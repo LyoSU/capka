@@ -21,7 +21,23 @@ const TEXTS: Record<string, string> = {
   evening: "Evening",
   "friday-eve": "Friday eve",
 };
-const t = (id: string) => TEXTS[id] ?? id;
+// The stub FORMATS, like next-intl, rather than looking up. A message carrying a
+// placeholder nobody supplied a value for raises, exactly as `useTranslations` does.
+//
+// The previous stub returned the raw template, and that is why every test in this
+// file passed while the real greeting header threw `FORMATTING_ERROR` for any user
+// without a usable first name: the engine read `text.includes("{name}")` to decide
+// whether a line needed one, which under real next-intl means resolving the line
+// first — the very thing that throws. A double more permissive than the thing it
+// stands in for cannot fail for the bug, however many tests are written against it.
+const t = (id: string, values?: Record<string, string>) => {
+  const text = TEXTS[id] ?? id;
+  return text.replace(/\{(\w+)\}/g, (_, key: string) => {
+    const value = values?.[key];
+    if (value === undefined) throw new Error(`FORMATTING_ERROR: no value for "${key}" in "${text}"`);
+    return value;
+  });
+};
 
 // 2026-06-08 is a Monday; 2026-06-12 a Friday. Local time via the Date ctor.
 const monMorning = new Date(2026, 5, 8, 9, 0); // Mon 09:00
@@ -82,6 +98,59 @@ describe("pickGreeting", () => {
   it("falls back to a line when nothing matches the moment", () => {
     const onlyMorning: Greeting[] = [{ id: "morning", time: ["morning"] }];
     expect(pickGreeting({ t, now: friEvening, catalog: onlyMorning })).toBe("Morning");
+  });
+
+  it("falls back past a name line when that is all the catalog has and no name is known", () => {
+    // The soft-failure path must not itself be the hard failure: picking catalog[0]
+    // blindly would resolve a `{name}` line with nothing to fill it and throw, which
+    // is the crash this whole path exists to avoid.
+    const nameFirst: Greeting[] = [
+      { id: "morning-name", time: ["morning"] },
+      { id: "morning", time: ["morning"] },
+    ];
+    expect(pickGreeting({ t, now: friEvening, catalog: nameFirst })).toBe("Morning");
+  });
+
+  it("never resolves a name line without a name, across every moment of a year", () => {
+    // The regression, against the SHIPPED catalog and both real message catalogs:
+    // a user whose profile holds no usable first name once crashed the chat header.
+    // A throw here is the bug; the assertion is that there is none.
+    for (const messages of [uk, en]) {
+      const real = (id: string, values?: Record<string, string>) => {
+        const text = (messages.chat.greetings as Record<string, string>)[id];
+        return text.replace(/\{(\w+)\}/g, (_, key: string) => {
+          const value = values?.[key];
+          if (value === undefined) throw new Error(`FORMATTING_ERROR: "${key}" in "${text}"`);
+          return value;
+        });
+      };
+      for (let day = 0; day < 365; day++) {
+        for (const hour of [3, 9, 14, 19, 23]) {
+          const now = new Date(2026, 0, 1 + day, hour);
+          expect(() => pickGreeting({ t: real, now, catalog: GREETINGS })).not.toThrow();
+          expect(pickGreeting({ t: real, now, catalog: GREETINGS })).not.toContain("{name}");
+        }
+      }
+    }
+  });
+});
+
+describe("the -name id convention", () => {
+  // `needsName` is inferred from the id because the words cannot be read before the
+  // decision is made. That inference is only sound while the convention holds, and
+  // nothing in the type system holds it — so this does.
+  it("marks exactly the messages that carry {name}, in both locales", () => {
+    for (const [locale, messages] of [["uk", uk], ["en", en]] as const) {
+      const greetings = messages.chat.greetings as Record<string, string>;
+      for (const g of GREETINGS) {
+        const text = greetings[g.id];
+        expect(text, `${locale}: no message for "${g.id}"`).toBeDefined();
+        expect(
+          text.includes("{name}"),
+          `${locale}: "${g.id}" ${text.includes("{name}") ? "uses {name} but is not named *-name" : "is named *-name but never uses {name}"}`,
+        ).toBe(g.id.includes("-name"));
+      }
+    }
   });
 });
 

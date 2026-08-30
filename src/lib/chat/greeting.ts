@@ -47,8 +47,18 @@ export interface Greeting {
   seasons?: Season[];
   /** true = weekends only, false = weekdays only, undefined = any day. */
   weekend?: boolean;
-  /** Only offer this line when a name is available. Auto-detected from a
-   *  `{name}` placeholder in the resolved text; set explicitly only to override. */
+  /** Only offer this line when a name is available. Inferred from the id: a line
+   *  whose words use `{name}` is named `<moment>-name[-N]`, and
+   *  `__tests__/greeting.test.ts` holds that convention against both message
+   *  catalogs. Set explicitly only to override.
+   *
+   *  It is inferred from the ID and not from the resolved words on purpose. The
+   *  words are what we may not touch yet: next-intl formats a message as it
+   *  returns it, so resolving a line that carries `{name}` without supplying one
+   *  raises `FORMATTING_ERROR` — which is precisely the case this flag exists to
+   *  skip. Reading the text to decide would put the guard downstream of the throw
+   *  it guards against, and it did: the greeting header crashed for every user
+   *  whose profile carries no usable first name. */
   needsName?: boolean;
   /** Relative likelihood within its specificity tier (default 1). */
   weight?: number;
@@ -118,14 +128,14 @@ function specificity(g: Greeting): number {
   );
 }
 
-function needsName(g: Greeting, text: string): boolean {
-  return g.needsName ?? text.includes("{name}");
+function needsName(g: Greeting): boolean {
+  return g.needsName ?? g.id.includes("-name");
 }
 
 export interface PickOptions {
   /** Resolves a greeting id against the `chat.greetings` namespace. The caller
    *  owns the locale, so the engine never needs to know it. */
-  t: (id: string) => string;
+  t: (id: string, values?: Record<string, string>) => string;
   now?: Date;
   name?: string | null;
   /** Override the catalog (tests). Defaults to the shipped one. */
@@ -147,29 +157,34 @@ export function pickGreeting(opts: PickOptions): string {
   const name = firstName(opts.name);
   const moment = getMoment(now);
 
-  // Resolved once per line: the name filter and the render both need the text,
-  // and a translator call per line per pass is the kind of thing that quietly
-  // doubles as the catalog grows.
-  const lines = catalog.map((g) => ({ g, text: opts.t(g.id) }));
-  const eligible = lines.filter(
-    ({ g, text }) => matches(g, moment) && (needsName(g, text) ? !!name : true),
-  );
+  // Eligibility is settled from the catalog entry ALONE, before a single line is
+  // resolved — see `Greeting.needsName` for why reading the words first cannot work.
+  // Resolving lazily also means one translator call per pick instead of one per
+  // catalog line per pick, which the previous shape paid on every empty chat.
+  const eligible = catalog.filter((g) => matches(g, moment) && (needsName(g) ? !!name : true));
 
-  // Substitute the name, or trim a trailing-comma form like "Good morning,
-  // {name}!" down cleanly when it is absent.
-  const render = (text: string): string =>
-    name ? text.replace("{name}", name) : text.replace(/,?\s*\{name\}/, "");
+  // `name` rides every call: a line that does not use it ignores the value, and a
+  // line that does is only ever in `eligible` when there is one to give it. So the
+  // substitution belongs to ICU, and nothing here has to patch up a placeholder —
+  // the old JS `.replace()` also had to trim `", {name}"` back out for the
+  // name-less case, a second formatting rule living outside the message catalogs.
+  const render = (g: Greeting): string => opts.t(g.id, { name: name ?? "" });
 
-  // Should not happen with a healthy catalog, which carries name-less any-time
-  // lines as a floor; fail soft to the first line rather than to an empty header.
-  if (eligible.length === 0) return lines[0] ? render(lines[0].text) : "";
+  // Should not happen with a healthy catalog, which carries name-less any-time lines
+  // as a floor. The floor must itself be name-less: failing soft to `catalog[0]`
+  // would throw when that line happened to want a name, turning a soft failure into
+  // the hard one this whole path exists to avoid.
+  if (eligible.length === 0) {
+    const floor = catalog.find((g) => !needsName(g));
+    return floor ? render(floor) : "";
+  }
 
-  const weights = eligible.map(({ g }) => (g.weight ?? 1) * (1 + specificity(g)));
+  const weights = eligible.map((g) => (g.weight ?? 1) * (1 + specificity(g)));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < eligible.length; i++) {
     r -= weights[i];
-    if (r < 0) return render(eligible[i].text);
+    if (r < 0) return render(eligible[i]);
   }
-  return render(eligible[eligible.length - 1].text);
+  return render(eligible[eligible.length - 1]);
 }
