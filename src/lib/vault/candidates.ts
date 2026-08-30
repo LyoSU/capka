@@ -256,8 +256,13 @@ export async function proposeCandidate(input: {
         action: "candidate.propose",
         subjectType: "candidate",
         subjectId: id,
-        // No proposal text: the audit log is read more widely than the space itself.
-        payload: { state, slotKey: slotKey ?? null, provenance: input.provenance.kind, ...payload },
+        // No proposal text: the audit log is read more widely than the space itself,
+        // and `retireProjectSpace` keeps these events after deleting the candidates —
+        // so anything here outlives the user's deletion of the project. `slotKey` is
+        // proposal text by design (a slot names its subject) and was riding along as
+        // addressing, which `subject_id` already is; see the same removal at
+        // `claims.ts`.
+        payload: { state, provenance: input.provenance.kind, ...payload },
       });
 
     if (gate) {
@@ -459,11 +464,14 @@ export async function confirmCandidate(args: {
       }
 
       const evidence = (cand.evidence ?? []) as EvidenceInput[];
-      // The same normalization as in propose, for the same reason — and here it
-      // also rescues rows written BEFORE that fix: a candidate carrying
-      // `slot_key = ''` would otherwise never read the head, would hit 23505 on
-      // every insert and would return `try_again` FOREVER, with no way to confirm it.
-      const slotKey = cand.slotKey?.trim() || null;
+      // `fitSlotKey`, the SAME function propose uses, not a second normalization that
+      // happens to agree with it: these two only ever agreed because every candidate
+      // row was written by propose first, and a future writer inserting a row directly
+      // would split them (whitespace collapsing and the 120-char clamp live in
+      // `fitSlotKey` alone). It also rescues rows written BEFORE that fix: a candidate
+      // carrying `slot_key = ''` would otherwise never read the head, would hit 23505
+      // on every insert and would return `try_again` FOREVER, with no way to confirm.
+      const slotKey = fitSlotKey(cand.slotKey) ?? null;
       const origin = cand.provenance as Record<string, unknown>;
       const finish = async (claimId: string) => {
         // `policy_state` is left as it was: the pending→confirmed transition is
@@ -476,7 +484,9 @@ export async function confirmCandidate(args: {
           action: "candidate.confirm",
           subjectType: "candidate",
           subjectId: cand.id,
-          payload: { claimId, policyState: cand.policyState, slotKey },
+          // No slot key, for the reason spelled out on `candidate.propose` above:
+          // it is proposal text, not addressing, and these events outlive the space.
+          payload: { claimId, policyState: cand.policyState },
         });
         return { ok: true, claimId } as const;
       };
@@ -698,8 +708,14 @@ const longWords = (s: string) =>
  * and `invoice`/`invoices` on the stem, `work`/`works` on the one-character rule.
  *
  * Its remaining weaknesses (negation, an UNMARKED paste, reporting someone else's
- * words without quotation marks) are known and accepted: the cost of being wrong is
- * one extra confirmation, not a lost fact. Short words are excluded because they
+ * words without quotation marks) are known and accepted, but NOT because the cost is
+ * "one extra confirmation" — this said that until the sentence was checked against the
+ * product it describes. Plan A ships no confirmation surface, and `PROPOSE_SAID.pending`
+ * says as much to the model: a fact that fails here is recorded and then invisible until
+ * plan D builds a review queue. So the accepted cost is a fact the user has to state
+ * again in their own words, and the direction that must not fail stays the other one —
+ * a false POSITIVE puts text the user never wrote into memory as theirs, silently and
+ * with no queue to catch it either. Short words are excluded because they
  * appear in any text and confirm nothing; with no long words at all there is nothing
  * to establish authorship with, and `false` (that is, pending) is the only honest
  * answer.

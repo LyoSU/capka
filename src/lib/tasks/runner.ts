@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import type { ModelMessage, UserModelMessage } from "ai";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chats, messages, users } from "@/lib/db/schema";
@@ -2073,15 +2073,42 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // that also never clobbers a title the user renamed by hand on a later turn.
     // The slice-of-first-message placeholder set by /api/chat stays visible until
     // this lands, so the sidebar always shows *something* in the meantime.
-    const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn && userTurnText.trim()) {
-      void trackAux(generateChatTitle(model, provider, userTurnText, getFullText(), recordAuxUsage)
-        .then(async (title) => {
+    //
+    // Read off `uiMessages` and NOT `modelMessages`, and excluding the row this task is
+    // writing. Both halves matter for the same case: a chat whose first turn goes
+    // through an `ask` suspends, and the continuation answers from the SAME assistant
+    // row (`replyParentId = resumeMessageId`), which is therefore on the path — so the
+    // plain probe read "not the first turn", the first half was skipped by
+    // `!awaitingAnswer`, and every later turn was skipped too. Such a chat kept the
+    // `/api/chat` placeholder (a 100-char slice of the opening message) forever.
+    // `modelMessages` is also the wrong list on its own terms: the emergency trim
+    // replaces it with only the most recent turns, which reads as a first turn in a
+    // conversation of any depth.
+    const isFirstTurn = !uiMessages.some((m) => m.role === "assistant" && m.id !== resumeMessageId);
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn) {
+      void trackAux(
+        (async () => {
+          // The chat's OWN opening message, not `userTurnText`. These are different
+          // questions — "what did the user type this turn" vs "what did this chat open
+          // with" — and only the second one has an answer on a continuation, where
+          // `uiMessages` is empty and `userTurnText` is "" by design (see
+          // `run-context.ts`). Sourced from the message ROW because a row survives a
+          // continuation; re-deriving it from `modelMessages` is what F1 was and must
+          // not come back. Rides idx_messages_chat_role_created.
+          const [opening] = await db
+            .select({ content: messages.content })
+            .from(messages)
+            .where(and(eq(messages.chatId, chatId), eq(messages.role, "user")))
+            .orderBy(asc(messages.createdAt))
+            .limit(1);
+          const openingText = opening?.content?.trim();
+          if (!openingText) return;
+          const title = await generateChatTitle(model, provider, openingText, getFullText(), recordAuxUsage);
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
-        })
-        .catch((e) => tlog.error("chat title generation failed", { err: String(e) })));
+        })().catch((e) => tlog.error("chat title generation failed", { err: String(e) })),
+      );
     }
 
     // Compaction. If this turn's INPUT neared the context-window budget, summarize

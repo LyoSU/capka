@@ -164,7 +164,14 @@ export async function extractCandidates(args: {
       maxOutputTokens: MAX_OUTPUT_TOKENS,
     });
   } catch (e) {
-    log.error("vault candidate extraction: generate failed", { err: String(e) });
+    // `failureShape`, not `String(e)`, and for a sharper reason than the DB write
+    // forty lines below: the prompt this call carried is `<user_turn>${userText}`,
+    // i.e. exactly the text the secret screen exists to keep out of anything durable.
+    // An AI SDK `APICallError`'s message is the provider's own response body, and a
+    // 400 or a content-filter refusal echoes the offending content back — so
+    // stringifying it writes the user's turn into the application log and every
+    // collector behind it.
+    log.error("vault candidate extraction: generate failed", failureShape(e));
     return;
   }
 

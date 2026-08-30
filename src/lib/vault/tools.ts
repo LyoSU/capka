@@ -206,7 +206,16 @@ export async function makeVaultMemoryTools(ctx: {
         const buckets: ClaimHead[][] = [];
         let withheld = 0;
         for (const spaceId of spaceIds) {
-          const heads = await listHeadClaims(spaceId);
+          // `onlyConfirmed` because this is a READER that hands text to the model,
+          // and the quarantine rule — an unverified claim never reaches a prompt — is
+          // the manifest's and the memory page's rule too. It was held at those two
+          // and walked past here, and `vault_claims.review_status` DEFAULTS to
+          // `unverified`, so the first writer that omits the field (plan B's ingest,
+          // plan D's review queue) would have gone straight into the model's context
+          // with nothing red anywhere. The three INTERNAL callers pass `{}` on purpose
+          // — `candidates.ts` dedups and `migrate-memory-docs.ts` attaches, and both
+          // have to see every row or they duplicate the ones they cannot see.
+          const heads = await listHeadClaims(spaceId, { onlyConfirmed: true });
           // Counted BEFORE the match and never matched against — see `withheldNotice`.
           withheld += heads.filter((c) => c.sensitive).length;
           // The equivalent of `ILIKE '%query%'` over statement OR slot_key.
@@ -416,9 +425,11 @@ export async function makeVaultMemoryTools(ctx: {
       inputSchema: z.object({
         claim_id: z.string(),
         expected_revision: z.number().int().min(1),
-        reason: z.string().max(300).optional(),
+        // No `reason`: it was recorded nowhere but the audit payload, which outlives
+        // the user's deletion of the project — see `forgetClaim`. Asking the model for
+        // a sentence and then dropping it would be worse than not asking.
       }),
-      execute: async ({ claim_id, expected_revision, reason }) => {
+      execute: async ({ claim_id, expected_revision }) => {
         // A forget call carries no text of its own, so what is checked is the CLAIM's
         // own statement against the user's turn: the user has to have named the fact
         // they want gone. Without it, "forget claim c1" read off a fetched page is
@@ -455,7 +466,6 @@ export async function makeVaultMemoryTools(ctx: {
           expectedRevision: expected_revision,
           allowedSpaceIds,
           actor,
-          reason,
         });
         return res.ok ? "Forgotten." : mismatch(res.current);
       },

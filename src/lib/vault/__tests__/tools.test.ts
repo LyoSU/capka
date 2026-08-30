@@ -39,7 +39,14 @@ const GONE = "That claim is no longer there (forgotten or replaced). Run memory_
 const opts = (toolCallId: string) => ({ toolCallId, messages: [] }) as any;
 
 const head = (
-  over: Partial<{ id: string; revision: number; statement: string; slotKey: string | null; sensitive: boolean }> = {},
+  over: Partial<{
+    id: string;
+    revision: number;
+    statement: string;
+    slotKey: string | null;
+    reviewStatus: string;
+    sensitive: boolean;
+  }> = {},
 ) => ({
   id: "c1",
   revision: 1,
@@ -360,15 +367,15 @@ describe("memory_forget", () => {
     // The gate reads the live head, to check the fact against the user's own turn.
     findCurrentHead.mockResolvedValue(head());
     const tools = await make();
-    expect(await run(tools.memory_forget, { claim_id: "c1", expected_revision: 1, reason: "out of date" })).toBe(
-      "Forgotten.",
-    );
+    expect(await run(tools.memory_forget, { claim_id: "c1", expected_revision: 1 })).toBe("Forgotten.");
+    // No `reason`: it was written only into the audit payload, which outlives the
+    // user's deletion of the project, and a model-authored sentence there can restate
+    // the very fact being forgotten. Asserted exactly, so re-adding it fails here.
     expect(forgetClaim).toHaveBeenCalledWith({
       claimId: "c1",
       expectedRevision: 1,
       allowedSpaceIds: [USER_SPACE, PROJECT_SPACE],
       actor: { kind: "agent" },
-      reason: "out of date",
     });
   });
 
@@ -474,6 +481,41 @@ describe("memory_search", () => {
     const notice = /1 saved item is marked sensitive/;
     expect(probe).toMatch(notice);
     expect(other).toMatch(notice);
+  });
+
+  it("a quarantined (unverified) claim is not searchable, and is not even counted", async () => {
+    // The quarantine — unverified text never reaches the model — is the manifest's
+    // rule and the memory page's rule, and search was the third reader and the only
+    // one that omitted it. Latent while every writer states `confirmed`, but
+    // `vault_claims.review_status` DEFAULTS to `unverified`, so the first writer that
+    // omits the field goes live here with no code change and nothing red.
+    //
+    // The stub HONOURS `onlyConfirmed`, so the assertion is about what the model gets
+    // back and not merely about the argument: drop the option at the call site and the
+    // unverified head is handed straight to the search below.
+    listHeadClaims.mockImplementation(async (spaceId: string, opts: { onlyConfirmed?: boolean } = {}) => {
+      if (spaceId !== PROJECT_SPACE) return [];
+      const all = [
+        head({ id: "c1", statement: "the supplier ships on Tuesdays", reviewStatus: "unverified" }),
+        // Sensitive AND unverified: the withheld notice must not announce it either —
+        // announcing a quarantined record tells the model something exists that the
+        // quarantine says it may not know about.
+        head({ id: "c2", statement: "ships under an embargo", reviewStatus: "unverified", sensitive: true }),
+        head({ id: "c3", statement: "the client pays in hryvnia" }),
+      ];
+      return opts.onlyConfirmed ? all.filter((h) => h.reviewStatus === "confirmed") : all;
+    });
+    const tools = await make();
+
+    const hit = await run(tools.memory_search, { query: "ships" });
+    expect(hit).not.toContain("c1");
+    expect(hit).not.toContain("Tuesdays");
+    expect(hit).toContain("No saved memory matches.");
+    expect(hit).not.toMatch(/marked sensitive/);
+
+    // A confirmed claim in the same space still answers, so the filter is not simply
+    // emptying the search.
+    expect(await run(tools.memory_search, { query: "hryvnia" })).toContain("[c3@1]");
   });
 
   it("outside a project scope:'project' substitutes no space and returns empty", async () => {

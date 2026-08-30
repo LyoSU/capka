@@ -75,6 +75,15 @@ const MAX_CHAIN = 1000;
  *
  * Tuned toward catching, not toward precision: a false positive costs one fact that a
  * human must handle; a false negative costs a durably re-injected credential.
+ *
+ * It has also been at the wrong COLUMN. Both writers ran it on `statement` alone,
+ * while `slot_key` is printed verbatim to the model by `memory_search` (`tools.ts`)
+ * and matched against its query — so a credential in the key with a clean sentence
+ * produced a non-sensitive claim that hands the key back on every later search. Both
+ * writers now screen all three text-bearing columns of the row they are about to
+ * write: `statement`, `slot_key` and `value`. `value` has no reader today, and "no
+ * reader today" is exactly the reasoning that left the quarantine filter off
+ * `memory_search` for a whole plan.
  */
 const SECRET_PATTERNS: RegExp[] = [
   // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
@@ -105,6 +114,25 @@ const SECRET_PATTERNS: RegExp[] = [
 
 export function looksLikeSecret(statement: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(statement));
+}
+
+/** The row's `value` as the text the screen reads: JSON, because that is what the
+ *  column holds and what any later reader would print.
+ *
+ *  `JSON.stringify` returns `undefined` for a value that does not serialize and
+ *  THROWS on a circular one. Neither is answered with "abort the write", and neither
+ *  leaves an unscreened row behind either: the column is `jsonb`, so a value this
+ *  cannot render is a value the INSERT below refuses anyway. Screened per column
+ *  rather than by concatenating the three — `\s` in the named-secret pattern spans a
+ *  newline, so a joined string would let a statement ending in "password:" match a
+ *  slot key that begins the next line. */
+function valueText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** What a fact may take up in a prompt, and what shape it may take there.
@@ -233,7 +261,11 @@ export async function createClaim(
   // text the row will hold — see `fitStatement`.
   const statement = fitStatement(input.statement);
   const slotKey = fitSlotKey(input.slotKey);
-  const sensitive = input.sensitive || looksLikeSecret(statement);
+  const sensitive =
+    input.sensitive ||
+    looksLikeSecret(statement) ||
+    looksLikeSecret(slotKey ?? "") ||
+    looksLikeSecret(valueText(input.value));
   // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
   // the merge-or-branch decision belongs to the candidate ledger, which is also
   // the thing holding the SAVEPOINT.
@@ -258,8 +290,15 @@ export async function createClaim(
     action: "claim.create",
     subjectType: "claim",
     subjectId: id,
-    // No claim text: the audit log is read more widely than the space itself.
-    payload: { slotKey: slotKey ?? null, reviewStatus: input.reviewStatus, sensitive },
+    // No claim text: the audit log is read more widely than the space itself, and
+    // `retireProjectSpace` deliberately keeps these events after it has deleted the
+    // claims — so whatever rides here outlives the user's own deletion of the project.
+    // `slotKey` is claim text by design (`supplier/acme/payment-terms` names the
+    // supplier) and it was carried here as addressing, which it is not: `subject_id`
+    // addresses the row, and while that row exists it holds the slot key itself. After
+    // the retire the row is gone and there is nothing left to address — only content
+    // that outlived its space, which is the one thing this line exists to prevent.
+    payload: { reviewStatus: input.reviewStatus, sensitive },
   });
   // `sensitive` travels back because the screen may have RAISED it: a caller that
   // tracks the flag it asked for would otherwise be tracking a value the row does not
@@ -359,8 +398,21 @@ export async function updateClaim(
   // well — the same reasoning as the screen below it: this upgrades a row written
   // before the rule existed, and a supersede is the one moment a legacy head's text is
   // rewritten at all.
+  //
+  // The slot key and the value are resolved HERE rather than inline in the insert
+  // below, because the screen has to read the text the successor will actually hold —
+  // the same reason the statement is clamped before it is screened. Both inherit from
+  // the predecessor when the patch is silent, and the inherited text is screened too,
+  // which is what upgrades a row written before this covered three columns.
   const statement = fitStatement(patch.statement ?? prev.statement);
-  const sensitive = prev.sensitive || (patch.sensitive ?? false) || looksLikeSecret(statement);
+  const slotKey = fitSlotKey(patch.slotKey ?? prev.slotKey) ?? null;
+  const value = patch.value !== undefined ? patch.value : prev.value;
+  const sensitive =
+    prev.sensitive ||
+    (patch.sensitive ?? false) ||
+    looksLikeSecret(statement) ||
+    looksLikeSecret(slotKey ?? "") ||
+    looksLikeSecret(valueText(value));
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
@@ -374,8 +426,8 @@ export async function updateClaim(
     id,
     spaceId: prev.spaceId,
     statement,
-    slotKey: fitSlotKey(patch.slotKey ?? prev.slotKey) ?? null,
-    value: patch.value !== undefined ? patch.value : prev.value,
+    slotKey,
+    value,
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,
     reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
@@ -418,12 +470,22 @@ export async function updateClaim(
   return { ok: true, id, revision };
 }
 
+/** Forgetting takes no `reason`, and the absence is deliberate. It used to accept
+ *  model-authored free text and write it into the audit payload, where — because
+ *  `retireProjectSpace` keeps these events after deleting the claims — a sentence
+ *  restating the very fact being forgotten outlived the user's deletion of the
+ *  project. It was not addressing either: the event already names the claim, the
+ *  revision, the actor and the moment. A paraphrase written by the model is thin
+ *  evidence at the best of times, and it is not worth retaining past a delete.
+ *
+ *  Whoever wants "why" on a deletion should take it from the human doing the
+ *  deleting, on plan D's own screen, and answer the retention question there. */
 export async function forgetClaim(
-  args: { claimId: string; expectedRevision: number; allowedSpaceIds: string[]; actor: Actor; reason?: string },
+  args: { claimId: string; expectedRevision: number; allowedSpaceIds: string[]; actor: Actor },
   ex?: Ex,
 ): Promise<{ ok: true } | { ok: false; current: ClaimHead | null }> {
   if (!ex || ex === db) return db.transaction((tx) => forgetClaim(args, tx));
-  const { claimId, expectedRevision, allowedSpaceIds, actor, reason } = args;
+  const { claimId, expectedRevision, allowedSpaceIds, actor } = args;
 
   const [prev] = await ex
     .update(vaultClaims)
@@ -449,7 +511,7 @@ export async function forgetClaim(
     action: "claim.forget",
     subjectType: "claim",
     subjectId: claimId,
-    payload: { revision: prev.revision, reason: reason ?? null },
+    payload: { revision: prev.revision },
   });
   return { ok: true };
 }

@@ -326,7 +326,7 @@ run("vault claims", () => {
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
-      forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR, reason: "stale" }),
+      forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR }),
     ]);
     expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"]);
     const [upd, forget] = settled.map((s) => (s.status === "fulfilled" ? s.value : null));
@@ -472,7 +472,6 @@ run("vault claims", () => {
       expectedRevision: 1,
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
-      reason: "the user asked",
     });
     expect(res).toEqual({ ok: true });
 
@@ -488,12 +487,16 @@ run("vault claims", () => {
     expect(await headBySlot(SPACE_A, "forget")).toBeNull();
     expect(await listHeadClaims(SPACE_A)).toEqual([]);
 
-    const { rows } = await pool.query<{ payload: { reason?: string } }>(
+    // The event attests the deletion and carries no text of the fact — `audit_events`
+    // survives `retireProjectSpace`, so a `reason` here would outlive the user's own
+    // deletion of the project. `forgetClaim` no longer accepts one at all; this asserts
+    // the payload a re-added field would have to break.
+    const { rows } = await pool.query<{ payload: Record<string, unknown> }>(
       `SELECT payload FROM audit_events WHERE action = 'claim.forget' AND subject_id = $1`,
       [id],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].payload.reason).toBe("the user asked");
+    expect(rows[0].payload).toEqual({ revision: 1 });
   });
 
   it("update AFTER forget: {ok:false, current:null} and not one new row", async () => {
@@ -669,6 +672,73 @@ run("vault claims", () => {
     const ordinary = await seed({ statement: "the client pays in hryvnia" });
     expect(ordinary.sensitive).toBe(false);
     expect((await claimRow(ordinary.id)).sensitive).toBe(false);
+  });
+
+  // One case per text-bearing column, so dropping any single column from the screen
+  // expression kills exactly one of these and names itself. The statement column is
+  // covered by the case above; these are the two that were unscreened.
+  it.each([
+    // `slot_key` is MODEL-FACING: memory_search prints it verbatim in every hit and
+    // matches the query against it, so a credential in the key with an innocent
+    // sentence was a non-sensitive claim handing the key back on every later search.
+    ["slot_key", { statement: "the deploy key for staging", slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
+    // `value` is rendered nowhere today. That is exactly the reasoning that left the
+    // quarantine filter off memory_search for a whole plan, so it is screened anyway.
+    ["value", { statement: "the deploy key for staging", value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
+  ])("createClaim screens %s, not only the statement", async (_column, over) => {
+    const made = await seed(over);
+    expect(made.sensitive).toBe(true);
+    expect((await claimRow(made.id)).sensitive).toBe(true);
+  });
+
+  it.each([
+    ["slot_key", { slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
+    ["value", { value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
+  ])("updateClaim screens %s on the successor it is about to write", async (_column, patch) => {
+    // The supersede is the other half of the boundary: without the screen here an
+    // ordinary claim could be rewritten to carry a credential in one of these columns
+    // and stay manifest-eligible, since `sensitive` is otherwise inherited.
+    const plain = await seed({ statement: "the deploy key is rotated every quarter" });
+    expect(plain.sensitive).toBe(false);
+    const upd = await updateClaim({
+      claimId: plain.id,
+      expectedRevision: plain.revision,
+      patch,
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!upd.ok) throw new Error("expected the supersede to win the CAS");
+    expect((await claimRow(upd.id)).sensitive).toBe(true);
+  });
+
+  it("a secret INHERITED into a successor is screened too, and the audit carries no slot key", async () => {
+    // A supersede that touches neither column still rewrites both onto a new row, so
+    // the inherited text goes through the screen — that is what upgrades a row written
+    // before the screen read three columns. Simulated by writing the row underneath
+    // the writers, which is the only way to obtain such a row now.
+    const plain = await seed({ statement: "the deploy key is rotated every quarter", slotKey: "deploy/key" });
+    await q(`UPDATE vault_claims SET slot_key = $2, sensitive = false WHERE id = $1`, [
+      plain.id,
+      "creds/sk-proj-AbCdEf0123456789ghijkl",
+    ]);
+    const upd = await updateClaim({
+      claimId: plain.id,
+      expectedRevision: plain.revision,
+      patch: { statement: "the deploy key is rotated twice a year" },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!upd.ok) throw new Error("expected the supersede to win the CAS");
+    expect((await claimRow(upd.id)).sensitive).toBe(true);
+
+    // And the slot key does not ride into the audit log, which outlives the space:
+    // `retireProjectSpace` deletes the claims and keeps these events.
+    const { rows } = await pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM audit_events WHERE space_id = $1 AND action IN ('claim.create', 'claim.supersede')`,
+      [SPACE_A],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.payload).not.toHaveProperty("slotKey");
   });
 
   it("sensitivity only ever rises: a stale caller cannot clear it", async () => {

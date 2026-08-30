@@ -24,11 +24,13 @@ All notable changes to Capka are documented here. Format follows
 - A forked or cloned chat is named in the interface language — the "(copy)" suffix was hardcoded Ukrainian for everyone.
 - Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
 - A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).
+- A chat whose first turn goes through an approval or "Ask" prompt is now auto-titled instead of keeping the placeholder name for good.
 
 ### Security
 
 - A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.
 - The boot-time memory migration logs only the error message on failure, so a failing statement's bound parameters no longer reach the log.
+- Memory audit events (`audit_events`) no longer carry a fact's slot key or a forget reason, so no memory text survives a project delete; `memory_forget` accordingly no longer takes a `reason`.
 
 ## [0.37.0] - 2026-08-29
 

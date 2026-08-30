@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { log } from "@/lib/log";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
-import { attachToTopic, confirmClaim, createClaim, listHeadClaims } from "./claims";
+import { attachToTopic, confirmClaim, createClaim, fitStatement, listHeadClaims } from "./claims";
 import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote, spaceAcceptsWrites } from "./spaces";
 
 /** The same normalization as in `candidates.ts`. Different rules here would mean
@@ -218,7 +218,11 @@ async function migrateOne(docId: string): Promise<boolean> {
     );
     let bullets = 0;
     for (const line of doc.content.split("\n")) {
-      const statement = line.trim().replace(/^[-*]\s*/, "").trim();
+      // `fitStatement` HERE and not only inside `createClaim`, because this is also
+      // the dedup KEY: `seen` is built from statements that already went through it,
+      // so a legacy bullet over 500 characters would not match its own stored row and
+      // a second pass would create a duplicate instead of attaching to what is there.
+      const statement = fitStatement(line.trim().replace(/^[-*]\s*/, "").trim());
       if (!statement) continue;
       bullets++;
       const known = seen.get(norm(statement));
