@@ -119,8 +119,16 @@ run("runAgentTask: a chat that opens with an ask still gets auto-titled", () => 
       [C, U, JSON.stringify({ uiMessages: [], resumeMessageId: "t15t-a1" })],
     );
     await runAgentTask(rows[0], "w-t15t");
-    // Titling is fire-and-forget; give the tracked aux call a moment to land.
-    for (let i = 0; i < 100 && titled.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+    // Titling is fire-and-forget, so wait on the LAST thing it does — the write —
+    // rather than on the first. Waiting for the generator to be called leaves the
+    // update still in flight, and under a loaded suite that gap is wide enough to read
+    // the placeholder back and call it a failure.
+    let stored = "";
+    for (let i = 0; i < 200 && stored !== "Quarterly supplier report"; i++) {
+      const c = await pool.query<{ title: string }>(`SELECT title FROM chats WHERE id=$1`, [C]);
+      stored = c.rows[0].title;
+      if (stored !== "Quarterly supplier report") await new Promise((r) => setTimeout(r, 50));
+    }
 
     const t = await pool.query(`SELECT status FROM tasks WHERE id='t15t-task'`);
     expect(t.rows[0].status).toBe("completed");
@@ -139,7 +147,6 @@ run("runAgentTask: a chat that opens with an ask still gets auto-titled", () => 
 
     // The finding: the chat is titled, from what it opened with.
     expect(titled).toEqual([{ userText: OPENING }]);
-    const chat = await pool.query<{ title: string }>(`SELECT title FROM chats WHERE id=$1`, [C]);
-    expect(chat.rows[0].title).toBe("Quarterly supplier report");
+    expect(stored).toBe("Quarterly supplier report");
   }, 30_000);
 });
