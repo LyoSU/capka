@@ -25,6 +25,11 @@ All notable changes to Capka are documented here. Format follows
 - Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
 - A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).
 
+### Security
+
+- A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.
+- The boot-time memory migration logs only the error message on failure, so a failing statement's bound parameters no longer reach the log.
+
 ## [0.37.0] - 2026-08-29
 
 ### Added
