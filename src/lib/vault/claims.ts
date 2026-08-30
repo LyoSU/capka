@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -24,6 +25,11 @@ export type ClaimHead = {
  * lands at the column's `unverified` default and only `confirmClaim` can move it, so
  * "the model sees only what a person approved" is enforced by there being one write
  * that grants approval, not by every writer remembering to ask for the right value.
+ *
+ * The one row that can be born `confirmed` is a supersede's successor that rewrote no
+ * text — the SAME words on a new row, carrying the approval they already had. That is
+ * not a second grant of authority and it cannot become one: see `updateClaim`, where the
+ * condition is read off the resulting row rather than off the caller's patch.
  *
  * Recall why this matters more than it reads: a column DEFAULT was already an unlisted
  * writer in this feature's history. A caller-supplied authorization field is the same
@@ -353,12 +359,14 @@ export async function updateClaim(
      *  because when the new content arrives from a DIFFERENT source (the candidate
      *  ledger) inheriting it would sign the user's text with someone else's provenance.
      *
-     *  `reviewStatus` is NOT settable and is NOT inherited, for the same reason
-     *  `ClaimInput` no longer carries it: a writer must not declare its own output
-     *  approved, and a supersede carrying `confirmed` across to a row with new text is a
-     *  writer declaring exactly that. The successor is born `unverified` and the confirm
-     *  path calls `confirmClaim` on it — one write grants approval, and it is the one a
-     *  person triggers. */
+     *  `reviewStatus` is NOT settable, for the same reason `ClaimInput` no longer carries
+     *  it: a writer must not declare its own output approved, and a supersede carrying
+     *  `confirmed` across to a row with NEW text is a writer declaring exactly that. So a
+     *  supersede that rewrites text is born `unverified` and the confirm path calls
+     *  `confirmClaim` on it — one write grants approval, and it is the one a person
+     *  triggers. A supersede that rewrites NO text carries the predecessor's status and
+     *  approval record forward instead; see the insert below for why the rule is that
+     *  width and not wider. */
     patch: {
       statement?: string;
       value?: unknown;
@@ -452,6 +460,20 @@ export async function updateClaim(
   const value = patch.value !== undefined ? patch.value : prev.value;
   // The RAW text goes to the screen, which answers for both forms — see `secretShaped`.
   const sensitive = prev.sensitive || (patch.sensitive ?? false) || secretShaped(rawStatement, rawSlotKey, value);
+  // Does this supersede put NEW text in the table? That question, and not "was this a
+  // supersede", is what decides whether approval carries across — see the insert below.
+  //
+  // Answered from the RESULTING ROW, never from which patch fields were supplied. A list
+  // of patch field names is an enumeration, and the field somebody adds next would not be
+  // on it — this feature's signature defect — and here it would fail OPEN, carrying
+  // `confirmed` onto words nobody approved. The three text-bearing columns are the three
+  // the model projection reads, so any patch that reaches the model is caught, including
+  // one written after this line. `isDeepStrictEqual` because jsonb does not preserve key
+  // order, so the same value comes back in either shape.
+  const rewritesText =
+    statement !== fitStatement(prev.statement) ||
+    slotKey !== (fitSlotKey(prev.slotKey) ?? null) ||
+    !isDeepStrictEqual(value ?? null, prev.value ?? null);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
@@ -464,22 +486,29 @@ export async function updateClaim(
     value,
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,
-    // `review_status` is NOT passed, and NOT inherited: it takes the column's
+    // `review_status` is NOT settable, and it is inherited ONLY when this supersede
+    // rewrites no text. When it does rewrite text the successor takes the column's
     // `unverified` default, exactly as `createClaim`'s insert does.
     //
-    // Inheriting was the loophole in "one write grants approval". A supersede is how NEW
-    // text enters this table — `patch.statement` is the common case — so inheriting
-    // `confirmed` from the predecessor minted model-visible words nobody had approved,
-    // without `confirmClaim` running at all. Latent rather than live, because the one
-    // caller today (`confirmCandidate`) is a human decision that calls `confirmClaim` on
-    // the successor two statements later; but "the only caller is safe" is an argument
-    // about today's callers, and this module's own comments refuse to lean on it
-    // everywhere else.
+    // Inheriting UNCONDITIONALLY was the loophole in "one write grants approval": a
+    // supersede is how NEW text enters this table, so carrying `confirmed` across minted
+    // model-visible words nobody had approved, without `confirmClaim` running at all.
     //
-    // The cost, stated: a supersede that changes nothing but, say, the topic attachment
-    // now demotes a confirmed head to the quarantine until somebody confirms it. There is
-    // no such caller, and if one appears it should be asking a person anyway — which is
-    // the property this line is for.
+    // Demoting unconditionally was the opposite error, and a worse-costing one. The
+    // argument above is about new WORDS; a topic move, a `sensitive` raise or an `origin`
+    // correction brings none, and demoting there is not a temporary quarantine but a
+    // one-way door: `confirmClaim`'s only callers sit inside `confirmCandidate`, which
+    // needs a `memory_candidates` row, and this path creates none — so the head would
+    // vanish from the model AND from the person's own memory page, present in the table
+    // and reachable from no surface at all. The mechanism and the invariant it serves now
+    // have the same width, which is the whole of the fix.
+    //
+    // The approval RECORD travels with the status it belongs to. Splitting them would
+    // leave a successor reading `confirmed` with nobody named as having approved it —
+    // and naming the approver is the entire reason those two columns exist.
+    reviewStatus: rewritesText ? "unverified" : prev.reviewStatus,
+    approvedAt: rewritesText ? null : prev.approvedAt,
+    approvedByUserId: rewritesText ? null : prev.approvedByUserId,
     sensitive,
     validFrom: prev.validFrom,
     validTo: prev.validTo,
@@ -512,9 +541,10 @@ export async function updateClaim(
     payload: {
       successor: id,
       revision,
-      // The successor's own status, which is now always the column default — a supersede
-      // does not carry approval across, so the event must not say it did.
-      reviewStatus: "unverified",
+      // The successor's OWN status, computed the same way the insert computes it: a
+      // supersede that rewrote text does not carry approval across, and the event must
+      // not say it did — nor say the opposite when nothing was rewritten.
+      reviewStatus: rewritesText ? "unverified" : prev.reviewStatus,
       sensitive,
     },
   });
@@ -625,10 +655,15 @@ export async function forgetAllClaims(spaceId: string, actor: Actor, ex?: Ex): P
 
 /**
  * THE write that grants authority. Since the cutover this is the only statement in the
- * codebase that can set `review_status = 'confirmed'`, and its only caller is the
+ * codebase that can turn unapproved words into approved ones, and its only caller is the
  * human's decision on the memory page — so "the model reads only what a person
  * approved" is a property of there being one such write, not of every writer choosing
  * the right value.
+ *
+ * One other statement can leave a row reading `confirmed`: `updateClaim`'s successor
+ * carries the predecessor's status when it rewrote no text. It grants nothing — the words
+ * and the approval are the ones that were already paired — and the alternative was
+ * demoting a head that no surface can re-approve.
  *
  * `approved_at` / `approved_by_user_id` are written here for the same reason.
  * `review_status = 'confirmed'` records THAT something was approved and cannot say by

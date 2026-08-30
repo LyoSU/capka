@@ -18,10 +18,12 @@ import type { Ex } from "./spaces";
  * WHAT THE PREDICATE IS, and why each half is in it:
  *
  *  - `superseded_at IS NULL` — only a head is a fact; a predecessor is history.
- *  - `review_status = 'confirmed'` — quarantine. Since the authority cutover NOTHING
- *    writes `confirmed` except `confirmClaim`, and its only caller is the human's
+ *  - `review_status = 'confirmed'` — quarantine. Since the authority cutover nothing
+ *    GRANTS `confirmed` except `confirmClaim`, and its only caller is the human's
  *    confirm on the memory page. So this clause is what makes "the model sees only what
- *    a person approved" a property of the query rather than a claim in a comment.
+ *    a person approved" a property of the query rather than a claim in a comment. (A
+ *    supersede's successor can be born `confirmed` too, but only by carrying across an
+ *    approval on text it did not change — see `updateClaim`.)
  *  - `sensitive = false` — withholding from the MODEL. It never withholds from the
  *    authenticated owner: that surface is `memory-page.ts`, which deliberately does not
  *    use this module.

@@ -53,6 +53,8 @@ const claimRow = async (id: string) => {
     kind: string;
     origin: Record<string, unknown>;
     review_status: string;
+    approved_at: Date | null;
+    approved_by_user_id: string | null;
     sensitive: boolean;
     revision: number;
     supersedes: string | null;
@@ -221,6 +223,12 @@ run("vault claims", () => {
       sensitive: true,
       topicNoteId: NOTE_A,
     });
+    // APPROVED first, and that is what makes the `review_status` assertion below a
+    // control rather than a restatement of the column default. A predecessor left
+    // `unverified` reads the same whether the successor inherited it or fell back to the
+    // default, so the expectation passed identically before and after the rule changed —
+    // which is exactly why nothing flagged it.
+    expect(await confirmClaim(oldId, false, ACTOR)).toBe(true);
 
     const res = await updateClaim({
       claimId: oldId,
@@ -245,12 +253,16 @@ run("vault claims", () => {
     expect(next.supersedes).toBe(oldId);
     expect(next.revision).toBe(2);
     expect(next.superseded_at).toBeNull();
-    // origin/sensitive/review_status are copied from the predecessor, not reset — and
-    // `review_status` can ONLY be inherited now: there is no patch field for it, so a
-    // supersede cannot promote its own successor.
+    // origin and sensitive are copied from the predecessor; `review_status` is NOT, and
+    // this patch is why: it rewrites the statement, so the successor holds words nobody
+    // has read yet and is born `unverified` however approved its predecessor was. The
+    // approval record goes with the status — a row reading `confirmed` with no approver
+    // named is the one shape those two columns exist to prevent.
     expect(next.origin).toEqual({ type: "chat" });
     expect(next.sensitive).toBe(true);
     expect(next.review_status).toBe("unverified");
+    expect(next.approved_at).toBeNull();
+    expect(next.approved_by_user_id).toBeNull();
     // The slot was not patched — it is inherited, and the slot's active head is now
     // the successor.
     expect(next.slot_key).toBe("city");
@@ -262,6 +274,61 @@ run("vault claims", () => {
     expect(
       await count("audit_events", "space_id = $1 AND action = 'claim.supersede' AND subject_id = $2", [SPACE_A, oldId]),
     ).toBe(1);
+  });
+
+  it("a supersede that rewrites NO text keeps the approval instead of stranding the head", async () => {
+    // The rule's width is the point. "A supersede must not carry approval across" was
+    // argued from NEW text reaching the model unapproved; a patch that moves a topic
+    // brings no new words, and demoting there is not a temporary quarantine — every
+    // caller of `confirmClaim` needs a candidate row, this path creates none, and the
+    // head would leave both the model projection and the person's own memory page with
+    // no surface left to re-approve it from.
+    const { id } = await seed({ statement: "Works in Kyiv", topicNoteId: NOTE_A });
+    expect(await confirmClaim(id, false, ACTOR)).toBe(true);
+    const approved = await claimRow(id);
+
+    const res = await updateClaim({
+      claimId: id,
+      expectedRevision: 1,
+      patch: { origin: { type: "correction" } },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!res.ok) throw new Error("unreachable");
+
+    const next = await claimRow(res.id);
+    expect(next.statement).toBe("Works in Kyiv");
+    expect(next.origin).toEqual({ type: "correction" });
+    // The same words, so the same approval — and the approver travels with it.
+    expect(next.review_status).toBe("confirmed");
+    expect(next.approved_at).toEqual(approved.approved_at);
+    expect(next.approved_by_user_id).toBe(OWNER);
+    // And the event says what the row says, rather than asserting a demotion that did
+    // not happen.
+    const { rows } = await q(
+      `SELECT payload->>'reviewStatus' AS s FROM audit_events
+        WHERE action = 'claim.supersede' AND subject_id = $1`,
+      [id],
+    );
+    expect(rows[0].s).toBe("confirmed");
+  });
+
+  it("a supersede that rewrites only the VALUE still demotes: the patch reached a column the model reads", async () => {
+    // The condition is read off the RESULTING ROW, not off a list of patch field names —
+    // so a patch that touches the model-facing text through any field is caught. `value`
+    // is the one nobody would think to enumerate.
+    const { id } = await seed({ statement: "Acme pays in 30 days", value: { days: 30 } });
+    expect(await confirmClaim(id, false, ACTOR)).toBe(true);
+
+    const res = await updateClaim({
+      claimId: id,
+      expectedRevision: 1,
+      patch: { value: { days: 60 } },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!res.ok) throw new Error("unreachable");
+    expect((await claimRow(res.id)).review_status).toBe("unverified");
   });
 
   it("revision mismatch: zero trace — no successor, no event, no touch to the row", async () => {
