@@ -69,7 +69,7 @@ const failureShape = (e: unknown) => {
   return { name: (e as Error)?.name ?? null, code: pg?.code ?? null, constraint: pg?.constraint ?? null };
 };
 
-type ExtractedItem = {
+export type ExtractedItem = {
   statement: string;
   slotKey?: string;
   sensitive?: boolean;
@@ -129,6 +129,84 @@ function toExtractedItem(entry: unknown): ExtractedItem | null {
 }
 
 /**
+ * Why an extraction yielded nothing usable. An empty `items` from a healthy call is
+ * deliberately NOT one of these: the model finding nothing worth saving is a normal,
+ * frequent outcome, and a different thing entirely from being unable to read the
+ * reply at all. Only the second needs an operator, which is why the two are an
+ * enumerated reason and an empty array rather than both being an empty array.
+ */
+export type ExtractionFailure = "generate_failed" | "truncated" | "unreadable" | "unparseable";
+
+export type ExtractionOutcome =
+  | {
+      ok: true;
+      /** Positional, and holes are kept. `null` marks an entry the model returned that
+       *  carried no usable statement. Compacting the array here would renumber the
+       *  entries after it — and the index is half of the caller's idempotency key, so a
+       *  retry of the same finished extraction would write duplicates instead of being
+       *  the no-op the ledger's unique index makes it. The hole is the invariant. */
+      items: (ExtractedItem | null)[];
+    }
+  | { ok: false; reason: ExtractionFailure; detail?: Record<string, unknown> };
+
+/**
+ * The turn in, candidate facts out: the whole model-facing half of extraction, with
+ * no database, no space resolution, and no provenance in it.
+ *
+ * Split out from `extractCandidates` so the prompt can be MEASURED — `eval/` runs a
+ * labelled corpus through this function against a real model and scores what comes
+ * back. That seam carries more weight than its size suggests: a harness holding its
+ * own copy of the prompt would score the copy, and would go on reporting the same
+ * number after the shipped prompt drifted away from it. So the one thing an
+ * extraction eval must never have is its own version of this function.
+ */
+export async function extractFromTurn(args: {
+  userText: string;
+  assistantText: string;
+  generate: GenerateFn;
+}): Promise<ExtractionOutcome> {
+  let result: { text: string; finishReason: string };
+  try {
+    result = await args.generate({
+      system: EXTRACT_INSTRUCTION,
+      prompt: `<user_turn>\n${args.userText}\n</user_turn>\n<assistant_turn>\n${args.assistantText}\n</assistant_turn>`,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+  } catch (e) {
+    // `failureShape`, not `String(e)`, and for a sharper reason than the DB write
+    // further down: the prompt this call carried is `<user_turn>${userText}`, i.e.
+    // exactly the text the secret screen exists to keep out of anything durable. An AI
+    // SDK `APICallError`'s message is the provider's own response body, and a 400 or a
+    // content-filter refusal echoes the offending content back — so stringifying it
+    // would write the user's turn into the application log and every collector behind
+    // it. The shape travels to the caller; the message never leaves this line.
+    return { ok: false, reason: "generate_failed", detail: failureShape(e) };
+  }
+
+  // A truncated JSON array can still be syntactically PARSEABLE while missing its
+  // tail — a partial extraction would silently drop facts and, worse, could cut a
+  // statement mid-sentence and store the fragment as a fact. Bail before parsing, not
+  // after: writing nothing is safer than writing something that isn't what was said.
+  if (result.finishReason === "length") return { ok: false, reason: "truncated" };
+
+  if (typeof result.text !== "string") return { ok: false, reason: "unreadable" };
+
+  const parsedArray = parseJsonArray(result.text);
+  if (!parsedArray.ok) return { ok: false, reason: "unparseable" };
+
+  return { ok: true, items: parsedArray.items.map(toExtractedItem) };
+}
+
+/** What an operator needs told about each way an extraction can come back empty. A
+ *  legitimate `[]` is absent on purpose — see `ExtractionFailure`. */
+const FAILURE_LOG: Record<ExtractionFailure, string> = {
+  generate_failed: "vault candidate extraction: generate failed",
+  truncated: "vault candidate extraction: aux output truncated (finishReason=length) — writing nothing",
+  unreadable: "vault candidate extraction: generate returned a non-string text",
+  unparseable: "vault candidate extraction: model output wasn't a parseable JSON array — writing nothing",
+};
+
+/**
  * Mine the turn that just finished for candidate facts and file each one through
  * the candidate ledger (`proposeCandidate`). Runs AFTER the reply is already
  * delivered, so nothing here may throw into the caller — a rejection would fail a
@@ -160,54 +238,24 @@ export async function extractCandidates(args: {
   assistantText: string;
   generate: GenerateFn;
 }): Promise<void> {
-  let result: { text: string; finishReason: string };
-  try {
-    result = await args.generate({
-      system: EXTRACT_INSTRUCTION,
-      prompt: `<user_turn>\n${args.userText}\n</user_turn>\n<assistant_turn>\n${args.assistantText}\n</assistant_turn>`,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-    });
-  } catch (e) {
-    // `failureShape`, not `String(e)`, and for a sharper reason than the DB write
-    // forty lines below: the prompt this call carried is `<user_turn>${userText}`,
-    // i.e. exactly the text the secret screen exists to keep out of anything durable.
-    // An AI SDK `APICallError`'s message is the provider's own response body, and a
-    // 400 or a content-filter refusal echoes the offending content back — so
-    // stringifying it writes the user's turn into the application log and every
-    // collector behind it.
-    log.error("vault candidate extraction: generate failed", failureShape(e));
+  const outcome = await extractFromTurn(args);
+  if (!outcome.ok) {
+    // A failed provider call is an error — it carries a shape worth chasing. The other
+    // three are warnings: the reply arrived and was simply unusable, which is a tuning
+    // signal (a cap set too low, a model that will not hold the format) rather than a
+    // fault. Both are logged, unlike a legitimate empty result, so an operator can tell
+    // "every turn loses its extraction" from "nothing to extract this turn".
+    const meta = { messageId: args.messageId, ...(outcome.detail ?? {}) };
+    if (outcome.reason === "generate_failed") log.error(FAILURE_LOG[outcome.reason], meta);
+    else log.warn(FAILURE_LOG[outcome.reason], meta);
     return;
   }
 
-  // A truncated JSON array can still be syntactically PARSEABLE while missing its
-  // tail — a partial extraction would silently drop facts and, worse, could cut a
-  // statement mid-sentence and store the fragment as a fact. Bail before parsing,
-  // not after: writing nothing is safer than writing something that isn't what was
-  // actually said. Logged (unlike a legitimate empty result) so an operator can
-  // tell "cap too low, every turn loses its extraction" apart from "nothing to
-  // extract this turn".
-  if (result.finishReason === "length") {
-    log.warn("vault candidate extraction: aux output truncated (finishReason=length) — writing nothing", {
-      messageId: args.messageId,
-    });
-    return;
-  }
-
-  if (typeof result.text !== "string") {
-    log.warn("vault candidate extraction: generate returned a non-string text", { messageId: args.messageId });
-    return;
-  }
-
-  const parsedArray = parseJsonArray(result.text);
-  if (!parsedArray.ok) {
-    log.warn("vault candidate extraction: model output wasn't a parseable JSON array — writing nothing", {
-      messageId: args.messageId,
-    });
-    return;
-  }
-
-  for (let ordinal = 0; ordinal < parsedArray.items.length; ordinal++) {
-    const item = toExtractedItem(parsedArray.items[ordinal]);
+  for (let ordinal = 0; ordinal < outcome.items.length; ordinal++) {
+    // A hole is an entry the model returned without a usable statement. Skipping it
+    // WITHOUT compacting is what keeps every later entry's ordinal — and so its
+    // idempotency key — the same across a re-run.
+    const item = outcome.items[ordinal];
     if (!item) continue;
     const provenance: Provenance =
       item.from === "user" && !item.quoted && verifyDirectProvenance(item.statement, args.userText)
