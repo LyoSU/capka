@@ -27,7 +27,7 @@ describe("looksLikeSecret — a long opaque run, in any language", () => {
     ["a full-length OpenAI project key", "my key is sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz0123456789"],
     // The screen never reads vocabulary, so the language of the sentence around the run
     // cannot change its answer. This row is the universality claim, asserted.
-    ["the same run inside a non-English sentence", "ключ: 0123456789abcdef0123456789abcdef01234567"],
+    ["the same run inside a non-English sentence", "anahtar: 0123456789abcdef0123456789abcdef01234567"],
     ["a GitHub fine-grained PAT body", "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz0123456789"],
   ])("screens %s", (_name, statement) => {
     expect(looksLikeSecret(statement)).toBe(true);
@@ -51,7 +51,7 @@ describe("looksLikeSecret — a long opaque run, in any language", () => {
    */
   it.each([
     ["an English credential assignment", 'the config line is password: "hunter22"'],
-    ["the same sentence in Ukrainian — the gap that started this", "пароль від пошти: hunter22"],
+    ["the same sentence in Turkish — the gap that started this", "e-posta parolasi: hunter22"],
     ["a short vendor-prefixed token", "token ghp_ABCdef1234567890abcd"],
     ["an AWS access key id", "AKIAIOSFODNN7EXAMPLE"],
     ["a connection string with a short password", "our db is postgresql://svcuser:Sup3rPW9@db.internal:5432/prod"],

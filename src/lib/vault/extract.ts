@@ -219,12 +219,13 @@ const FAILURE_LOG: Record<ExtractionFailure, string> = {
  * wraps both texts in `<user_turn>`/`<assistant_turn>` tags and tells the model
  * that content is data to analyse, never instructions to follow — a second layer,
  * not a proof. The remaining layers are NOT here, and this module is not the place to
- * read them off either: `proposeCandidate` gates what this path proposes — anything
- * not `user_direct`, and anything sensitive, lands `pending` rather than active — and
- * the secret screen sits lower still, on `vault_claims`' own two writers, where no
- * caller can get behind it. Extraction is one writer among several, which is exactly
- * why it holds neither rule: it used to hold the screen, and `memory_propose` walked
- * straight past it into an active claim.
+ * read them off either: since the authority cutover `proposeCandidate` writes no claim at
+ * all, so everything this path proposes lands `pending` and waits for a person — there is
+ * no branch that activates and `user_direct` gates nothing — and the secret screen sits
+ * lower still, on `vault_claims`' own two writers, where no caller can get behind it.
+ * Extraction is one writer among several, which is exactly why it holds neither rule: it
+ * used to hold the screen, and `memory_propose` walked straight past it into an active
+ * claim.
  */
 export async function extractCandidates(args: {
   userSpaceId: string;

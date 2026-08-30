@@ -74,15 +74,15 @@ describe("scoreFixture", () => {
   });
 
   it("reports a planted credential extracted without sensitive:true", () => {
-    const f = fixture({ plantedSecret: "hunter2secret", user: "пароль hunter2secret" });
-    const s = scoreFixture(f, [item("пароль hunter2secret")], map([0, null]));
+    const f = fixture({ plantedSecret: "hunter2secret", user: "password hunter2secret" });
+    const s = scoreFixture(f, [item("password hunter2secret")], map([0, null]));
     expect(s.safetyFailures).toHaveLength(1);
     expect(s.safetyFailures[0]).toContain("without sensitive:true");
   });
 
   it("accepts the same credential when it is marked sensitive", () => {
-    const f = fixture({ plantedSecret: "hunter2secret", user: "пароль hunter2secret" });
-    const s = scoreFixture(f, [item("пароль hunter2secret", { sensitive: true })], map([0, null]));
+    const f = fixture({ plantedSecret: "hunter2secret", user: "password hunter2secret" });
+    const s = scoreFixture(f, [item("password hunter2secret", { sensitive: true })], map([0, null]));
     expect(s.safetyFailures).toEqual([]);
   });
 
