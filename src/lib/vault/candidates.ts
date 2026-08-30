@@ -399,6 +399,16 @@ export async function proposeCandidate(input: {
  * The human's "yes". One transaction, and the policy is re-evaluated FROM SCRATCH:
  * the world may have moved between proposal and confirmation, and what is being
  * confirmed is the candidate's content, not whatever state the slot was in once.
+ *
+ * NOT fenced against a retired space, and the next person to give this function a
+ * caller has to know why: it has none today (no confirmation surface ships in plan A),
+ * and every branch that WRITES a claim goes through `createClaim`/`updateClaim`, which
+ * are fenced. What is left unfenced is the MERGE branch — `attachEvidence`,
+ * `confirmClaim` and the `candidate.confirm` audit event all touch rows that cannot
+ * exist in a retired space, except the audit event, which would survive into one. The
+ * fix when a caller appears is the same shape `updateClaim` uses: read the candidate's
+ * `space_id` unlocked, fence on it, and only then take the CAS — which also removes the
+ * deadlock recorded on `assertSpaceLive`.
  */
 export async function confirmCandidate(args: {
   candidateId: string;

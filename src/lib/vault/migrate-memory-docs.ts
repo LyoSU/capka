@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { log } from "@/lib/log";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
 import { attachToTopic, confirmClaim, createClaim, listHeadClaims } from "./claims";
-import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote } from "./spaces";
+import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote, spaceAcceptsWrites } from "./spaces";
 
 /** The same normalization as in `candidates.ts`. Different rules here would mean
  *  the same fact merges or splits depending on which path carried it into
@@ -187,6 +187,18 @@ async function migrateOne(docId: string): Promise<boolean> {
         : { type: "user", refId: doc.userId },
       tx,
     );
+    // The project was deleted while this boot was migrating (teardown retires the space
+    // and removes the project row in two separate transactions, so a boot can land
+    // between them). There is nothing to carry into a space the user destroyed, and the
+    // fences below would refuse anyway — but as a THROW, which this loop would read as
+    // a document that failed and retry three times per boot, forever, logging an error
+    // each time for a correct outcome. `migratedAt` was already stamped by the CAS
+    // above, so returning here records the document as carried and stops it coming
+    // back. `false`, not `true`: nothing was migrated.
+    if (!(await spaceAcceptsWrites(spaceId, tx))) {
+      log.info("vault: skipping a memory doc whose space was retired", { docId, spaceId });
+      return false;
+    }
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC, tx);
 
     // Dedup against the space's existing heads — this covers both a repeat after a

@@ -19,7 +19,7 @@ import { vaultClaims } from "@/lib/db/schema";
 import { createClaim, updateClaim, type Actor } from "../claims";
 import { proposeCandidate } from "../candidates";
 import { extractCandidates } from "../extract";
-import { getOrCreateSpace, retireProjectSpace } from "../spaces";
+import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -149,6 +149,91 @@ run("vault: writes into a retired space", () => {
     await retire;
     expect(await propose).toEqual({ state: "retired" });
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
+  });
+
+  it("the retire takes the space row BEFORE it deletes, not after", async () => {
+    // The fence's first branch — "a writer that gets FOR SHARE first commits into a
+    // still-live space, and the retire queued behind it then deletes what it wrote" —
+    // is only true because `retireProjectSpace` takes its lock as its FIRST statement.
+    // Nothing else pins that. Move the `.for("update")` below the deletes, or drop it,
+    // and the DELETE runs on a snapshot that cannot see the uncommitted claim, the lock
+    // is then taken with nothing left to do, and the claim survives into a space the
+    // user deleted — the original defect, restored in full, with every other test in
+    // this file still green.
+    const { projectSpaceId } = await spaces();
+    const wrote = deferred();
+    const holding = deferred();
+    const writer = db.transaction(async (tx) => {
+      await createClaim(
+        { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {}, reviewStatus: "confirmed" },
+        actor,
+        tx,
+      );
+      wrote.resolve();
+      await holding.promise;
+    });
+    await wrote.promise;
+
+    const retire = retireProjectSpace(PROJ);
+    const outcome = await Promise.race([
+      retire.then(() => "done" as const),
+      new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+    ]);
+    // Lock first: the retire cannot get past the writer at all. Lock last: the deletes
+    // sail through the writer's invisible row and this reads "done".
+    expect(outcome).toBe("blocked");
+
+    holding.resolve();
+    await writer;
+    await retire;
+    expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
+  });
+
+  it("a PENDING proposal in flight is refused — the path where a row would SURVIVE", async () => {
+    // The claim path carries a second statement that catches a stale fence read on its
+    // own: `createClaim` throws and takes the transaction with it, so nothing durable
+    // escapes even without the lock. A pending proposal has no such statement — it
+    // writes its candidate row and COMMITS. So this is the shape where the locking read
+    // is the only thing standing between a deleted project and a durable row, and it is
+    // the one the mutation has to be run against.
+    const { projectSpaceId } = await spaces();
+    const retired = deferred();
+    const holding = deferred();
+    const retire = db.transaction(async (tx) => {
+      await retireProjectSpace(PROJ, tx);
+      retired.resolve();
+      await holding.promise;
+    });
+    await retired.promise;
+
+    const propose = proposeCandidate({
+      idempotencyKey: `${P}inflight-pending`,
+      spaceId: projectSpaceId,
+      // Not the user's own words, so the ledger gates it to `pending` and no claim is
+      // ever attempted.
+      statement: "the supplier raised prices in March",
+      provenance: { kind: "derived", messageId: MSG },
+    });
+    const outcome = await Promise.race([
+      propose.then(() => "done" as const),
+      new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+    ]);
+    expect(outcome).toBe("blocked");
+
+    holding.resolve();
+    await retire;
+    expect(await propose).toEqual({ state: "retired" });
+    expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
+  });
+
+  it("getOrCreateTopicNote refuses to open a topic in a retired space", async () => {
+    // The fourth entrance, and a real one: `migrateMemoryDocs` creates the topic note
+    // BEFORE the first claim, so a bullet-less document would commit an empty topic
+    // into a retired space without ever reaching the claim fence.
+    const { projectSpaceId } = await spaces();
+    await retireProjectSpace(PROJ);
+    await expect(getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC)).rejects.toThrow(/retired/i);
+    expect(await count("vault_notes", "space_id = $1", [projectSpaceId])).toBe(0);
   });
 
   it("a PENDING proposal leaves no candidate row either", async () => {

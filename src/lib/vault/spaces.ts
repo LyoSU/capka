@@ -132,6 +132,17 @@ export const DEFAULT_TOPIC = "General";
  *  (space, title) is scoped to that kind, so it is the same race and the same
  *  resolution as above. */
 export async function getOrCreateTopicNote(spaceId: string, title: string, ex: Ex = db): Promise<string> {
+  // The FOURTH entrance into a space, and it is reachable: `migrateMemoryDocs` opens
+  // the topic note BEFORE its first claim, so a bullet-less legacy document migrating
+  // during the window between teardown's two transactions would commit an empty topic
+  // into a retired space without ever meeting the claim fence. One empty note and no
+  // user content is a small harm — but this feature's whole history is a guard standing
+  // at one entrance of two, so it is closed rather than noted. The migration itself
+  // does not rely on the throw: it checks and SKIPS, because a deleted project's
+  // document is nothing to carry, not a failure to retry every boot.
+  if (!(await spaceAcceptsWrites(spaceId, ex))) {
+    throw new Error(`space ${spaceId} is retired; refusing to open a topic in it`);
+  }
   const where = and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.title, title), eq(vaultNotes.kind, "memory_topic"));
   const found = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
   if (found[0]) return found[0].id;
