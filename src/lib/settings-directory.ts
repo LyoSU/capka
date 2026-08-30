@@ -54,7 +54,7 @@ export const SETTINGS_DIRECTORY: SettingsEntry[] = [
   { href: "/settings", label: "language.label", page: "settings.nav.general", keywordsKey: "settings.search.language" },
   { href: "/settings", label: "settings.integrations.link.title", page: "settings.nav.general", keywordsKey: "settings.search.telegramAccount" },
   { href: "/settings/memory#memory-enabled", label: "settings.memory.enabled", page: "settings.nav.memory", keywordsKey: "settings.search.memoryEnabled" },
-  { href: "/settings/memory", label: "settings.memory.userTitle", page: "settings.nav.memory", keywordsKey: "settings.search.memoryFacts" },
+  { href: "/settings/memory", label: "settings.memory.title", page: "settings.nav.memory", keywordsKey: "settings.search.memoryFacts" },
   { href: "/settings/connections", label: "settings.connections.title", page: "settings.nav.connections", keywordsKey: "settings.search.connections", needsOwnKeys: true },
   { href: "/settings/skills", label: "settings.skills.title", page: "settings.nav.skills", keywordsKey: "settings.search.skills" },
   { href: "/settings/automations", label: "settings.automations.title", page: "settings.nav.automations", keywordsKey: "settings.search.automations" },
