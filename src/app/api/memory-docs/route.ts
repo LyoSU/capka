@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { requireActive, apiHandler } from "@/lib/auth";
+import { requireActive, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memoryDocs, projects, spaces, vaultNotes } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
@@ -18,8 +18,16 @@ import { DEFAULT_TOPIC } from "@/lib/vault/spaces";
  *
  * The FALLBACK is what keeps memory from disappearing for even a minute. A document
  * whose `migrated_at` is still NULL has not been carried across yet, so its own text
- * is returned verbatim — exactly the condition the prompt manifest falls back on, so
- * the screen and the model never disagree about which half of the move a scope is in.
+ * is returned verbatim — exactly the condition the prompt manifest falls back on.
+ *
+ * It is ADDITIVE, like the manifest, and not a precedence: the two are concatenated
+ * when both exist. Legacy-first precedence would have hidden a fact the model can
+ * plainly see — a claim recorded this session while the document is still
+ * unmigrated. Normally that divergence lasts seconds, but a document that fails
+ * `migrateOne` deterministically rolls `migrated_at` back on every retry and never
+ * progresses, so the page would hide those facts permanently with nothing on screen
+ * to explain it. Showing both can repeat a fact for the length of the migration
+ * window; that is the cheaper error, and the same trade the manifest already makes.
  */
 
 /** Claims a scope shows: confirmed heads under the default topic, as bullets. A
@@ -68,14 +76,18 @@ export const GET = apiHandler(async () => {
   const legacy = (projectId: string | null) =>
     legacyRows.find((r) => (projectId === null ? r.projectId === null : r.projectId === projectId))?.content ?? "";
 
-  const userLegacy = legacy(null);
+  // Claims first, then the not-yet-carried document underneath — the same order the
+  // manifest puts them in, so the page and the prompt list a scope's memory the same
+  // way round.
+  const both = (claims: string, legacyText: string) => [claims, legacyText].filter(Boolean).join("\n\n");
+
   return Response.json({
-    user: userLegacy || (await project(userSpaceId)),
+    user: both(await project(userSpaceId), legacy(null)),
     projects: await Promise.all(
       projectRows.map(async (p) => ({
         id: p.id,
         name: p.name,
-        content: legacy(p.id) || (await project(projectSpaceId(p.id))),
+        content: both(await project(projectSpaceId(p.id)), legacy(p.id)),
       })),
     ),
   });
@@ -92,6 +104,10 @@ export const GET = apiHandler(async () => {
  * any more, so a carried document is never re-selected.
  */
 export const PUT = apiHandler(async () => {
-  await requireActive();
+  // The SAME gate this route had before the cutover, deliberately: `requireActive`
+  // would have widened it to `viewer`. The 409 is constant and touches nothing, so
+  // the difference is invisible in effect — which is exactly why it would have
+  // survived unnoticed as a standing authorization change nobody decided to make.
+  await requireRole("admin", "user");
   return Response.json({ error: "memory_moved" }, { status: 409 });
 });

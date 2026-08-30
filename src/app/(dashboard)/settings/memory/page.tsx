@@ -50,9 +50,10 @@ export default function MemoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // The user's own memory switch, plus the org ceiling that can override it. The
-  // docs below stay visible and editable either way: turning memory off leaves
-  // saved notes alone (merely unused), so hiding them would suggest they were lost.
+  // The user's own memory switch, plus the org ceiling that can override it. What is
+  // recorded below stays VISIBLE either way (it is read-only for everyone since the
+  // vault cutover): turning memory off leaves saved facts alone, merely unused, so
+  // hiding them would suggest they were lost.
   // Held as a whole profile because that's what GET returns, but only the memory
   // bit is ever POSTed: the endpoint merges the patch over the stored row, so it —
   // not every caller — is what keeps the other fields from being reset by schema

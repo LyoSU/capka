@@ -1,14 +1,3 @@
-// ── Agent memory ─────────────────────────────────────────────
-
-/** Hard size ceiling for a memory document. The per-turn reconcile clamps to
- *  this, and crossing it triggers a consolidation rewrite. Kept small on
- *  purpose: the doc rides every prompt uncached, so it must stay cheap. */
-export const MEMORY_DOC_MAX_CHARS = 3000;
-
-/** Consolidate (full rewrite to dedup/reorganize) at most once every N turns,
- *  even if the doc never crosses the size ceiling — bounds drift accumulation. */
-export const MEMORY_CONSOLIDATE_EVERY = 20;
-
 // ── File attachments ─────────────────────────────────────────
 
 /** Metadata for a file uploaded to the sandbox workspace */

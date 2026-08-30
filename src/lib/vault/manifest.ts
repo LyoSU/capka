@@ -87,7 +87,25 @@ async function topicCounts(spaceId: string): Promise<{ title: string; count: num
  *  statement is shorter and less dangerous than a whole legacy document, but
  *  it's the same class of risk.
  */
-function spaceBlock(header: string, topics: { title: string; count: number }[], facts: string[]): string {
+function spaceBlock(header: string, topics: { title: string; count: number }[], facts: string[]): string | null {
+  // `null`, not a bare header, when the space holds nothing worth saying. The
+  // manifest sits in the UNCACHED volatile tier and is rebuilt every turn, so an
+  // empty headed section is a cost paid on every single turn of every account that
+  // has never recorded a fact — which is every new account. The pre-cutover prompt
+  // omitted its memory block when the document was empty; keeping the header would
+  // make the cutover a regression that bills for itself forever.
+  //
+  // The gate is "has anything to SAY", which is not the same as "has any rows". A
+  // migrated-but-EMPTY legacy document creates the default topic with no claims in
+  // it, so a plain `topics.length` test still prints `Topics:` / `- General (0)` —
+  // telling the model a topic exists and holds nothing, the most misleading output
+  // of the three and the reason this counts nonzero topics rather than topics.
+  //
+  // Zero-count topics are still printed INSIDE a block that has other content:
+  // that is the deliberate choice above (a topic whose only fact just turned
+  // sensitive should not vanish), and it is untouched. This decides only whether
+  // there is a block at all.
+  if (!facts.length && !topics.some((t) => t.count > 0)) return null;
   const lines = [header];
   if (topics.length) lines.push("", "Topics:", ...topics.map((t) => `- ${t.title} (${t.count})`));
   if (facts.length) lines.push("", "Recent facts:", ...facts.map((s) => `- «${s}»`));
@@ -160,14 +178,16 @@ export async function buildMemoryManifest(args: {
     topicCounts(args.userSpaceId),
     recentFacts(args.userSpaceId),
   ]);
-  blocks.push(spaceBlock("## User memory", userTopics, userFacts));
+  const userBlock = spaceBlock("## User memory", userTopics, userFacts);
+  if (userBlock) blocks.push(userBlock);
 
   if (args.projectSpaceId) {
     const [projectTopics, projectFacts] = await Promise.all([
       topicCounts(args.projectSpaceId),
       recentFacts(args.projectSpaceId),
     ]);
-    blocks.push(spaceBlock("## Project memory", projectTopics, projectFacts));
+    const projectBlock = spaceBlock("## Project memory", projectTopics, projectFacts);
+    if (projectBlock) blocks.push(projectBlock);
   }
 
   // The two halves are independent: the project doc can already be migrated

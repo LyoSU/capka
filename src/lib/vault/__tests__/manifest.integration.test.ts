@@ -186,7 +186,7 @@ run("vault: memory manifest", () => {
     expect(second).toBe(first);
   });
 
-  it("an empty vault (no claims, no topics, no legacy doc) -> minimum: headers and tail only", async () => {
+  it("an empty vault (no claims, no topics, no legacy doc) -> the tail line ALONE, no headers", async () => {
     const manifest = await buildMemoryManifest({
       userId: OWNER,
       userSpaceId: SPACE_A,
@@ -194,14 +194,34 @@ run("vault: memory manifest", () => {
       projectSpaceId: SPACE_B,
     });
 
-    expect(manifest).toContain("## User memory");
-    expect(manifest).toContain("## Project memory");
+    // A headed-but-empty section is not free: the manifest lives in the UNCACHED
+    // volatile tier and is rebuilt every turn, so every account that has never
+    // recorded a fact would pay for these headers on every turn forever.
+    expect(manifest).not.toContain("## User memory");
+    expect(manifest).not.toContain("## Project memory");
     expect(manifest).not.toContain("Topics:");
     expect(manifest).not.toContain("Recent facts:");
     expect(manifest).not.toContain("Memory (being migrated)");
-    expect(manifest).toContain(
+    expect(manifest).toBe(
       "Use memory_search before assuming facts about the user or project; propose new facts with memory_propose.",
     );
+  });
+
+  it("a topic that exists but holds nothing (migrated empty doc) prints no section either", async () => {
+    // `migrateOne` creates the default topic before it reads a single bullet, so an
+    // empty legacy document leaves a real topic row with zero claims behind. A
+    // `topics.length` gate would print `- General (0)` — an assertion to the model
+    // that a topic exists and is empty, which is worse than saying nothing.
+    await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'General', 'memory_topic')`, [
+      `${P}emptytopic`,
+      SPACE_A,
+    ]);
+
+    const manifest = await buildMemoryManifest({ userId: OWNER, userSpaceId: SPACE_A });
+
+    expect(manifest).not.toContain("## User memory");
+    expect(manifest).not.toContain("General");
+    expect(manifest).not.toContain("Topics:");
   });
 
   it("the manifest never mentions search_knowledge -- that tool doesn't exist yet (Plan C)", async () => {

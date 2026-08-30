@@ -26,10 +26,10 @@ const STRANGER = `${P}stranger`;
 const PROJ = `${P}proj`;
 const STRANGER_PROJ = `${P}strangerproj`;
 
-const { requireActive } = vi.hoisted(() => ({ requireActive: vi.fn() }));
+const { requireActive, requireRole } = vi.hoisted(() => ({ requireActive: vi.fn(), requireRole: vi.fn() }));
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
-  return { ...actual, requireActive };
+  return { ...actual, requireActive, requireRole };
 });
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
@@ -57,11 +57,21 @@ const mkDoc = async (id: string, userId: string, projectId: string | null, conte
   );
 };
 
-/** A confirmed head filed under the default topic — what the projection reads. */
-const mkClaim = async (spaceId: string, statement: string) => {
+/** A head filed under the default topic — what the projection reads.
+ *
+ *  `reviewStatus` is a parameter and not a constant because the quarantine is only
+ *  observable here: a web/tool-derived fact lands `unverified` and must NOT reach
+ *  this page, which is the one surface where a human would read it as something the
+ *  assistant knows. A fixture of confirmed claims alone cannot tell the filter apart
+ *  from no filter. */
+const mkClaim = async (
+  spaceId: string,
+  statement: string,
+  reviewStatus: "confirmed" | "unverified" = "confirmed",
+) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC);
   await createClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus: "confirmed", topicNoteId: noteId },
+    { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus, topicNoteId: noteId },
     { kind: "system" },
   );
 };
@@ -98,6 +108,7 @@ run("vault: /api/memory-docs projection", () => {
   beforeEach(async () => {
     await cleanup();
     requireActive.mockImplementation(() => Promise.resolve({ userId: OWNER, role: "user", status: "active" }));
+    requireRole.mockImplementation(() => Promise.resolve({ userId: OWNER, role: "user", status: "active" }));
   });
 
   it("projects confirmed claims as bullets, for the user scope and a project scope", async () => {
@@ -109,6 +120,24 @@ run("vault: /api/memory-docs projection", () => {
     const body = await get();
     expect(body.user).toContain("- works in procurement");
     expect(body.projects.find((p) => p.id === PROJ)?.content).toContain("- ships on Fridays");
+  });
+
+  it("quarantined (unverified) claims never reach the page, in either scope", async () => {
+    // The quarantine exists so a fact the assistant merely DERIVED — from a web page
+    // or a tool result — is not presented as something it knows until a human says
+    // so. This page is where that promise becomes visible, so it is where the filter
+    // has to be held: without it, the same rows render as plain bullets.
+    const userSpace = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const projectSpace = await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER });
+    await mkClaim(userSpace, "confirmed user fact");
+    await mkClaim(userSpace, "quarantined user fact", "unverified");
+    await mkClaim(projectSpace, "confirmed project fact");
+    await mkClaim(projectSpace, "quarantined project fact", "unverified");
+
+    const body = await get();
+    expect(body.user).toBe("- confirmed user fact");
+    expect(body.projects.find((p) => p.id === PROJ)?.content).toBe("- confirmed project fact");
+    expect(JSON.stringify(body)).not.toContain("quarantined");
   });
 
   it("falls back to the legacy text while a document is still unmigrated", async () => {
@@ -130,6 +159,22 @@ run("vault: /api/memory-docs projection", () => {
 
     const body = await get();
     expect(body.user).toBe("- likes tea");
+  });
+
+  it("shows claims AND an unmigrated document together, so nothing the model sees is hidden", async () => {
+    // The divergence case: a fact recorded this session lands as a claim while the
+    // document has not been carried across yet. The manifest renders both, so the
+    // page must too — legacy-first precedence would hide the claim, and for a
+    // document that fails `migrateOne` deterministically it would hide it forever.
+    await mkDoc(`${P}d5`, OWNER, null, "- an old line still in the document", false);
+    const userSpace = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await mkClaim(userSpace, "a fact recorded this session");
+
+    const body = await get();
+    expect(body.user).toContain("- a fact recorded this session");
+    expect(body.user).toContain("- an old line still in the document");
+    // Claims first, matching the manifest's order.
+    expect(body.user.indexOf("this session")).toBeLessThan(body.user.indexOf("still in the document"));
   });
 
   it("never shows another user's project, memory or claims", async () => {

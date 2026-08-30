@@ -219,8 +219,11 @@ run("vault: memory_docs migration", () => {
     const stamp = await migratedAt(`${P}d9`);
 
     expect(await migrate(`${P}d9`)).toEqual({ migrated: 1 });
-    // The already-migrated bullet dedups instead of doubling; the late one lands.
-    expect(new Set(await inTopic(spaceId))).toEqual(new Set(["first fact", "added after the stamp"]));
+    // COUNT, not a Set: a Set discards duplicates, so wrapping the projection in one
+    // silently swallows the very doubling this assertion exists to catch — remove
+    // `migrateOne`'s dedup and the Set version stays green.
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [spaceId])).toBe(2);
+    expect((await inTopic(spaceId)).sort()).toEqual(["added after the stamp", "first fact"]);
     expect(await migratedAt(`${P}d9`)).not.toEqual(stamp);
     // Converges by construction: the fresh stamp is now past `updated_at`, and after
     // the cutover nothing moves `updated_at` again.
