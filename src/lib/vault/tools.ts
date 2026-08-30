@@ -85,7 +85,12 @@ const NOT_THE_USERS_WORDS = {
 const PROPOSE_SAID = {
   auto_active: "Saved.",
   merged: "Already known — added this conversation as evidence.",
-  pending: "Saved as awaiting the user's confirmation.",
+  // Not "awaiting the user's confirmation": that promised a step that does not
+  // exist. Plan A ships no confirmation surface at all, so a pending candidate is
+  // recorded and then invisible until one does — and a tool result must not describe
+  // a queue the user cannot reach. What IS actionable is said instead.
+  pending:
+    "Recorded, but not in memory: a fact the user did not state directly stays inactive until they confirm it, and there is no confirmation screen yet. If it should be remembered now, ask the user to state it themselves.",
   conflict: "Conflicts with an existing fact — recorded for the user to resolve.",
   duplicate: "Already recorded from this same call.",
   denied: "Not saved — the memory policy declined this fact.",
@@ -247,6 +252,15 @@ export async function makeVaultMemoryTools(ctx: {
         // this path and for extraction alike — they used to answer it oppositely.
         const spaceId = spaceForScope(scope, { userSpaceId, projectSpaceId });
         const res = await proposeCandidate({
+          // KNOWN LIMIT, not a claim of uniqueness: an approval continuation is a
+          // SECOND task writing the SAME message row, so both halves of such a turn
+          // mint keys in one namespace. Nothing reachable from a tool tells the halves
+          // apart — `execute` sees a toolCallId and this factory a messageId, and
+          // neither carries the task — so the key cannot be made to. It holds as long
+          // as the provider's tool-call ids are unique per message rather than per
+          // request; one that numbers them from zero each request would collide, and
+          // the collision reads as `duplicate` (a silently dropped fact), not as an
+          // error. Closing it means threading the task id in from the runner.
           idempotencyKey: `${ctx.messageId}:${toolCallId}`,
           spaceId,
           originMessageId: ctx.messageId,

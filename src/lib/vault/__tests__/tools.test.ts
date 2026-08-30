@@ -121,9 +121,11 @@ describe("memory_propose", () => {
     proposeCandidate.mockResolvedValue({ state: "pending", candidateId: "cand1" });
     const tools = await make({ projectId: null, projectOwnerUserId: undefined });
 
-    expect(await run(tools.memory_propose, { statement: "Favourite colour is blue" })).toBe(
-      "Saved as awaiting the user's confirmation.",
-    );
+    // The reply must not promise a confirmation step: plan A ships no surface for
+    // one, so "awaiting the user's confirmation" named a queue nobody can reach.
+    const out = await run(tools.memory_propose, { statement: "Favourite colour is blue" });
+    expect(out).toContain("not in memory");
+    expect(out).toContain("ask the user to state it themselves");
     expect(proposeCandidate).toHaveBeenCalledWith(
       expect.objectContaining({ spaceId: USER_SPACE, provenance: { kind: "derived", messageId: "m1" } }),
     );
