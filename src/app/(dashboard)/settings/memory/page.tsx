@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { MemoryReview } from "@/components/settings/memory-review";
 import { MemoryTopics } from "@/components/settings/memory-topics";
@@ -28,8 +33,8 @@ import type { ScopeView } from "@/lib/vault/memory-page";
  * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
  *
  * Still absent, and by task rather than by oversight: the Keep/Discard control on a
- * waiting fact (Task 8), the topic summary (Task 9), the sensitive-consent switch
- * (Task 4) and "forget everything" (Task 13).
+ * waiting fact (Task 8), the topic summary (Task 9) and the sensitive-consent switch
+ * (Task 4).
  *
  * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
  * control to state it with. A hand-typed fact has no honest provenance, and provenance
@@ -54,6 +59,76 @@ function Scope({ scope, onChanged }: { scope: ScopeView; onChanged: () => void }
   return (
     <SettingsSection title={scope.projectName ?? ""}>
       <div className="space-y-10">{body}</div>
+    </SettingsSection>
+  );
+}
+
+/**
+ * "Forget everything" — the most destructive control on this page, and the one with no
+ * narrower alternative behind it.
+ *
+ * CONFIRMED, and with a DIFFERENT dialog from the per-fact delete rather than a reuse of
+ * it. That one deliberately names nothing about the row it removes, so that a sensitive
+ * fact needs no second, emptier variant. Here the opposite obligation applies: the promise
+ * being made is "everything", and a person cannot check a promise of that size against a
+ * dialog that names nothing. So this one carries the COUNT — a number withholds exactly as
+ * much as that dialog does, since it is not the fact's text — and it says what SURVIVES,
+ * because a dialog claiming "everything" while chats and files quietly stay is a claim the
+ * reader has no way to test.
+ *
+ * NOT type-to-confirm, which was the other real option. It is a developer-tool ritual: it
+ * asks a non-technical office user to transcribe a token, in a UI whose first language is
+ * Ukrainian, and it defends against one mis-click by making every deliberate use tedious.
+ * The weight is carried instead by where the control sits (its own section at the foot of
+ * the page, with nothing else near it to mis-hit), by its being a quiet tinted button
+ * rather than a filled one, and by the dialog stating the size of what goes.
+ *
+ * It renders only when there IS something to forget. A destructive control that would do
+ * nothing is still a thing a person has to read and decide to ignore.
+ *
+ * The count is of FACTS only, matching the two headings above it; the route also ends
+ * every unverified head, which this page has never shown and the copy therefore does not
+ * promise. What the copy does promise — the waiting list going too — is the one part a
+ * reader can see disappear.
+ */
+function ForgetEverything({ facts, onChanged }: { facts: number; onChanged: () => void }) {
+  const t = useTranslations("settings.memory");
+  const tc = useTranslations("common");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const forgetAll = async () => {
+    setConfirming(false);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/memory", { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      toast.success(t("resetDone"));
+      // Re-read rather than emptying the local state: whether a scope disappears entirely
+      // is the server's decision, and after this it is the only interesting one left.
+      onChanged();
+    } catch {
+      toast.error(t("resetFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsSection title={t("resetTitle")} description={t("resetHint")}>
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogTrigger render={<Button variant="destructive" disabled={busy}>{t("reset")}</Button>} />
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("resetConfirm")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("resetConfirmBody", { facts })}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tc("cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={forgetAll}>{t("reset")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsSection>
   );
 }
@@ -162,6 +237,12 @@ export default function MemoryPage() {
           {scopes?.map((scope) => (
             <Scope key={scope.projectId ?? "user"} scope={scope} onChanged={load} />
           ))}
+          {/* Last on the page, after everything it would destroy: a reset offered before
+              the reader has seen what they have is a question asked too early. */}
+          <ForgetEverything
+            facts={scopes?.reduce((n, s) => n + s.topics.reduce((m, x) => m + x.facts.length, 0), 0) ?? 0}
+            onChanged={load}
+          />
         </>
       )}
     </SettingsPage>

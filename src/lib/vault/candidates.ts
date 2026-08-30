@@ -657,6 +657,54 @@ export async function rejectCandidate(args: {
   });
 }
 
+/**
+ * The queue half of "forget everything": every unresolved candidate in one space.
+ *
+ * It lives beside `rejectCandidate` and `proposeCandidate` rather than inside
+ * `forgetAllClaims` because `memory_candidates` is this module's table — the same rule
+ * that keeps `vault_claims` inside `claims.ts`. A claims function resolving candidates
+ * would be an inverse filed under the wrong writer, and the next person adding a column
+ * here would have no reason to look for a second writer over there.
+ *
+ * It takes an `ex` where `rejectCandidate` does not, and that is the whole reason both
+ * exist: a reset has to leave the claims and the queue in the same state, and
+ * `rejectCandidate` opens its own transaction, so composing it in a loop would let a
+ * failure land halfway — memory emptied, the queue still offering back the facts that
+ * were in it.
+ *
+ * `policy_state` is left as it was, exactly as one rejection leaves it: the resolution is
+ * recorded by the event, and the proposal's original state stays readable.
+ */
+export async function rejectAllCandidates(
+  spaceId: string,
+  actor: Actor,
+  ex?: Ex,
+): Promise<{ rejected: number }> {
+  if (!ex || ex === db) return db.transaction((tx) => rejectAllCandidates(spaceId, actor, tx));
+
+  const open = await ex
+    .update(memoryCandidates)
+    .set({ resolvedAt: new Date() })
+    .where(and(eq(memoryCandidates.spaceId, spaceId), isNull(memoryCandidates.resolvedAt)))
+    .returning({ id: memoryCandidates.id, policyState: memoryCandidates.policyState });
+  if (!open.length) return { rejected: 0 };
+
+  await ex.insert(auditEvents).values(
+    open.map((cand) => ({
+      id: nanoid(),
+      spaceId,
+      actor,
+      action: "candidate.reject",
+      subjectType: "candidate",
+      subjectId: cand.id,
+      // `rejectCandidate`'s payload plus `bulk`, for the reason recorded on
+      // `forgetAllClaims`: a reset must not read back as a queue somebody worked through.
+      payload: { policyState: cand.policyState, bulk: true },
+    })),
+  );
+  return { rejected: open.length };
+}
+
 /** A space's review queue, oldest first: a human works through it from the start,
  *  not from the end. Served by `idx_mcand_unresolved`. */
 export async function listOpenCandidates(spaceId: string): Promise<CandidateRow[]> {

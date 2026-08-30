@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - Vault data foundation (content-addressed blob store; sources/versions/fragments/citations schema) — groundwork for project knowledge.
 - Facts can now be deleted from the memory page, including sensitive ones the assistant is not allowed to read.
 - The memory page now says how a fact gets saved — by telling the assistant in a chat — and why the set-aside list is waiting.
+- A "forget everything" control on the memory page removes every recorded fact and every set-aside candidate across the user's own memory and all their projects; the audit trail of the reset is kept.
 
 ### Changed
 

@@ -551,6 +551,62 @@ export async function forgetClaim(
   return { ok: true };
 }
 
+/**
+ * "Forget everything" for one space, and it lives here because `forgetClaim` does: the
+ * module that owns `vault_claims` owns every way out of it, and a bulk `db.delete` from
+ * a route would skip the audit trail that makes the deletion visible afterwards.
+ *
+ * FORGETS, it does not DELETE. Every live head is superseded — the same terminal state
+ * one forget produces — so the rows, their evidence and their topic attachments stay as
+ * they were and the audit log can still name what was removed. A DELETE would leave
+ * `audit_events` pointing at subject ids that no longer resolve, which is the artifact
+ * N-3 warns about from the other direction: a log that records that something happened
+ * and cannot say what.
+ *
+ * Takes every live head, NOT only the confirmed ones the memory page renders. An
+ * unverified head is invisible on that page and is still a recorded claim in the space,
+ * and leaving it behind would mean a later confirmation resurrects a fact the person
+ * believed they had erased. So the count returned is a count of rows and not of the facts
+ * that were on screen — which is why nothing shows it to the user.
+ *
+ * The review queue is deliberately NOT swept here. `memory_candidates` is
+ * `candidates.ts`'s table and `rejectAllCandidates` is its inverse; a function named for
+ * claims quietly resolving candidates is the same altitude slip this module's own rules
+ * are written against. The route runs the two inside one transaction per space.
+ */
+export async function forgetAllClaims(spaceId: string, actor: Actor, ex?: Ex): Promise<{ forgotten: number }> {
+  if (!ex || ex === db) return db.transaction((tx) => forgetAllClaims(spaceId, actor, tx));
+
+  const heads = await ex
+    .update(vaultClaims)
+    .set({ supersededAt: new Date() })
+    .where(and(eq(vaultClaims.spaceId, spaceId), isNull(vaultClaims.supersededAt)))
+    .returning({ id: vaultClaims.id, revision: vaultClaims.revision });
+  // Drizzle rejects an empty VALUES list outright, and a space with nothing in it is the
+  // ordinary case for every scope the person never used.
+  if (!heads.length) return { forgotten: 0 };
+
+  // One multi-row INSERT rather than a statement per head: this is a sweep over a whole
+  // space, and a round trip per fact would scale with exactly the thing that makes
+  // someone reach for this button.
+  await ex.insert(auditEvents).values(
+    heads.map((head) => ({
+      id: nanoid(),
+      spaceId,
+      actor,
+      action: "claim.forget",
+      subjectType: "claim",
+      subjectId: head.id,
+      // The same payload one forget writes: no text, because the audit log is read more
+      // widely than the space itself. `bulk` is the one addition, and it earns its place
+      // by telling a reset apart from a person deleting facts one at a time — without it
+      // the trail of a single click is indistinguishable from a hundred deliberate ones.
+      payload: { revision: head.revision, bulk: true },
+    })),
+  );
+  return { forgotten: heads.length };
+}
+
 /** Mark an EXISTING head confirmed, without a supersede: when the user's
  *  statement matched what is already recorded, the content did not change — only
  *  the fact that it is now confirmed did, and a new version would be empty.

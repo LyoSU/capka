@@ -1030,7 +1030,14 @@
       "deleteFailed": "Could not delete the fact. Please try again.",
       "reviewTitle": "Set aside",
       "reviewHint": "The assistant worked these out on its own instead of hearing them from you, so it holds them until you agree — they have no effect on your conversations. Keeping or discarding them here arrives shortly; to save one now, just tell the assistant in a chat.",
-      "reviewConflict": "This disagrees with something already remembered."
+      "reviewConflict": "This disagrees with something already remembered.",
+      "resetTitle": "Forget everything",
+      "resetHint": "Clears your own memory and every project's, including anything set aside. Chats and files are not touched, and the assistant starts saving again from your next chat.",
+      "reset": "Forget everything",
+      "resetConfirm": "Forget everything the assistant remembers?",
+      "resetConfirmBody": "The assistant will forget {facts, plural, =0 {everything set aside} one {# saved fact and everything set aside} other {# saved facts and everything set aside}}, in your own memory and in every project. Your chats and files stay. This can't be undone.",
+      "resetDone": "Memory cleared",
+      "resetFailed": "Could not clear the memory. Please try again."
     },
     "integrations": {
       "title": "Integrations",
