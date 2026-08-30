@@ -254,6 +254,27 @@ describe("extractCandidates — isolation from the caller and from each other", 
     expect(proposeCandidate).not.toHaveBeenCalled();
   });
 
+  it("a failed propose logs a shape, never the error text — which carries the statement", async () => {
+    // The installed Drizzle embeds every SQL parameter in the error's own message, so
+    // `String(e)` writes the statement — a credential included — into the application
+    // log and every collector behind it, right after the ledger's screen kept it out
+    // of the prompt. Asserting "something was logged" passes against that bug; this
+    // asserts what is IN the payload.
+    const secret = "sk-proj-AbCdEf0123456789ghijkl";
+    const boom = Object.assign(new Error(`insert into "vault_claims" failed, params: my key is ${secret}`), {
+      cause: { code: "23503", constraint: "vault_claims_space_id_fk" },
+    });
+    proposeCandidate.mockRejectedValue(boom);
+    const generate = generateReturning(`[{"statement":"my key is ${secret}","from":"user"}]`);
+
+    await extractCandidates({ ...baseArgs, generate });
+
+    expect(log.error).toHaveBeenCalledTimes(1);
+    const [message, payload] = log.error.mock.calls[0] as [string, Record<string, unknown>];
+    expect(`${message} ${JSON.stringify(payload)}`).not.toContain(secret);
+    expect(payload).toMatchObject({ code: "23503", constraint: "vault_claims_space_id_fk", ordinal: 0 });
+  });
+
   it("never throws when proposeCandidate rejects, and still processes the remaining items", async () => {
     proposeCandidate.mockRejectedValueOnce(new Error("db exploded")).mockResolvedValueOnce({
       state: "auto_active",

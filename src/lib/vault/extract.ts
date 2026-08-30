@@ -51,6 +51,24 @@ const EXTRACT_INSTRUCTION =
 // would remove the one example that shows the model NOT to translate. A future
 // de-Cyrillic sweep must not touch it.
 
+/**
+ * All a failed write is allowed to say. The installed Drizzle puts every SQL
+ * parameter — the statement and its JSON value included — into the error's own
+ * message, so `String(e)` would write the credential the ledger's screen just kept
+ * out of the prompt into the application log and every collector behind it. The
+ * class name is a class name; the message is data.
+ *
+ * `code` and `constraint` come off the SAME object: drizzle >=0.36 wraps the driver
+ * error, so both live on `e`, or both on `e.cause` (`marketplace/barrier.ts`). Taking
+ * one from each would be reading two different errors.
+ */
+const failureShape = (e: unknown) => {
+  const pg = ((e as { code?: unknown })?.code ? e : (e as { cause?: unknown })?.cause) as
+    | { code?: unknown; constraint?: unknown }
+    | undefined;
+  return { name: (e as Error)?.name ?? null, code: pg?.code ?? null, constraint: pg?.constraint ?? null };
+};
+
 type ExtractedItem = {
   statement: string;
   slotKey?: string;
@@ -210,7 +228,7 @@ export async function extractCandidates(args: {
     } catch (e) {
       // One bad candidate must not lose the rest, and this runs after the user's
       // turn already succeeded — log and move on to the next item.
-      log.error("vault candidate extraction: propose failed", { err: String(e), ordinal });
+      log.error("vault candidate extraction: propose failed", { ...failureShape(e), ordinal });
     }
   }
 }
