@@ -82,7 +82,6 @@ run("extraction quality", () => {
     // so a run that cannot vouch for its own instrument must report no number at all
     // rather than a flattering one.
     const control = await checkJudge(judge, corpus);
-    // eslint-disable-next-line no-console
     console.log(`judge control: ${control.detail}`);
     expect(control.ok, `judge is not trustworthy, so no score was computed — ${control.detail}`).toBe(true);
 
@@ -150,7 +149,6 @@ run("extraction quality", () => {
     ];
     const report = lines.join("\n");
     if (REPORT) writeFileSync(REPORT, report);
-    // eslint-disable-next-line no-console
     console.log(report);
 
     // The only hard gate this file asserts. Everything else is a number to compare against
