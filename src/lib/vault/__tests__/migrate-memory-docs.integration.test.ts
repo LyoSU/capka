@@ -81,6 +81,12 @@ const migrate = (...docIds: string[]) => migrateMemoryDocs({ docIds });
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 const count = async (table: string, where: string, params: unknown[]) => {
   const { rows } = await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, params);
   return Number(rows[0].n);
@@ -434,6 +440,7 @@ run("vault: memory_docs migration", () => {
     // model-facing projection, so the dedup cannot see it and the bullet becomes an
     // ordinary question for the person.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await seedNode(`${P}unverified`, spaceId, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive)
        VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', false)`,

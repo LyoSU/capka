@@ -36,6 +36,12 @@ const FK_VIOLATION = "23503";
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 const count = async (table: string, where: string, params: unknown[]) => {
   const { rows } = await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, params);
   return Number(rows[0].n);
@@ -55,6 +61,7 @@ const mkChain = async (spaceId: string, tag: string) => {
   const source = `${P}${tag}-src`;
   const version = `${P}${tag}-ver`;
   const fragment = `${P}${tag}-frag`;
+  await seedNode(source, spaceId, "source");
   await q(
     `INSERT INTO knowledge_sources (id, space_id, title, origin, created_by)
      VALUES ($1, $2, 'fixture', '{"type":"upload"}'::jsonb, $3)`,
@@ -86,8 +93,13 @@ const mkCitation = async (tag: string, versionId: string, fragmentId: string) =>
   return id;
 };
 
-const mkClaim = (id: string, spaceId: string) =>
-  q(`INSERT INTO vault_claims (id, space_id, statement, origin) VALUES ($1, $2, 'a fact', '{}'::jsonb)`, [id, spaceId]);
+const mkClaim = async (id: string, spaceId: string) => {
+  await seedNode(id, spaceId, "claim");
+  await q(`INSERT INTO vault_claims (id, space_id, statement, origin) VALUES ($1, $2, 'a fact', '{}'::jsonb)`, [
+    id,
+    spaceId,
+  ]);
+};
 
 const retireEvents = (spaceId: string) => count("audit_events", "space_id = $1 AND action = 'space.retire'", [spaceId]);
 

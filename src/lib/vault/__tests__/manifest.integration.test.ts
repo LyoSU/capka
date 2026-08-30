@@ -30,6 +30,12 @@ const SPACE_B = `${P}space-b`; // project
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 /** users.email is unique too — a targeted ON CONFLICT (id) would throw 23505
  *  on a leftover row with the same email, and that would look like a skipped
  *  test rather than a fixture bug. */
@@ -212,6 +218,7 @@ run("vault: memory manifest", () => {
     // guillemets, on its own line, indistinguishable from the manifest's own structure
     // and injected on every turn of this scope.
     const noteId = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    await seedNode(`${P}legacy-multiline`, SPACE_A, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
        VALUES ($1, $2, $3, '{"kind":"legacy_memory_doc"}'::jsonb, 'confirmed')`,
@@ -259,6 +266,7 @@ run("vault: memory manifest", () => {
     // empty legacy document leaves a real topic row with zero claims behind. A
     // `topics.length` gate would print `- General (0)` — an assertion to the model
     // that a topic exists and is empty, which is worse than saying nothing.
+    await seedNode(`${P}emptytopic`, SPACE_A, "note");
     await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'General', 'memory_topic')`, [
       `${P}emptytopic`,
       SPACE_A,

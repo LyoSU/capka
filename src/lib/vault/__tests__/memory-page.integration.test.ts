@@ -24,6 +24,12 @@ const OWNER = `${P}owner`;
 const STRANGER = `${P}stranger`;
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 const mkUser = (id: string) =>
   q(
     `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
@@ -393,6 +399,9 @@ run("vault: memory page projection", () => {
     // wrong fact. Seeded oldest-first so a projection that simply preserved insertion
     // order would fail.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await seedNode(`${P}c-old`, spaceId, "claim");
+    await seedNode(`${P}c-mid`, spaceId, "claim");
+    await seedNode(`${P}c-new`, spaceId, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
        VALUES ($1, $4, 'Oldest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '2 days'),
@@ -460,6 +469,13 @@ run("vault: memory page projection", () => {
     // and two hundred round-trips through the ledger would be testing the ledger.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const over = FACT_LIMIT + 5;
+    // Set-based, like the insert it feeds: a per-row round trip for FACT_LIMIT + 5 nodes
+    // would be the very thing the comment above says this test avoids.
+    await q(
+      `INSERT INTO vault_nodes (id, space_id, kind)
+       SELECT $1 || i, $2, 'claim' FROM generate_series(1, $3) AS i`,
+      [`${P}bulk-`, spaceId, over],
+    );
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
        SELECT $1 || i, $2, 'Bulk fact ' || i, '{"kind":"user_direct"}'::jsonb, 'confirmed',

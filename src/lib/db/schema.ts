@@ -866,7 +866,16 @@ export const knowledgeSources = pgTable("knowledge_sources", {
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   deletedAt: timestamp("deleted_at"),         // SOFT delete: cited versions have to survive
-}, (t) => [index("idx_ksources_space").on(t.spaceId)]);
+}, (t) => [
+  index("idx_ksources_space").on(t.spaceId),
+  // Child -> parent, so NO `onDelete`: removing a document must remove nothing from
+  // `vault_nodes` — the cascade that does exist runs the other way, from a space.
+  foreignKey({
+    name: "knowledge_source_node_fk",
+    columns: [t.spaceId, t.id],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }),
+]);
 
 export const knowledgeSourceVersions = pgTable("knowledge_source_versions", {
   id: text("id").primaryKey(),
@@ -920,6 +929,12 @@ export const vaultNotes = pgTable("vault_notes", {
   // legitimately end up showing the same title (a user-named one colliding with a
   // built-in label); they may not share a key.
   uniqueIndex("uniq_vnotes_memory_topic").on(t.spaceId, t.topicKey).where(sql`${t.kind} = 'memory_topic'`),
+  // Child -> parent, so NO `onDelete`: see `knowledge_source_node_fk`.
+  foreignKey({
+    name: "vault_note_node_fk",
+    columns: [t.spaceId, t.id],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }),
 ]);
 
 export const vaultClaims = pgTable("vault_claims", {
@@ -962,6 +977,12 @@ export const vaultClaims = pgTable("vault_claims", {
   index("idx_vclaims_slot").on(t.spaceId, t.slotKey),
   // One successor per claim (a supersede race loses at the insert, not silently):
   uniqueIndex("uniq_vclaims_one_successor").on(t.supersedes).where(sql`${t.supersedes} IS NOT NULL`),
+  // Child -> parent, so NO `onDelete`: see `knowledge_source_node_fk`.
+  foreignKey({
+    name: "vault_claim_node_fk",
+    columns: [t.spaceId, t.id],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }),
 ]);
 
 export const noteClaims = pgTable("note_claims", {

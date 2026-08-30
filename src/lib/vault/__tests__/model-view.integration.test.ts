@@ -28,6 +28,12 @@ const ACTOR: Actor = { kind: "user", id: OWNER };
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 const mkUser = (id: string) =>
   q(
     `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
@@ -127,6 +133,7 @@ run("vault: the model-facing projection", () => {
     // The manifest fences a fact as `- «…»`, built for one bounded line: a stored
     // `\n## Rules\n…` renders its tail OUTSIDE the guillemets, indistinguishable from
     // the manifest's own structure, on every turn of that scope.
+    await seedNode(`${P}legacy`, SPACE_A, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
        VALUES ($1, $2, $3, '{}'::jsonb, 'confirmed')`,
@@ -141,6 +148,8 @@ run("vault: the model-facing projection", () => {
   it("orders newest first with a stable tiebreak", async () => {
     // `recorded_at` is identical across every claim one transaction wrote, and the
     // manifest has to be byte-identical across turns.
+    await seedNode(`${P}claim-b`, SPACE_A, "claim");
+    await seedNode(`${P}claim-a`, SPACE_A, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
        VALUES ($1, $3, 'b same instant', '{}'::jsonb, 'confirmed', '2020-01-01'),

@@ -22,6 +22,7 @@ const SPACE_A = `${P}space-a`;
 const SPACE_B = `${P}space-b`;
 const NOTE_B = `${P}note-b`;
 const ACTOR: Actor = { kind: "user", id: OWNER };
+const FK_VIOLATION = "23503";
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
 const cleanup = () => q(`DELETE FROM spaces WHERE id LIKE $1`, [`${P}%`]);
@@ -31,6 +32,12 @@ const nodeOf = async (id: string) =>
 
 const nodeCount = async (spaceId: string) =>
   (await q(`SELECT count(*)::int AS n FROM vault_nodes WHERE space_id = $1`, [spaceId])).rows[0].n as number;
+
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
 
 run("vault: a subtype row and its node row are one write", () => {
   beforeAll(async () => {
@@ -50,8 +57,11 @@ run("vault: a subtype row and its node row are one write", () => {
     await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'user',$2,$2)`, [SPACE_A, OWNER]);
     await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'project',$1,$2)`, [SPACE_B, OWNER]);
     // Written by hand rather than through `getOrCreateTopicNote`: this note is only ever
-    // a wrong address for a claim in SPACE_A, and minting it through the service would
-    // put a node of its own in SPACE_B for the counting below to step around.
+    // a wrong address for a claim in SPACE_A, and the service would run its own fence and
+    // lock for a row that never needs either. Its node is seeded here because the
+    // composite FK below now requires one — which is why SPACE_B's count is a baseline
+    // rather than a literal zero.
+    await seedNode(NOTE_B, SPACE_B, "note");
     await q(`INSERT INTO vault_notes (id, space_id, title, kind, topic_key) VALUES ($1,$2,'Elsewhere','memory_topic',$3)`, [
       NOTE_B,
       SPACE_B,
@@ -117,6 +127,7 @@ run("vault: a subtype row and its node row are one write", () => {
     // autocommits the node survives its own claim, which is the orphan the whole co-write
     // exists to prevent and which no ordinary test can see.
     const before = await nodeCount(SPACE_A);
+    const beforeB = await nodeCount(SPACE_B);
     await expect(
       createClaim(
         { spaceId: SPACE_A, statement: "filed under a stranger's topic", origin: { kind: "test" }, topicNoteId: NOTE_B },
@@ -125,8 +136,60 @@ run("vault: a subtype row and its node row are one write", () => {
     ).rejects.toThrow(/does not belong/);
     expect(await nodeCount(SPACE_A)).toBe(before);
     // And nothing landed in the other space either: the node carries SPACE_A, so a
-    // surviving row would be counted above — this pins the second space at zero so the
-    // assertion above cannot pass by the node having gone somewhere else.
-    expect(await nodeCount(SPACE_B)).toBe(0);
+    // surviving row would be counted above — this pins the second space at its baseline
+    // so the assertion above cannot pass by the node having gone somewhere else.
+    expect(await nodeCount(SPACE_B)).toBe(beforeB);
+  });
+});
+
+run("vault: the subtype -> node composite FKs", () => {
+  beforeEach(async () => {
+    await cleanup();
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'user',$2,$2)`, [SPACE_A, OWNER]);
+  });
+  afterAll(cleanup);
+
+  it("refuses a claim with no node row", async () => {
+    await expect(
+      q(
+        `INSERT INTO vault_claims (id, space_id, statement, origin)
+         VALUES ($1,$2,'a claim with no node','{}'::jsonb)`,
+        [`${P}orphan-claim`, SPACE_A],
+      ),
+    ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claim_node_fk" });
+  });
+
+  it("refuses a note with no node row", async () => {
+    await expect(
+      q(`INSERT INTO vault_notes (id, space_id, title) VALUES ($1,$2,'orphan')`, [`${P}orphan-note`, SPACE_A]),
+    ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_note_node_fk" });
+  });
+
+  it("refuses a knowledge source with no node row", async () => {
+    await expect(
+      q(
+        `INSERT INTO knowledge_sources (id, space_id, title, origin, created_by)
+         VALUES ($1,$2,'orphan','{}'::jsonb,$3)`,
+        [`${P}orphan-src`, SPACE_A, OWNER],
+      ),
+    ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "knowledge_source_node_fk" });
+  });
+
+  it("refuses a claim whose node is in another space", async () => {
+    // The composite FK carries the space. A node with the right id in the wrong space is
+    // not a parent — that is the property, and it is the same one the edges rely on.
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'project',$2,$3)`, [
+      SPACE_B,
+      `${P}proj`,
+      OWNER,
+    ]);
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}cross`, SPACE_B]);
+    await expect(
+      q(
+        `INSERT INTO vault_claims (id, space_id, statement, origin)
+         VALUES ($1,$2,'wrong space','{}'::jsonb)`,
+        [`${P}cross`, SPACE_A],
+      ),
+    ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claim_node_fk" });
   });
 });

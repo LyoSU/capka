@@ -40,6 +40,12 @@ const ACTOR: Actor = { kind: "user", id: OWNER };
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
 const count = async (table: string, where: string, params: unknown[]) => {
   const { rows } = await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, params);
   return Number(rows[0].n);
@@ -96,10 +102,12 @@ const fixtures = async () => {
     `${P}proj`,
     OWNER,
   ]);
+  await seedNode(NOTE_A, SPACE_A, "note");
   await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Topic', 'memory_topic')`, [
     NOTE_A,
     SPACE_A,
   ]);
+  await seedNode(NOTE_B, SPACE_B, "note");
   await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Topic', 'memory_topic')`, [
     NOTE_B,
     SPACE_B,

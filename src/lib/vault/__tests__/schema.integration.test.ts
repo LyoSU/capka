@@ -53,18 +53,27 @@ const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 const mkSpace = (id: string) =>
   q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1, 'user', $1, $2)`, [id, USER]);
 
-const mkClaim = (id: string, spaceId: string, extra: { slotKey?: string; supersedes?: string } = {}) =>
-  q(
+/** The node half of a subtype row. Raw fixtures write the subtype row directly, so they
+ *  own the node row too — the composite FK is what turned "every subtype row has a node"
+ *  from a convention into a constraint. */
+const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
+  q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
+const mkClaim = async (id: string, spaceId: string, extra: { slotKey?: string; supersedes?: string } = {}) => {
+  await seedNode(id, spaceId, "claim");
+  await q(
     `INSERT INTO vault_claims (id, space_id, statement, slot_key, origin, supersedes)
      VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)`,
     [id, spaceId, `statement ${id}`, extra.slotKey ?? null, extra.supersedes ?? null],
   );
+};
 
 /** A full source→version→fragment chain hanging off one space. */
 const mkChain = async (spaceId: string) => {
   const source = `${spaceId}-src`;
   const version = `${spaceId}-ver`;
   const fragment = `${spaceId}-frag`;
+  await seedNode(source, spaceId, "source");
   await q(
     `INSERT INTO knowledge_sources (id, space_id, title, origin, created_by)
      VALUES ($1, $2, 'fixture', '{"type":"upload"}'::jsonb, $3)`,
@@ -218,14 +227,16 @@ run("vault schema", () => {
   it("two topics with one KEY in a space are impossible; one title twice is not", async () => {
     const space = `${P}notes`;
     await mkSpace(space);
-    const note = (id: string, kind: string, topicKey: string | null, title = "Work") =>
-      q(`INSERT INTO vault_notes (id, space_id, title, kind, topic_key) VALUES ($1, $2, $3, $4, $5)`, [
+    const note = async (id: string, kind: string, topicKey: string | null, title = "Work") => {
+      await seedNode(id, space, "note");
+      await q(`INSERT INTO vault_notes (id, space_id, title, kind, topic_key) VALUES ($1, $2, $3, $4, $5)`, [
         id,
         space,
         title,
         kind,
         topicKey,
       ]);
+    };
 
     await note(`${space}-t1`, "memory_topic", "work");
     await expect(note(`${space}-t2`, "memory_topic", "work")).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
