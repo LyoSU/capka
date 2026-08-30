@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { memoryDocs, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import { listHeadClaims } from "./claims";
+import { notCarried } from "./migrate-memory-docs";
 
 /** The brief's "cap 4KB" is an approximate figure for temporary (pre-Task 10
  *  cutover) raw text, not a contract on an exact byte count. A byte-precise
@@ -127,7 +128,15 @@ async function legacyDoc(userId: string, projectId: string | null): Promise<stri
       and(
         eq(memoryDocs.userId, userId),
         projectId ? eq(memoryDocs.projectId, projectId) : isNull(memoryDocs.projectId),
-        isNull(memoryDocs.migratedAt),
+        // The migration's OWN predicate, imported rather than restated. It used to be
+        // a local `isNull(migratedAt)`, which silently stopped agreeing the moment the
+        // migration widened to "stamped, but appended to since". During a rolling
+        // upgrade — the deployment this project actually ships — an old instance
+        // appends fact B after a new one stamped and carried fact A, and a reader
+        // testing only `IS NULL` treats the document as done: B vanishes from the
+        // prompt and stays gone until something restarts. Three call sites, one
+        // definition, in the module that decides what "carried" means.
+        notCarried(),
       ),
     )
     .limit(1);

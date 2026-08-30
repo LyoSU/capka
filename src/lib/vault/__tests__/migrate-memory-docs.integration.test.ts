@@ -15,6 +15,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vites
  * The assertions are scoped too (`space_id = $1`, prefixed ids) — the worker lives
  * next door.
  */
+import { createHash } from "node:crypto";
 import { pool } from "@/lib/db";
 import { getOrCreateSpace } from "../spaces";
 import { migrateMemoryDocs } from "../migrate-memory-docs";
@@ -32,12 +33,34 @@ vi.mock("../claims", async (importOriginal) => {
     ...actual,
     createClaim: (...args: Parameters<typeof actual.createClaim>) => {
       if (hook.failOn && args[0].statement === hook.failOn) {
-        throw new Error(`mdmig: deliberate failure on bullet \"${hook.failOn}\"`);
+        // Shaped like what the installed Drizzle actually throws: the failing
+        // statement's PARAMETERS are embedded in the message, and the driver's own
+        // error hangs off `cause`. That is the whole hazard behind the log assertion
+        // below — the secret is genuinely inside this object.
+        const e = new Error(
+          `Failed query: insert into "vault_claims" ... params: ${hook.failOn}`,
+        ) as Error & { cause: unknown };
+        e.cause = { code: "23503", constraint: "vclaims_space_fk" };
+        throw e;
       }
       return actual.createClaim(...args);
     },
   };
 });
+
+/** Captures what the module hands the logger. Asserting on the ARGUMENTS rather than
+ *  on stdout is the point: the question is what this module chose to pass on, not how
+ *  the sink happened to render it. */
+const logged = vi.hoisted(() => ({ errors: [] as { msg: string; ctx?: Record<string, unknown> }[] }));
+vi.mock("@/lib/log", () => ({
+  log: {
+    error: (msg: string, ctx?: Record<string, unknown>) => logged.errors.push({ msg, ctx }),
+    warn: () => {},
+    info: () => {},
+    debug: () => {},
+    child: () => ({ error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }),
+  },
+}));
 
 /** Every fixture id carries this prefix. Space ids are not ours to choose (nanoid,
  *  from the inside), so those are caught by owner_user_id instead. */
@@ -110,14 +133,21 @@ const migratedAt = async (docId: string): Promise<Date | null> => {
   return rows[0]?.migrated_at ?? null;
 };
 
-const snapshots = async (spaceId: string) => {
-  const { rows } = await pool.query<{ actor: unknown; payload: { content?: string; docId?: string } }>(
+type MigrationEvent = {
+  actor: unknown;
+  payload: { content?: string; docId?: string; bullets?: number; chars?: number; sha256?: string };
+};
+
+const snapshots = async (spaceId: string): Promise<MigrationEvent[]> => {
+  const { rows } = await pool.query<MigrationEvent>(
     `SELECT actor, payload FROM audit_events
       WHERE space_id = $1 AND action = 'system.memory_doc_migrated' ORDER BY created_at`,
     [spaceId],
   );
   return rows;
 };
+
+const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 const cleanup = async () => {
   await q(`DELETE FROM memory_docs WHERE id LIKE $1`, [`${P}%`]);
@@ -142,6 +172,7 @@ run("vault: memory_docs migration", () => {
 
   beforeEach(async () => {
     hook.failOn = null;
+    logged.errors.length = 0;
     await cleanup();
   });
 
@@ -170,12 +201,20 @@ run("vault: memory_docs migration", () => {
     // for the UI.
     expect(await inTopic(spaceId!)).toHaveLength(3);
 
-    // The only copy of the original markdown that survives the move.
+    // The event ATTESTS to the move; it does not keep a second copy of the text. A
+    // full snapshot here outlived the user's own deletion of the project, since
+    // `retireProjectSpace` deliberately preserves the audit trail.
     const events = await snapshots(spaceId!);
     expect(events).toHaveLength(1);
-    expect(events[0].payload.content).toBe(content);
     expect(events[0].payload.docId).toBe(`${P}d1`);
+    expect(events[0].payload.bullets).toBe(3);
+    expect(events[0].payload.chars).toBe(content.length);
+    expect(events[0].payload.sha256).toBe(sha256(content));
     expect(events[0].actor).toEqual({ kind: "system" });
+    // The point of the finding: no substring of the document survives in the event.
+    expect(events[0].payload.content).toBeUndefined();
+    expect(JSON.stringify(events[0].payload)).not.toContain("likes tea");
+    expect(JSON.stringify(events[0].payload)).not.toContain("works from Lviv");
 
     expect(await migratedAt(`${P}d1`)).not.toBeNull();
   });
@@ -289,7 +328,9 @@ run("vault: memory_docs migration", () => {
     expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(0);
     const events = await snapshots(spaceId);
     expect(events).toHaveLength(1);
-    expect(events[0].payload.content).toBe("");
+    expect(events[0].payload.bullets).toBe(0);
+    expect(events[0].payload.chars).toBe(0);
+    expect(events[0].payload.sha256).toBe(sha256(""));
   });
 
   it("a bullet that already exists as a topicless claim is not duplicated — and joins the default topic", async () => {
@@ -375,5 +416,52 @@ run("vault: memory_docs migration", () => {
     expect(spaceId).not.toBeNull();
     expect(await count("spaces", "id = $1 AND owner_user_id = $2", [spaceId, OWNER])).toBe(1);
     expect(await statements(spaceId!)).toEqual(["a project fact"]);
+  });
+
+  it("a failure logs a discriminated shape and NEVER the statement text", async () => {
+    // Drizzle embeds every bound parameter in the error message, so logging the error
+    // whole would write a screened credential verbatim into the application log and
+    // every attached collector — defeating the screen that kept it out of the prompt.
+    // The mocked `createClaim` throws with the statement genuinely inside `message`,
+    // so this fails if the module ever logs the error object again.
+    const secret = "sk-live-abc123SECRETVALUE";
+    await mkDoc(`${P}d11`, `- ${secret}`);
+    hook.failOn = secret;
+
+    await expect(migrate(`${P}d11`)).rejects.toThrow();
+
+    const entry = logged.errors.find((e) => e.ctx?.docId === `${P}d11`);
+    expect(entry).toBeDefined();
+    // What an operator legitimately needs: which row, which fault, how many tries.
+    expect(entry!.ctx).toMatchObject({
+      docId: `${P}d11`,
+      attempts: 1,
+      code: "23503",
+      constraint: "vclaims_space_fk",
+    });
+    // And what must never travel: the value, or any raw message that carries it.
+    expect(JSON.stringify(logged.errors)).not.toContain(secret);
+    expect(JSON.stringify(logged.errors)).not.toContain("Failed query");
+    expect(entry!.ctx).not.toHaveProperty("message");
+    expect(entry!.ctx).not.toHaveProperty("err");
+  });
+
+  it("a deterministically failing document is retried a bounded number of times, then left alone", async () => {
+    // One broken row must not re-drive forever against the 60-second boot retry.
+    await mkDoc(`${P}d12`, "- poisonous");
+    hook.failOn = "poisonous";
+
+    // Five attempts, each still reporting failure so the boot loop stays armed.
+    for (let i = 0; i < 5; i++) {
+      await expect(migrate(`${P}d12`)).rejects.toThrow(`did not migrate: ${P}d12`);
+    }
+    expect(logged.errors.some((e) => e.msg.includes("giving up") && e.ctx?.docId === `${P}d12`)).toBe(true);
+
+    // Sixth: no longer selected, so nothing fails and the retry loop RETURNS rather
+    // than spinning. That is what ends the growth, not the log line.
+    logged.errors.length = 0;
+    await expect(migrate(`${P}d12`)).resolves.toEqual({ migrated: 0 });
+    expect(logged.errors).toHaveLength(0);
+    expect(await migratedAt(`${P}d12`)).toBeNull();
   });
 });

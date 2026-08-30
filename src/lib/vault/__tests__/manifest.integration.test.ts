@@ -246,6 +246,21 @@ run("vault: memory manifest", () => {
     const after = await buildMemoryManifest({ userId: OWNER, userSpaceId: SPACE_A });
     expect(after).not.toContain("Memory (being migrated)");
     expect(after).not.toContain("legacy fact for the user");
+
+    // ...and comes BACK if the document is appended to after that stamp. The reader
+    // shares `notCarried()` with the migration, so "stamped, but written to since" is
+    // uncarried for both. A reader testing only `IS NULL` would hide this bullet from
+    // the prompt until some process restarted — the rolling-upgrade case.
+    await q(
+      `UPDATE memory_docs
+          SET content = $2, migrated_at = now() - interval '2 hours', updated_at = now() - interval '1 hour'
+        WHERE user_id = $1 AND project_id IS NULL`,
+      [OWNER, "- legacy fact for the user\n- appended after the stamp"],
+    );
+
+    const reopened = await buildMemoryManifest({ userId: OWNER, userSpaceId: SPACE_A });
+    expect(reopened).toContain("## Memory (being migrated)");
+    expect(reopened).toContain("> - appended after the stamp");
   });
 
   it("an unmigrated project memory_docs renders in the legacy section under the \"Project\" label", async () => {

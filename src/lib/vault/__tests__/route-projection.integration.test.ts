@@ -76,6 +76,24 @@ const mkClaim = async (
   );
 };
 
+/** A CONFIRMED head the user marked sensitive — the case the manifest withholds from
+ *  the model and this page was printing in full. Confirmed on purpose: an unverified
+ *  one would be filtered by `onlyConfirmed` and prove nothing about sensitivity. */
+const mkSensitiveClaim = async (spaceId: string, statement: string) => {
+  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC);
+  await createClaim(
+    {
+      spaceId,
+      statement,
+      origin: { kind: "user_direct" },
+      reviewStatus: "confirmed",
+      sensitive: true,
+      topicNoteId: noteId,
+    },
+    { kind: "system" },
+  );
+};
+
 type Body = { user: string; projects: { id: string; name: string; content: string }[] };
 
 const get = async (): Promise<Body> => {
@@ -175,6 +193,41 @@ run("vault: /api/memory-docs projection", () => {
     expect(body.user).toContain("- an old line still in the document");
     // Claims first, matching the manifest's order.
     expect(body.user.indexOf("this session")).toBeLessThan(body.user.indexOf("still in the document"));
+  });
+
+  it("never prints a confirmed SENSITIVE statement, in either scope", async () => {
+    // The manifest already withholds these from the model. This page was the second
+    // reader of the same invariant and did not, so a fact the user marked sensitive —
+    // a diagnosis, a private-life detail — was correctly absent from the prompt and
+    // then printed in full on the settings screen.
+    const userSpace = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const projectSpace = await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER });
+    await mkClaim(userSpace, "ordinary user fact");
+    await mkSensitiveClaim(userSpace, "has a private medical condition");
+    await mkClaim(projectSpace, "ordinary project fact");
+    await mkSensitiveClaim(projectSpace, "a confidential project detail");
+
+    const body = await get();
+    expect(body.user).toBe("- ordinary user fact");
+    expect(body.projects.find((p) => p.id === PROJ)?.content).toBe("- ordinary project fact");
+    expect(JSON.stringify(body)).not.toContain("private medical");
+    expect(JSON.stringify(body)).not.toContain("confidential project");
+  });
+
+  it("shows a document that was appended to AFTER its stamp (the reader shares notCarried)", async () => {
+    // A rolling upgrade: the old instance appends after the new one stamped. The
+    // migration treats that document as uncarried; a reader testing only
+    // `migrated_at IS NULL` calls it done and the late bullet vanishes from this page
+    // until some process happens to restart.
+    await mkDoc(`${P}d6`, OWNER, null, "- carried already\n- appended after the stamp", true);
+    await q(
+      `UPDATE memory_docs SET migrated_at = now() - interval '2 hours', updated_at = now() - interval '1 hour'
+        WHERE id = $1`,
+      [`${P}d6`],
+    );
+
+    const body = await get();
+    expect(body.user).toContain("- appended after the stamp");
   });
 
   it("never shows another user's project, memory or claims", async () => {
