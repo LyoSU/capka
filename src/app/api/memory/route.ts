@@ -16,10 +16,17 @@ import { readMemoryPage } from "@/lib/vault/memory-page";
  * `requireActive` and self-scoped: there is no user parameter anywhere here, and an
  * admin reading somebody else's memory is not a thing this route can express. A later
  * task adds PATCH (consent) beside this.
+ *
+ * `?q=` searches the FACTS. It is a parameter on this route rather than a route of its own
+ * for two reasons: the answer is the same projection narrowed, so a second route would be a
+ * second reader of it; and a new route DIRECTORY is not picked up by the dev watcher over
+ * this repo's bind mount, so Next answers 404 before any handler runs — a symptom that
+ * reads exactly like a logic bug and has cost this project an afternoon before.
  */
-export const GET = apiHandler(async () => {
+export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
-  return Response.json(await readMemoryPage(userId));
+  const query = new URL(req.url).searchParams.get("q") ?? "";
+  return Response.json(await readMemoryPage(userId, query));
 });
 
 /**

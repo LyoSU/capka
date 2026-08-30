@@ -45,24 +45,6 @@ describe("formatSource", () => {
   });
 });
 
-describe("topicLabel", () => {
-  it("prefers the copy for a known key over the stored title", async () => {
-    const { topicLabel } = await import("../memory-topics");
-    const topic = { id: "n1", topicKey: "general", title: "Something a rename left behind",
-      lastUpdatedAt: null, facts: [] };
-    expect(topicLabel(topic, (k) => `copy:${k}`, (k) => k === "topics.general")).toBe("copy:topics.general");
-  });
-
-  it("falls back to the stored title for a key nobody has copy for", async () => {
-    const { topicLabel } = await import("../memory-topics");
-    const topic = { id: "n1", topicKey: "suppliers", title: "Suppliers", lastUpdatedAt: null, facts: [] };
-    expect(topicLabel(topic, (k) => `copy:${k}`, () => false)).toBe("Suppliers");
-  });
-
-  it("falls back to the stored title for a note with no key at all", async () => {
-    const { topicLabel } = await import("../memory-topics");
-    const topic = { id: "n1", topicKey: null, title: "Untouched by the migration",
-      lastUpdatedAt: null, facts: [] };
-    expect(topicLabel(topic, (k) => `copy:${k}`, () => true)).toBe("Untouched by the migration");
-  });
-});
+// `topicLabel` used to be tested here — three cases over a topic rail's display name. The
+// rail is gone (see `MemoryFacts`), the function with it, and the tests are deleted rather
+// than kept green against a helper nothing calls.

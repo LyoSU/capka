@@ -3,16 +3,19 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 /** Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run src/lib/vault
  *
  *  The projection is all joins and ownership filters — exactly what a mocked `db` would
- *  simply agree with. What it must prove: the three relations survive the read (topic
- *  grouping, provenance, version history), a sensitive fact arrives as an existence with
- *  no text, a pending candidate arrives separately from a confirmed fact, and nothing
- *  crosses a user boundary. */
+ *  simply agree with. What it must prove: the relations survive the read (provenance,
+ *  version history), a sensitive fact arrives in full and marked, a pending candidate
+ *  arrives separately from a confirmed fact, and nothing crosses a user boundary.
+ *
+ *  Since the topic rail was removed it must also prove the thing that removal was FOR: one
+ *  list holds the whole space, whichever topic note a fact hangs off, and the search over
+ *  it finds a sensitive fact as readily as an ordinary one. */
 import { pool } from "@/lib/db";
 import { attachEvidence, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim } from "./fixtures";
 import { proposeCandidate } from "../candidates";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
-import { readMemoryPage } from "../memory-page";
+import { FACT_LIMIT, readMemoryPage } from "../memory-page";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "mempage-";
@@ -34,16 +37,22 @@ const mkMessage = (id: string, chatId: string) =>
   q(`INSERT INTO messages (id, chat_id, role, content, created_at)
      VALUES ($1, $2, 'user', 'test', now()) ON CONFLICT (id) DO NOTHING`, [id, chatId]);
 
-const seedFact = async (statement: string, opts: { sensitive?: boolean; owner?: string } = {}) => {
+const seedFact = async (
+  statement: string,
+  opts: { sensitive?: boolean; owner?: string; topicKey?: string } = {},
+) => {
   const owner = opts.owner ?? OWNER;
   const spaceId = await getOrCreateSpace({ type: "user", refId: owner });
-  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+  const noteId = await getOrCreateTopicNote(spaceId, opts.topicKey ?? DEFAULT_TOPIC_KEY);
   const claim = await seedConfirmedClaim(
     { spaceId, statement, origin: { kind: "user_direct" }, sensitive: opts.sensitive, topicNoteId: noteId },
     { kind: "user", id: owner },
   );
   return { spaceId, noteId, claim };
 };
+
+const factTexts = async (query?: string) =>
+  (await readMemoryPage(OWNER, query)).scopes[0].facts.map((f) => f.statement.text);
 
 run("vault: memory page projection", () => {
   beforeAll(async () => {
@@ -65,7 +74,7 @@ run("vault: memory page projection", () => {
     await mkMessage(`${P}msg`, `${P}chat`);
     await attachEvidence(claim.id, { messageId: `${P}msg` });
 
-    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement.text).toBe("Prefers metric units");
     expect(fact.source).toMatchObject({ kind: "chat", chatTitle: "Q2 report" });
   });
@@ -77,7 +86,7 @@ run("vault: memory page projection", () => {
       { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" }, topicNoteId: noteId },
       { kind: "system" },
     );
-    expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0].source).toEqual({ kind: "legacy" });
+    expect((await readMemoryPage(OWNER)).scopes[0].facts[0].source).toEqual({ kind: "legacy" });
   });
 
   it("shows the OWNER a sensitive fact in full, marked", async () => {
@@ -87,7 +96,7 @@ run("vault: memory page projection", () => {
     // a fact they cannot read is one they cannot delete, correct or judge. The mark is
     // what the page blurs on; the withholding is not the server's to do here.
     await seedFact("Attends a support group", { sensitive: true });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement).toEqual({ text: "Attends a support group", sensitive: true });
   });
 
@@ -101,7 +110,7 @@ run("vault: memory page projection", () => {
       patch: { statement: "Attends a support group on Thursdays", sensitive: true },
       allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
     });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement).toEqual({ text: "Attends a support group on Thursdays", sensitive: true });
     // The predecessor carries its OWN flag, not the successor's — `confirmClaim` raises
     // one in place with no supersede, so the two really can differ.
@@ -127,7 +136,7 @@ run("vault: memory page projection", () => {
       patch: { statement: "Works from the Kyiv office, desk by the safe", sensitive: true },
       allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
     });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement.sensitive).toBe(true);
     expect(fact.previous?.statement).toEqual({ text: "Works from the Kyiv office", sensitive: false });
   });
@@ -139,7 +148,7 @@ run("vault: memory page projection", () => {
       patch: { statement: "Works from the Lviv office" },
       allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
     });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement.text).toBe("Works from the Lviv office");
     expect(fact.previous?.statement.text).toBe("Works from the Kyiv office");
   });
@@ -155,7 +164,7 @@ run("vault: memory page projection", () => {
     expect(res.state).toBe("pending");
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
-    expect(scope.topics.flatMap((t) => t.facts)).toHaveLength(0);
+    expect(scope.facts).toHaveLength(0);
     expect(scope.pending.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
     expect(scope.pending[0].state).toBe("pending");
   });
@@ -170,7 +179,7 @@ run("vault: memory page projection", () => {
       { spaceId, statement: "Read off a web page", origin: { kind: "web" }, topicNoteId: noteId },
       { kind: "agent" },
     );
-    expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts).toHaveLength(0);
+    expect((await readMemoryPage(OWNER)).scopes[0].facts).toHaveLength(0);
   });
 
   it("shows a waiting fact that is sensitive in full, marked", async () => {
@@ -206,7 +215,7 @@ run("vault: memory page projection", () => {
         origin: { kind: "user_direct" }, topicNoteId: noteId },
       { kind: "user", id: OWNER },
     );
-    const head = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    const head = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     const res = await proposeCandidate({
       idempotencyKey: `${P}conflict`, spaceId,
       statement: "Works as a lead cloud architect",
@@ -254,7 +263,7 @@ run("vault: memory page projection", () => {
 
   it("a conflict never quotes a head the page itself refuses to list", async () => {
     // `conflict(head.id)` takes its head from `headBySlot`/`listHeadClaims`, neither of
-    // which filters review status, while `topicsOf` lists only `confirmed`. Without the
+    // which filters review status, while `factsOf` lists only `confirmed`. Without the
     // same filter here the page says "keeping this replaces «…»" about quarantined
     // material it will not show anywhere else — the module's own quarantine rule, walked
     // past at the entrance Amendment D created.
@@ -325,11 +334,143 @@ run("vault: memory page projection", () => {
     await seedFact("Nobody else may read this", { owner: STRANGER });
     await seedFact("The owner's own fact");
 
-    const mine = (await readMemoryPage(OWNER)).scopes.flatMap((s) => s.topics.flatMap((t) => t.facts));
+    const mine = (await readMemoryPage(OWNER)).scopes.flatMap((s) => s.facts);
     expect(mine.map((f) => f.statement.text)).toEqual(["The owner's own fact"]);
     expect(JSON.stringify(await readMemoryPage(OWNER))).not.toContain("Nobody else may read this");
 
-    const theirs = (await readMemoryPage(STRANGER)).scopes.flatMap((s) => s.topics.flatMap((t) => t.facts));
+    const theirs = (await readMemoryPage(STRANGER)).scopes.flatMap((s) => s.facts);
     expect(theirs.map((f) => f.statement.text)).toEqual(["Nobody else may read this"]);
+  });
+
+  it("puts facts from DIFFERENT topic notes in one list", async () => {
+    // THE REGRESSION THIS TASK EXISTS FOR. The page used to render a topic rail and show
+    // one topic at a time, so on the live account 33 of 51 approved facts were on screen
+    // and 18 sat behind rail entries no live write path has touched since the topic
+    // vocabulary was narrowed to a single key. A fact a person confirmed and cannot find
+    // reads as a fact the assistant lost.
+    //
+    // Both halves are asserted. That all three come back is the fix; that they come back
+    // in ONE array is what stops the fix being re-implemented as a rail with the tabs
+    // pre-expanded.
+    await seedFact("Sends the reports on Fridays");
+    await seedFact("Works from the Lviv office", { topicKey: "work" });
+    await seedFact("Prefers metric units", { topicKey: "preferences" });
+
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.facts.map((f) => f.statement.text).sort()).toEqual([
+      "Prefers metric units",
+      "Sends the reports on Fridays",
+      "Works from the Lviv office",
+    ]);
+    expect(scope.factsTotal).toBe(3);
+  });
+
+  it("lists a fact that hangs off no topic note at all", async () => {
+    // The other half of "the space is the scope". `topic_note_id` is optional on
+    // `createClaim`, so a head with no attachment is reachable — and under the old
+    // note join it was not merely mis-filed, it was unreachable from the page by any
+    // click at all.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await seedConfirmedClaim(
+      { spaceId, statement: "Filed under nothing", origin: { kind: "user_direct" } },
+      { kind: "user", id: OWNER },
+    );
+    expect(await factTexts()).toEqual(["Filed under nothing"]);
+  });
+
+  it("orders the list newest first", async () => {
+    // Not alphabetical and not by topic: what changed lately is how a person notices a
+    // wrong fact. Seeded oldest-first so a projection that simply preserved insertion
+    // order would fail.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
+       VALUES ($1, $4, 'Oldest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '2 days'),
+              ($2, $4, 'Middle', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '1 day'),
+              ($3, $4, 'Newest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now())`,
+      [`${P}c-old`, `${P}c-mid`, `${P}c-new`, spaceId],
+    );
+    expect(await factTexts()).toEqual(["Newest", "Middle", "Oldest"]);
+  });
+
+  it("searches case- and whitespace-insensitively, on both sides", async () => {
+    // Normalized substring through the SAME `norm` the ledger's dedup uses (`text.ts`).
+    // The stored statement carries the odd spacing, so a search that normalized only the
+    // query would miss it — which is the half a "lowercase the input" implementation gets
+    // right while still failing on real data.
+    await seedFact("Sends   the\tQUARTERLY report on Fridays");
+    await seedFact("Prefers metric units");
+
+    expect(await factTexts("quarterly report")).toEqual(["Sends   the\tQUARTERLY report on Fridays"]);
+    expect(await factTexts("  METRIC   UNITS ")).toEqual(["Prefers metric units"]);
+    expect(await factTexts("")).toHaveLength(2);
+    expect(await factTexts("nothing here matches")).toEqual([]);
+  });
+
+  it("FINDS a sensitive fact, and returns its words", async () => {
+    // `sensitive` withholds from the MODEL and never from the authenticated owner. A
+    // search that skipped these rows would be this feature's sixth instance of the rule
+    // applied at the wrong entrance, and the worst-behaved: the row is not absent from a
+    // screen where a person can see it is absent, it is absent from an ANSWER, which
+    // reads as "you never saved that".
+    //
+    // The control is the ordinary fact seeded beside it: a projection that returned
+    // everything regardless of the query would satisfy the first assertion alone.
+    await seedFact("Attends a support group on Thursdays", { sensitive: true });
+    await seedFact("Prefers metric units");
+
+    const found = (await readMemoryPage(OWNER, "SUPPORT group")).scopes[0].facts;
+    expect(found.map((f) => f.statement)).toEqual([
+      { text: "Attends a support group on Thursdays", sensitive: true },
+    ]);
+  });
+
+  it("leaves the waiting list alone whatever is searched for", async () => {
+    // The queue is what a person still has to decide, and a decision hidden behind a
+    // search box is a decision that gets lost. `query` narrows the facts and nothing else.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await seedFact("Prefers metric units");
+    await proposeCandidate({
+      idempotencyKey: `${P}unfiltered`, spaceId,
+      statement: "Uses Linux as their main operating system",
+      provenance: { kind: "derived" },
+    });
+
+    const scope = (await readMemoryPage(OWNER, "metric")).scopes[0];
+    expect(scope.facts).toHaveLength(1);
+    expect(scope.pending.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
+  });
+
+  it("caps the rows and reports the total independently of them", async () => {
+    // The shape has to survive 5000. `factsMatched` is counted off the matched set and
+    // `factsTotal` off the space, so neither can be derived from `facts.length` — a page
+    // that said "showing 200 of 200" is the sentence being wrong exactly where it matters.
+    //
+    // Written straight into the table: this is about the projection's arithmetic at scale,
+    // and two hundred round-trips through the ledger would be testing the ledger.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const over = FACT_LIMIT + 5;
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
+       SELECT $1 || i, $2, 'Bulk fact ' || i, '{"kind":"user_direct"}'::jsonb, 'confirmed',
+              now() - (i || ' seconds')::interval
+         FROM generate_series(1, $3) AS i`,
+      [`${P}bulk-`, spaceId, over],
+    );
+
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.facts).toHaveLength(FACT_LIMIT);
+    expect(scope.factsMatched).toBe(over);
+    expect(scope.factsTotal).toBe(over);
+
+    // And the search narrows what is COUNTED, not only what is sent. The needle is the
+    // highest number seeded, so no other statement has it as a substring — and it is the
+    // one row the cap would have dropped, which is the case a browser-side filter over the
+    // capped rows would silently fail.
+    const narrowed = (await readMemoryPage(OWNER, `bulk fact ${over}`)).scopes[0];
+    expect(narrowed.factsMatched).toBe(1);
+    expect(narrowed.facts.map((f) => f.statement.text)).toEqual([`Bulk fact ${over}`]);
+    // `factsTotal` ignores the query — the "forget everything" dialog promises against it.
+    expect(narrowed.factsTotal).toBe(over);
   });
 });

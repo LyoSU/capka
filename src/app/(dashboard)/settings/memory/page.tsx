@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { MemoryReview } from "@/components/settings/memory-review";
-import { MemoryTopics } from "@/components/settings/memory-topics";
+import { MemoryFacts } from "@/components/settings/memory-topics";
 import {
   SettingsEmpty,
   SettingsError,
@@ -32,8 +34,12 @@ import type { ScopeView } from "@/lib/vault/memory-page";
  * all three away, and had nowhere at all to put the facts still waiting for the reader's
  * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
  *
- * Still absent, and by task rather than by oversight: the topic summary (Task 9) and the
- * sensitive-consent switch (Task 4).
+ * Still absent, and by task rather than by oversight: the sensitive-consent switch (Task 4).
+ *
+ * THE FACTS ARE ONE LIST, not a topic rail — see `MemoryFacts` for what the rail was
+ * hiding. The search box that replaces it is SERVER-SIDE, because the list it filters is
+ * capped: filtering in the browser could only ever search the rows the server chose to
+ * send, which is the search failing precisely on the memory large enough to need one.
  *
  * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
  * control to state it with. A hand-typed fact has no honest provenance, and provenance
@@ -50,7 +56,7 @@ import type { ScopeView } from "@/lib/vault/memory-page";
 function Scope({ scope, onChanged }: { scope: ScopeView; onChanged: () => void }) {
   const body = (
     <>
-      <MemoryTopics topics={scope.topics} onChanged={onChanged} />
+      <MemoryFacts facts={scope.facts} matched={scope.factsMatched} onChanged={onChanged} />
       <MemoryReview pending={scope.pending} onChanged={onChanged} />
     </>
   );
@@ -182,10 +188,22 @@ export default function MemoryPage() {
       });
   };
 
+  // The search, in two pieces: what the box shows, and what has actually been asked for.
+  // The box has to stay responsive to every keystroke while the request is not sent on
+  // every keystroke, and a `query`-shaped `useEffect` dependency is what makes the
+  // debounce a property of the data flow rather than a timer somebody has to remember to
+  // clear. Trailing edge, so the last thing typed is the thing searched for.
+  const [query, setQuery] = useState("");
+  const [asked, setAsked] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setAsked(query.trim()), 250);
+    return () => clearTimeout(id);
+  }, [query]);
+
   const load = useCallback(async () => {
     try {
       setError("");
-      const res = await fetch("/api/memory");
+      const res = await fetch(`/api/memory?q=${encodeURIComponent(asked)}`);
       if (!res.ok) throw new Error();
       const data: { scopes: ScopeView[] } = await res.json();
       setScopes(data.scopes ?? []);
@@ -195,7 +213,7 @@ export default function MemoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, asked]);
 
   useEffect(() => {
     load();
@@ -203,7 +221,16 @@ export default function MemoryPage() {
 
   if (loading) return <SettingsSkeleton rows={1} />;
 
-  const nothingYet = !!scopes && scopes.every((s) => !s.topics.length && !s.pending.length);
+  // "Nothing here" and "nothing matched" are different sentences and must not be shared:
+  // an empty search result that read "Nothing remembered yet" would tell a person their
+  // memory is gone. `factsTotal` is the query-independent count, so it stays true while
+  // the search box has words in it.
+  const empty = !!scopes && scopes.every((s) => !s.factsTotal && !s.pending.length);
+  const nothingYet = empty && !asked;
+  const noMatches = !!scopes && !!asked && scopes.every((s) => !s.factsMatched);
+  // Shown once there is anything to search — and kept on screen while the box has words in
+  // it, or a search that matched nothing would remove the control needed to undo it.
+  const searchable = !!scopes && (!!query || scopes.some((s) => s.factsTotal));
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
@@ -233,13 +260,45 @@ export default function MemoryPage() {
           {/* Said once, above everything, rather than per section: it is the answer to
               "what do I do here", and the reader asks that before they read a fact. */}
           <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{t("howToSave")}</p>
+
+          {searchable && (
+            <div className="space-y-2">
+              <div className="relative max-w-xs">
+                <Search
+                  aria-hidden
+                  className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                />
+                {/* `type="search"` for the browser's own clear affordance — a person who
+                    typed a word that matched nothing needs the way back to be obvious. */}
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t("searchPlaceholder")}
+                  aria-label={t("searchPlaceholder")}
+                  className="h-9 pl-8"
+                />
+              </div>
+              {/* The honest sentence about what this list is. It sits UNDER the box rather
+                  than at the top of the page because it answers the question the box
+                  prompts — "can I organise these?" — and it promises no date. */}
+              <p className="max-w-prose text-[12.5px] leading-relaxed text-muted-foreground">{t("noGrouping")}</p>
+            </div>
+          )}
+
+          {noMatches && (
+            <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{t("searchEmpty")}</p>
+          )}
+
           {scopes?.map((scope) => (
             <Scope key={scope.projectId ?? "user"} scope={scope} onChanged={load} />
           ))}
           {/* Last on the page, after everything it would destroy: a reset offered before
-              the reader has seen what they have is a question asked too early. */}
+              the reader has seen what they have is a question asked too early.
+              `factsTotal`, never the matched count: the dialog promises "everything", and a
+              number the search box narrowed would understate what the button does. */}
           <ForgetEverything
-            facts={scopes?.reduce((n, s) => n + s.topics.reduce((m, x) => m + x.facts.length, 0), 0) ?? 0}
+            facts={scopes?.reduce((n, s) => n + s.factsTotal, 0) ?? 0}
             onChanged={load}
           />
         </>

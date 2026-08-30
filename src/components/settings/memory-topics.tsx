@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ChevronRight, Trash2 } from "lucide-react";
@@ -10,12 +10,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import type { FactSource, FactView, StatementView, TopicView } from "@/lib/vault/memory-page";
+import type { FactSource, FactView, StatementView } from "@/lib/vault/memory-page";
 
-/** One day, in the reader's language. Shared by the provenance line, the history
- *  disclosure and the topic's last-updated stamp so a page full of dates has ONE
- *  format on it — three call sites each calling `Intl` with their own options is how
- *  a page ends up saying "14 August", "Aug 14" and "14.08" about the same fact. */
+/** One day, in the reader's language. Shared by the provenance line and the history
+ *  disclosure so a page full of dates has ONE format on it — call sites each calling
+ *  `Intl` with their own options is how a page ends up saying "14 August", "Aug 14" and
+ *  "14.08" about the same fact. */
 export function formatDay(iso: string, locale: string): string {
   return new Intl.DateTimeFormat(locale === "uk" ? "uk-UA" : "en-US", { day: "numeric", month: "long" })
     .format(new Date(iso));
@@ -53,19 +53,6 @@ export function formatSource(
     case "unknown":
       return t("fromUnknown");
   }
-}
-
-/** A topic's name as the reader sees it. The KEY selects the copy; the stored title is
- *  the fallback for a user-named topic (plan D2), which has no translation and needs
- *  none. This is the only place a topic's display is decided — `topic_key` is what
- *  everything else joins on, which is what makes localizing this safe at all. */
-export function topicLabel(
-  topic: TopicView,
-  t: (key: string) => string,
-  has: (key: string) => boolean,
-): string {
-  const key = topic.topicKey ? `topics.${topic.topicKey}` : null;
-  return key && has(key) ? t(key) : topic.title;
 }
 
 /**
@@ -407,94 +394,64 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
 }
 
 /**
- * The topic rail and the selected topic's facts.
+ * ONE list of everything the person has approved in this scope, newest first.
  *
- * The rail is a real tablist rather than a row of divs with click handlers: every topic
- * is reachable by Tab and by arrow key, and the panel is announced as the thing the
- * selected tab controls. The mockup put a bare fact COUNT beside each name; that is not
- * built, here or later — a number is not what makes a list of topics scannable, and the
- * amendment settled on a one-line summary (plan D1 Task 9) plus the date this task
- * renders.
+ * IT REPLACES A TOPIC RAIL, and the rail is worth a sentence because deleting a working
+ * control needs one. It was a real tablist, keyboard-navigable, with a last-updated stamp
+ * under each name — and it was a filing system nothing files into. Every live write path
+ * passes one topic key; the other four entries were leftovers from a vocabulary that was
+ * later narrowed, frozen since August, and rendering in English to a Ukrainian reader
+ * because only the one live key had copy. The cost was not that it looked untidy: with one
+ * topic selected at a time it put 33 of this account's 51 approved facts on screen and left
+ * the other 18 behind buttons nobody had a reason to press. A person's own confirmed fact
+ * that they cannot find reads as a fact the assistant lost.
+ *
+ * So there is no grouping control here, and the copy above the list says grouping does not
+ * exist yet rather than implying it does. Subject-based topics — a project, a person, a
+ * document, named in the user's own words — are a later design with their own identity
+ * model, not this rail with better labels.
+ *
+ * NO MATCH HIGHLIGHTING, deliberately, and this is the one search convention worth
+ * refusing. A `<mark>` inside a sensitive statement would put exactly the matched words on
+ * screen in the one state whose whole purpose is that they are not readable — the blur
+ * defeated by the feature meant to help read past it. The list is short sentences ordered
+ * by date; a person finds their row without a yellow band on it.
  */
-export function MemoryTopics({ topics, onChanged }: { topics: TopicView[]; onChanged: () => void }) {
+export function MemoryFacts({
+  facts,
+  matched,
+  onChanged,
+}: {
+  facts: FactView[];
+  /** How many matched before the server's cap — `facts` may be a prefix of them. */
+  matched: number;
+  onChanged: () => void;
+}) {
   const t = useTranslations("settings.memory");
-  const locale = useLocale();
   const sourceText = useSourceText();
-  const [selected, setSelected] = useState(topics[0]?.id ?? null);
-  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
-  const panelId = useId();
-
-  // A topic can disappear under the selection between two loads (a fact deleted, the
-  // whole topic emptied). Falling back to the first one keeps the panel from going
-  // blank with a rail that still looks like something is chosen.
-  useEffect(() => {
-    if (!topics.some((x) => x.id === selected)) setSelected(topics[0]?.id ?? null);
-  }, [topics, selected]);
-
-  if (!topics.length) return null;
-  const active = topics.find((x) => x.id === selected) ?? topics[0];
-
-  const move = (from: number, delta: number) => {
-    const next = (from + delta + topics.length) % topics.length;
-    setSelected(topics[next].id);
-    tabs.current[next]?.focus();
-  };
+  if (!facts.length) return null;
 
   return (
-    <div className="grid grid-cols-1 gap-5 md:grid-cols-[220px_1fr]">
-      <div role="tablist" aria-orientation="vertical" aria-label={t("topicsLabel")} className="flex flex-col gap-1">
-        {topics.map((topic, i) => {
-          const on = topic.id === active.id;
-          return (
-            <button
-              key={topic.id}
-              ref={(el) => { tabs.current[i] = el; }}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              aria-controls={panelId}
-              onClick={() => setSelected(topic.id)}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); move(i, 1); }
-                if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); move(i, -1); }
-                if (e.key === "Home") { e.preventDefault(); move(0, 0); }
-                if (e.key === "End") { e.preventDefault(); move(topics.length - 1, 0); }
-              }}
-              className={cn(
-                "rounded-[9px] px-3 py-2 text-left text-[13.5px] transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                on ? "bg-card font-[550] shadow-panel" : "hover:bg-hover",
-              )}
-            >
-              <span className="block truncate">{topicLabel(topic, t as (k: string) => string, (k) => t.has(k as never))}</span>
-              {topic.lastUpdatedAt && (
-                <span className="mt-0.5 block text-[11.5px] font-normal text-muted-foreground">
-                  {t("updated", { date: formatDay(topic.lastUpdatedAt, locale) })}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div id={panelId} role="tabpanel" className="min-w-0">
-        {active.facts.length ? (
-          <FactList>
-            {groupBySource(active.facts, (f) => sourceText(f.source)).map((run) => (
-              <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
-                {/* A run shares one source SENTENCE, so it shares the conversation the
-                    sentence names — the first item's is every item's. */}
-                <SourceCaption href={chatHref(run.items[0].source)}>{run.source}</SourceCaption>
-                {run.items.map((fact) => (
-                  <Fact key={fact.id} fact={fact} onChanged={onChanged} />
-                ))}
-              </div>
+    <div className="space-y-2">
+      <FactList>
+        {groupBySource(facts, (f) => sourceText(f.source)).map((run) => (
+          <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
+            {/* A run shares one source SENTENCE, so it shares the conversation the
+                sentence names — the first item's is every item's. */}
+            <SourceCaption href={chatHref(run.items[0].source)}>{run.source}</SourceCaption>
+            {run.items.map((fact) => (
+              <Fact key={fact.id} fact={fact} onChanged={onChanged} />
             ))}
-          </FactList>
-        ) : (
-          <p className="text-sm leading-relaxed text-muted-foreground">{t("topicEmpty")}</p>
-        )}
-      </div>
+          </div>
+        ))}
+      </FactList>
+      {/* Said only when it is true, and it points at the search box rather than offering
+          a page 2: a person looking for one fact among thousands reaches for words. */}
+      {matched > facts.length && (
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+          {t("showingSome", { shown: facts.length, total: matched })}
+        </p>
+      )}
     </div>
   );
 }

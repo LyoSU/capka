@@ -18,6 +18,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Agent memory is now a structured vault: facts with provenance, quarantine for web/tool-derived facts, full audit trail; existing memory documents migrate automatically at boot. The old memory editor is read-only until the new memory page ships.
 - The memory page now shows topics, each fact's source conversation and what it replaced, and the facts set aside awaiting the user's confirmation (migration 0057).
+- The memory page's topic rail is replaced by one searchable list of every approved fact, newest first (server-side search on `GET /api/memory?q=`, 200 rows per scope). No database change: topic rows stay as they are and the prompt manifest still lists topics.
 - Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
 - Files carried into a project when a chat is moved land in an English subdir (`From chat "…"`), which stays stable across an interface-language change so a retry replaces rather than duplicates the copy.
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.

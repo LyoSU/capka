@@ -171,7 +171,10 @@ run("vault: DELETE /api/memory — forget everything", () => {
    *  the reset, and the screen is fed by this route. */
   const page = async () => {
     const { GET } = await import("@/app/api/memory/route");
-    return (await GET()).json() as Promise<{ scopes: ScopeView[] }>;
+    // A real Request, because the handler now reads `?q=` off the URL. No query on it —
+    // the reset's promise is about everything, so the read that checks the promise must
+    // not be a narrowed one.
+    return (await GET(new Request("http://test.local/api/memory"))).json() as Promise<{ scopes: ScopeView[] }>;
   };
 
   beforeAll(async () => {
@@ -216,7 +219,7 @@ run("vault: DELETE /api/memory — forget everything", () => {
     expect(await res.json()).toEqual({ forgotten: 3 });
 
     const body = await page();
-    expect(body.scopes.flatMap((s) => s.topics.flatMap((t) => t.facts))).toHaveLength(0);
+    expect(body.scopes.flatMap((s) => s.facts)).toHaveLength(0);
     // The waiting list goes with it. A review queue that survived "forget everything"
     // would offer the person, a moment later, the very facts they just erased.
     expect(body.scopes.flatMap((s) => s.pending)).toHaveLength(0);

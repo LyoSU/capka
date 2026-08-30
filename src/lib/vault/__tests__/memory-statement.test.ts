@@ -96,6 +96,23 @@ describe("a statement's legibility is decided in one place", () => {
     expect(counted).toEqual({ "src/components/settings/memory-review.tsx": 1 });
   });
 
+  it("never marks up a matched substring inside a statement", () => {
+    // Search arrived on this surface with Task 9 and brought its conventions with it. This
+    // is the one that must not land: a highlight inside a blurred statement puts precisely
+    // the matched words on screen in the state whose entire purpose is that they are not
+    // readable — the blur defeated by the feature meant to help read past it. It is the
+    // same shape as the conflict line and the edit textarea, arriving through a third door
+    // that looks like a rendering nicety rather than a decision about a secret.
+    //
+    // The two mechanisms a highlight actually uses, and nothing looser: prose is skipped by
+    // `codeLines`, so the paragraph in `memory-topics.tsx` explaining why there is no
+    // highlighting does not trip its own rule.
+    const offenders = files.filter((f) =>
+      codeLines(readFileSync(f, "utf8")).some((l) => /<mark[\s/>]|dangerouslySetInnerHTML/.test(l)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("gates the editor on the reveal, not on a flag of its own", () => {
     // A source-text assertion, and deliberately so: this repo's vitest runs
     // `environment: "node"` with no renderer, so "the button is disabled" is not

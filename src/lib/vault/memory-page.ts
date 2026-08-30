@@ -1,18 +1,23 @@
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  chats, claimEvidence, memoryCandidates, messages, noteClaims, projects, spaces, vaultClaims, vaultNotes,
+  chats, claimEvidence, memoryCandidates, messages, projects, spaces, vaultClaims,
 } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
+import { norm } from "./text";
 
 /**
  * Everything the memory page shows, assembled server-side.
  *
- * The point of this module is what the page it replaces threw away. Three relations are
- * already populated and were all projected out by rendering memory as markdown:
- * `note_claims` groups facts into topics, `claim_evidence.message_id` records the
- * conversation a fact came from, and `vault_claims.supersedes` records what it replaced.
- * None of it is new work; the page simply stopped discarding it.
+ * The point of this module is what the page it replaces threw away. Two relations are
+ * already populated and were both projected out by rendering memory as markdown:
+ * `claim_evidence.message_id` records the conversation a fact came from, and
+ * `vault_claims.supersedes` records what it replaced. Neither is new work; the page simply
+ * stopped discarding them.
+ *
+ * A third, `note_claims`, files a fact under a topic, and this module deliberately does NOT
+ * read it any more — see `factsOf`. The rail it fed was a filing system nothing files into,
+ * and it kept a third of this account's approved facts off the screen.
  *
  * WHAT `sensitive` MEANS, because this surface is the one place it means something
  * different. The rule, in one sentence:
@@ -97,16 +102,6 @@ export type FactView = {
   previous: FactHistory | null;
 };
 
-export type TopicView = {
-  id: string;
-  /** The stable identity. The UI localizes it; nothing joins on the title. */
-  topicKey: string | null;
-  /** The stored seed title — the fallback display for a key the UI has no copy for. */
-  title: string;
-  lastUpdatedAt: string | null;
-  facts: FactView[];
-};
-
 export type PendingView = {
   id: string;
   statement: StatementView;
@@ -124,9 +119,32 @@ export type ScopeView = {
   scope: "user" | "project";
   projectId?: string;
   projectName?: string;
-  topics: TopicView[];
+  /** Every confirmed live head in the space, newest first — matching the search when
+   *  there is one, and never more than `FACT_LIMIT` of them. */
+  facts: FactView[];
+  /** How many matched the search, BEFORE the cap. Reported separately because the page
+   *  has to be able to say "you are looking at 200 of 5000" — a count derived from
+   *  `facts.length` could only ever say 200, which is the sentence being wrong exactly
+   *  when it matters. */
+  factsMatched: number;
+  /** How many facts the scope holds at all, IGNORING the search. Its one reader is the
+   *  "forget everything" dialog, which promises to forget everything and so cannot state
+   *  a number the search box narrowed — a person who typed a word and then reset would be
+   *  told two facts were going while fifty-one went. */
+  factsTotal: number;
   pending: PendingView[];
 };
+
+/**
+ * How many facts one scope sends to the browser.
+ *
+ * At today's 51 it does nothing, and that is the point: the shape has to survive 5000
+ * without anybody rewriting this module, and an unbounded list is the thing that would
+ * have to be rewritten. The page says so in one sentence when `factsMatched` exceeds it
+ * and points at the search box, rather than paginating — a person looking for one fact
+ * reaches for words, not for page 7.
+ */
+export const FACT_LIMIT = 200;
 
 /** Where a fact came from, in the shape the UI turns into one plain sentence.
  *
@@ -159,23 +177,38 @@ function sourceOf(
   return distinct === 1 ? { kind: "chat", ...latest } : { kind: "chats", count: distinct, latest };
 }
 
-/** One space's topics with their facts, provenance and one step of history.
+/**
+ * ONE list of a scope's facts — every confirmed live head in the space, newest first.
  *
- *  Four statements, not N+1: the topics, their memberships joined to the confirmed
- *  heads, every evidence row for those heads with its chat, and every immediate
- *  predecessor. A per-fact query would be a round-trip per fact on a page whose whole
- *  purpose is to show all of them at once. */
-async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
-  const noteRows = await db
-    .select({ id: vaultNotes.id, topicKey: vaultNotes.topicKey, title: vaultNotes.title })
-    .from(vaultNotes)
-    .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.kind, "memory_topic")))
-    .orderBy(asc(vaultNotes.title));
-  if (!noteRows.length) return [];
-
-  const factRows = await db
+ * IT USED TO BE A LIST PER TOPIC, and that is what this replaces. The page drew a rail of
+ * topic buttons over the result and showed one topic's facts at a time, so of the 51 facts
+ * this account had approved it put 33 on screen; the other 18 sat behind four rail entries
+ * (`health`, `people`, `preferences`, `work`) that no live write path has touched since the
+ * vocabulary was narrowed to one key, and that a person had no reason to click. A fact
+ * somebody confirmed and cannot find reads as a fact the system lost.
+ *
+ * So there is no note join here at all: the space is the scope, and a head belongs to this
+ * list whether it hangs off a topic note, off four of them, or off none. The topic rows are
+ * untouched in the database and the MODEL still sees topics (the manifest's counters are
+ * unchanged) — this is navigation dropping a distinction the data never had, not a
+ * migration.
+ *
+ * ORDERING is `recorded_at` descending, not alphabetical and not by topic: what changed
+ * lately is how a person notices a wrong fact. The `id` tiebreak is not decorative —
+ * `recorded_at` is identical across every claim one transaction wrote, and a list that
+ * reshuffles between two loads of the same page is one a person cannot re-find a row in.
+ *
+ * FOUR STATEMENTS, not N+1, and the filter sits between the first and the rest: the heads,
+ * then evidence and predecessors for the CAPPED page only. That is what keeps a 5000-fact
+ * space from fanning out into two 5000-row joins to render 200 rows.
+ */
+async function factsOf(
+  spaceId: string,
+  userId: string,
+  query: string,
+): Promise<{ facts: FactView[]; matched: number; total: number }> {
+  const heads = await db
     .select({
-      noteId: noteClaims.noteId,
       id: vaultClaims.id,
       revision: vaultClaims.revision,
       statement: vaultClaims.statement,
@@ -184,11 +217,9 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
       supersedes: vaultClaims.supersedes,
       origin: vaultClaims.origin,
     })
-    .from(noteClaims)
-    .innerJoin(vaultClaims, eq(vaultClaims.id, noteClaims.claimId))
+    .from(vaultClaims)
     .where(
       and(
-        inArray(noteClaims.noteId, noteRows.map((n) => n.id)),
         eq(vaultClaims.spaceId, spaceId),
         isNull(vaultClaims.supersededAt),
         eq(vaultClaims.reviewStatus, "confirmed"),
@@ -196,7 +227,26 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
     )
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
 
-  const factIds = factRows.map((f) => f.id);
+  // The search, and the one thing it must not do: look at `sensitive`.
+  //
+  // `sensitive` withholds from the MODEL and never from the authenticated owner — the rule
+  // this feature has now broken five times by applying it at a human-facing entrance. A
+  // search that silently skipped the owner's own sensitive facts would be the sixth, and
+  // the worst-behaved of them: the row is not missing from a screen where its absence is
+  // visible, it is missing from an answer to a question, which reads as "you never saved
+  // that". So the predicate is over the STATEMENT alone, and the flag is not in scope here
+  // at all. `Statement` still blurs the result; finding it and reading it are separate
+  // questions and only the second one `sensitive` gets to answer.
+  //
+  // Normalized substring on both sides, through the same `norm` the ledger's dedup uses.
+  // Nothing language-specific: plan C swaps this predicate for n-gram and embedding
+  // matching behind the same call site, and a transliteration table added now would be an
+  // enumerated-case hardcode to delete then.
+  const needle = norm(query);
+  const matched = needle ? heads.filter((h) => norm(h.statement).includes(needle)) : heads;
+  const page = matched.slice(0, FACT_LIMIT);
+
+  const factIds = page.map((f) => f.id);
   const evidenceRows = factIds.length
     ? await db
         .select({ claimId: claimEvidence.claimId, chatId: chats.id, chatTitle: chats.title, at: messages.createdAt })
@@ -206,7 +256,7 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
         .where(inArray(claimEvidence.claimId, factIds))
     : [];
 
-  const predecessorIds = factRows.map((f) => f.supersedes).filter((v): v is string => !!v);
+  const predecessorIds = page.map((f) => f.supersedes).filter((v): v is string => !!v);
   const predecessors = predecessorIds.length
     ? await db
         // `sensitive` is selected, and its own value rather than the successor's. It was
@@ -224,36 +274,25 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
         .where(and(inArray(vaultClaims.id, predecessorIds), eq(vaultClaims.spaceId, spaceId)))
     : [];
 
-  return noteRows.map((note) => {
-    const facts: FactView[] = factRows
-      .filter((f) => f.noteId === note.id)
-      .map((f) => {
-        const prev = f.supersedes ? predecessors.find((p) => p.id === f.supersedes) : undefined;
-        return {
-          id: f.id,
-          revision: f.revision,
-          // The owner's own fact, in full, paired with the advisory the page blurs on —
-          // see `StatementView` for why the two travel together and the module comment
-          // for why this is not the same question the manifest answers.
-          statement: { text: f.statement, sensitive: f.sensitive },
-          recordedAt: f.recordedAt.toISOString(),
-          source: sourceOf(evidenceRows.filter((e) => e.claimId === f.id), f.origin),
-          previous: prev
-            ? { statement: { text: prev.statement, sensitive: prev.sensitive }, at: prev.recordedAt.toISOString() }
-            : null,
-        };
-      });
+  const facts: FactView[] = page.map((f) => {
+    const prev = f.supersedes ? predecessors.find((p) => p.id === f.supersedes) : undefined;
     return {
-      id: note.id,
-      topicKey: note.topicKey,
-      title: note.title,
-      // Derived from the CLAIMS, never from `vault_notes.updated_at`: nothing in this
-      // codebase writes that column after insert, so it would report the day the topic
-      // was created and call it the day the topic changed.
-      lastUpdatedAt: facts.length ? facts[0].recordedAt : null,
-      facts,
+      id: f.id,
+      revision: f.revision,
+      // The owner's own fact, in full, paired with the advisory the page blurs on —
+      // see `StatementView` for why the two travel together and the module comment
+      // for why this is not the same question the manifest answers.
+      statement: { text: f.statement, sensitive: f.sensitive },
+      recordedAt: f.recordedAt.toISOString(),
+      source: sourceOf(evidenceRows.filter((e) => e.claimId === f.id), f.origin),
+      previous: prev
+        ? { statement: { text: prev.statement, sensitive: prev.sensitive }, at: prev.recordedAt.toISOString() }
+        : null,
     };
   });
+  // Both counts off the sets they name, neither off `facts`: the cap is the reason
+  // `matched` is worth sending, and the search is the reason `total` is.
+  return { facts, matched: matched.length, total: heads.length };
 }
 
 /** What is waiting for the person: everything they still have to decide, oldest first
@@ -334,7 +373,14 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
   });
 }
 
-export async function readMemoryPage(userId: string): Promise<{ scopes: ScopeView[] }> {
+/**
+ * The whole page for one person, optionally narrowed to a search.
+ *
+ * `query` narrows the FACTS and nothing else. The review queue is what a person still has
+ * to decide, it is short by construction, and hiding rows out of it behind a search box
+ * would be a way to lose a decision — so it comes back whole whatever is typed.
+ */
+export async function readMemoryPage(userId: string, query = ""): Promise<{ scopes: ScopeView[] }> {
   const projectRows = await db
     .select({ id: projects.id, name: projects.name })
     .from(projects)
@@ -359,17 +405,27 @@ export async function readMemoryPage(userId: string): Promise<{ scopes: ScopeVie
 
   const scopes: ScopeView[] = [];
   const userSpace = spaceRows.find((s) => s.type === "user" && s.refId === userId);
+  const own = userSpace ? await factsOf(userSpace.id, userId, query) : { facts: [], matched: 0, total: 0 };
   scopes.push({
     scope: "user",
-    topics: userSpace ? await topicsOf(userSpace.id, userId) : [],
+    facts: own.facts,
+    factsMatched: own.matched,
+    factsTotal: own.total,
     pending: userSpace ? await pendingOf(userSpace.id, userId) : [],
   });
   for (const p of projectRows) {
     const space = spaceRows.find((s) => s.type === "project" && s.refId === p.id);
     if (!space) continue;
-    const [topics, pending] = await Promise.all([topicsOf(space.id, userId), pendingOf(space.id, userId)]);
-    if (!topics.length && !pending.length) continue;
-    scopes.push({ scope: "project", projectId: p.id, projectName: p.name, topics, pending });
+    const [found, pending] = await Promise.all([factsOf(space.id, userId, query), pendingOf(space.id, userId)]);
+    // Dropped on the UNFILTERED total, not on the match count: a project section is a
+    // heading, and a heading over nothing is noise — but a search that matched nothing in
+    // this project has not emptied the project, and making its whole section vanish while
+    // the reader types is how a person concludes a project's memory was lost.
+    if (!found.total && !pending.length) continue;
+    scopes.push({
+      scope: "project", projectId: p.id, projectName: p.name,
+      facts: found.facts, factsMatched: found.matched, factsTotal: found.total, pending,
+    });
   }
   return { scopes };
 }
