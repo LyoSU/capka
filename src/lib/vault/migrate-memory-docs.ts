@@ -6,10 +6,23 @@ import { auditEvents, memoryDocs } from "@/lib/db/schema";
 import { proposeCandidate } from "./candidates";
 import { fitStatement } from "./claims";
 import { getOrCreateSpace, spaceAcceptsWrites } from "./spaces";
-// Used here only to build a stable idempotency key, so that re-carrying a document
-// appended to since its last pass is a no-op for the bullets already carried. It has to be
-// the SAME normalization the dedup uses, which is why it is imported rather than repeated.
-import { norm } from "./text";
+
+/**
+ * FROZEN — do not import `text.ts`'s `norm` here, and do not edit this body.
+ *
+ * Its output is embedded in `memory_candidates.idempotency_key` under the unique index
+ * `uniq_mcand_idem` (`schema.ts`), so a legacy bullet already carried across is recognised
+ * by matching this exact string forever. `text.ts`'s `norm` answers a different question —
+ * "is this the same wording, for today's search or dedup" — and is free to gain Unicode
+ * normalization, apostrophe folding, or anything else those callers want. This function
+ * used to BE that shared `norm`, which meant the day search learned NFC every legacy key
+ * would shift at once and every bullet already carried would re-propose itself as a fresh
+ * candidate — no test would fail, no error would fire, the review queue would simply refill
+ * with facts a person had already resolved. Pinned by a test naming `uniq_mcand_idem`; if
+ * that test still passes after you "simplify" this back into a shared call, it is not
+ * testing what its name says.
+ */
+export const legacyIdemKeyNorm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /** "Never carried across, or appended to since it was." The selection below and the
  *  CAS in `migrateOne` MUST share this predicate: a widened selection over a
@@ -247,7 +260,7 @@ async function migrateOne(docId: string): Promise<boolean> {
           // bullet already carried. The statement sits in this row's own `statement`
           // column anyway, so the key discloses nothing the row does not, and candidate
           // rows are deleted with their space rather than outliving it.
-          idempotencyKey: `legacy:${docId}:${norm(statement)}`,
+          idempotencyKey: `legacy:${docId}:${legacyIdemKeyNorm(statement)}`,
           spaceId,
           statement,
           provenance: { kind: "legacy_memory_doc" },

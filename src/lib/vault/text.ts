@@ -1,13 +1,19 @@
 /**
  * ONE normalization of a statement's text, for every question of the form "is this the
- * same wording as that".
+ * same wording as that" — asked LIVE, against rows read a moment ago, never persisted.
  *
- * It existed twice, identically and by copy — `candidates.ts` used it to decide whether a
- * proposal duplicates a head, `migrate-memory-docs.ts` to build a stable idempotency key —
- * and the memory page's search box was about to be the third. Three copies of a rule is
- * this feature's recurring defect wearing a different hat: the copies agree today, and the
- * day one of them learns about apostrophes or non-breaking spaces the dedup and the search
- * quietly stop answering the same question, with nothing failing anywhere.
+ * Shared by `candidates.ts` (does a proposal duplicate a head that exists right now?) and
+ * `memory-page.ts` (does a head's text contain the search words typed right now?). Both
+ * questions are asked fresh against the current data every time, so both are free to
+ * change this function's answer whenever a better one is found — an apostrophe folded, a
+ * non-breaking space collapsed, Unicode NFC applied.
+ *
+ * `migrate-memory-docs.ts` used to share this function too, to build a persisted
+ * idempotency key. It no longer does: that key is written into a column under a unique
+ * index and must never change once chosen, which is the opposite requirement from the two
+ * callers here, so it now keeps its own frozen copy (`legacyIdemKeyNorm`) instead. Do not
+ * "consolidate" that copy back into this one — see its docstring for why that undoes a
+ * fix.
  *
  * Case-folded, trimmed, whitespace-collapsed, and deliberately nothing more. No language
  * list, no transliteration, no stemming: those are enumerated cases that go stale, and the
