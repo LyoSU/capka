@@ -457,17 +457,47 @@ run("vault schema", () => {
       // Asserted against the real table rather than a fixture: quarantine's successor is a
       // WEAKER channel, not a promotion, and this is the only place that can go wrong
       // exactly once. It writes nothing, so it is left un-prefixed on purpose.
+      //
+      // WHAT IT PROVES: that migration 0061's backfill mapped the rows that already existed
+      // when it ran. WHAT IT DELIBERATELY DOES NOT: say anything about rows written since.
+      // The distinction is not pedantry — the mapping is a MIGRATION rule, not an invariant
+      // of the table, and `createClaim` is designed to break it (it can only produce
+      // `review_status = 'unverified'`, while its callers legitimately pass
+      // `sourceClass: "owner_authored"`). An unscoped version of this control therefore goes
+      // red whenever another suite's fixtures happen to be live during this query, which
+      // `vitest.config.ts` permits — `fileParallelism` is only disabled in
+      // `vitest.integration.db.config.ts`, and the command both briefs prescribe uses the
+      // base config. A control that reddens for reasons unrelated to what it measures is
+      // the thing that teaches people to re-run instead of read.
+      //
+      // The boundary is read from drizzle's own bookkeeping rather than hardcoded as a date,
+      // so this also ASSERTS its precondition instead of inferring it: if 0061 is not
+      // applied, there is no row and the test fails loudly rather than passing vacuously.
+      const [{ boundary }] = (
+        await q(
+          `SELECT to_timestamp(created_at / 1000.0)::timestamp AS boundary
+             FROM drizzle.__drizzle_migrations WHERE created_at = 1788130121997`,
+        )
+      ).rows as { boundary: Date }[];
+      expect(boundary).toBeInstanceOf(Date);
+
       const bad = await q(
         `SELECT count(*)::int AS n FROM vault_claims
-         WHERE (review_status = 'unverified' AND source_class <> 'agent_inferred')
-            OR (review_status = 'confirmed'  AND source_class <> 'legacy_confirmed')`,
+         WHERE recorded_at < $1
+           AND ((review_status = 'unverified' AND source_class <> 'agent_inferred')
+             OR (review_status = 'confirmed'  AND source_class <> 'legacy_confirmed'))`,
+        [boundary],
       );
       expect(bad.rows[0].n).toBe(0);
       const promoted = await q(
         `SELECT count(*)::int AS n FROM vault_claims
-         WHERE review_status = 'unverified' AND prompt_access = 'manifest'`,
+         WHERE recorded_at < $1 AND review_status = 'unverified' AND prompt_access = 'manifest'`,
+        [boundary],
       );
       expect(promoted.rows[0].n).toBe(0);
+      // On a database that had claims before 0061 this covers all of them; on a fresh one
+      // there are none and both counts are vacuously 0, which is the correct answer there.
+      // Recorded so nobody later reads a green run as proof that rows were checked.
     });
   });
 });

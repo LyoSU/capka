@@ -6,7 +6,6 @@ import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import { deleteNode, insertNode } from "./nodes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
-import { norm } from "./text";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
 
@@ -247,12 +246,42 @@ const canonicalValue = (v: unknown): string => {
   return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonicalValue(o[k])}`).join(",")}}`;
 };
 
-/** norm(statement) + canonical value, sha256 hex. The separator is a NEWLINE and that is
- *  not arbitrary: `norm` collapses every whitespace run to a single space, so its output
- *  can never contain one — the two halves cannot be re-cut at a different boundary, which
- *  a space or a colon would allow. */
-function normalizedHashOf(statement: string, value: unknown): string {
-  return createHash("sha256").update(`${norm(statement)}\n${canonicalValue(value)}`).digest("hex");
+/**
+ * The statement half of the exact-dedup key, and a FROZEN copy of what `text.ts`'s `norm`
+ * happens to say today — deliberately a copy, exactly like `migrate-memory-docs.ts`'s
+ * `legacyIdemKeyNorm`, and for the same reason that one exists.
+ *
+ * Its output is embedded in `vault_claims.normalized_hash` under `idx_vclaims_norm_hash`
+ * (`schema.ts`), so a fact already recorded is recognised by matching this exact string
+ * forever. `text.ts`'s `norm` answers a different question — "is this the same wording,
+ * for today's search or dedup" — and its docstring explicitly frees its callers to gain
+ * Unicode normalization, apostrophe folding, or anything else. This function used to BE
+ * that shared `norm`, which meant the day search learned NFC every stored key would shift
+ * at once: old rows would keep one key and new rows another, the exact-dedup read would
+ * answer "not known" for facts that are known, and the store would start repeating itself
+ * back to the person — no test failing, no error firing. Pinned by literal digests in
+ * `__tests__/normalized-hash.test.ts`; if that test still passes after you "simplify" this
+ * back into a shared call, it is not testing what its name says.
+ */
+const dedupKeyNorm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
+
+/**
+ * `dedupKeyNorm(statement)` + canonical value, sha256 hex. The separator is a NEWLINE and
+ * that is not arbitrary: `dedupKeyNorm` collapses every whitespace run to a single space,
+ * so its output can never contain one, and `JSON.stringify` escapes newlines inside
+ * strings, so neither can the right half — the two halves cannot be re-cut at a different
+ * boundary, which a space or a colon would allow.
+ *
+ * BOTH inputs are frozen, and neither is frozen by this function. Callers hand it the
+ * CLAMPED statement (`fitStatement`), which is right — the key must describe the text that
+ * was actually stored — but `fitStatement` is an ordinary live function with no freeze
+ * contract of its own, so moving `STATEMENT_MAX_CHARS` off 500 re-keys every long claim.
+ * That drift is at least visible (the stored statement changes too), unlike a
+ * `dedupKeyNorm` drift, but the only thing that would actually CATCH either is the
+ * literal-digest test. Exported for it, and for no other caller.
+ */
+export function normalizedHashOf(statement: string, value: unknown): string {
+  return createHash("sha256").update(`${dedupKeyNorm(statement)}\n${canonicalValue(value)}`).digest("hex");
 }
 
 /** A slot is a GROUPING HINT, not an identity, and the difference is this round's
