@@ -39,11 +39,21 @@ const withheldNotice = (n: number) =>
  *  It says "no longer there", not "forgotten": the head may equally have been
  *  superseded, or have been in a space this caller cannot see, and naming one cause
  *  out of three would be a guess printed as a fact. */
+const showable = (c: ClaimHead) => !c.sensitive && c.reviewStatus === "confirmed";
+
 const mismatch = (current: ClaimHead | null) =>
   current
     ? // The text is withheld for a sensitive head, for the same reason `line` withholds
       // it: otherwise a lost CAS would be a second way to read out what the manifest hides.
-      `Claim ${current.id} is now at revision ${current.revision}${current.sensitive ? "" : `: "${current.statement}"`}. Re-issue with expected_revision=${current.revision} if the change still applies.`
+      //
+      // And withheld for a QUARANTINED one, on the same reasoning that put
+      // `onlyConfirmed` on the search below: `line` and this are the only two places in
+      // this module that print a claim's text to the model, and a rule held by one of
+      // them is a rule with a way around it. `findCurrentHead` has no review filter and
+      // is not given one — an unscoped read there would answer "does this chain exist",
+      // which update and forget both need whatever the head's status is. What must not
+      // leave is the TEXT, so the filter belongs on the sentence, not on the lookup.
+      `Claim ${current.id} is now at revision ${current.revision}${showable(current) ? `: "${current.statement}"` : ""}. Re-issue with expected_revision=${current.revision} if the change still applies.`
     : "That claim is no longer there (forgotten or replaced). Run memory_search to see what is.";
 
 /** An arbitrary value travels as a JSON STRING, not an object: `asSchema` collapses

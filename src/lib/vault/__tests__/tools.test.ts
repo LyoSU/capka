@@ -215,6 +215,26 @@ describe("memory_update", () => {
     expect(findCurrentHead).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["sensitive", { sensitive: true }],
+    ["quarantined", { reviewStatus: "unverified" }],
+  ])("a lost CAS gives the address of a %s head and not its words", async (_kind, over) => {
+    // `line` and `mismatch` are the only two places in this module that print a claim's
+    // text to the model, so a rule held by one of them has a way around it. Search now
+    // withholds both kinds; a lost CAS would otherwise be the second read-out — and it
+    // needs no search hit to reach, only an id the model is already holding.
+    updateClaim.mockResolvedValue({
+      ok: false,
+      current: head({ id: "c5", revision: 4, statement: "diagnosed in March", ...over }),
+    });
+    const tools = await make();
+
+    const said = await run(tools.memory_update, { claim_id: "c1", expected_revision: 1, statement: "In dollars" });
+    expect(said).toContain("Claim c5 is now at revision 4");
+    expect(said).not.toContain("diagnosed");
+    expect(said).not.toContain("March");
+  });
+
   it("a mismatch on a SENSITIVE head names the revision without repeating the text", async () => {
     // Same rule as memory_search: the model is the reader here, and the mismatch
     // sentence would otherwise be a second way to read out a claim the manifest hides.
