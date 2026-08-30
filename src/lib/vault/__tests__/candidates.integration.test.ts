@@ -631,6 +631,18 @@ run("vault candidates", () => {
     // policy_state stays as it was — the transition is recorded by the audit event.
     expect(cand.policy_state).toBe("pending");
     expect(await count("audit_events", "space_id = $1 AND action = 'candidate.confirm'", [SPACE_A])).toBe(1);
+
+    // Not one of this flow's events carries the slot key. A slot is memory text by
+    // design (`deadline` here; `supplier/acme/payment-terms` in the wild), it was never
+    // the addressing it looked like — `subject_id` is — and `retireProjectSpace` keeps
+    // `audit_events` after deleting the claims and candidates, so anything left here
+    // outlives the user's own deletion of the project.
+    const { rows: events } = await pool.query<{ action: string; payload: Record<string, unknown> }>(
+      `SELECT action, payload FROM audit_events WHERE space_id = $1`,
+      [SPACE_A],
+    );
+    expect(events.map((e) => e.action).sort()).toEqual(["candidate.confirm", "candidate.propose", "claim.create"]);
+    for (const e of events) expect(e.payload).not.toHaveProperty("slotKey");
   });
 
   it("confirm on a taken slot with the same text → merge into the head, and the head becomes confirmed", async () => {
