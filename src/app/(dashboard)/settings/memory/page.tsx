@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
@@ -200,23 +200,41 @@ export default function MemoryPage() {
     return () => clearTimeout(id);
   }, [query]);
 
+  // `load` has more than one caller — the debounced search effect below, and every
+  // `onChanged` a child fires after a delete or a confirm — so a sequence token has to
+  // live outside any one of them. The ref holds whichever request is currently allowed to
+  // win: starting a new one aborts whatever it is still holding, so a search fired while an
+  // older one is in flight (or an edit's `onChanged` racing a debounced search) can no
+  // longer have the older response land second and overwrite the newer one. Aborting also
+  // turns a failing STALE request into a no-op instead of a false "load failed" panel that
+  // replaces the whole page, including the search box, after a newer request already
+  // succeeded.
+  const inFlight = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    inFlight.current?.abort();
+    const ac = new AbortController();
+    inFlight.current = ac;
     try {
       setError("");
-      const res = await fetch(`/api/memory?q=${encodeURIComponent(asked)}`);
+      const res = await fetch(`/api/memory?q=${encodeURIComponent(asked)}`, { signal: ac.signal });
       if (!res.ok) throw new Error();
       const data: { scopes: ScopeView[] } = await res.json();
       setScopes(data.scopes ?? []);
     } catch {
+      // Aborted means a newer `load` superseded this one — not a failure, and the newer
+      // call already owns `error`/`loading`. Only a request still current gets to report.
+      if (ac.signal.aborted) return;
       // A panel, not a toast: a page that failed to load has to keep saying so.
       setError(t("loadError"));
     } finally {
-      setLoading(false);
+      if (inFlight.current === ac) setLoading(false);
     }
   }, [t, asked]);
 
   useEffect(() => {
     load();
+    return () => inFlight.current?.abort();
   }, [load]);
 
   if (loading) return <SettingsSkeleton rows={1} />;

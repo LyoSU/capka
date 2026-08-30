@@ -45,6 +45,7 @@ All notable changes to Capka are documented here. Format follows
 - Keeping a set-aside fact whose slot a sensitive fact holds now works instead of failing with "try again" on every attempt.
 - A sensitive fact quoted in a conflict line, or opened for editing, is blurred like every other sensitive statement on the memory page.
 - The memory page no longer quotes an unverified claim as the fact a conflict would replace.
+- The memory page's search no longer lets a slower, older request overwrite a faster, newer one's results, and a stale request failing after a newer one succeeded no longer blanks the whole page with a load-error panel.
 
 ### Security
 
