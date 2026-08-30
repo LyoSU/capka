@@ -39,8 +39,16 @@ export async function insertNode(
  * tombstone (§2.4). A node is soft-deleted because the subtype services disagree about
  * what "deleted" means for their own rows — `retireProjectSpace` hard-DELETEs claims and
  * notes but SOFT-deletes sources — and a hard node delete would raise 23503 against the
- * source rows that deliberately survive. The one hard delete of a node in the whole system
- * is the `spaces` cascade fired by `purgeUserSpaces`, where the space itself is going.
+ * source rows that deliberately survive.
+ *
+ * TWO sites in the whole system hard-delete a node row, and this is neither of them:
+ * the `spaces` cascade fired by `purgeUserSpaces`, hard because the space itself is
+ * going; and `getOrCreateTopicNote`'s race-loser rollback in `spaces.ts`, hard because
+ * the node is two statements old, has no edges and lost its note to a concurrent
+ * creator — a tombstone for a note that never existed would be worse than no row.
+ * Anywhere ELSE a hard node delete fires `vault_edges`' `on delete cascade` and
+ * hard-deletes edges, which is exactly what §2.4 forbids. Read those two as the closed
+ * enumeration; a third would be a defect.
  *
  * Idempotent by predicate: both writes are guarded on `deleted_at IS NULL`, so a
  * re-driven forget re-timestamps nothing.

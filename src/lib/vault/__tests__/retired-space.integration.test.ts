@@ -503,4 +503,40 @@ run("vault: writes into a retired space", () => {
     const srcNode = await q(`SELECT deleted_at FROM vault_nodes WHERE id = $1`, [src]);
     expect(srcNode.rows[0].deleted_at).not.toBeNull();
   });
+
+  it("a re-driven retire re-timestamps no tombstone", async () => {
+    // Teardown IS re-driven, from the worker tick, so the `deleted_at IS NULL` guards in
+    // `deleteSpaceNodes` are load-bearing: without them a second pass moves every node's
+    // and edge's tombstone forward, and the row then records when teardown last ran
+    // rather than when the user deleted the project — the same failure the
+    // `isNull(spaces.retiredAt)` guard already prevents for the space row itself.
+    //
+    // Back-dating between the two passes is what makes this killable. Both writes stamp
+    // `new Date()`, so two retires a millisecond apart would compare equal with the
+    // guards removed; against a 2020 tombstone an unguarded re-drive moves by years.
+    const { projectSpaceId } = await spaces();
+    const topic = await getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY);
+    const c = await createClaim(
+      { spaceId: projectSpaceId, statement: "the lease renews in April", origin: { kind: "test" }, topicNoteId: topic },
+      actor,
+    );
+    await q(
+      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
+      [`${P}e-redrive`, projectSpaceId, topic, c.id],
+    );
+
+    await retireProjectSpace(PROJ);
+    const backdated = "2020-01-01 00:00:00";
+    await q(`UPDATE vault_nodes SET deleted_at = $2 WHERE space_id = $1`, [projectSpaceId, backdated]);
+    await q(`UPDATE vault_edges SET deleted_at = $2 WHERE space_id = $1`, [projectSpaceId, backdated]);
+    // Not a vacuous comparison: the first pass really did tombstone rows to compare.
+    expect(await count("vault_nodes", "space_id = $1", [projectSpaceId])).toBe(2);
+    expect(await count("vault_edges", "space_id = $1", [projectSpaceId])).toBe(1);
+
+    await retireProjectSpace(PROJ);
+
+    expect(await count("vault_nodes", "space_id = $1 AND deleted_at <> $2", [projectSpaceId, backdated])).toBe(0);
+    expect(await count("vault_edges", "space_id = $1 AND deleted_at <> $2", [projectSpaceId, backdated])).toBe(0);
+  });
 });

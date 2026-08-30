@@ -8,8 +8,9 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  * that SOMETHING inserted a node — not that the writer did it inside the same transaction,
  * which is what makes a rolled-back claim leave no orphan node behind.
  */
-import { pool } from "@/lib/db";
+import { db, pool } from "@/lib/db";
 import { createClaim, forgetAllClaims, forgetClaim, updateClaim, type Actor } from "../claims";
+import { deleteNode } from "../nodes";
 import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -38,6 +39,24 @@ const nodeCount = async (spaceId: string) =>
  *  from a convention into a constraint. */
 const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
   q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
+
+const edge = (id: string, from: string, to: string, relation: "contains" | "references") =>
+  q(
+    `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+     VALUES ($1,$2,$3,$4,$5,'{"kind":"system"}'::jsonb)`,
+    [id, SPACE_A, from, to, relation],
+  );
+
+/** As TEXT, so identity is compared byte for byte: the driver parses `timestamp` to a
+ *  millisecond-precision Date, and a re-timestamping mutant that lands in the same
+ *  millisecond would compare equal as a Date. */
+const deletedAt = async (table: "vault_nodes" | "vault_edges", id: string) =>
+  (await q(`SELECT deleted_at::text AS t FROM ${table} WHERE id = $1`, [id])).rows[0]?.t as string | null;
+
+/** A tombstone far enough in the past that an unguarded re-drive moves it by years
+ *  rather than by microseconds — which is the only thing that makes the
+ *  `deleted_at IS NULL` guards killable at all. */
+const BACKDATED = "2020-01-01 00:00:00";
 
 run("vault: a subtype row and its node row are one write", () => {
   beforeAll(async () => {
@@ -209,18 +228,19 @@ run("vault: the node inverses", () => {
       { spaceId: SPACE_A, statement: "reports go out on fridays", origin: { kind: "test" }, topicNoteId: topic },
       ACTOR,
     );
-    await q(
-      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
-       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
-      [`${P}e-f`, SPACE_A, topic, c.id],
-    );
+    // BOTH directions, because the cascade's `or` has two disjuncts and one seeded edge
+    // kills only one of them. With the claim on the `to` side alone, dropping
+    // `eq(vaultEdges.fromNodeId, nodeId)` leaves every test green — and that is the half
+    // slice 3 produces first, when a `derived_from` edge points FROM a claim.
+    await edge(`${P}e-to`, topic, c.id, "contains");
+    await edge(`${P}e-from`, c.id, topic, "references");
     const res = await forgetClaim({
       claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR,
     });
     expect(res.ok).toBe(true);
     expect((await nodeOf(c.id))?.deleted_at).not.toBeNull();
-    const edge = await q(`SELECT deleted_at FROM vault_edges WHERE id = $1`, [`${P}e-f`]);
-    expect(edge.rows[0].deleted_at).not.toBeNull();
+    expect(await deletedAt("vault_edges", `${P}e-to`)).not.toBeNull();
+    expect(await deletedAt("vault_edges", `${P}e-from`)).not.toBeNull();
     // The TOPIC survives: forgetting a fact is not forgetting where it was filed.
     expect((await nodeOf(topic))?.deleted_at).toBeNull();
   });
@@ -245,5 +265,34 @@ run("vault: the node inverses", () => {
     });
     expect(upd.ok).toBe(true);
     expect((await nodeOf(c.id))?.deleted_at).toBeNull();
+  });
+
+  it("a re-driven deleteNode re-timestamps nothing", async () => {
+    // The `deleted_at IS NULL` guards are what make the docstring's idempotency claim
+    // true, and nothing else in the suite kills them: drop either guard and every other
+    // test stays green. A second `forgetClaim` cannot be the vehicle — it is refused at
+    // its OWN `superseded_at` guard and never reaches the node module — so the re-drive
+    // is aimed at the exported inverse, which is where the guards live.
+    //
+    // The reachable harm is not hypothetical: teardown is re-driven from the worker
+    // tick, and an unguarded second pass would leave every tombstone reading when
+    // teardown last ran instead of when the memory was removed.
+    const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "the lease renews in April", origin: { kind: "test" }, topicNoteId: topic },
+      ACTOR,
+    );
+    await edge(`${P}e-idem`, topic, c.id, "contains");
+    const res = await forgetClaim({
+      claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR,
+    });
+    expect(res.ok).toBe(true);
+    await q(`UPDATE vault_nodes SET deleted_at = $2 WHERE id = $1`, [c.id, BACKDATED]);
+    await q(`UPDATE vault_edges SET deleted_at = $2 WHERE id = $1`, [`${P}e-idem`, BACKDATED]);
+
+    await deleteNode(c.id, SPACE_A, db);
+
+    expect(await deletedAt("vault_nodes", c.id)).toBe(BACKDATED);
+    expect(await deletedAt("vault_edges", `${P}e-idem`)).toBe(BACKDATED);
   });
 });
