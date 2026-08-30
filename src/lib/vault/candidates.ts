@@ -19,6 +19,9 @@ import {
 } from "./claims";
 import { listModelClaims } from "./model-view";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
+// One home for the statement normalization the slot branch and the slotless dedup share —
+// and, since Task 9, the memory page's search box. See `text.ts` for why it is not copied.
+import { norm } from "./text";
 
 export type Provenance = {
   kind: "user_direct" | "derived" | "tool" | "file" | "web" | "legacy_memory_doc";
@@ -27,11 +30,6 @@ export type Provenance = {
 };
 
 export type CandidateRow = typeof memoryCandidates.$inferSelect;
-
-/** One normalization for comparing statements, shared by the slot branch and the
- *  slotless dedup. Different rules in those two places would mean the same fact
- *  merges or splits depending on whether a slot happens to be set. */
-const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /**
  * The other half of "the same fact": a matching statement whose structured `value`

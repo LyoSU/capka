@@ -6,11 +6,10 @@ import { auditEvents, memoryDocs } from "@/lib/db/schema";
 import { proposeCandidate } from "./candidates";
 import { fitStatement } from "./claims";
 import { getOrCreateSpace, spaceAcceptsWrites } from "./spaces";
-
-/** The same normalization as in `candidates.ts`. Used here only to build a stable
- *  idempotency key, so that re-carrying a document appended to since its last pass is a
- *  no-op for the bullets already carried. */
-const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
+// Used here only to build a stable idempotency key, so that re-carrying a document
+// appended to since its last pass is a no-op for the bullets already carried. It has to be
+// the SAME normalization the dedup uses, which is why it is imported rather than repeated.
+import { norm } from "./text";
 
 /** "Never carried across, or appended to since it was." The selection below and the
  *  CAS in `migrateOne` MUST share this predicate: a widened selection over a
