@@ -304,8 +304,10 @@ export async function resolveTopic(
   // `onConflictDoNothing`; the savepoint above is the same requirement met by a construct
   // that also says which constraint refused. What Task 4 collapses is the part that was
   // duplicated — the version insert and the pointer update — so that "no path creates a
-  // note without a revision 1" is a property of `insertNoteVersion` having no second caller
-  // rather than of remembering.
+  // note without a revision 1" is a property of `insertNoteVersion` being the only
+  // IMPLEMENTATION of that write rather than of remembering. Not "the only caller": it has
+  // three (`createNote`, `reviseNote`, and this), which is the point — three callers, one
+  // implementation, one grep (T4 review L1).
   //
   // `ownerAuthored()`, so the horizon `createNote` would have armed is null here anyway: a
   // topic the person's own filing created is not agent content and does not expire.

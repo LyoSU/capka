@@ -125,9 +125,17 @@ function liveNoteForModel() {
  * which is what a user-named topic has — the version is where a rename will land, and
  * `vault_notes.title` is the compatibility copy the fold indexes.
  *
- * Private, and it serves `listManifestTopics` — one query, one mint, no reader outside the
- * module. (`listMemoryToolRows`' note arm resolves its own `topic` label the same way and
- * from the same table, because it needs it per NOTE rather than per topic with a count.)
+ * TWO QUERIES, ONE LABEL RULE, and the distinction is the whole of review MED-2. This helper
+ * asks a per-topic question with a claim count; the memory-tool note arm asks a per-note one
+ * and cannot be served by a projection with no id in it, so the QUERY is legitimately not
+ * shared. What must never be two is the RULE — the label lookup, the clamp and the secret
+ * screen — and it is not: both mints call `topicLabel`, which is the only place those three
+ * obligations are written. The first version of this split copied two of the three into
+ * `asNoteRow` and dropped the screen, so a title this function refuses to print was minted
+ * for the model by the other arm.
+ *
+ * Private, and it serves `listManifestTopics`; the `count > 0` gate is the MANIFEST's and
+ * is applied by that caller, not here.
  */
 async function topicRows(spaceId: string, ex: Ex): Promise<{ title: string; count: number }[]> {
   const rows = await ex
@@ -173,23 +181,57 @@ async function topicRows(spaceId: string, ex: Ex): Promise<{ title: string; coun
         eq(vaultClaims.promptAccess, "manifest"),
       ),
     )
-    .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.kind, "memory_topic"), liveNoteForModel()))
+    .where(and(
+      eq(vaultNotes.spaceId, spaceId),
+      eq(vaultNotes.kind, "memory_topic"),
+      liveNoteForModel(),
+      // The per-channel clause (§2.10/§3.4), and NOTES ARE NOT THE EXCEPTION named there —
+      // fragments are, because a fragment has no class of its own. This arm went in without
+      // it (review MED-1): `liveNoteForModel` contributes `sensitive = false`, which excludes
+      // `owner_only` and nothing else, so a topic whose head version is `memory_search` or
+      // `knowledge_search` printed its title in the ALWAYS-ON tier. Inert while
+      // `resolveTopic` is the only writer of a topic version (`ownerAuthored` => `manifest`),
+      // and reachable the moment a rename control revises one under any other class.
+      eq(vaultNoteVersions.promptAccess, "manifest"),
+    ))
     .groupBy(vaultNotes.id, vaultNotes.topicKey, vaultNoteVersions.title)
     // Deterministic, because the byte-identity requirement depends on it: `id` (nanoid) is
     // the only stable key here — `createdAt` is not guaranteed to differ at millisecond
     // resolution between topics inserted in one transaction.
     .orderBy(asc(vaultNotes.id));
-  return rows
-    .map((r) => ({ title: TOPIC_LABELS[r.topicKey ?? ""] ?? r.title, count: r.count }))
-    .filter((r) => r.count > 0 && !looksLikeSecret(r.title))
-    .map((r) => ({ title: fitTopicTitle(r.title), count: r.count }));
+  return rows.flatMap((r) => {
+    const title = topicLabel(r.topicKey, r.title);
+    return title === null ? [] : [{ title, count: r.count }];
+  });
+}
+
+/**
+ * THE model-facing name of a topic note, and the one place its three obligations are
+ * written: resolve the label from the KEY (a title is a display seed a rename may
+ * overwrite, and the manifest must be byte-identical across turns; a key with no entry
+ * falls back to the head version's title, which is what a user-named topic has), clamp it
+ * to `TOPIC_TITLE_MAX_CHARS`, and REFUSE it outright if it is secret-shaped.
+ *
+ * `null` means "no mint may print this", which is the screen. It lives at read time rather
+ * than at the writer because a title written before the screen existed still renders into a
+ * prompt — the two shapes that reach it are a raw-SQL row and a row predating `0065`, and
+ * `insertNoteVersion`'s write-time screen cannot retroactively cover either.
+ */
+function topicLabel(topicKey: string | null, versionTitle: string): string | null {
+  const label = TOPIC_LABELS[topicKey ?? ""] ?? versionTitle;
+  return looksLikeSecret(label) ? null : fitTopicTitle(label);
 }
 
 export async function listManifestTopics(
   spaceId: string,
   ex: Ex = db,
 ): Promise<{ title: ManifestText; count: number }[]> {
-  return (await topicRows(spaceId, ex)).map((r) => ({ title: mintManifest(r.title), count: r.count }));
+  // The `count > 0` visibility gate, applied HERE because it is the manifest's and not the
+  // label rule's: an empty topic is a heading asserting nothing, and printing it in the
+  // always-on tier spends bytes on it every turn. The note arm has no count to gate on.
+  return (await topicRows(spaceId, ex))
+    .filter((r) => r.count > 0)
+    .map((r) => ({ title: mintManifest(r.title), count: r.count }));
 }
 
 /** Claim heads the ALWAYS-ON tier may print: `prompt_access = 'manifest'` ANDed with
@@ -339,6 +381,20 @@ export type MemoryToolRow =
       kind: "note";
       title: MemoryToolText;
       excerpt: MemoryToolText;
+      /**
+       * THE LABEL THIS NOTE WOULD PRINT IN THE MANIFEST IF IT IS ITSELF A `memory_topic`,
+       * and NOT a lookup of the topic that contains it. `null` for a plain note, and also
+       * for a topic whose label the secret screen refuses.
+       *
+       * It is not a containing-topic label because there is nothing to look one up in:
+       * `note_claims` links a topic to CLAIMS, so a plain note has no parent topic in the
+       * graph, and inventing one would be the mint asserting a relationship the data does
+       * not hold. If a containing-topic label is wanted later it needs an EDGE — a
+       * `contains` edge from topic to note — not a change to this projection.
+       *
+       * Documented on the field rather than at the producer (review MED-3): T12 and slice 3
+       * import this type, and they will not read a private `const` in this module.
+       */
       topic: MemoryToolText | null;
       sourceClass: SourceClass;
       spaceId: string;
@@ -411,19 +467,32 @@ const asNoteRow = (r: {
   title: string;
   body: string;
   sourceClass: SourceClass;
-}): MemoryToolRow => ({
-  id: r.id,
-  revision: r.revision,
-  kind: "note",
-  title: mintMemoryTool(fitNoteTitle(r.title)),
-  excerpt: mintMemoryTool(fitStatement(r.body)),
-  topic:
-    r.noteKind === "memory_topic"
-      ? mintMemoryTool(fitTopicTitle(TOPIC_LABELS[r.topicKey ?? ""] ?? r.title))
-      : null,
-  sourceClass: r.sourceClass,
-  spaceId: r.spaceId,
-});
+}): MemoryToolRow => {
+  // Through `topicLabel`, the same rule `listManifestTopics` mints from (review MED-2).
+  // This used to inline the lookup and the clamp and omit the SCREEN, so a title the
+  // manifest refuses to print was handed to the model here instead. `null` therefore means
+  // two things a caller does not have to tell apart: not a topic, or a label no mint prints.
+  //
+  // The note's own `title` above is NOT read-time screened, and that asymmetry is deliberate
+  // rather than an oversight of the same kind: the memory-tool channel governs secrets by
+  // the write-time screen in `insertNoteVersion` raising `sensitive` (=> `owner_only` =>
+  // excluded by `liveNoteForModel`), exactly as the claim arm's `excerpt` does. The extra
+  // read-time screen exists on the topic LABEL because that label is also minted into the
+  // always-on tier, which predates the screen. If read-time screening is owed to every
+  // model-facing text, it is owed to `excerpt` first, and that is a channel-level decision,
+  // not one to make per mint.
+  const label = r.noteKind === "memory_topic" ? topicLabel(r.topicKey, r.title) : null;
+  return {
+    id: r.id,
+    revision: r.revision,
+    kind: "note",
+    title: mintMemoryTool(fitNoteTitle(r.title)),
+    excerpt: mintMemoryTool(fitStatement(r.body)),
+    topic: label ? mintMemoryTool(label) : null,
+    sourceClass: r.sourceClass,
+    spaceId: r.spaceId,
+  };
+};
 
 /**
  * THE memory-tool channel: `prompt_access in ('manifest','memory_search')` ANDed with

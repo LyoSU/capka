@@ -17,6 +17,7 @@ import { pool } from "@/lib/db";
 import { confirmClaim, createClaim, forgetClaim, updateClaim, type Actor } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { countWithheld, listManifestClaims, listManifestTopics, listMemoryToolRows } from "../model-view";
+import { rebuildSearchDocuments } from "../search-documents";
 import { DEFAULT_TOPIC_KEY, TOPIC_TITLE_MAX_CHARS, getOrCreateTopicNote } from "../topics";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -292,6 +293,71 @@ run("vault: the model-facing projection", () => {
       ACTOR,
     );
     expect(await listManifestTopics(SPACE_A)).toEqual([]);
+  });
+
+  it("keeps a topic whose head version is NOT manifest-class out of the always-on tier", async () => {
+    // Review MED-1, spec 2.10: every arm is ANDed with its channel's `prompt_access`
+    // clause, and notes are not the exception named there (fragments are, having no class
+    // of their own). `liveNoteForModel` contributes `sensitive = false`, which excludes
+    // `owner_only` and NOTHING ELSE - so without the clause a topic revised at
+    // `agent_inferred` (=> `memory_search`) printed its title in the tier that ships on
+    // every single turn. Inert while `resolveTopic` is the only writer of a topic version;
+    // reachable the moment T12's rename control revises one.
+    const id = `${P}mssearch-topic`;
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [id, SPACE_A]);
+    await q(
+      `INSERT INTO vault_notes (id, space_id, title, topic_key, kind)
+       VALUES ($1,$2,'Quarterly reporting',$1,'memory_topic')`,
+      [id, SPACE_A],
+    );
+    await q(
+      `INSERT INTO vault_note_versions (id, note_id, revision, title, body_markdown, source_class, provenance)
+       VALUES ($1, $2, 1, 'Quarterly reporting', '', 'agent_inferred', '{}'::jsonb)`,
+      [`${id}-v1`, id],
+    );
+    await createClaim(
+      { spaceId: SPACE_A, statement: "filed under the agent topic", origin: {},
+        sourceClass: testServerClass("owner_authored"), topicNoteId: id },
+      ACTOR,
+    );
+    // The claim itself is manifest-class and IS printed - so an empty topic list here is
+    // about the note's channel and not about the space being empty.
+    expect((await listManifestClaims(SPACE_A)).map((c) => String(c.statement)))
+      .toContain("filed under the agent topic");
+    expect(await listManifestTopics(SPACE_A)).toEqual([]);
+  });
+
+  it("refuses a secret-shaped topic label in BOTH mints, not just the manifest", async () => {
+    // Review MED-2. The label rule - key lookup, clamp, secret screen - is one function,
+    // and this is the assertion that keeps it one: the memory-tool arm used to inline two
+    // of the three and drop the screen, so a title `listManifestTopics` refuses printed to
+    // the model through the other door. Both mints are asked about the SAME row.
+    const id = `${P}secret-both`;
+    const secret = "sk-live-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [id, SPACE_A]);
+    await q(
+      `INSERT INTO vault_notes (id, space_id, title, topic_key, kind)
+       VALUES ($1,$2,$3,$1,'memory_topic')`,
+      [id, SPACE_A, secret],
+    );
+    // The body carries the searchable words, so the QUERY that reaches the note arm does
+    // not have to be the credential itself. The note arm only exists in the ranked branch,
+    // and ranking reads `vault_search_documents` - hence the rebuild.
+    await seedNoteVersion(id, secret, "quarterly ledger notes");
+    await createClaim(
+      { spaceId: SPACE_A, statement: "filed under the secret topic", origin: {},
+        sourceClass: testServerClass("owner_authored"), topicNoteId: id },
+      ACTOR,
+    );
+    await rebuildSearchDocuments(SPACE_A);
+
+    expect(await listManifestTopics(SPACE_A)).toEqual([]);
+    const note = (await listMemoryToolRows([SPACE_A], { queries: ["quarterly ledger"] })).rows
+      .find((r) => r.id === id);
+    // The control: the row IS in the channel, so a null `topic` below is the screen and not
+    // an absent row.
+    expect(note?.kind).toBe("note");
+    expect(note && note.kind === "note" ? note.topic : "row was not a note").toBeNull();
   });
 
   it("clamps a long topic title to TOPIC_TITLE_MAX_CHARS", async () => {
