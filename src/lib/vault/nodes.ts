@@ -59,6 +59,15 @@ export async function insertNode(
  *
  * Idempotent by predicate: both writes are guarded on `deleted_at IS NULL`, so a
  * re-driven forget re-timestamps nothing.
+ *
+ * THE EDGE HALF NOW MOVES REAL ROWS. Until §11.5's dual-write, `vault_edges` was empty in
+ * every live space and this update was a statement nothing had yet exercised outside a
+ * seeded fixture; `claims.ts` now writes a `contains` edge beside every `note_claims` row,
+ * so forgetting one fact closes the edge that filed it. The `note_claims` row deliberately
+ * stays — "forgetting a fact does not mean rewriting where it came from" — which is why
+ * `containsParity` compares only LIVE nodes: the two tables disagree about a forgotten
+ * claim on purpose, and a control that read that as a divergence would fire on ordinary
+ * use.
  */
 export async function deleteNode(nodeId: string, spaceId: string, ex: Ex): Promise<void> {
   const now = new Date();

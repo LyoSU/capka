@@ -234,7 +234,11 @@ run("vault: the node inverses", () => {
     // kills only one of them. With the claim on the `to` side alone, dropping
     // `eq(vaultEdges.fromNodeId, nodeId)` leaves every test green — and that is the half
     // slice 3 produces first, when a `derived_from` edge points FROM a claim.
-    await edge(`${P}e-to`, topic, c.id, "contains");
+    //
+    // `references` on the inbound one, not `contains`: since §11.5 `createClaim` writes the
+    // `contains` edge for this very pair itself, and a hand-seeded second one collides on
+    // `uniq_live_vault_edge`. The dual-written edge is asserted below beside these two.
+    await edge(`${P}e-to`, topic, c.id, "references");
     await edge(`${P}e-from`, c.id, topic, "references");
     const res = await forgetClaim({
       claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR,
@@ -243,6 +247,12 @@ run("vault: the node inverses", () => {
     expect((await nodeOf(c.id))?.deleted_at).not.toBeNull();
     expect(await deletedAt("vault_edges", `${P}e-to`)).not.toBeNull();
     expect(await deletedAt("vault_edges", `${P}e-from`)).not.toBeNull();
+    // And the `contains` edge `createClaim` wrote for the same pair, which nobody seeded:
+    // the cascade has to reach the rows the product itself writes, not only fixtures.
+    expect(
+      (await q(`SELECT count(*)::int AS n FROM vault_edges WHERE space_id = $1 AND deleted_at IS NULL`, [SPACE_A]))
+        .rows[0].n,
+    ).toBe(0);
     // The TOPIC survives: forgetting a fact is not forgetting where it was filed.
     expect((await nodeOf(topic))?.deleted_at).toBeNull();
   });
@@ -284,7 +294,9 @@ run("vault: the node inverses", () => {
       { spaceId: SPACE_A, statement: "the lease renews in April", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored"), topicNoteId: topic },
       ACTOR,
     );
-    await edge(`${P}e-idem`, topic, c.id, "contains");
+    // `references`, for the reason above: `createClaim` already holds the live `contains`
+    // edge for this pair.
+    await edge(`${P}e-idem`, topic, c.id, "references");
     const res = await forgetClaim({
       claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR,
     });

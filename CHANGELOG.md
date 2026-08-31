@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Topic membership is now written to `vault_edges` alongside `note_claims`; existing memberships are back-filled at boot, a parity check runs on every write outside production, and `POST /api/admin/vault/reindex` reports it as `containsParity`.
 - Notes are searchable by the assistant: `memory_search` now returns note rows beside facts, filtered by the note's own trust class.
 - Notes now store their body in immutable revisions (`vault_note_versions`); the backfill runs at boot and needs no operator action.
 - New admin-only `POST /api/admin/vault/reindex` (body `{"spaceId": "..."}`) rebuilds one space's memory search index.

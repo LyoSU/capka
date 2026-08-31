@@ -492,11 +492,10 @@ run("vault: writes into a retired space", () => {
        VALUES ($1, $2, 'a document', '{"type":"upload"}'::jsonb, $3)`,
       [src, projectSpaceId, OWNER],
     );
-    await q(
-      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
-       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
-      [`${P}e-retire`, projectSpaceId, topic, c.id],
-    );
+    // No hand-seeded edge any more: since §11.5 `createClaim` writes the `contains` edge
+    // for this pair itself, and a second one collides on `uniq_live_vault_edge`. Asserted
+    // BEFORE the retire so the zero below is not vacuous — the row it must remove exists.
+    expect(await count("vault_edges", "space_id = $1 AND to_node_id = $2 AND deleted_at IS NULL", [projectSpaceId, c.id])).toBe(1);
 
     await retireProjectSpace(PROJ);
 
@@ -523,15 +522,12 @@ run("vault: writes into a retired space", () => {
     // guards removed; against a 2020 tombstone an unguarded re-drive moves by years.
     const { projectSpaceId } = await spaces();
     const topic = await getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY);
-    const c = await createClaim(
+    await createClaim(
       { spaceId: projectSpaceId, statement: "the lease renews in April", origin: { kind: "test" }, topicNoteId: topic, sourceClass: testServerClass("owner_authored") },
       actor,
     );
-    await q(
-      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
-       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
-      [`${P}e-redrive`, projectSpaceId, topic, c.id],
-    );
+    // The edge comes from `createClaim`'s dual-write, not from a fixture — see the test
+    // above. The counts below pin it.
 
     await retireProjectSpace(PROJ);
     const backdated = "2020-01-01 00:00:00";

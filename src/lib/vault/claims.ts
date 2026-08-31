@@ -7,6 +7,7 @@ import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from 
 // Runtime, and it is safe: `grounding.ts` imports only the leaf `quote-match.ts` plus a
 // TYPE from here, so nothing travels back at runtime. `horizonFor` is called INSIDE both
 // inserts rather than passed in — see `ClaimInput.sourceClass`.
+import { assertContainsParity, linkNodes, unlinkContainsInto } from "./edges";
 import { horizonFor, type ServerClass } from "./grounding";
 import { deleteNode, insertNode } from "./nodes";
 import { projectClaimDoc } from "./search-documents";
@@ -328,20 +329,6 @@ export function fitSlotKey(slotKey: string | null | undefined): string | undefin
 }
 
 /**
- * "A topic and the claim filed under it live in the same space." Both foreign keys
- * on `note_claims` are satisfied by a cross-space pair, so the row is accepted and
- * the other space's topic starts counting a claim it may not even be allowed to
- * show — and plan D's topic projection turns that count into leaked content.
- * Neither the schema nor a foreign key can express the invariant, so the module that
- * owns the table enforces it.
- *
- * Called from ALL THREE sites that write `note_claims` (create, the successor's
- * fallback topic, and `attachToTopic`): an unguarded fourth would mean the invariant
- * simply does not hold. Throwing rather than skipping — a caller reaching across
- * spaces is a bug, and a silently dropped attachment is a fact missing from the
- * screen with nothing to explain why.
- */
-/**
  * "A retired space gains no new claims." Stands on BOTH inserts into `vault_claims`
  * rather than on the candidate ledger alone, because a rule placed on one entrance out
  * of two is how this feature has already been wrong twice: the secret screen sat on the
@@ -372,6 +359,31 @@ async function assertSpaceLive(spaceId: string, ex: Ex): Promise<void> {
   }
 }
 
+/**
+ * "A topic and the claim filed under it live in the same space." Both foreign keys
+ * on `note_claims` are satisfied by a cross-space pair, so the row is accepted and
+ * the other space's topic starts counting a claim it may not even be allowed to
+ * show — and plan D's topic projection turns that count into leaked content.
+ * Neither the schema nor a foreign key can express the invariant, so the module that
+ * owns the table enforces it.
+ *
+ * Called from ALL THREE sites that write `note_claims` (create, the successor's
+ * fallback topic, and `attachToTopic`): an unguarded fourth would mean the invariant
+ * simply does not hold. Throwing rather than skipping — a caller reaching across
+ * spaces is a bug, and a silently dropped attachment is a fact missing from the
+ * screen with nothing to explain why.
+ *
+ * Since §11.5 it is the pre-check for TWO writes at each of those sites, not one: the
+ * `note_claims` row and the `contains` edge beside it. The edge's own composite FKs would
+ * refuse a cross-space pair on their own — that is the property `vault_nodes`'
+ * `unique (space_id, id)` exists for — so a caller that skipped this guard would now get a
+ * 23503 from the second write instead of a clean refusal from the first, after the
+ * membership row was already in. The guard is still what makes the pair coherent; the FK
+ * is a backstop that fires later and reads worse.
+ *
+ * (This docstring sat above `assertSpaceLive` for three slices, detached from the function
+ * it describes. It is here now.)
+ */
 async function assertTopicInSpace(noteId: string, spaceId: string, ex: Ex): Promise<void> {
   const [note] = await ex
     .select({ spaceId: vaultNotes.spaceId })
@@ -434,6 +446,14 @@ export async function createClaim(
   if (input.topicNoteId) {
     await assertTopicInSpace(input.topicNoteId, input.spaceId, ex);
     await ex.insert(noteClaims).values({ noteId: input.topicNoteId, claimId: id });
+    // The dual-write of §11.5, in the same transaction as the row it mirrors — a topic
+    // membership written to one table and not the other is the divergence the whole
+    // dual-write period exists to make impossible rather than merely detectable.
+    await linkNodes(
+      { spaceId: input.spaceId, from: input.topicNoteId, to: id, relation: "contains", createdBy: actor },
+      ex,
+    );
+    await assertContainsParity(input.spaceId, ex);
   }
   await ex.insert(auditEvents).values({
     id: nanoid(),
@@ -655,12 +675,29 @@ export async function updateClaim(
     .set({ claimId: id })
     .where(eq(noteClaims.claimId, claimId))
     .returning({ noteId: noteClaims.noteId });
+  // The edge half of that same move, and it is the same SHAPE deliberately: one set-based
+  // close of everything that pointed at the predecessor, then one link per row the UPDATE
+  // above actually moved. Reading `moved` rather than the edges is what keeps the two
+  // halves from being two answers — the membership table decides which topics travel, and
+  // the graph copies it.
+  await unlinkContainsInto(claimId, prev.spaceId, ex);
+  for (const { noteId } of moved) {
+    await linkNodes({ spaceId: prev.spaceId, from: noteId, to: id, relation: "contains", createdBy: actor }, ex);
+  }
   // The predecessor was in no topic at all — inheriting "none" would make the
   // successor invisible to the note projection, so the fallback topic applies.
   if (!moved.length && patch.topicNoteId) {
     await assertTopicInSpace(patch.topicNoteId, prev.spaceId, ex);
     await ex.insert(noteClaims).values({ noteId: patch.topicNoteId, claimId: id });
+    await linkNodes(
+      { spaceId: prev.spaceId, from: patch.topicNoteId, to: id, relation: "contains", createdBy: actor },
+      ex,
+    );
   }
+  // At the END of the move, never between its two halves: a supersede legitimately has a
+  // moment in which the predecessor's edges are closed and the successor's are not yet
+  // open, and a check placed inside the writer would fire on that window.
+  await assertContainsParity(prev.spaceId, ex);
   await ex.insert(auditEvents).values({
     id: nanoid(),
     spaceId: prev.spaceId,
@@ -898,8 +935,13 @@ export async function confirmClaim(
  *  This ADDS a topic, it does not move one: a human-curated section stays where
  *  it is (unlike the fallback topic in `updateClaim`, which applies only when no
  *  attachment survived at all). Lives in this module for the same reason as
- *  `confirmClaim`: `note_claims` is written only by whoever owns it. */
+ *  `confirmClaim`: `note_claims` is written only by whoever owns it.
+ *
+ *  A TRANSACTION now, for the same reason the other three moves are one: since §11.5 it
+ *  writes two rows, and without a transaction that is not a move but two autocommits, with
+ *  the membership row able to survive a failed edge. */
 export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db): Promise<void> {
+  if (ex === db) return db.transaction((tx) => attachToTopic(claimId, noteId, tx));
   // The claim's space has to be read: unlike the other two sites, this signature
   // carries only the two ids, and the invariant is about the pair.
   const [claim] = await ex
@@ -910,6 +952,15 @@ export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db
   if (!claim) throw new Error(`claim ${claimId} does not exist`);
   await assertTopicInSpace(noteId, claim.spaceId, ex);
   await ex.insert(noteClaims).values({ noteId, claimId }).onConflictDoNothing();
+  // `system`, and not because the actor is unknown: this signature takes none, and it takes
+  // none because it writes no audit event either — the two arrive together the day a caller
+  // that knows who asked for the attach appears. Inventing a user here would put a name on
+  // the edge that the audit log could not corroborate.
+  await linkNodes(
+    { spaceId: claim.spaceId, from: noteId, to: claimId, relation: "contains", createdBy: { kind: "system" } },
+    ex,
+  );
+  await assertContainsParity(claim.spaceId, ex);
 }
 
 export async function attachEvidence(claimId: string, ev: EvidenceInput, ex: Ex = db): Promise<void> {
