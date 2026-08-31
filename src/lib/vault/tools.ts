@@ -224,7 +224,7 @@ export async function makeVaultMemoryTools(ctx: {
         // A response that hits the cap says how many it left out. A silent truncation reads
         // to the model as "that is all there is", which is the same wrong conclusion the
         // note below exists to prevent, arrived at from the other direction.
-        const more = omitted ? `${omitted} more match${omitted === 1 ? "" : "es"} were not shown.` : "";
+        const more = omitted ? `${omitted} more ${omitted === 1 ? "match was" : "matches were"} not shown.` : "";
         // "No lexical match is not evidence of absence" ships on EVERY response, not only
         // empty ones: an agent that reads it only on zero results has already concluded
         // absence on a thin result set.

@@ -439,12 +439,12 @@ describe("memory_search", () => {
   });
 
   it("counts one left-out match in the singular, and prints nothing when none were", async () => {
-    // The NOUN inflects and the verb does not — "1 more match were not shown." — which is
-    // the brief's literal string and is pinned here rather than quietly corrected, so that
-    // whoever fixes the wording changes it in one place with a test naming the old form.
+    // Noun and verb inflect together — "1 more match was", "10 more matches were". The
+    // singular used to read "1 more match were not shown."; the string is pinned in both
+    // numbers so a future edit to one form cannot silently unfix the other.
     listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 1 });
     const tools = await make();
-    expect(await run(tools.memory_search, { query: "fact" })).toContain("1 more match were not shown.");
+    expect(await run(tools.memory_search, { query: "fact" })).toContain("1 more match was not shown.");
     listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
     expect(await run(tools.memory_search, { query: "fact" })).not.toContain("not shown");
   });
