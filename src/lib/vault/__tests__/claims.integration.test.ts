@@ -995,10 +995,12 @@ run("vault claims", () => {
     expect(by[never.id]).toBeNull();
     // A WINDOW, not an equality: `horizonFor` reads the clock, so the honest assertion is
     // the one a 90-day horizon passes and a 30- or 365-day one fails.
-    expect(by[armed.id]).not.toBeNull();
-    const days = (by[armed.id]!.getTime() - Date.now()) / 86_400_000;
-    expect(days).toBeGreaterThan(HORIZON_DAYS - 1);
-    expect(days).toBeLessThan(HORIZON_DAYS + 1);
+    const daysOut = (at: Date | null) => {
+      expect(at).not.toBeNull();
+      return (at!.getTime() - Date.now()) / 86_400_000;
+    };
+    expect(daysOut(by[armed.id])).toBeGreaterThan(HORIZON_DAYS - 1);
+    expect(daysOut(by[armed.id])).toBeLessThan(HORIZON_DAYS + 1);
 
     // And a supersede RE-ARMS from the successor's own class rather than inheriting the
     // predecessor's null — the second `horizonFor` call site, which the create case above
@@ -1013,6 +1015,10 @@ run("vault claims", () => {
     });
     if (!res.ok) throw new Error("unreachable");
     const successor = await q(`SELECT expires_at FROM vault_claims WHERE id = $1`, [res.id]);
-    expect(successor.rows[0].expires_at).not.toBeNull();
+    // The SAME window as the create half, not merely non-null: a supersede armed at 30 days
+    // or at 3650 is exactly the drift between two call sites this test exists to catch, and
+    // an existence check cannot see it.
+    expect(daysOut(successor.rows[0].expires_at)).toBeGreaterThan(HORIZON_DAYS - 1);
+    expect(daysOut(successor.rows[0].expires_at)).toBeLessThan(HORIZON_DAYS + 1);
   });
 });
