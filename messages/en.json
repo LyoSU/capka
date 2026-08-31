@@ -1002,6 +1002,7 @@
     "memory": {
       "title": "Agent memory",
       "subtitle": "What the AI remembers across conversations. It records these facts itself as you work.",
+      "searchImproved": "The assistant still proposes facts for you to confirm. Memory search is now more accurate.",
       "saveFailed": "Failed to save memory",
       "loadError": "Could not load memory. Please refresh the page.",
       "enabled": "Remember things about me",
@@ -1014,7 +1015,7 @@
       "howToSave": "The assistant saves what you tell it directly: say “Remember that we send our reports on Fridays” in any chat. Anything it merely works out on its own is set aside below instead.",
       "searchPlaceholder": "Search facts",
       "noGrouping": "Everything you have approved is here, newest first. Grouping facts by subject isn't available yet — use the search box to find the one you need.",
-      "searchEmpty": "Nothing found. Try other words.",
+      "searchEmpty": "Search looks for the words you type. If a fact is saved in different words, it will not be found.",
       "showingSome": "Showing {shown} of {total, plural, one {# fact} other {# facts}}. Use the search box to narrow the list.",
       "fromChat": "from the chat \"{chat}\", {date}",
       "fromChats": "from {count} conversations, most recently \"{chat}\", {date}",

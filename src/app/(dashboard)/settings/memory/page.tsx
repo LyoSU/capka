@@ -251,7 +251,7 @@ export default function MemoryPage() {
   const searchable = !!scopes && (!!query || scopes.some((s) => s.factsTotal));
 
   return (
-    <SettingsPage title={t("title")} description={t("subtitle")}>
+    <SettingsPage title={t("title")} description={`${t("subtitle")} ${t("searchImproved")}`}>
       <SettingsGroup>
         <SettingsRow
           id="memory-enabled"
