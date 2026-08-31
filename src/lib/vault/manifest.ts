@@ -1,8 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
-import { listModelClaims, modelVisible, type ModelText } from "./model-view";
-import { TOPIC_LABELS } from "./spaces";
+import { listManifestClaims, listManifestTopics, type ManifestText } from "./model-view";
 
 /** Up to 10 facts per section, taken from the ONE model-facing projection.
  *
@@ -11,54 +7,14 @@ import { TOPIC_LABELS } from "./spaces";
  *  were wrong at different times — the search filter was missing the quarantine half for
  *  a whole plan — which is the twelfth instance of this feature's recurring defect: a
  *  rule at one entrance while a second walks past it. There is now one entrance, and it
- *  hands back `ModelText`, so this file cannot render a statement it did not get from
+ *  hands back `ManifestText`, so this file cannot render a statement it did not get from
  *  there without failing `tsc`.
  *
  *  Ordering matters for the byte-identity requirement as much as for correctness: the
  *  projection orders by `recorded_at DESC, id`, the `id` tiebreak existing precisely
  *  because several claims landing in one transaction share a `recorded_at`. */
-async function recentFacts(spaceId: string): Promise<ModelText[]> {
-  return (await listModelClaims(spaceId)).slice(0, 10).map((c) => c.statement);
-}
-
-/** Topic counters — confirmed, non-sensitive heads ONLY. The manifest is what
- *  the agent is meant to rely on; a nonzero count next to a topic name would
- *  leak "something is known here" even with the actual text redacted, which
- *  is exactly the kind of thing the "never include sensitive/unverified"
- *  requirement is meant to rule out. `LEFT JOIN` on the claims, not `INNER`
- *  — a topic note with zero qualifying heads (all sensitive, all
- *  unverified, or genuinely empty) stays in the list showing `0` rather than
- *  disappearing outright. That's a deliberate choice: Plan A always writes
- *  into `DEFAULT_TOPIC_KEY` (`spaces.ts`), so this case is rare in production, but a
- *  topic vanishing from the manifest the moment its one fact turns sensitive
- *  would be a much stranger surprise than seeing it at `0`.
- */
-async function topicCounts(spaceId: string): Promise<{ title: string; count: number }[]> {
-  const rows = await db
-    .select({
-      topicKey: vaultNotes.topicKey,
-      title: vaultNotes.title,
-      count: sql<number>`count(${vaultClaims.id})::int`,
-    })
-    .from(vaultNotes)
-    .leftJoin(noteClaims, eq(noteClaims.noteId, vaultNotes.id))
-    // `modelVisible()` — the same predicate `listModelClaims` selects on, not a
-    // hand-written copy of it. A count is a projection of claim text too: a nonzero
-    // number beside a topic name tells the model something is known there, which is
-    // exactly what withholding the statement exists to prevent.
-    .leftJoin(vaultClaims, and(eq(vaultClaims.id, noteClaims.claimId), modelVisible()))
-    .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.kind, "memory_topic")))
-    .groupBy(vaultNotes.id, vaultNotes.topicKey, vaultNotes.title)
-    // Order must be deterministic (the byte-identity requirement depends on
-    // it): `id` (nanoid) is the only stable key available here — `createdAt`
-    // isn't guaranteed to differ at millisecond resolution between topics
-    // inserted inside the same transaction.
-    .orderBy(asc(vaultNotes.id));
-  // The name the MODEL reads, resolved from the key rather than from the stored title.
-  // The title is a display seed a rename control (plan D2) may overwrite, and the
-  // manifest has to be byte-identical across turns — so it renders the label table,
-  // falling back to the stored title for a user-named topic that has no label.
-  return rows.map((r) => ({ title: TOPIC_LABELS[r.topicKey ?? ""] ?? r.title, count: r.count }));
+async function recentFacts(spaceId: string): Promise<ManifestText[]> {
+  return (await listManifestClaims(spaceId)).slice(0, 10).map((c) => c.statement);
 }
 
 /** Every line the model reads here is prompt content, not markup the model
@@ -77,7 +33,11 @@ async function topicCounts(spaceId: string): Promise<{ title: string; count: num
  *  on the writers themselves, and the projection re-applies it for rows that
  *  predate it — so this fence may keep assuming one bounded line.
  */
-function spaceBlock(header: string, topics: { title: string; count: number }[], facts: ModelText[]): string | null {
+function spaceBlock(
+  header: string,
+  topics: { title: ManifestText; count: number }[],
+  facts: ManifestText[],
+): string | null {
   // `null`, not a bare header, when the space holds nothing worth saying. The
   // manifest sits in the UNCACHED volatile tier and is rebuilt every turn, so an
   // empty headed section is a cost paid on every single turn of every account that
@@ -85,17 +45,11 @@ function spaceBlock(header: string, topics: { title: string; count: number }[], 
   // omitted its memory block when the document was empty; keeping the header would
   // make the cutover a regression that bills for itself forever.
   //
-  // The gate is "has anything to SAY", which is not the same as "has any rows". A
-  // migrated-but-EMPTY legacy document creates the default topic with no claims in
-  // it, so a plain `topics.length` test still prints `Topics:` / `- General (0)` —
-  // telling the model a topic exists and holds nothing, the most misleading output
-  // of the three and the reason this counts nonzero topics rather than topics.
-  //
-  // Zero-count topics are still printed INSIDE a block that has other content:
-  // that is the deliberate choice above (a topic whose only fact just turned
-  // sensitive should not vanish), and it is untouched. This decides only whether
-  // there is a block at all.
-  if (!facts.length && !topics.some((t) => t.count > 0)) return null;
+  // The gate is "has anything to SAY". It used to read `topics.some(t => t.count > 0)`
+  // because `topicCounts` returned zero-count topics; `listManifestTopics` applies that
+  // gate inside the mint now (a count is claim text too), so a topic that reaches here at
+  // all is one with something behind it.
+  if (!facts.length && !topics.length) return null;
   const lines = [header];
   if (topics.length) lines.push("", "Topics:", ...topics.map((t) => `- ${t.title} (${t.count})`));
   if (facts.length) lines.push("", "Recent facts:", ...facts.map((s) => `- «${s}»`));
@@ -141,7 +95,7 @@ export async function buildMemoryManifest(args: {
   const blocks: string[] = [];
 
   const [userTopics, userFacts] = await Promise.all([
-    topicCounts(args.userSpaceId),
+    listManifestTopics(args.userSpaceId),
     recentFacts(args.userSpaceId),
   ]);
   const userBlock = spaceBlock("## User memory", userTopics, userFacts);
@@ -149,7 +103,7 @@ export async function buildMemoryManifest(args: {
 
   if (args.projectSpaceId) {
     const [projectTopics, projectFacts] = await Promise.all([
-      topicCounts(args.projectSpaceId),
+      listManifestTopics(args.projectSpaceId),
       recentFacts(args.projectSpaceId),
     ]);
     const projectBlock = spaceBlock("## Project memory", projectTopics, projectFacts);

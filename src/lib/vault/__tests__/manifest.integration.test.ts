@@ -27,6 +27,7 @@ const OWNER = `${P}owner`;
 const PROJ = `${P}proj`;
 const SPACE_A = `${P}space-a`; // user
 const SPACE_B = `${P}space-b`; // project
+const ACTOR = { kind: "user", id: OWNER } as const;
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
@@ -344,6 +345,73 @@ run("vault: memory manifest", () => {
     const manifest = await buildMemoryManifest({ userSpaceId: SPACE_A, projectSpaceId: SPACE_B });
     expect(manifest).not.toContain("hunter2secret");
     expect(manifest).toContain("Deadline on Friday");
+  });
+
+  it("renders a byte-identical manifest across the channel cutover", async () => {
+    // M15. The risk is the PREDICATE changing which rows reach the prompt, not the row
+    // count. This file already pins byte identity; the fixture below is the one whose
+    // bytes must not move at all: confirmed non-sensitive heads in the default topic map
+    // to legacy_confirmed/manifest, which is exactly the set `review_status = 'confirmed'
+    // AND sensitive = false` admitted before.
+    const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    for (const s of ["alpha fact", "beta fact"]) {
+      await seedConfirmedClaim(
+        { spaceId: SPACE_A, statement: s, origin: {}, sourceClass: "legacy_confirmed", topicNoteId: topic },
+        ACTOR,
+      );
+    }
+    const built = await buildMemoryManifest({ userSpaceId: SPACE_A });
+    expect(built).toBe(
+      [
+        "## User memory",
+        "",
+        "Topics:",
+        "- General (2)",
+        "",
+        "Recent facts:",
+        "- «beta fact»",
+        "- «alpha fact»",
+        "",
+        "Use memory_search before assuming facts about the user or project; propose new facts with memory_propose.",
+      ].join("\n"),
+    );
+  });
+
+  it("changes in exactly the one documented way: a zero-count topic no longer prints", async () => {
+    // The second fixture. Before the cutover `topicCounts` returned every memory topic and
+    // printed `- General (0)`; `listManifestTopics` gates on `count > 0` inside the mint,
+    // because a count is a projection of claim text. One confirmed head, one unverified
+    // head and one sensitive head: only the first is manifest-class, and the second topic
+    // holding only the other two disappears rather than printing a zero.
+    const topicA = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    const topicB = `${P}topic-b`;
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [topicB, SPACE_A]);
+    await q(
+      `INSERT INTO vault_notes (id, space_id, title, topic_key, kind)
+       VALUES ($1,$2,'Reporting',$1,'memory_topic')`,
+      [topicB, SPACE_A],
+    );
+    await seedConfirmedClaim(
+      { spaceId: SPACE_A, statement: "confirmed one", origin: {}, sourceClass: "legacy_confirmed",
+        topicNoteId: topicA },
+      ACTOR,
+    );
+    await createClaim(
+      { spaceId: SPACE_A, statement: "unverified one", origin: {}, sourceClass: "agent_inferred",
+        topicNoteId: topicB },
+      ACTOR,
+    );
+    await createClaim(
+      { spaceId: SPACE_A, statement: "sensitive one", origin: {}, sensitive: true,
+        sourceClass: "legacy_confirmed", topicNoteId: topicB },
+      ACTOR,
+    );
+    const built = await buildMemoryManifest({ userSpaceId: SPACE_A });
+    expect(built).toContain("- General (1)");
+    expect(built).not.toContain("Reporting");
+    expect(built).toContain("- «confirmed one»");
+    expect(built).not.toContain("unverified one");
+    expect(built).not.toContain("sensitive one");
   });
 
   it("a fact in the project space is visible only in the project section, not the user section", async () => {

@@ -148,6 +148,17 @@ export const DEFAULT_TOPIC_KEY = "general";
  *  topic (plan D2) will have. */
 export const TOPIC_LABELS: Record<string, string> = { [DEFAULT_TOPIC_KEY]: "General" };
 
+/** A topic title is destined for the manifest, which is a byte-budgeted tier, so it is
+ *  bounded at the one place that renders it and at every writer that produces one. */
+export const TOPIC_TITLE_MAX_CHARS = 64;
+
+/** Single-line, whitespace-collapsed, clamped. Not `norm`: this is what a PERSON reads,
+ *  so case and punctuation survive — `norm` answers "is this the same wording", which is
+ *  a different question with a different frozenness requirement. */
+export function fitTopicTitle(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, TOPIC_TITLE_MAX_CHARS);
+}
+
 /** A memory topic is a note of kind `memory_topic`, identified by `topic_key`; the
  *  partial unique index on (space, key) is scoped to that kind, so it is the same race
  *  and the same resolution as `getOrCreateSpace`.

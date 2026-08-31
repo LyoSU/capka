@@ -91,3 +91,56 @@ describe("the model-facing readers go through one projection", () => {
     expect(manifest).not.toMatch(/\bnotCarried\b/);
   });
 });
+
+describe("the three channels", () => {
+  it("mints each brand in exactly one module, and never widens between them", () => {
+    // A wrapper object would be constructible by anyone; three distinct `unique symbol`s
+    // put the discrimination in the type system, where a bypass fails tsc. What a type
+    // cannot catch is a deliberate cast, so that is what this asserts.
+    const files = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/claims.ts"];
+    // `EvidenceText` is expected to be minted NOWHERE in this slice: the mint that
+    // produces it (`listEvidenceRows`) ships with its only reader, `knowledge_search`.
+    // The assertion is the same one in both cases — nobody but the owner casts — and
+    // writing the empty list out is what keeps that from being read as "the mint moved".
+    const expected: Record<string, string[]> = {
+      ManifestText: [OWNER],
+      MemoryToolText: [OWNER],
+      EvidenceText: [],
+    };
+    for (const [brand, want] of Object.entries(expected)) {
+      const casters = files.filter((f) => new RegExp(`as ${brand}\\b`).test(code(read(f))));
+      expect(casters).toEqual(want);
+    }
+    // No widening function: promotion must be impossible to express, not discouraged.
+    expect(code(read(OWNER))).not.toMatch(/function\s+widen|toManifestText|asManifest\b/);
+  });
+
+  it("keeps the liveness arms side by side in the owner module and nowhere else", () => {
+    // The invariant is not "one function"; it is "one module owns liveness". A fourth node
+    // kind has to add a fourth arm HERE, beside the others, which is what makes the
+    // omission visible - a bare shared fragment typed to one table was not that.
+    const owner = code(read(OWNER));
+    expect(owner).toMatch(/function liveClaimForModel\(/);
+    expect(owner).toMatch(/function liveNoteForModel\(/);
+    const others = [...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
+    for (const f of others) {
+      expect(code(read(f))).not.toMatch(/liveClaimForModel\s*\(\s*\)\s*\{|liveNoteForModel\s*\(\s*\)\s*\{/);
+    }
+  });
+
+  it("writes the prompt_access channel clause in exactly one module", () => {
+    // The SQL half, the same shape as the review_status assertion above it: a second
+    // `prompt_access = 'manifest'` written out by hand somewhere is a second copy of the
+    // rule even when it is correct today.
+    const files = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
+    const writers = files.filter((f) => /promptAccess/.test(code(read(f))));
+    expect(writers).toEqual([OWNER]);
+  });
+
+  it("finds the files at all", () => {
+    // The control, extended: a test pointed at a renamed export finds no violations and
+    // passes for the wrong reason.
+    expect(read(OWNER)).toContain("export async function listManifestClaims");
+    expect(read(OWNER)).toContain("export async function listManifestTopics");
+  });
+});

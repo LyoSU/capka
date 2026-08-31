@@ -59,8 +59,14 @@ const GONE = "That claim is no longer there (forgotten or replaced). Run memory_
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const opts = (toolCallId: string) => ({ toolCallId, messages: [] }) as any;
 
-/** A head as `findCurrentHead` returns it — carrying `reviewStatus` and `sensitive`,
- *  because `modelTextOf` reads both to decide whether the words may be repeated. */
+/** A head as `findCurrentHead` returns it — carrying `promptAccess`, because that is what
+ *  `modelTextOf` reads to decide whether the words may be repeated.
+ *
+ *  `promptAccess` is DERIVED here rather than defaulted, and it has to be: the column is
+ *  GENERATED in Postgres, so a fixture that let a caller set `sensitive: true` while
+ *  leaving `promptAccess: "manifest"` would build a row the database cannot produce, and
+ *  a fixture that simply omitted it made every one of these assertions pass because
+ *  `undefined` matches no channel — an absence that reads exactly like withholding. */
 const head = (
   over: Partial<{
     id: string;
@@ -69,17 +75,21 @@ const head = (
     slotKey: string | null;
     reviewStatus: string;
     sensitive: boolean;
+    promptAccess: string;
   }> = {},
-) => ({
-  id: "c1",
-  revision: 1,
-  statement: "The client pays in hryvnia",
-  slotKey: null,
-  value: null,
-  reviewStatus: "confirmed",
-  sensitive: false,
-  ...over,
-});
+) => {
+  const base = {
+    id: "c1",
+    revision: 1,
+    statement: "The client pays in hryvnia",
+    slotKey: null,
+    value: null,
+    reviewStatus: "confirmed",
+    sensitive: false,
+    ...over,
+  };
+  return { ...base, promptAccess: over.promptAccess ?? (base.sensitive ? "owner_only" : "manifest") };
+};
 
 /** A row as the model-facing projection hands it back: already filtered to
  *  head/confirmed/not-sensitive, which is why this shape carries no flags to filter on. */
@@ -293,15 +303,35 @@ describe("memory_update — records a correction, writes nothing", () => {
     expect(out).not.toContain("March");
   });
 
-  it("a mismatch on a QUARANTINED head withholds the text too", async () => {
-    // `findCurrentHead` has no review filter — it answers "does this chain exist" —
-    // so the rule has to hold on the sentence. It does, via `modelTextOf`, which is the
-    // same decision the manifest and search make.
-    findCurrentHead.mockResolvedValue(head({ revision: 2, statement: "not yet approved", reviewStatus: "unverified" }));
+  it("a mismatch on an OFF-CHANNEL head withholds the text too", async () => {
+    // `findCurrentHead` has no channel filter — it answers "does this chain exist" — so
+    // the rule has to hold on the sentence. It does, via `modelTextOf`, which is the same
+    // decision the manifest and search make.
+    //
+    // The premise moved with the cutover and the test moved with it rather than keeping
+    // its old name over a new rule: this used to be a QUARANTINED head (`unverified`),
+    // and an unverified head is `agent_inferred` -> `memory_search`, which a memory TOOL
+    // reply may legitimately repeat. What may not appear in a tool reply is a channel
+    // below it — `knowledge_search`, the class an untrusted document produces.
+    findCurrentHead.mockResolvedValue(
+      head({ revision: 2, statement: "read off a web page", promptAccess: "knowledge_search" }),
+    );
     const tools = await make();
     const out = await run(tools.memory_update, { claim_id: "c1", expected_revision: 1, statement: "New wording" });
     expect(out).toContain("revision 2");
-    expect(out).not.toContain("not yet approved");
+    expect(out).not.toContain("read off a web page");
+  });
+
+  it("a mismatch on a memory_search-class head DOES repeat the text", async () => {
+    // The control beside it. Asserting only the absence would pass just as well if
+    // `modelTextOf` returned `null` for everything — which is exactly the state this
+    // suite was in for one run, because the fixture had no `promptAccess` at all.
+    findCurrentHead.mockResolvedValue(
+      head({ revision: 2, statement: "proposed by the agent", promptAccess: "memory_search" }),
+    );
+    const tools = await make();
+    const out = await run(tools.memory_update, { claim_id: "c1", expected_revision: 1, statement: "New wording" });
+    expect(out).toContain("proposed by the agent");
   });
 
   it("someone else's claim reads as nonexistent and records nothing", async () => {

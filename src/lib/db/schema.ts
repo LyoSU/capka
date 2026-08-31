@@ -1120,7 +1120,7 @@ export const vaultClaims = pgTable("vault_claims", {
    * so `expires_at`/`retired_at` are ANDed into the model-facing predicate in
    * `model-view.ts` instead.
    */
-  promptAccess: text("prompt_access")
+  promptAccess: text("prompt_access", { enum: ["manifest", "memory_search", "knowledge_search", "owner_only"] })
     .notNull()
     .generatedAlwaysAs(
       sql`case when sensitive then 'owner_only'

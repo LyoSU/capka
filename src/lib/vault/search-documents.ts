@@ -170,12 +170,19 @@ export async function unprojectSpace(spaceId: string, ex: Ex): Promise<void> {
  * whole-instance job.
  *
  * ACCEPTED, and recorded rather than discovered: this loops one round trip per claim and
- * per note, while the boot migration does the same mapping set-based in SQL. Two
- * implementations of one mapping is exactly this repo's recurring defect, and the reason
- * it is accepted here is that the SQL copy runs ONCE, at a migration, and the rebuild test
- * ("reproduces exactly what the writers wrote") compares rows rather than counts - so a
- * divergence fails a test rather than becoming a silent second answer. If a third producer
- * ever appears, collapse them; do not add it.
+ * per note, while the boot migration (`drizzle/0064`) does the same mapping set-based in
+ * SQL. Two implementations of one mapping is exactly this repo's recurring defect.
+ *
+ * WHAT THE REBUILD TEST ACTUALLY PROVES, since this docstring used to claim more. Its
+ * fixture rows are written by the TS writers and then compared against what THIS function
+ * writes - both sides are the same TS mapping, so it proves that mapping self-consistent
+ * (a rebuild reproduces a live projection row for row) and says NOTHING about the SQL
+ * copy. What covers the SQL copy is a different, one-shot fact: it was compared against
+ * the live data at migration time, and being a migration it cannot run a second time, so
+ * it has no later chance to diverge. `0064`'s own header still credits the test with more
+ * than that; it is an applied migration and its comment stays as written.
+ *
+ * If a third producer ever appears, collapse them; do not add it.
  */
 export async function rebuildSearchDocuments(spaceId: string, ex?: Ex): Promise<{ written: number }> {
   if (!ex || ex === db) return db.transaction((tx) => rebuildSearchDocuments(spaceId, tx));

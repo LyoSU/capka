@@ -18,6 +18,10 @@ export type ClaimHead = {
   value: unknown;
   reviewStatus: string;
   sensitive: boolean;
+  /** The channel that may ever show this row to a model — GENERATED, so it is read here
+   *  and written nowhere. `modelTextOf` is its only reader: the lost-CAS reply has to make
+   *  the same decision as the mints, off a head the caller already had in hand. */
+  promptAccess: "manifest" | "memory_search" | "knowledge_search" | "owner_only";
 };
 
 /**
@@ -73,6 +77,7 @@ const HEAD = {
   value: vaultClaims.value,
   reviewStatus: vaultClaims.reviewStatus,
   sensitive: vaultClaims.sensitive,
+  promptAccess: vaultClaims.promptAccess,
 };
 
 /** The version chain cannot cycle: `uniq_vclaims_one_successor` allows at most
@@ -820,8 +825,23 @@ export async function confirmClaim(
   claimId: string,
   sensitive: boolean,
   actor: Actor,
-  ex: Ex = db,
+  ex?: Ex,
 ): Promise<boolean> {
+  // TWO statements now, not one — the flip and the re-projection — so without a
+  // transaction this stopped being a move and became a pair of autocommits: a crash
+  // between them leaves a confirmed, possibly newly-sensitive head whose search document
+  // still carries the OLD `model_text`, which is a withheld statement left matchable in
+  // the model lane. The `!ex || ex === db` shape is the one `getOrCreateTopicNote`
+  // documents: `Ex` permits passing the pool explicitly, and "omitted" and "explicit db"
+  // must not mean different things.
+  //
+  // There is deliberately NO atomicity witness beside the one `insertNode` has. That test
+  // needs a failure injected BETWEEN the two writes, and nothing here can supply one: the
+  // projection's only statement is an upsert into a table with no constraint a fixture can
+  // violate, so the witness would need either a module-level mock of `search-documents`
+  // across the whole claims suite or a trigger on a table the live dev worker also writes.
+  // Recorded rather than left as an unexplained gap.
+  if (!ex || ex === db) return db.transaction((tx) => confirmClaim(claimId, sensitive, actor, tx));
   const hit = await ex
     .update(vaultClaims)
     .set({
