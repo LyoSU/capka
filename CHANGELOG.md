@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Vault tool results are capped per call and per turn (50,000 bytes across all memory and document tools), so prompt cost stays flat as the vault grows.
 - Topic membership is now written to `vault_edges` alongside `note_claims`; existing memberships are back-filled at boot, a parity check runs on every write outside production, and `POST /api/admin/vault/reindex` reports it as `containsParity`.
 - Notes are searchable by the assistant: `memory_search` now returns note rows beside facts, filtered by the note's own trust class.
 - Notes now store their body in immutable revisions (`vault_note_versions`); the backfill runs at boot and needs no operator action.
@@ -66,6 +67,7 @@ All notable changes to Capka are documented here. Format follows
 ### Security
 
 - A turn that has read untrusted content (a tool result, a provider-side search, an attachment, or a compaction summary of any of those) can no longer replace a fact the user stated; the correction is recorded as a conflict instead. The mark is stored on `messages.untrusted_ingress` and survives compaction and approval continuations.
+- Forking or cloning a chat now carries each message's untrusted-content mark, and an imported conversation's messages are marked untrusted, so a copied history no longer reads as if the user authored it.
 - A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.
 - The boot-time memory migration logs only the error message on failure, so a failing statement's bound parameters no longer reach the log.
 - Memory audit events (`audit_events`) no longer carry a fact's slot key or a forget reason, so no memory text survives a project delete; `memory_forget` accordingly no longer takes a `reason`.

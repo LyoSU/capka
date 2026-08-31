@@ -1,5 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
+import type { TurnTaint } from "@/lib/tasks/turn-taint";
+import type { VaultBudget } from "./budget";
+import type { HandleMap } from "./handles";
 import { proposeCandidate, spaceForScope } from "./candidates";
 import { findCurrentHead, type ClaimHead } from "./claims";
 import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolRow } from "./model-view";
@@ -160,6 +163,15 @@ const PROPOSE_SAID = {
  * `userTurnText` is the text of the turn's last user message. An empty string is not
  * an error but a fail-safe: `verifyDirectProvenance` then returns false and the
  * proposal lands in pending instead of activating.
+ *
+ * THREE PER-TURN OBJECTS ARRIVE FROM `prepareRun`, and all three have the factory's own
+ * lifetime for the factory's own reason: it is called exactly once per turn, and an object
+ * created twice would give the turn two answers to one question. The handle map would mint
+ * `m1` twice for different rows; the budget would grant the ceiling twice; the taint would
+ * lose half a turn's marks. An approval continuation is a SECOND task and therefore gets
+ * fresh handles and a fresh budget — correct, and stated in §4.1 — while the taint is
+ * SEEDED from the persisted column rather than re-created empty, which is the whole of
+ * NEW-1.
  */
 export async function makeVaultMemoryTools(ctx: {
   userId: string;
@@ -171,6 +183,12 @@ export async function makeVaultMemoryTools(ctx: {
    *  how a later caller reopens a hole by omission rather than by decision. */
   taskId: string;
   userTurnText: string;
+  /** The run-local address space the model sees instead of persistent ids. */
+  handles: HandleMap;
+  /** What the vault may still spend of this turn's context. */
+  budget: VaultBudget;
+  /** Whether this turn has already read something it did not author. */
+  taint: TurnTaint;
 }) {
   // The caller knows the project space's owner (it already holds the project row).
   // Its absence is a bug in the caller, not licence to invent an owner or quietly fall

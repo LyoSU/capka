@@ -119,6 +119,72 @@ function sanitizeForkedMeta(metadata: unknown): unknown {
   return rest;
 }
 
+/**
+ * One copied message row, for `forkChat` and `cloneSharedChat` alike.
+ *
+ * `untrustedIngress` is CARRIED, not re-derived and not defaulted: a copy of a
+ * conversation is neither cleaner nor dirtier than the conversation it copies. Left to the
+ * column's `DEFAULT false`, forking a turn that had read a fetched page produced a chat
+ * whose history says the model authored every word of it — and the whole point of the
+ * per-row mark is that a prompt assembled from those rows folds to the truth. A compacted
+ * prompt is never cleaner than what it replaced (`runner.ts` writes the checkpoint's mark
+ * in the same insert); a forked one must not be either.
+ *
+ * Exported and pure so the carry has a test that does not need a database: the copy paths
+ * below are DB functions with no integration coverage, and a rule nothing asserts is the
+ * rule that silently stops holding.
+ */
+export function forkedMessageRow(node: MessageRow, ids: { id: string; chatId: string; parentId: string | null }) {
+  return {
+    id: ids.id,
+    chatId: ids.chatId,
+    parentId: ids.parentId,
+    role: node.role,
+    content: node.content,
+    platform: node.platform,
+    untrustedIngress: node.untrustedIngress,
+    // A copy is never the live task — strip the source taskId and never
+    // inherit a "running" spinner (e.g. forking the tail mid-stream).
+    metadata: sanitizeForkedMeta(node.metadata),
+  };
+}
+
+/**
+ * The linear chain an import materializes: each row the sole child of the previous, with
+ * `createdAt` strictly increasing so sibling ordering (and any later fork) is deterministic
+ * even though the rows are inserted in one batch.
+ *
+ * Every row is born `untrustedIngress: true`, which is this function's whole security
+ * content. The text came off another service's public share link — the module's own
+ * docstring has said so since it shipped — so the first turn of an imported chat assembles
+ * a prompt that folds to untrusted, and a fact the model reads out of that history cannot
+ * overwrite one the user stated in their own words.
+ */
+export function importedMessageRows(a: {
+  chatId: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+  importSource: string;
+  base?: number;
+}) {
+  const base = a.base ?? Date.now();
+  let prevId: string | null = null;
+  return a.messages.map((m, i) => {
+    const id = nanoid();
+    const row = {
+      id,
+      chatId: a.chatId,
+      parentId: prevId,
+      role: m.role,
+      content: m.content,
+      platform: `import:${a.importSource}`,
+      untrustedIngress: true,
+      createdAt: new Date(base + i),
+    };
+    prevId = id;
+    return row;
+  });
+}
+
 /** All messages of a chat — small, bounded set; the graph math runs in memory. */
 async function loadMessages(chatId: string): Promise<MessageRow[]> {
   return db.select().from(messages).where(eq(messages.chatId, chatId));
@@ -206,17 +272,11 @@ export async function forkChat(opts: {
   const copies = chain.map((node) => {
     const newId = nanoid();
     idMap.set(node.id, newId);
-    return {
+    return forkedMessageRow(node, {
       id: newId,
       chatId: newChatId,
       parentId: node.parentId ? idMap.get(node.parentId) ?? null : null,
-      role: node.role,
-      content: node.content,
-      platform: node.platform,
-      // A copy is never the live task — strip the source taskId and never
-      // inherit a "running" spinner (e.g. forking the tail mid-stream).
-      metadata: sanitizeForkedMeta(node.metadata),
-    };
+    });
   });
 
   const t = await getTranslations("chat");
@@ -270,15 +330,11 @@ export async function cloneSharedChat(opts: {
   const copies = path.map(({ node }) => {
     const newId = nanoid();
     idMap.set(node.id, newId);
-    return {
+    return forkedMessageRow(node, {
       id: newId,
       chatId: newChatId,
       parentId: node.parentId ? idMap.get(node.parentId) ?? null : null,
-      role: node.role,
-      content: node.content,
-      platform: node.platform,
-      metadata: sanitizeForkedMeta(node.metadata),
-    };
+    });
   });
 
   await db.transaction(async (tx) => {
@@ -319,25 +375,7 @@ export async function createImportedChat(opts: {
   const { userId, model, title, messages: imported, importSource } = opts;
   const newChatId = nanoid();
 
-  // Linear chain: each row's parent is the previous row. createdAt is set
-  // explicitly and strictly increasing so sibling ordering (and any later fork)
-  // is deterministic even though these rows are inserted in one batch.
-  const base = Date.now();
-  let prevId: string | null = null;
-  const rows = imported.map((m, i) => {
-    const id = nanoid();
-    const row = {
-      id,
-      chatId: newChatId,
-      parentId: prevId,
-      role: m.role,
-      content: m.content,
-      platform: `import:${importSource}`,
-      createdAt: new Date(base + i),
-    };
-    prevId = id;
-    return row;
-  });
+  const rows = importedMessageRows({ chatId: newChatId, messages: imported, importSource });
 
   await db.transaction(async (tx) => {
     await tx.insert(chats).values({

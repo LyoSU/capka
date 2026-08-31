@@ -50,6 +50,9 @@ vi.mock("../candidates", async (importOriginal) => ({
 vi.mock("../quote-match", () => ({ verifyDirectProvenance }));
 
 import { makeVaultMemoryTools } from "../tools";
+import { makeVaultBudget } from "../budget";
+import { makeHandleMap } from "../handles";
+import { makeTurnTaint } from "@/lib/tasks/turn-taint";
 
 const USER_SPACE = "space-user";
 const PROJECT_SPACE = "space-project";
@@ -119,6 +122,11 @@ const make = (over: Partial<Parameters<typeof makeVaultMemoryTools>[0]> = {}) =>
     messageId: "m1",
     taskId: "t1",
     userTurnText: "The client pays in hryvnia, remember that",
+    handles: makeHandleMap(),
+    budget: makeVaultBudget(),
+    // `write` is a no-op: a unit test asserts the tools' behavior, not the flip-write, and
+    // T6 already pins the write itself. `seeded: false` is the ordinary turn.
+    taint: makeTurnTaint({ messageId: "m1", seeded: false, write: async () => {} }),
     ...over,
   });
 
@@ -252,6 +260,9 @@ describe("memory_propose", () => {
       const tools = await makeVaultMemoryTools({
         userId: "u1", messageId: "m1", taskId,
         userTurnText: "we pay our suppliers in euros",
+        handles: makeHandleMap(),
+        budget: makeVaultBudget(),
+        taint: makeTurnTaint({ messageId: "m1", seeded: false, write: async () => {} }),
       });
       await tools.memory_propose.execute!({ statement: "We pay our suppliers in euros" }, { toolCallId: "call_0" } as never);
     }

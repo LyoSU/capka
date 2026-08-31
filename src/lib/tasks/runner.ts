@@ -49,7 +49,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
-import { makeTurnTaint, foldAssembledRows, untrustedOutputOf } from "./turn-taint";
+import { foldAssembledRows, untrustedOutputOf } from "./turn-taint";
 import { prepareRun } from "./run-context";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
@@ -363,13 +363,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, untrustedIngressSeeded } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
-    // Has this turn read anything it did not author? Keyed by the MESSAGE, not this task:
-    // an approval/`ask` continuation is a second task writing this same row, and none of
-    // the construction sites re-runs for its rehydrated input — so the first half's answer
-    // is seeded from the row rather than recomputed. See turn-taint.ts.
-    const taint = makeTurnTaint({ messageId: msgId, seeded: untrustedIngressSeeded });
+    // `taint` — has this turn read anything it did not author? — is CONSTRUCTED in
+    // prepareRun and arrives here, rather than being built here from a seed: the vault's
+    // tool factory needs the same object, it runs inside prepareRun, and a turn with two
+    // taints would lose half its marks. Keyed by the MESSAGE, not this task: an
+    // approval/`ask` continuation is a second task writing this same row, and none of the
+    // construction sites re-runs for its rehydrated input — so the first half's answer is
+    // seeded from the row rather than recomputed. See turn-taint.ts.
     // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
     // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
     // what the row belongs to and this is the scope that owns it — and because a tool

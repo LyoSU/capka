@@ -10,10 +10,22 @@
  * is `NOT NULL DEFAULT false`, which is what makes the column implementable against
  * existing history at all — so an unmarked row is CLEAN and `foldAssembledRows` is not a
  * second fail-closed belt. What is left holding the property is `untrustedOutputOf`'s
- * default (unset => untrusted) and the construction sites that call `mark`. A seventh
+ * default (unset => untrusted) and the construction sites that call `mark`. A further
  * content source added without a mark produces clean rows and breaks nothing else, so the
  * acceptance test in `turn-taint.integration.test.ts` is the only thing that catches it.
  * Do not "restore" a fail-closed predicate below: the column cannot carry one.
+ *
+ * THE RULE, rather than the list it used to be. This comment said "a seventh content
+ * source", and the seventh arrived the same week: `src/lib/chat/tree.ts` mints rows in
+ * three copy paths of its own (`forkChat`, `cloneSharedChat`, `createImportedChat`), none
+ * of which is a turn and none of which passes through `mark` at all. A count is a fact
+ * about one afternoon; state the property instead. ANY code that writes a `messages` row
+ * decides that row's `untrusted_ingress`, and there are exactly two right answers: CARRY
+ * the mark of whatever the row's content came from (a fork, a clone, a compaction
+ * checkpoint — a copy or a summary is never cleaner than its source), or set `true`
+ * outright when the content came from outside Capka (an import, an attachment). Defaulting
+ * is the third answer and it is always wrong, because it is indistinguishable from having
+ * thought about it.
  *
  * WHY IT RIDES THE ROW RATHER THAN THE PROCESS, and the precedent is in this repo already.
  * An approval/`ask` continuation is a SECOND TASK with its own `prepareRun`, its own

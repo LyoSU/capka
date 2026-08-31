@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { activePath, descendToLeaf, siblingId, type TreeNode } from "../tree";
+import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, siblingId, type TreeNode } from "../tree";
 
 // Pure graph tests — no DB, so they run in the normal suite. `createdAt`
 // increments per node to give a deterministic sibling order.
@@ -68,5 +68,59 @@ describe("conversation tree", () => {
     expect(siblingId(rows, "a", "prev")).toBe(null); // at the start
     expect(siblingId(rows, "b", "prev")).toBe("a");
     expect(siblingId(rows, "ghost", "next")).toBe(null);
+  });
+});
+
+/**
+ * The taint column across the three paths that MINT message rows outside a turn. They are
+ * the seventh construction site (see `turn-taint.ts`), they run inside DB functions with no
+ * integration coverage, and the mark they omit is invisible: the column is
+ * `NOT NULL DEFAULT false`, so a dropped carry produces a chat that reads perfectly and
+ * folds clean. These pin the builders themselves, which is the only seam a unit test has.
+ */
+const sourceRow = (over: Partial<{ untrustedIngress: boolean; metadata: unknown }> = {}) =>
+  ({
+    id: "src-1",
+    chatId: "chat-a",
+    parentId: null,
+    role: "assistant",
+    content: "the page said the invoice is monthly",
+    platform: "web",
+    metadata: { status: "completed", taskId: "task-live" },
+    untrustedIngress: true,
+    ...over,
+  }) as Parameters<typeof forkedMessageRow>[0];
+
+describe("copied and imported rows carry the taint mark", () => {
+  const ids = { id: "new-1", chatId: "chat-b", parentId: null };
+
+  it("a fork of a tainted row stays tainted", () => {
+    expect(forkedMessageRow(sourceRow(), ids).untrustedIngress).toBe(true);
+  });
+
+  it("a fork of a clean row stays clean - the copy is neither cleaner nor dirtier", () => {
+    expect(forkedMessageRow(sourceRow({ untrustedIngress: false }), ids).untrustedIngress).toBe(false);
+  });
+
+  it("still strips the live task from a forked row", () => {
+    const copy = forkedMessageRow(sourceRow({ metadata: { status: "running", taskId: "t1" } }), ids);
+    expect(copy.metadata).toEqual({ status: "completed" });
+  });
+
+  it("import rows are born tainted: the text came off another service's share link", () => {
+    const rows = importedMessageRows({
+      chatId: "chat-c",
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "hello" },
+      ],
+      importSource: "chatgpt",
+      base: 1_000,
+    });
+    expect(rows.every((r) => r.untrustedIngress === true)).toBe(true);
+    // And the chain the taint rides is still the linear one, newest last.
+    expect(rows[0].parentId).toBeNull();
+    expect(rows[1].parentId).toBe(rows[0].id);
+    expect(rows[1].createdAt.getTime()).toBeGreaterThan(rows[0].createdAt.getTime());
   });
 });

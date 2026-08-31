@@ -17,8 +17,11 @@ import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders"
 import { makeAskTool } from "@/lib/ask/tool";
 import { askAnswerSchema, askFormSchema } from "@/lib/ask/types";
 import { makeVaultMemoryTools } from "@/lib/vault/tools";
+import { makeVaultBudget } from "@/lib/vault/budget";
+import { makeHandleMap } from "@/lib/vault/handles";
 import { buildMemoryManifest } from "@/lib/vault/manifest";
 import { getOrCreateSpace } from "@/lib/vault/spaces";
+import { makeTurnTaint } from "./turn-taint";
 import { resolvePolicies, isOffered } from "@/lib/governance/policy";
 import { resolveAgentProfile, capProfile, parseAgentProfile } from "@/lib/agents/profile";
 import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getOrgInstructions, getSetting, setSetting } from "@/lib/settings";
@@ -200,6 +203,25 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       return "";
     })() || answeredAsk;
 
+  // THE TURN'S THREE PER-TURN OBJECTS, constructed once, here, because the tool factory
+  // below is called exactly once per turn and all three have exactly its lifetime: the
+  // handle map is the only address space the model is shown, the budget is what the vault
+  // may spend of this turn's context, and the taint is whether the turn has read anything
+  // it did not author. A second instance of any of them would give one turn two answers to
+  // one question — two `m1`s, two ceilings, half a turn's marks.
+  //
+  // They are built HERE rather than inside the factory so the runner can hold the taint
+  // too: the assembled-row fold and the provider-result site are outside the vault
+  // entirely. The handle map and the budget do not need to escape.
+  //
+  // The taint is SEEDED, not recreated: an approval/`ask` continuation is a second task
+  // writing the same message row, and `readResumeRow` above already carries that row's
+  // stored mark. Handles and budget are deliberately NOT seeded — a fresh task gets a
+  // fresh address space and a fresh allowance (§4.1).
+  const handles = makeHandleMap();
+  const budget = makeVaultBudget();
+  const taint = makeTurnTaint({ messageId, seeded: untrustedIngressSeeded });
+
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
   // definition across runs, and the merge order is deterministic, so the
@@ -376,6 +398,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
             messageId,
             taskId,
             userTurnText,
+            handles,
+            budget,
+            taint,
           })
         : {}),
       // Provider-executed tools (e.g. Gemini's Google Search grounding); empty for
@@ -478,9 +503,11 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // against, so a second derivation of it downstream is not a duplicate value but a
     // second definition of who "the user" is — and the runner's own `modelMessages`
     // has synthetic `role:"user"` entries in it that this text must never be.
-    // `untrustedIngressSeeded` rides it because the turn taint is per-MESSAGE and this
-    // task may be the SECOND half writing that message — see readResumeRow.
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, untrustedIngressSeeded };
+    // `taint` rides it — the OBJECT, not the seed it was built from — because the turn
+    // taint is per-MESSAGE and this task may be the SECOND half writing that message (see
+    // readResumeRow), while the runner holds two of its mark sites: the assembled-row fold
+    // and the provider-executed tool result. One object, marked from both sides.
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint };
   } catch (e) {
     await closeAll();
     throw e;
