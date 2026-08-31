@@ -27,6 +27,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The interface palette is now graphite: a warm near-achromatic ramp with no accent hue, so colour is reserved for error, warning and success. Links are ink and permanently underlined; audit-log category badges are no longer colour-coded.
+- Input fields are a white raised well with a mid-grey border instead of a sunken grey fill, so a field no longer looks like a disabled control. `--popover` again shares `--card`'s value.
 - A correction the assistant cannot prove came from the user is stored beside the existing fact as a conflict rather than replacing it.
 - `memory_search` now takes several query wordings per call and returns short run-local handles instead of `[id@revision]` addresses.
 - Memory topics now fold by normalized title inside a space, enforced by `uniq_vnotes_topic_title`; naming an existing subject reuses it instead of creating a second topic.

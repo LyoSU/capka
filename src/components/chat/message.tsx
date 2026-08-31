@@ -524,7 +524,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
                 {r.fields.map((f, j) => (
                   <td key={j} className="whitespace-nowrap px-2 py-1 text-muted-foreground">
                     {f.url ? (
-                      <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
+                      <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current">
                         {hostOf(f.value) ?? f.value}
                       </a>
                     ) : (
@@ -561,7 +561,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] font-medium leading-snug text-link [overflow-wrap:anywhere] underline-offset-2 hover:underline"
+                  className="text-[13px] font-medium leading-snug text-link [overflow-wrap:anywhere] underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current"
                 >
                   {head.value}
                 </a>
@@ -734,7 +734,7 @@ function FieldsGrid({ fields }: { fields: StepField[] }) {
           <dt className="truncate text-muted-foreground">{f.label}</dt>
           <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
             {f.url ? (
-              <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
+              <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current">
                 {f.value}
               </a>
             ) : (
@@ -833,7 +833,7 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
               keeps one- and two-digit rows left-aligned. */}
           <span className="min-w-[1.5rem] shrink-0 rounded-full border border-border bg-background px-1 text-center text-[11px] font-medium tabular-nums text-muted-foreground">{s.n}</span>
           <span className="min-w-0">
-            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{s.title}</a>
+            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current">{s.title}</a>
             {hostOf(s.url) && <span className="ml-1.5 text-xs text-muted-foreground">{hostOf(s.url)}</span>}
             {s.date && <span className="ml-1.5 text-xs text-muted-foreground">· {s.date}</span>}
             {s.snippet && <span className="line-clamp-2 block text-xs leading-relaxed text-muted-foreground">{s.snippet}</span>}

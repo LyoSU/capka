@@ -43,11 +43,19 @@ const GROUP_ICON: Record<Exclude<Category, "all">, typeof UserCog> = {
   settings: SlidersHorizontal,
   security: ShieldAlert,
 };
+/* One tint, not four hues. The palette spends colour ONLY on the three things
+   that carry a state — error, warning, success — and an audit category is not a
+   state: nothing is wrong with a `people` entry. Four categorical hues also made
+   this the one screen in the app with a rainbow on it. The categories are already
+   distinguished by GROUP_ICON above and by their label, so the badge just needs a
+   surface. Kept as a map rather than collapsed to a constant: the shape is what
+   lets a future category that IS a state (a blocked action, say) take
+   `text-destructive-text` without unpicking the call site. */
 const GROUP_TINT: Record<Exclude<Category, "all">, string> = {
-  people: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  extensions: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  settings: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  security: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  people: "bg-field text-muted-foreground",
+  extensions: "bg-field text-muted-foreground",
+  settings: "bg-field text-muted-foreground",
+  security: "bg-field text-muted-foreground",
 };
 
 export default function ActivityPage() {

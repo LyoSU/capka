@@ -120,26 +120,44 @@
      the padding back off the element — the reading line the whole state machine is
      measured against. There is no second copy of this number anywhere. */
   --reading-line: 4rem;
-  --background: oklch(0.97 0.004 75);
-  --foreground: oklch(0.18 0.005 285);
-  --card: oklch(0.995 0.002 75);
-  --card-foreground: oklch(0.18 0.005 285);
-  --popover: oklch(0.995 0.002 75);
-  --popover-foreground: oklch(0.18 0.005 285);
-  --primary: oklch(0.22 0.008 285);
+  --background: oklch(0.967 0.003 106);
+  --foreground: oklch(0.205 0.006 92);
+  --card: oklch(0.989 0.002 68);
+  --card-foreground: oklch(0.205 0.006 92);
+  /* The same value as `--card`, as it was before this palette landed. The
+     reference separates them (surface #fcfbfa < raised #ffffff) and gets away
+     with it because it never puts a field inside a popover; we do, constantly —
+     the model picker, the command palette, every menu with a search box. With
+     popover at pure white and `--field` also white, those fields had no fill of
+     their own and nothing but their border to sit on. Collapsing the two frees
+     white for the field, which then sits strictly above ALL FOUR host surfaces.
+     A popover is separated from a card by its shadow (`--elev-overlay` vs
+     `--elev-panel`), which is the rung that actually reads. */
+  --popover: oklch(0.989 0.002 68);
+  --popover-foreground: oklch(0.205 0.006 92);
+  --primary: oklch(0.236 0.008 85);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.945 0.005 75);
-  --secondary-foreground: oklch(0.22 0.008 285);
-  --muted: oklch(0.945 0.005 75);
-  /* 0.46, not 0.50 — clears WCAG AA (~4.5:1) for secondary text on the light
-     bg; the old value sat just under and failed for body-size captions. */
-  --muted-foreground: oklch(0.46 0.012 285);
-  /* The one non-neutral hue in an otherwise monochrome palette: a restrained
-     blue reserved for links, so a link reads as clickable without an underline.
-     Tuned to clear WCAG AA (~4.5:1) on the light background. */
-  --link: oklch(0.50 0.14 250);
-  --accent: oklch(0.945 0.005 75);
-  --accent-foreground: oklch(0.22 0.008 285);
+  --secondary: oklch(0.934 0.004 91);
+  --secondary-foreground: oklch(0.236 0.008 85);
+  --muted: oklch(0.934 0.004 91);
+  /* Graphite's own mid-ink (#696763), measured at 5.12:1 on the page and
+     4.65:1 on `--field` — the worst surface a caption ever lands on — so it
+     clears WCAG AA in both places. Lighter than the 0.46 this sat at, which
+     was a COOL grey (hue 285) borrowed from a palette that no longer exists
+     here; the extra lightness is affordable because the hue now matches the
+     paper instead of fighting it. */
+  --muted-foreground: oklch(0.514 0.007 85);
+  /* Graphite spends NO hue on identity: `active` is carried by ink, weight and
+     position, and colour is reserved for the three things that mean something —
+     error, warning, success. So a link is ink (#302e27), one step off
+     `--foreground` rather than a different hue.
+     That makes the underline load-bearing, not decoration: with link and body
+     text this close, colour alone cannot distinguish them, and WCAG 1.4.1 wants
+     a non-colour cue. Every `text-link` in the app is therefore permanently
+     underlined — never `hover:underline`. */
+  --link: oklch(0.301 0.013 94);
+  --accent: oklch(0.934 0.004 91);
+  --accent-foreground: oklch(0.236 0.008 85);
   --destructive: oklch(0.577 0.245 27.33);
   --destructive-foreground: oklch(0.985 0 0);
   /* Calm, role-aware notice surfaces. The saturated `--destructive` above is a
@@ -147,53 +165,79 @@
      soft tinted surface + legible warm text, so an error reads as honest, not
      as a fire alarm — and the body stays `--foreground`, never all-red. Warmed
      toward the palette's hue rather than a pure primary red. */
-  --destructive-surface: oklch(0.945 0.04 22);
-  --destructive-border: oklch(0.74 0.13 24);
-  --destructive-text: oklch(0.505 0.17 25);
-  --warning-surface: oklch(0.95 0.065 80);
-  --warning-border: oklch(0.74 0.13 78);
-  --warning-text: oklch(0.50 0.085 70);
-  --success: oklch(0.52 0.15 150);
+  --destructive-surface: oklch(0.951 0.025 27);
+  --destructive-border: oklch(0.74 0.13 27);
+  --destructive-text: oklch(0.540 0.185 27);
+  --warning-surface: oklch(0.949 0.037 73);
+  --warning-border: oklch(0.74 0.13 73);
+  --warning-text: oklch(0.535 0.115 71);
+  --success: oklch(0.506 0.130 152);
   --success-foreground: oklch(0.985 0 0);
-  --border: oklch(0.90 0.006 75);
+  --border: oklch(0.885 0.006 95);
   /* Darker than `--border`, on purpose. A field's edge is the only thing telling
-     you where it starts once the inset shadow is gone, and at `--border` (1.24:1
-     against the page, measured) it was a suggestion rather than an edge. 0.80
-     reads as 1.60:1 — still quiet, but a form now scans as a stack of fields
-     instead of a stack of faint rectangles.
-     It stops there rather than continuing to the 3:1 of WCAG 1.4.11, which on a
-     near-white page lands at L≈0.62 — a mid-grey slab that would fight the calm
-     this palette is built around. That is a deliberate, permitted stop: 1.4.11's
-     own Understanding text exempts a control whose visible text (a value or a
-     placeholder, and ours always has one) identifies it without relying on a
-     boundary. The part the exemption does NOT cover is the focus indicator — see
-     `--ring`, which does meet 3:1. */
-  --input: oklch(0.80 0.007 75);
+     you where it starts once the inset shadow is gone, and at `--border` (1.28:1
+     against the page, measured) it was a suggestion rather than an edge.
+     2.25:1 against the page, 2.48:1 against the field's own white fill. That is a
+     deliberate middle, and it moved TWICE:
+       0.80 (1.70:1) — when the fill was a grey a shade under the page, the fill
+         was the field's only real cue and this was a hairline behind it.
+       0.621 (3.30:1) — the full WCAG 1.4.11 value, taken when the fill went white.
+         Too loud in practice, and the reason is instructive: the white fill is a
+         cue in its own right (1.18:1 against the sidebar, where the old grey had
+         1.05:1 against the page), so the edge was the SECOND full-strength signal
+         for one job, and the control read as an outlined slab.
+       0.72 — one cue at full strength, one supporting it.
+     This does not meet 1.4.11's 3:1, and takes that Success Criterion's own
+     exemption for a control whose visible text — a value or a placeholder, and
+     ours always has one — identifies it without relying on the boundary. The
+     exemption does NOT cover the focus indicator: `--ring` stays at 3.30:1. */
+  --input: oklch(0.72 0.006 85);
   /* A second, more assertive hairline. `--border` is the quiet divider inside a
      surface; this is the one that has to hold the *outer* edge of a control
      against the page, where the softer value reads as an unfinished button. */
-  --border-strong: oklch(0.855 0.008 75);
-  /* Recessed surfaces and hover states, as tokens rather than each component
-     inventing its own `hover:bg-muted/50`. `--field` is the sunken input well;
-     `--hover` is the quiet rest-to-hover step, `--hover-strong` the pressed /
-     currently-open step above it. */
-  --field: oklch(0.955 0.004 75);
-  --hover: oklch(0.952 0.005 75);
-  --hover-strong: oklch(0.922 0.007 75);
-  /* 0.62, not the 0.65 this sat at. A focus indicator is the one piece of
-     non-text contrast WCAG grants no exemption for — a keyboard user has nothing
-     else telling them where they are — and 0.65 measured 2.99:1 against the page,
-     failing 1.4.11 by a hair. 0.62 measures 3.37:1. The change is invisible as
-     colour and decisive as compliance. */
-  --ring: oklch(0.62 0.01 285);
-  --sidebar: oklch(0.985 0.003 75);
-  --sidebar-foreground: oklch(0.18 0.005 285);
-  --sidebar-primary: oklch(0.22 0.008 285);
+  --border-strong: oklch(0.811 0.006 85);
+  /* Surfaces for fields and hover states, as tokens rather than each component
+     inventing its own `hover:bg-muted/50`. `--hover` is the quiet rest-to-hover
+     step, `--hover-strong` the pressed / currently-open step above it.
+
+     `--field` is a RAISED well, not a sunken one — it is the page's whitest
+     value, above every host surface. It used to be a grey a shade under the page
+     (0.955), and it had to be, because the field's border was a 1.60:1
+     suggestion and the fill was the only thing saying "this is a control". Now
+     that `--input` measures 3.30:1 the border does that job on its own, and the
+     grey stopped paying for itself: a fill DARKER than the page reads as
+     "switched off", which is why the app's own disabled state
+     (`disabled:bg-input/50`) is a grey slab. Two things cannot both mean
+     inactive. White fill + drawn edge = "type here"; grey fill = "you can't".
+     The one place this is flush rather than raised is a field inside a popover,
+     which is also white. That is the exemption the stronger border bought: at
+     3.30:1 the edge defines the control with no fill contrast at all, which is
+     precisely what WCAG 1.4.11 asks of it. */
+  --field: oklch(1 0 0);
+  --hover: oklch(0.943 0.003 85);
+  --hover-strong: oklch(0.919 0.006 95);
+  /* A focus indicator is the one piece of non-text contrast WCAG grants no
+     exemption for — a keyboard user has nothing else telling them where they
+     are. 0.621 measures 3.30:1 against the page. Deliberately the SAME value as
+     `--input`: in a palette with no accent hue, the ring cannot announce itself
+     by colour, so it does it by width and offset (see `:focus-visible`), and
+     giving it a second grey would only be a near-miss of the field edge. */
+  --ring: oklch(0.621 0.006 85);
+  /* Recessed, but only half a step. The reference palette puts the sidebar a full
+     step under the page (0.943 vs 0.967) and the direction is right — the sidebar
+     is navigation, the page is the work — but at that depth it reads as a dark
+     slab, because it is the largest single surface in the app and area weighs more
+     than tone. Same step, spread over twice the distance: the hierarchy survives,
+     the weight does not. (The fields on it are white now, which is the other half
+     of why the full step was too much — it doubled the edge they sit against.) */
+  --sidebar: oklch(0.955 0.003 85);
+  --sidebar-foreground: oklch(0.205 0.006 92);
+  --sidebar-primary: oklch(0.236 0.008 85);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.92 0.005 75);
-  --sidebar-accent: oklch(0.94 0.005 75);
-  --sidebar-accent-foreground: oklch(0.22 0.008 285);
-  --sidebar-ring: oklch(0.65 0.01 285);
+  --sidebar-border: oklch(0.885 0.006 95);
+  --sidebar-accent: oklch(0.919 0.006 95);
+  --sidebar-accent-foreground: oklch(0.236 0.008 85);
+  --sidebar-ring: oklch(0.621 0.006 85);
   --chart-1: oklch(0.646 0.222 41.12);
   --chart-2: oklch(0.6 0.118 184.71);
   --chart-3: oklch(0.398 0.07 227.39);
@@ -209,20 +253,20 @@
      (grouped content) < raised (a floating pane) < overlay (menus, dialogs).
      Every rung goes UP. There is no sunken one — see the note below the ladder.
 
-     Shadow colour is a warm near-black on the palette's own hue (75), not pure
+     Shadow colour is a warm near-black on the palette's own hue (85), not pure
      black: a neutral shadow over warm paper greys reads faintly blue-grey. */
   --elev-hairline: 0 0 0 1px var(--border);
-  --elev-btn: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0.25 0.012 75 / 0.05);
-  --elev-panel: 0 0 0 1px var(--border), 0 1px 2px oklch(0.25 0.012 75 / 0.04),
-    0 2px 6px oklch(0.25 0.012 75 / 0.03);
-  --elev-raised: 0 0 0 1px var(--border), 0 2px 10px oklch(0.25 0.012 75 / 0.05);
+  --elev-btn: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0.24 0.008 85 / 0.05);
+  --elev-panel: 0 0 0 1px var(--border), 0 1px 2px oklch(0.24 0.008 85 / 0.04),
+    0 2px 6px oklch(0.24 0.008 85 / 0.03);
+  --elev-raised: 0 0 0 1px var(--border), 0 2px 10px oklch(0.24 0.008 85 / 0.05);
   /* Two shadow layers, and the stronger edge. An overlay is the only rung that
      covers OTHER CONTENT, so unlike a card it needs a near "contact" shadow: a
      single wide 28px blur has no dark edge close to the box, and over a busy
      surface (a menu opened across the chat list) it reads as a smudge instead of a
      lifted panel. The tight layer says "off the page", the wide one keeps it soft. */
-  --elev-overlay: 0 0 0 1px var(--border-strong), 0 2px 6px oklch(0.25 0.012 75 / 0.06),
-    0 12px 32px oklch(0.25 0.012 75 / 0.10);
+  --elev-overlay: 0 0 0 1px var(--border-strong), 0 2px 6px oklch(0.24 0.008 85 / 0.06),
+    0 12px 32px oklch(0.24 0.008 85 / 0.10);
   /* There is no downward rung. A field used to carry an inset shadow, and it was
      a third statement of something the 1px border and the focus ring already
      said — while its sunken look meant "editable", which then leaked onto
@@ -234,73 +278,76 @@
 
 .dark {
   color-scheme: dark;
-  /* Warm graphite, not black. The old palette was both near-black (L 0.13) and
-     cool (hue 285), reading as "switched-off" rather than "dark mode". Surfaces
-     sit at a charcoal grey (L≈0.22–0.30) on the same warm hue (75) as the light
-     theme; chroma stays near-zero so it's a warm grey, not a tint. Lightness
-     steps UP as a surface comes forward (raised = lighter): sidebar (recessed)
-     < background < card < popover. */
-  --background: oklch(0.22 0.004 75);
-  --foreground: oklch(0.95 0.003 80);
-  --card: oklch(0.255 0.004 75);
-  --card-foreground: oklch(0.95 0.003 80);
-  --popover: oklch(0.285 0.005 75);
-  --popover-foreground: oklch(0.95 0.003 80);
-  --primary: oklch(0.95 0.003 80);
-  --primary-foreground: oklch(0.21 0.004 75);
-  --secondary: oklch(0.295 0.006 75);
-  --secondary-foreground: oklch(0.95 0.003 80);
-  --muted: oklch(0.295 0.006 75);
-  /* Raised to L 0.68 to clear WCAG AA (~4.5:1) on the lighter graphite bg. */
-  --muted-foreground: oklch(0.68 0.008 75);
-  /* Lighter, slightly less saturated blue so it stays legible on the dark bg. */
-  --link: oklch(0.72 0.12 245);
-  --accent: oklch(0.295 0.006 75);
-  --accent-foreground: oklch(0.95 0.003 80);
+  /* Warm graphite, not black — and now literally the reference palette's own
+     graphite ramp. Surfaces sit at a charcoal grey (L≈0.21–0.30) on the same warm
+     hue as the light theme; chroma stays near-zero so it's a warm grey, not a
+     tint. Lightness steps UP as a surface comes forward (raised = lighter):
+     sidebar (recessed) < background < card < popover. */
+  --background: oklch(0.213 0.004 107);
+  --foreground: oklch(0.955 0.003 85);
+  --card: oklch(0.256 0.004 85);
+  --card-foreground: oklch(0.955 0.003 85);
+  --popover: oklch(0.293 0.004 85);
+  --popover-foreground: oklch(0.955 0.003 85);
+  --primary: oklch(0.955 0.003 85);
+  --primary-foreground: oklch(0.174 0.003 68);
+  --secondary: oklch(0.301 0.006 92);
+  --secondary-foreground: oklch(0.955 0.003 85);
+  --muted: oklch(0.301 0.006 92);
+  /* Graphite's own dark mid-ink (#a4a29e): 6.91:1 on the page and 6.16:1 on the
+     card — clears WCAG AA on every dark surface a caption lands on. */
+  --muted-foreground: oklch(0.713 0.006 85);
+  /* Graphite's dark ink, for the same reason as the light theme: no accent hue
+     exists, so a link is ink and the permanent underline is what marks it. */
+  --link: oklch(0.930 0.007 97);
+  --accent: oklch(0.301 0.006 92);
+  --accent-foreground: oklch(0.955 0.003 85);
   --destructive: oklch(0.577 0.245 27.33);
-  --destructive-foreground: oklch(0.95 0.003 80);
+  --destructive-foreground: oklch(0.955 0.003 85);
   /* Dark notice surfaces: a warm dark red/amber that lifts clearly off the
      graphite bg (L 0.22) and card (L 0.255), with light, low-chroma text so the
      message is legible instead of a harsh saturated glow. */
-  --destructive-surface: oklch(0.305 0.045 25);
-  --destructive-border: oklch(0.46 0.08 25);
-  --destructive-text: oklch(0.82 0.10 25);
-  --warning-surface: oklch(0.31 0.045 82);
-  --warning-border: oklch(0.47 0.08 82);
-  --warning-text: oklch(0.84 0.10 88);
-  --success: oklch(0.72 0.17 152);
-  --success-foreground: oklch(0.21 0.004 75);
+  --destructive-surface: oklch(0.300 0.043 27);
+  --destructive-border: oklch(0.46 0.08 27);
+  --destructive-text: oklch(0.761 0.140 27);
+  --warning-surface: oklch(0.300 0.035 80);
+  --warning-border: oklch(0.47 0.08 80);
+  --warning-text: oklch(0.800 0.115 80);
+  --success: oklch(0.776 0.125 152);
+  --success-foreground: oklch(0.174 0.003 68);
   /* White-alpha borders nudged up: on a lighter bg the old 0.08/0.10 nearly
      vanished, so hairlines now read at the same strength they did on black. */
   --border: oklch(1 0 0 / 0.10);
-  /* 0.12 → 0.18, the dark-theme counterpart of the light theme's 0.90 → 0.80.
-     Measured against `--background` this moves 1.42:1 → ~1.78:1, matching the
-     light theme's 1.60:1 closely enough that a form has the same presence in both
-     — and alpha means it holds up on the sidebar too, which is the darkest
-     surface a field ever lands on. Same deliberate stop short of 3:1 as the light
-     theme; the reasoning is written out there. */
-  --input: oklch(1 0 0 / 0.18);
+  /* The dark counterpart of the light theme's `--input`, and it tracks the same
+     middle for the same reason — the argument is written out there. Kept ALPHA
+     rather than an opaque grey because a field lands on four different surface
+     lightnesses here (see `--field` below), so no single opaque value is right on
+     more than one of them. */
+  --input: oklch(1 0 0 / 0.28);
   --border-strong: oklch(1 0 0 / 0.17);
   /* Both of these are ALPHA, not fixed greys, and for the same reason: they have
-     to land on four different surface lightnesses (sidebar 0.19 < bg 0.22 <
-     card 0.255 < popover 0.285), so any single opaque value is wrong on three of
-     them. `--field` was opaque 0.20 at first, chosen to sit under card and
+     to land on four different surface lightnesses (sidebar 0.186 < bg 0.213 <
+     card 0.256 < popover 0.293), so any single opaque value is wrong on three of
+     them. `--field` was opaque at first, chosen to sit under card and
      background — but that is LIGHTER than the sidebar, so a "sunken" search box
      there came out faintly raised instead. Black alpha darkens whatever it lands
      on; white alpha lightens it. The light theme keeps opaque values because its
-     surfaces are clustered within 0.97–0.995, where one value serves all. */
-  --field: oklch(0 0 0 / 0.18);
-  --hover: oklch(1 0 0 / 0.055);
+     surfaces are clustered within 0.943–1.0, where one value serves all.
+     `--field` is WHITE alpha now, not black: it lifts, matching the light theme's
+     move to a raised well (the reasoning is written out there) and the reference
+     palette, whose dark field (L 0.301) also sits above its canvas (0.213). */
+  --field: oklch(1 0 0 / 0.11);
+  --hover: oklch(1 0 0 / 0.05);
   --hover-strong: oklch(1 0 0 / 0.10);
-  --ring: oklch(0.56 0.008 75);
-  --sidebar: oklch(0.19 0.004 75);
-  --sidebar-foreground: oklch(0.95 0.003 80);
-  --sidebar-primary: oklch(0.95 0.003 80);
-  --sidebar-primary-foreground: oklch(0.21 0.004 75);
+  --ring: oklch(0.559 0.008 89);
+  --sidebar: oklch(0.186 0.004 107);
+  --sidebar-foreground: oklch(0.955 0.003 85);
+  --sidebar-primary: oklch(0.955 0.003 85);
+  --sidebar-primary-foreground: oklch(0.174 0.003 68);
   --sidebar-border: oklch(1 0 0 / 0.08);
-  --sidebar-accent: oklch(0.295 0.006 75);
-  --sidebar-accent-foreground: oklch(0.95 0.003 80);
-  --sidebar-ring: oklch(0.56 0.008 75);
+  --sidebar-accent: oklch(0.333 0.005 92);
+  --sidebar-accent-foreground: oklch(0.955 0.003 85);
+  --sidebar-ring: oklch(0.559 0.008 89);
   --chart-1: oklch(0.488 0.243 264.05);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -719,19 +766,23 @@
 /* --- Text selection ------------------------------------------------------
    The browser default is a saturated system blue: it fights a warm monochrome
    palette, and on the dark theme it sinks selected glyphs below legible contrast.
-   A translucent wash in the palette's one accent hue tints the background and
-   leaves the text at full strength. Alpha is higher in dark because the same wash
-   over graphite barely registers.
+   With no accent hue left to borrow, this is the palette's own INK at low alpha —
+   a wash that darkens (light) or lifts (dark) the background and leaves the text
+   at full strength. Alpha is higher in dark because the same wash over graphite
+   barely registers.
+   Not the reference's `--brand-wash` itself: at L 0.946 against L 0.967 paper it
+   is a 1.02:1 step, which is a selection you cannot see. Ink-at-alpha keeps the
+   no-accent rule and still marks the range.
 
    Alpha is written into the colour directly rather than mixed with `color-mix`:
    Lightning CSS emits a fallback for a mix it can't resolve at build time, and for
    this one the fallback was the FULLY OPAQUE accent — selected text on it is
    unreadable. A literal `oklch(… / α)` has no such failure mode. */
 ::selection {
-  background: oklch(0.50 0.14 250 / 0.22);
+  background: oklch(0.301 0.013 94 / 0.15);
 }
 .dark ::selection {
-  background: oklch(0.72 0.12 245 / 0.34);
+  background: oklch(0.930 0.007 97 / 0.22);
 }
 
 /* --- Print ---------------------------------------------------------------
@@ -1109,21 +1160,26 @@
   background: var(--muted);
 }
 
-/* Links: a distinct colour (the one accent hue in the palette) carries the
-   "clickable" signal — no underline at rest, which would clutter dense prose.
-   The underline appears only on hover as the affordance confirmation. */
+/* Links: graphite has no accent hue, so `--link` is ink — a shade off the body
+   text and nothing more. That makes the underline the actual "clickable" signal
+   rather than a hover confirmation, so it is on AT REST. It has to be: with link
+   and prose this close in colour, hiding the underline until hover leaves a
+   keyboard or touch reader with no way to find a link at all (WCAG 1.4.1).
+   Kept hairline-thin and offset, which is what stops a paragraph of links from
+   reading as clutter — the previous reason for hiding it. */
 /* Citation chips (components/chat/sources.tsx) carry their own colors and no
    underline; without the exclusion these prose rules out-specify the chip's
    utility classes and paint a blue underlined number inside the pill. */
 .chat-prose a:not(.citation-chip) {
   color: var(--link);
-  text-decoration: none;
-  text-underline-offset: 2px;
-  transition: color 150ms ease;
-}
-.chat-prose a:hover:not(.citation-chip) {
   text-decoration: underline;
   text-decoration-thickness: 1px;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 150ms ease;
+}
+.chat-prose a:hover:not(.citation-chip) {
+  text-decoration-color: currentColor;
 }
 
 /* Horizontal rule: a hairline with generous breathing room. */
