@@ -7,14 +7,14 @@ import { asSchema } from "ai";
 const {
   getOrCreateSpace,
   findCurrentHead,
-  listModelClaims,
+  listMemoryToolRows,
   countWithheld,
   proposeCandidate,
   verifyDirectProvenance,
 } = vi.hoisted(() => ({
   getOrCreateSpace: vi.fn(),
   findCurrentHead: vi.fn(),
-  listModelClaims: vi.fn(),
+  listMemoryToolRows: vi.fn(),
   countWithheld: vi.fn(),
   proposeCandidate: vi.fn(),
   verifyDirectProvenance: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock("../claims", async (importOriginal) => ({
 // a rule the shipped code no longer holds — which is exactly how the search filter came
 // to be missing its quarantine half for a whole plan.
 vi.mock("../model-view", async (importOriginal) => ({
-  listModelClaims,
+  listMemoryToolRows,
   countWithheld,
   modelTextOf: (await importOriginal<typeof import("../model-view")>()).modelTextOf,
 }));
@@ -91,16 +91,21 @@ const head = (
   return { ...base, promptAccess: over.promptAccess ?? (base.sensitive ? "owner_only" : "manifest") };
 };
 
-/** A row as the model-facing projection hands it back: already filtered to
- *  head/confirmed/not-sensitive, which is why this shape carries no flags to filter on. */
-const visible = (over: Partial<{ id: string; revision: number; statement: string; slotKey: string | null }> = {}) => ({
+/** A row as the memory-tool mint hands it back: already filtered to the channel AND
+ *  already matched, ranked and sliced by the database, which is why this shape carries no
+ *  flags to filter on and no text for this module to search. */
+const visible = (over: Partial<{ id: string; revision: number; excerpt: string; slotKey: string | null }> = {}) => ({
   id: "c1",
   revision: 1,
-  statement: "The client pays in hryvnia",
+  kind: "claim" as const,
+  excerpt: "The client pays in hryvnia",
   slotKey: null,
   value: null,
   ...over,
 });
+
+/** The sentence `memory_search` appends to EVERY reply, empty ones included. */
+const NOTE = "No lexical match is not evidence of absence - try other wordings.";
 
 const make = (over: Partial<Parameters<typeof makeVaultMemoryTools>[0]> = {}) =>
   makeVaultMemoryTools({
@@ -123,7 +128,7 @@ beforeEach(() => {
     scope.type === "project" ? PROJECT_SPACE : USER_SPACE,
   );
   verifyDirectProvenance.mockReturnValue(true);
-  listModelClaims.mockResolvedValue([]);
+  listMemoryToolRows.mockResolvedValue({ rows: [], omitted: 0 });
   countWithheld.mockResolvedValue(0);
   proposeCandidate.mockResolvedValue({ state: "pending", candidateId: "cand1" });
 });
@@ -323,9 +328,17 @@ describe("memory_update — records a correction, writes nothing", () => {
   });
 
   it("a mismatch on a memory_search-class head DOES repeat the text", async () => {
-    // The control beside it. Asserting only the absence would pass just as well if
-    // `modelTextOf` returned `null` for everything — which is exactly the state this
-    // suite was in for one run, because the fixture had no `promptAccess` at all.
+    // OWNED, NOT INCIDENTAL. The channel cutover widened this reply: it used to withhold a
+    // head a person had not confirmed, and `review_status` now reaches no model channel, so
+    // a `memory_search`-class head has its words echoed here. That is the correct rule and
+    // this assertion is what makes it a decision rather than a drift — the lost-CAS sentence
+    // IS the memory-tool channel, the same one `memory_search` would have handed those words
+    // back on a moment earlier, so withholding them here would withhold nothing.
+    //
+    // It is also the control beside the off-channel test above: asserting only the absence
+    // would pass just as well if `modelTextOf` returned `null` for everything — which is
+    // exactly the state this suite was in for one run, because the fixture had no
+    // `promptAccess` at all.
     findCurrentHead.mockResolvedValue(
       head({ revision: 2, statement: "proposed by the agent", promptAccess: "memory_search" }),
     );
@@ -371,66 +384,79 @@ describe("memory_forget — refuses, and says who can", () => {
 });
 
 describe("memory_search", () => {
-  it("matches a substring in statement OR slot_key and formats id@revision lines", async () => {
-    listModelClaims.mockImplementation(async (spaceId: string) =>
-      spaceId === PROJECT_SPACE
-        ? [
-            visible({ id: "c1", revision: 2, statement: "The client pays in Hryvnia" }),
-            visible({ id: "c2", revision: 1, statement: "Nothing in common", slotKey: "hryvnia/rate" }),
-            visible({ id: "c3", revision: 1, statement: "Something else entirely" }),
-          ]
-        : [],
-    );
+  it("formats id@revision lines from the rows the mint handed back", async () => {
+    // MATCHING IS NO LONGER THIS MODULE'S JOB. The two-lane fusion and the channel join
+    // happen in the mint, against a database, and are proved in
+    // `vault-search.integration.test.ts`; what is checked here is the one thing that
+    // exists only in this file — how the returned rows are rendered for the model.
+    listMemoryToolRows.mockResolvedValue({
+      rows: [
+        visible({ id: "c1", revision: 2, excerpt: "The client pays in Hryvnia" }),
+        visible({ id: "c2", revision: 1, excerpt: "Nothing in common", slotKey: "hryvnia/rate" }),
+      ],
+      omitted: 0,
+    });
     const tools = await make();
     const out = await run(tools.memory_search, { query: "hryvni" });
-    expect(out).toBe("[c1@2] The client pays in Hryvnia\n[c2@1] Nothing in common (slot: hryvnia/rate)");
+    expect(out).toBe(`[c1@2] The client pays in Hryvnia\n[c2@1] Nothing in common (slot: hryvnia/rate)\n${NOTE}`);
   });
 
-  it("reads the shared projection, not the raw claim table", async () => {
-    // The assertion that this reader stopped carrying its own copy of the
-    // head/confirmed/not-sensitive rule. What that projection actually excludes is
-    // proved against a database in `model-view.integration.test.ts`; what is checked
-    // here is that this module asks IT and not something wider.
+  it("asks the mint ONCE, across both spaces, with the query and the ceiling", async () => {
+    // The assertion that this reader carries no copy of the admission rule and no search
+    // of its own. One call, not one per space: a fused score is comparable across spaces,
+    // so the ceiling is spent on relevance instead of on an arithmetic split — which is
+    // what the deleted `quota` was.
     const tools = await make();
     await run(tools.memory_search, { query: "x" });
-    expect(listModelClaims.mock.calls.map((c) => c[0])).toEqual([PROJECT_SPACE, USER_SPACE]);
+    expect(listMemoryToolRows.mock.calls).toEqual([
+      [[PROJECT_SPACE, USER_SPACE], { queries: ["x"], limit: 20 }],
+    ]);
   });
 
   it("an empty result is a sentence, not an empty string", async () => {
     const tools = await make();
-    expect(await run(tools.memory_search, { query: "nothing" })).toBe("No saved memory matches.");
+    expect(await run(tools.memory_search, { query: "nothing" })).toBe(`No saved memory matches.\n${NOTE}`);
   });
 
   it("scope narrows the spaces; the default takes both", async () => {
     const tools = await make();
     await run(tools.memory_search, { query: "x", scope: "user" });
-    expect(listModelClaims.mock.calls.map((c) => c[0])).toEqual([USER_SPACE]);
+    expect(listMemoryToolRows.mock.calls.map((c) => c[0])).toEqual([[USER_SPACE]]);
   });
 
-  it("hands back at most 20 lines", async () => {
-    listModelClaims.mockImplementation(async (spaceId: string) =>
-      spaceId === PROJECT_SPACE
-        ? Array.from({ length: 30 }, (_, i) => visible({ id: `c${i}`, statement: `fact ${i}` }))
-        : [],
-    );
-    const tools = await make();
-    expect((await run(tools.memory_search, { query: "fact" })).split("\n")).toHaveLength(20);
-  });
-
-  it("an overflowing project does not crowd the user space off the list", async () => {
-    // Without sharing the ceiling, twenty project matches would leave the user's
-    // claims not merely invisible but uncorrectable: the ids for update come from here
-    // and nowhere else.
-    listModelClaims.mockImplementation(async (spaceId: string) =>
-      Array.from({ length: 30 }, (_, i) =>
-        visible({ id: `${spaceId === PROJECT_SPACE ? "p" : "u"}${i}`, statement: `fact ${i}` }),
-      ),
-    );
+  it("says how many matches it left out, rather than truncating in silence", async () => {
+    // A silent truncation reads to the model as "that is all there is". The count comes
+    // from the mint, which is the only place the slice happens.
+    listMemoryToolRows.mockResolvedValue({
+      rows: Array.from({ length: 20 }, (_, i) => visible({ id: `c${i}`, excerpt: `fact ${i}` })),
+      omitted: 10,
+    });
     const tools = await make();
     const lines = (await run(tools.memory_search, { query: "fact" })).split("\n");
-    expect(lines).toHaveLength(20);
-    expect(lines.filter((l) => l.startsWith("[p"))).toHaveLength(10);
-    expect(lines.filter((l) => l.startsWith("[u"))).toHaveLength(10);
+    expect(lines).toHaveLength(22);
+    expect(lines[20]).toBe("10 more matches were not shown.");
+    expect(lines[21]).toBe(NOTE);
+  });
+
+  it("counts one left-out match in the singular, and prints nothing when none were", async () => {
+    // The NOUN inflects and the verb does not — "1 more match were not shown." — which is
+    // the brief's literal string and is pinned here rather than quietly corrected, so that
+    // whoever fixes the wording changes it in one place with a test naming the old form.
+    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 1 });
+    const tools = await make();
+    expect(await run(tools.memory_search, { query: "fact" })).toContain("1 more match were not shown.");
+    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
+    expect(await run(tools.memory_search, { query: "fact" })).not.toContain("not shown");
+  });
+
+  it("appends the absence note to EVERY reply, not only empty ones", async () => {
+    // An agent that reads it only on zero results has already concluded absence on a thin
+    // result set, which is the wrong conclusion this sentence exists to prevent.
+    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
+    const tools = await make();
+    expect(await run(tools.memory_search, { query: "hryvnia" })).toContain(NOTE);
+    listMemoryToolRows.mockResolvedValue({ rows: [], omitted: 0 });
+    expect(await run(tools.memory_search, { query: "hryvnia" })).toContain(NOTE);
   });
 
   it("the withheld notice is an aggregate, and says the same thing whatever was asked", async () => {
@@ -438,8 +464,10 @@ describe("memory_search", () => {
     // "diagnosis" confirms the category the withholding exists to protect. The count
     // comes from its own aggregate over rows the projection never returns, so it cannot
     // vary with the query even by accident.
-    listModelClaims.mockImplementation(async (spaceId: string) =>
-      spaceId === PROJECT_SPACE ? [visible({ id: "c2", statement: "The client pays in hryvnia" })] : [],
+    listMemoryToolRows.mockImplementation(async (_ids: string[], opts: { queries: string[] }) =>
+      opts.queries[0] === "hryvnia"
+        ? { rows: [visible({ id: "c2", excerpt: "The client pays in hryvnia" })], omitted: 0 }
+        : { rows: [], omitted: 0 },
     );
     countWithheld.mockImplementation(async (spaceId: string) => (spaceId === PROJECT_SPACE ? 1 : 0));
     const tools = await make();
@@ -456,8 +484,15 @@ describe("memory_search", () => {
 
   it("outside a project scope:'project' substitutes no space and returns empty", async () => {
     const tools = await make({ projectId: null, projectOwnerUserId: undefined });
-    expect(await run(tools.memory_search, { query: "x", scope: "project" })).toBe("No saved memory matches.");
-    expect(listModelClaims).not.toHaveBeenCalled();
+    expect(await run(tools.memory_search, { query: "x", scope: "project" })).toBe(
+      `No saved memory matches.\n${NOTE}`,
+    );
+    // The mint IS asked, and it is asked about NOTHING — which is the honest shape: the
+    // model requested a scope that does not exist here, and no space is substituted for
+    // it. `countWithheld` is not called at all, so the sentence about sensitive records
+    // cannot leak a count out of a space that was not in scope.
+    expect(listMemoryToolRows.mock.calls.map((c) => c[0])).toEqual([[]]);
+    expect(countWithheld).not.toHaveBeenCalled();
   });
 });
 

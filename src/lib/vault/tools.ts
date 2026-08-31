@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { proposeCandidate, spaceForScope, verifyDirectProvenance } from "./candidates";
 import { findCurrentHead, type ClaimHead } from "./claims";
-import { countWithheld, listModelClaims, modelTextOf, type ModelClaim } from "./model-view";
+import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolRow } from "./model-view";
 import { getOrCreateSpace } from "./spaces";
 
 /** How many memory lines one search hands back. Memory rides in the turn's own
@@ -10,14 +10,15 @@ import { getOrCreateSpace } from "./spaces";
  *  afford to spend". */
 const SEARCH_LIMIT = 20;
 
-/** One line for the model: `[id@revision]` is how it addresses a claim in
- *  update afterwards, so search and the mismatch reply print it identically.
+/** One line for the model: `[id@revision]` is how it addresses a claim in update
+ *  afterwards, so search and the mismatch reply print it identically.
  *
- *  It accepts a `ModelClaim` and nothing else, which is the point: the statement and
- *  the slot key on that shape are branded strings that only `model-view.ts` can mint,
+ *  It accepts a `MemoryToolRow` and nothing else, which is the point: the statement and
+ *  the slot key on that shape are `MemoryToolText`, which only `model-view.ts` can mint,
  *  so a future reader that pulls a row off `listHeadClaims` and formats it here does not
- *  compile. The rule stopped being something each reader has to remember. */
-const line = (c: ModelClaim) => `[${c.id}@${c.revision}] ${c.statement}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
+ *  compile — and a `ManifestText` cannot be substituted either, because the three symbols
+ *  are mutually unassignable. */
+const line = (c: MemoryToolRow) => `[${c.id}@${c.revision}] ${c.excerpt}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
 
 /** What search says about sensitive claims: that they exist, and nothing else.
  *
@@ -47,11 +48,21 @@ const withheldNotice = (n: number) =>
  *
  *  The TEXT comes from `modelTextOf`, not from a filter written here. That is the
  *  eleventh instance of this feature's recurring defect, closed: `findCurrentHead` has
- *  no review filter and is not given one — it answers "does this chain exist", which
+ *  no channel filter and is not given one — it answers "does this chain exist", which
  *  update needs whatever the head's status is — so what must not leave is the text, and
  *  the decision about text belongs to the module that owns that decision for every
- *  model-facing reader at once. `null` from it means the head is sensitive or
- *  quarantined and the sentence simply says less. */
+ *  model-facing reader at once.
+ *
+ *  WHAT `null` MEANS, stated against the rule that actually holds rather than the one this
+ *  comment used to describe. It is not "sensitive or quarantined": `review_status` reaches
+ *  no model channel since the channel cutover. It is "not on the MEMORY-TOOL channel" —
+ *  `owner_only` (which is what `sensitive` generates) and `knowledge_search`. A
+ *  `memory_search`-class head DOES have its words repeated here, and that is deliberate,
+ *  not an oversight: this reply IS the memory tool channel, the same one `memory_search`
+ *  would have handed those words back on a moment earlier, so withholding them here would
+ *  withhold nothing while making the lost-CAS sentence say less than it can. The positive
+ *  control for it is `it("a mismatch on a memory_search-class head DOES repeat the text")`
+ *  in `tools.test.ts`, beside the off-channel one. */
 const mismatch = (current: ClaimHead | null) => {
   if (!current) return "That claim is no longer there (forgotten or replaced). Run memory_search to see what is.";
   const text = modelTextOf(current);
@@ -187,51 +198,38 @@ export async function makeVaultMemoryTools(ctx: {
       }),
       execute: async ({ query, scope }) => {
         // Outside a project, `scope: "project"` yields an empty list of spaces — more
-        // honest than quietly substituting the user space: the model asked for
-        // something else.
+        // honest than quietly substituting the user space: the model asked for something
+        // else.
         const spaceIds =
           scope === "user"
             ? [userSpaceId]
             : scope === "project"
-              ? projectSpaceId
-                ? [projectSpaceId]
-                : []
-              : // The project space first: inside a project chat it is closer to the
-                // matter at hand, and there is nothing to truly merge two ordered lists
-                // by — `ModelClaim` does not carry `recorded_at`.
-                (projectSpaceId ? [projectSpaceId, userSpaceId] : [userSpaceId]);
-        const needle = query.toLowerCase();
-        const buckets: ModelClaim[][] = [];
+              ? (projectSpaceId ? [projectSpaceId] : [])
+              : (projectSpaceId ? [projectSpaceId, userSpaceId] : [userSpaceId]);
+        // ONE call across both spaces, which is what the fusion makes possible: the old
+        // per-space loop had to invent a quota because it was merging two ordered lists
+        // with nothing to merge them BY. A fused score is comparable across spaces, so the
+        // ceiling is spent on relevance instead of on an arithmetic split.
+        const { rows: hits, omitted } = await listMemoryToolRows(spaceIds, {
+          queries: [query],
+          limit: SEARCH_LIMIT,
+        });
+        // An aggregate over what the mint excludes, computed independently of the query
+        // and never matched against — see `withheldNotice`. Counting it off the returned
+        // rows would be counting the wrong set, since they are precisely the rows that are
+        // NOT withheld.
         let withheld = 0;
-        for (const spaceId of spaceIds) {
-          // The shared projection, which IS the head/confirmed/not-sensitive rule — this
-          // reader no longer carries its own copy of it. It used to, and the copy was
-          // missing the quarantine half for a whole plan while the manifest held it.
-          const claims = await listModelClaims(spaceId);
-          // An aggregate over what this projection excludes, computed independently of
-          // the query and never matched against — see `withheldNotice`. Counting it off
-          // the returned rows would be counting the wrong set, since they are precisely
-          // the rows that are NOT withheld.
-          withheld += await countWithheld(spaceId);
-          // The equivalent of `ILIKE '%query%'` over statement OR slot_key.
-          // Deliberately primitive: lexical search is plan C, and doing half of it here
-          // would mean two different searches inside one system.
-          buckets.push(
-            claims.filter(
-              (c) => c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle),
-            ),
-          );
-        }
-        // The ceiling is SHARED between spaces, not eaten by the first. Search is the
-        // ONLY way to obtain an `[id@revision]`, so twenty project matches would
-        // otherwise leave the user space not merely invisible but uncorrectable: there
-        // would be nothing to address update or forget with. One space's shortfall is
-        // topped up by the other, so the ceiling is used in full.
-        const quota = Math.ceil(SEARCH_LIMIT / Math.max(buckets.length, 1));
-        const hits = buckets.flatMap((b) => b.slice(0, quota));
-        for (const b of buckets) for (const c of b.slice(quota)) if (hits.length < SEARCH_LIMIT) hits.push(c);
-        const body = hits.length ? hits.slice(0, SEARCH_LIMIT).map(line).join("\n") : "No saved memory matches.";
-        return withheld ? `${body}\n${withheldNotice(withheld)}` : body;
+        for (const spaceId of spaceIds) withheld += await countWithheld(spaceId);
+        const body = hits.length ? hits.map(line).join("\n") : "No saved memory matches.";
+        // A response that hits the cap says how many it left out. A silent truncation reads
+        // to the model as "that is all there is", which is the same wrong conclusion the
+        // note below exists to prevent, arrived at from the other direction.
+        const more = omitted ? `${omitted} more match${omitted === 1 ? "" : "es"} were not shown.` : "";
+        // "No lexical match is not evidence of absence" ships on EVERY response, not only
+        // empty ones: an agent that reads it only on zero results has already concluded
+        // absence on a thin result set.
+        const note = "No lexical match is not evidence of absence - try other wordings.";
+        return [body, more, note, withheld ? withheldNotice(withheld) : ""].filter(Boolean).join("\n");
       },
     }),
 

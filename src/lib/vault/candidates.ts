@@ -19,7 +19,7 @@ import {
   type ClaimHead,
   type EvidenceInput,
 } from "./claims";
-import { listModelClaims } from "./model-view";
+import { listMemoryToolRows } from "./model-view";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
 // One home for the statement normalization the slot branch and the slotless dedup share —
 // and, since Task 9, the memory page's search box. See `text.ts` for why it is not copied.
@@ -59,7 +59,7 @@ export type CandidateRow = typeof memoryCandidates.$inferSelect;
  * ONE RESIDUE, recorded here because the paragraphs above reason about exactly this class
  * for sensitive and unverified heads and did not name it. `known` and `pending` are
  * distinguishable replies, and this comparison reads `value`, which is NOT model-facing:
- * `ModelClaim.value` rides through the projection unbranded and no reader prints it. So
+ * `MemoryToolRow.value` rides through the projection unbranded and no reader prints it. So
  * an agent that already knows a head's statement — which it may read — can probe that
  * head's stored `value` by proposing guesses, `known` on a deep-equal hit and `pending`
  * on a miss. Narrow today: the statement must already be model-visible, `value` is almost
@@ -351,22 +351,29 @@ export async function proposeCandidate(input: {
     return { state: "retired" } as const;
   }
 
-  // Is this fact already recorded? Read through the model-facing projection — the same
-  // predicate that decides what the manifest and `memory_search` may print — so
-  // "already known" answers about exactly the facts the model can see anyway, and
-  // reveals nothing it could not have read for itself.
+  // Is this fact already recorded? Read through the memory-tool channel — the widest one a
+  // model can reach through a tool — so "already known" answers about exactly the facts the
+  // model can see anyway and reveals nothing it could not have read for itself. It is
+  // deliberately WIDER than the manifest: a fact the agent can find with `memory_search` is
+  // one it already knows, and answering `pending` for it would put a decision in front of
+  // the person for something already recorded.
   //
-  // That choice also keeps a hole shut. `known` and `pending` are distinguishable
+  // The hole this keeps shut is unchanged: `known` and `pending` are distinguishable
   // replies, so a projection that matched WITHHELD heads would let an agent confirm a
-  // specific sensitive statement by proposing guesses at it. Sensitive heads are not in
-  // this projection, so a proposal duplicating one lands `pending` and the person — who
-  // is shown both halves on their own page — decides.
+  // specific sensitive statement by proposing guesses at it. `owner_only` is in no channel,
+  // so a proposal duplicating one lands `pending` and the person decides.
+  //
+  // The no-queries branch, which is a SET read and stamps no `last_used_at`: this asks
+  // "does the space already hold these words", not "did the model just read this row", and
+  // it runs on the hot path of post-turn extraction. `omitted` is destructured away because
+  // that branch returns everything eligible and omits nothing.
   //
   // A forced conflict skips the read entirely: it is not asking whether the fact is
   // known, it is recording that it contests a named head.
   if (!input.forceConflict) {
-    const known = (await listModelClaims(input.spaceId, ex)).find(
-      (h) => norm(h.statement) === norm(statement) && valueAgrees(h.value, input.value),
+    const { rows: knownRows } = await listMemoryToolRows([input.spaceId], undefined, ex);
+    const known = knownRows.find(
+      (h) => norm(h.excerpt) === norm(statement) && valueAgrees(h.value, input.value),
     );
     // No write of any kind, the candidate row included: a fact already in memory is not
     // a decision to put in front of anybody.

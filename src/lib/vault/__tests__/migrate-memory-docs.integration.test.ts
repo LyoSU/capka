@@ -433,12 +433,18 @@ run("vault: memory_docs migration", () => {
     expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
   });
 
-  it("a bullet matching an UNVERIFIED head is asked about — matching one does not approve it", async () => {
+  it("a bullet matching an UNVERIFIED head writes nothing — matching one does not approve it", async () => {
     // The old behaviour, and it was quarantine escalation with a friendly face: a bullet
     // whose words matched an unverified head called `confirmClaim` on it, so text nobody
-    // had reviewed promoted text nobody had reviewed. An unverified head is not in the
-    // model-facing projection, so the dedup cannot see it and the bullet becomes an
-    // ordinary question for the person.
+    // had reviewed promoted text nobody had reviewed. That is what this test is about and
+    // it still holds — no branch of the dedup can reach `confirmClaim`.
+    //
+    // The bullet is no longer QUEUED, though, and that is the channel cutover rather than
+    // a regression: `review_status` reaches no model channel, so an `agent_inferred` head
+    // is `memory_search`-class whatever its review state and the fact is already recorded.
+    // `known` writes nothing at all — strictly less than the candidate row `pending` used
+    // to create — and it does not put a decision in front of the person for something the
+    // space already holds.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedNode(`${P}unverified`, spaceId, "claim");
     await q(
@@ -452,7 +458,10 @@ run("vault: memory_docs migration", () => {
 
     expect(await count("vault_claims", "space_id = $1 AND review_status = 'confirmed'", [spaceId])).toBe(0);
     expect(await count("vault_claims", "id = $1 AND review_status = 'unverified'", [`${P}unverified`])).toBe(1);
-    expect(await waiting(spaceId)).toEqual(["likes tea"]);
+    // Nothing queued, and — the assertion that carries the concern — nothing written to the
+    // head either: no second version, no evidence, no promotion.
+    expect(await waiting(spaceId)).toEqual([]);
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
   });
 
   it("the candidates land in the document's TRANSACTION, so a failure takes them with it", async () => {

@@ -9,11 +9,17 @@ import { readFileSync } from "node:fs";
  * that a SECOND module has started making the same decision correctly. It only notices
  * when the second copy goes wrong, which is months later and by then in a prompt.
  *
- * The structural half of the fix is the `ModelText` brand: `listModelClaims` and
- * `modelTextOf` hand back strings nothing else can mint, and the model-facing formatters
- * accept only those, so an accidental bypass fails `tsc`. What a type cannot catch is a
- * deliberate `as ModelText`, or a reader that quietly grows its own `WHERE` clause. That
- * is what this file is for.
+ * The structural half of the fix is the per-channel brands: the MINTS
+ * (`listManifestClaims`, `listManifestTopics`, `listMemoryToolRows`, `modelTextOf`) hand
+ * back strings nothing else can mint, and the model-facing formatters accept only those,
+ * so an accidental bypass fails `tsc`. What a type cannot catch is a deliberate
+ * `as ManifestText`, or a reader that quietly grows its own `WHERE` clause. That is what
+ * this file is for.
+ *
+ * And the decision the mints own is no longer ONE `WHERE`: it is a channel clause over
+ * `prompt_access` — three arms of it, one per tier — ANDed with a liveness arm per node
+ * kind. That is more surface, not less, which is precisely why owning it in one module
+ * matters more now than it did when the whole rule fitted on one line.
  *
  * The count that matters: this feature has produced twelve instances of one defect —
  * a rule at one entrance while a second walks past it — and the eleventh was found only
@@ -50,35 +56,36 @@ const code = (text: string) =>
     .join("\n");
 
 describe("the model-facing readers go through one projection", () => {
-  it("finds the files at all", () => {
-    // The control. A test pointed at a mistyped path finds no violations and passes for
-    // the wrong reason — which, on a guard whose whole job is to fail later, is
-    // indistinguishable from working.
-    expect(read(OWNER)).toContain("export async function listModelClaims");
-    for (const f of MODEL_FACING) expect(read(f).length).toBeGreaterThan(0);
-  });
+  // THREE CONTROLS WERE DELETED HERE, not weakened, and the difference matters. Task 11
+  // removed `listModelClaims`, `modelVisible` and the single `ModelText` brand, so the
+  // "finds the files" control naming that export, the `/as ModelText\b/` caster count and
+  // the `reviewStatus, "confirmed"` writer count were all asserting about subjects that no
+  // longer exist — each of them would have gone red on a codebase that is CORRECT. Their
+  // replacements are the three-brand and `prompt_access` assertions in the next describe,
+  // which assert the same properties about the rules that replaced them.
 
   it("no model-facing module reads claim text through an unfiltered accessor", () => {
     const offenders = MODEL_FACING.filter((f) => UNFILTERED.test(code(read(f))));
     expect(offenders).toEqual([]);
   });
 
-  it("mints the brand in exactly one module", () => {
-    // `as ModelText` is the escape hatch the type cannot close. It must exist — the
-    // projection has to produce the branded value somehow — and it must exist ONCE.
-    const casters = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/claims.ts"].filter((f) =>
-      /as ModelText\b/.test(code(read(f))),
-    );
-    expect(casters).toEqual([OWNER]);
+  it("leaves no second reader of the search projection", () => {
+    // The mints are the only readers. A tool, a page or a ledger that queried
+    // vault_search_documents directly would be a second entrance carrying whatever
+    // predicate its author remembered.
+    const others = [...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
+    for (const f of others) expect(code(read(f))).not.toMatch(/vaultSearchDocuments/);
   });
 
-  it("writes the admission predicate in exactly one module", () => {
-    // The SQL half. A second `review_status = 'confirmed' AND sensitive = false` written
-    // out by hand somewhere is a second copy of the rule even if it is correct today —
-    // and one of the three copies this replaced was NOT correct, for a whole plan.
+  it("has no listModelClaims and no modelVisible left anywhere", () => {
+    // The single-brand predicate is gone, not shadowed: two ways to ask "may the model
+    // read this" is the defect this module exists to prevent, and a surviving old one is
+    // the second way.
     const files = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts"];
-    const writers = files.filter((f) => /reviewStatus,\s*"confirmed"/.test(code(read(f)).replace(/\s+/g, " ")));
-    expect(writers).toEqual([OWNER]);
+    for (const f of files) {
+      expect(code(read(f))).not.toMatch(/\blistModelClaims\b/);
+      expect(code(read(f))).not.toMatch(/\bmodelVisible\b/);
+    }
   });
 
   it("keeps the legacy free-text fallback deleted", () => {
@@ -139,8 +146,11 @@ describe("the three channels", () => {
 
   it("finds the files at all", () => {
     // The control, extended: a test pointed at a renamed export finds no violations and
-    // passes for the wrong reason.
+    // passes for the wrong reason. It names every mint, so a rename cannot leave the
+    // guards above pointing at nothing.
     expect(read(OWNER)).toContain("export async function listManifestClaims");
     expect(read(OWNER)).toContain("export async function listManifestTopics");
+    expect(read(OWNER)).toContain("export async function listMemoryToolRows");
+    for (const f of MODEL_FACING) expect(read(f).length).toBeGreaterThan(0);
   });
 });

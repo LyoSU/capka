@@ -57,7 +57,7 @@ vi.mock("../claims", async (importOriginal) => {
 
 import { pool } from "@/lib/db";
 import { confirmClaim, createClaim, updateClaim, type Actor } from "../claims";
-import { listModelClaims } from "../model-view";
+import { listMemoryToolRows } from "../model-view";
 import { seedConfirmedClaim } from "./fixtures";
 import {
   proposeCandidate,
@@ -123,6 +123,13 @@ const claimRow = async (id: string) => {
   }>(`SELECT * FROM vault_claims WHERE id = $1`, [id]);
   return rows[0];
 };
+
+/** What the model may read through a memory TOOL — the same mint the ledger's own dedup
+ *  reads, which is why these assertions are made through it rather than by counting rows:
+ *  "the model asserts both" was the damage each of them is about. The no-queries branch, so
+ *  the whole eligible set comes back and nothing is ranked away. */
+const modelSees = async (spaceId: string) =>
+  (await listMemoryToolRows([spaceId])).rows.map((r) => String(r.excerpt));
 
 /** A claim attached to the default topic — exactly what the Task 10 GET reads. */
 const inDefaultTopic = async (claimId: string) =>
@@ -268,19 +275,43 @@ run("vault candidates", () => {
     expect((await claimRow(head.id)).revision).toBe(1);
   });
 
-  it("a proposal matching an UNVERIFIED head does not promote it — it waits alongside", async () => {
-    // Quarantine escalation, which is the fifth of the audit's five attempts. The dedup
-    // reads the model-facing projection, and an unverified claim is not in it, so there
-    // is no branch from which `confirmClaim` could be reached by a proposal at all.
+  it("a proposal matching an UNVERIFIED head does not promote it — it writes nothing at all", async () => {
+    // Quarantine escalation, which is the fifth of the audit's five attempts, and the
+    // property it is about is UNCHANGED: no branch of the dedup can reach `confirmClaim`,
+    // so nothing promotes this head.
+    //
+    // What DID change is the reply, and the change is the channel cutover, not a
+    // weakening. `review_status` reaches no model channel any more: an `agent_inferred`
+    // head is `memory_search`-class whatever its review state, so the agent can already
+    // find these words with `memory_search` and `known` is the true answer. Answering
+    // `pending` would put a decision in front of the person for a fact already recorded.
+    // The reply is now the one that writes LESS than the old one did — no candidate row,
+    // where `pending` created one.
     const stale = await createClaim(
       { spaceId: SPACE_A, statement: "Has a cat named Murchyk", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
       ACTOR,
     );
 
     const res = await propose({ statement: "has a cat named murchyk" });
-    expect(res.state).toBe("pending");
+    expect(res).toEqual({ state: "known", claimId: stale.id });
+    // The assertions that carry the audit's concern, and they are the same ones as before.
     expect((await claimRow(stale.id)).review_status).toBe("unverified");
     expect((await claimRow(stale.id)).revision).toBe(1);
+    expect(await count("memory_candidates", "space_id = $1", [SPACE_A])).toBe(0);
+    expect(await count("claim_evidence", "claim_id = $1", [stale.id])).toBe(0);
+  });
+
+  it("a proposal matching an OFF-CHANNEL head is asked about, not answered `known`", async () => {
+    // The control on the other side of the widening above, and the reason it is not a
+    // blanket "the dedup sees everything now". `untrusted_derived` generates
+    // `knowledge_search`, which no memory tool may read, so the agent could NOT have found
+    // these words for itself — and `known` would then be telling it something it had no
+    // way to know. It lands `pending`, and the person decides.
+    await createClaim(
+      { spaceId: SPACE_A, statement: "Read off a vendor page", origin: { kind: "web" }, sourceClass: "untrusted_derived" },
+      ACTOR,
+    );
+    expect((await propose({ statement: "read off a vendor page" })).state).toBe("pending");
   });
 
   it("a proposal matching a SENSITIVE head is not told so", async () => {
@@ -477,7 +508,7 @@ run("vault candidates", () => {
     // The assertion the defect was about — read through the projection that decides what
     // the model may see, not by counting rows, because "the model asserts both" was the
     // damage.
-    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+    expect(await modelSees(SPACE_A)).toEqual(["Works in Lviv"]);
   });
 
   it("a contested head someone else replaced first: the correction is recorded, nothing is superseded", async () => {
@@ -514,7 +545,7 @@ run("vault candidates", () => {
 
     // Two facts, side by side, for the person to resolve — the accepted cost, asserted so
     // it stays the accepted one rather than becoming a supersession by drift.
-    expect((await listModelClaims(SPACE_A)).map((c) => c.statement).sort()).toEqual([
+    expect((await modelSees(SPACE_A)).sort()).toEqual([
       "Works in Lviv",
       "Works in Odesa",
     ]);
@@ -563,7 +594,7 @@ run("vault candidates", () => {
 
     // The assertion the finding was about, read through the projection that decides what
     // the model may see: one fact, not the same sentence twice in every later manifest.
-    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+    expect(await modelSees(SPACE_A)).toEqual(["Works in Lviv"]);
   });
 
   it("a second correction carrying the same words as the first records nothing new", async () => {
@@ -581,7 +612,7 @@ run("vault candidates", () => {
     if (!second.ok) throw new Error("unreachable");
 
     expect(second.claimId).toBe(first.claimId);
-    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+    expect(await modelSees(SPACE_A)).toEqual(["Works in Lviv"]);
   });
 
   it("a conflict row written with no contested id confirms as an ordinary fact", async () => {
@@ -742,6 +773,20 @@ run("vault candidates", () => {
   });
 
   it("confirm on a taken slot with the same text → merge into the head, and the head becomes confirmed", async () => {
+    // THE ORDER IS LOAD-BEARING and it was not before: the head is created AFTER the
+    // proposal. The subject here is `confirmCandidate`'s merge branch, and propose's dedup
+    // now reads the memory-TOOL channel, which admits an `agent_inferred` head whatever
+    // its review state — so proposing these words against an existing head answers `known`
+    // and there is no candidate to confirm. A head arriving between the proposal and the
+    // click is an ordinary sequence, and it is the one that reaches this branch.
+    const pending = await propose({
+      statement: "works in kyiv",
+      slotKey: "city",
+      sensitive: true,
+      evidence: [{ messageId: `${P}msg3` }],
+    });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
     // The head is deliberately unverified and non-sensitive: the HUMAN's decision has
     // to raise both fields, or {ok:true} is returned for a fact nobody can see.
     const head = await createClaim(
@@ -754,14 +799,6 @@ run("vault candidates", () => {
       },
       ACTOR,
     );
-
-    const pending = await propose({
-      statement: "works in kyiv",
-      slotKey: "city",
-      sensitive: true,
-      evidence: [{ messageId: `${P}msg3` }],
-    });
-    if (pending.state !== "pending") throw new Error("expected pending");
 
     const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
     expect(res).toEqual({ ok: true, claimId: head.id });
@@ -1058,16 +1095,22 @@ run("vault candidates", () => {
    * the page's own link from a decision to its fact points at the wrong version.
    */
   it("a supersede between the merge read and the confirmation does not leave the decision on a dead row", async () => {
-    // An unverified head — the shape the merge branch confirms rather than supersedes.
-    const head = await createClaim(
-      { spaceId: SPACE_A, statement: "Works in Kyiv", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
-      ACTOR,
-    );
+    // The proposal comes FIRST, for the reason spelled out on the taken-slot merge test:
+    // propose's dedup reads the memory-tool channel, which admits an `agent_inferred` head
+    // whatever its review state, so proposing these words against an existing head answers
+    // `known` and leaves nothing to confirm. The window this test is about opens inside
+    // `confirmCandidate`, and it is unaffected by which order the two rows appeared in.
     const pending = await propose({
       statement: "works   in kyiv",
       provenance: { kind: "derived", messageId: `${P}msg` },
     });
     if (pending.state !== "pending") throw new Error("expected pending");
+
+    // An unverified head — the shape the merge branch confirms rather than supersedes.
+    const head = await createClaim(
+      { spaceId: SPACE_A, statement: "Works in Kyiv", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
+      ACTOR,
+    );
 
     // The forget commits on a SEPARATE connection (the pool autocommits) while the
     // confirm's transaction is open, which is the only way to land inside the window.
