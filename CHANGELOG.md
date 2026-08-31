@@ -25,6 +25,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Memory topics now fold by normalized title inside a space, enforced by `uniq_vnotes_topic_title`; naming an existing subject reuses it instead of creating a second topic.
+- Two pre-existing memory topics in one space whose titles differ only in case or spacing block that migration: it retries and the schema stays at `0065` until they are merged, while the app keeps serving without the constraint. The first `[db] auto-migration failed` log line names the space and the title; later retries name only the index.
 - Claim trust classes are now minted by one module (`src/lib/vault/grounding.ts`); no other code path can state a `source_class`.
 - Memory search now matches by full text and trigram similarity instead of substring, so a misspelling or a different word order still finds the fact.
 - The "N saved items are marked sensitive" line `memory_search` appends now counts sensitive facts still awaiting confirmation, not only kept ones.

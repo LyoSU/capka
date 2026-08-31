@@ -82,34 +82,67 @@ export type TopicId = string & { readonly [topicId]: true };
 export type TopicState = "default" | "existing" | "revived" | "created" | "secret_fallback";
 
 /**
- * A FROZEN copy, and the JS half of `uniq_vnotes_topic_title`'s expression.
+ * The JS RENDERING of `uniq_vnotes_topic_title`'s expression — for the error message and
+ * for the parity test, and DELIBERATELY NOT for finding a row (review HIGH-1).
  *
  * Deliberately NOT `text.ts::norm`, whose docstring forbids exactly this: its three live
  * callers ask a question answered fresh against current rows every time and are therefore
- * free to change its answer, while this one is computed at write time and frozen into an
- * index over a populated table. `legacyIdemKeyNorm` and `dedupKeyNorm` are the two prior
- * instances of the same split; this is the third and it is listed in `text.ts`'s roll-call
- * beside them.
+ * free to change its answer, while an index expression over a populated table is frozen.
+ * `legacyIdemKeyNorm` and `dedupKeyNorm` are the two prior instances of the same split;
+ * this is the third, and it is the first one that a frozen copy could not actually
+ * satisfy — `text.ts`'s roll-call records that corollary beside it.
  *
- * ASCII whitespace only, in BOTH operations, and the character classes are written out
- * rather than reached for. JavaScript's `\s` matches U+00A0 and Postgres's `[[:space:]]`
- * does not, so a `\s` collapse here would fold a title the index thinks is distinct — a
- * silent duplicate topic under the one constraint built to make duplicates impossible.
+ * THE TWIN HAS THREE OPERATIONS, and an earlier draft of this docstring enumerated two.
+ * The third is why this function is off the lookup path:
  *
- * `.trim()` IS THE SAME BUG ONE OPERATION OVER, which is why it is not used (review
- * NEW-5). JS `trim` is Unicode-aware and strips U+00A0; `btrim(x)` with no second argument
- * strips ASCII spaces only. So a LEADING or TRAILING non-breaking space would fold in JS
- * and survive in SQL — the same asymmetry, moved from the collapse to the trim, and just
- * as invisible. `.replace(/^ +| +$/g, "")` matches `btrim`'s actual behavior.
+ *   collapse — ASCII class written out, not `\s`. JavaScript's `\s` matches U+00A0 and
+ *              Postgres's `[[:space:]]` does not, so a `\s` collapse here would fold a
+ *              title the index thinks is distinct.
+ *   trim     — `.replace(/^ +| +$/g, "")`, not `.trim()`, which is the same bug one
+ *              operation over (NEW-5): JS `trim` is Unicode-aware and strips U+00A0 while
+ *              `btrim(x)` with no second argument strips ASCII spaces only.
+ *   case     — AND THIS ONE CANNOT BE PINNED AT ALL. `lower()` follows the database's
+ *              collation (`en_US.utf8` on this deployment) and `toLowerCase()` follows
+ *              Unicode default casing, and they measurably disagree: U+0130, the Turkish
+ *              dotted capital I, lowercases to plain `i` in Postgres and to `i` + U+0307
+ *              in JS; a word-final capital sigma lowercases to U+03C3 in Postgres and to
+ *              final sigma U+03C2 in JS. No character class closes that, and unlike the
+ *              whitespace halves it has no pre-normalizer — `fitTopicTitle` collapses
+ *              whitespace and does NOT case-fold, so the unreachability argument that
+ *              covers the first two operations does not extend to this one.
  *
- * Both sides are pinned by the 23505 test and the NBSP case below.
+ * So the resolver stopped computing the fold in JS: `foldOf` computes it in SQL on both
+ * sides of every comparison, which makes divergence unrepresentable on the read path
+ * rather than merely unlikely, and the 23505 catch on the insert degrades any residual
+ * disagreement to reuse. What this function is still for is the message text and the
+ * parity test — which asserts SQL agreement for the two whitespace operations and does
+ * NOT claim it for case, because that claim would be false.
  */
 export const topicTitleNorm = (raw: string) =>
   raw.toLowerCase().replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "");
 
-/** The fold, as SQL, and the only place this expression is written on the query side.
- *  Byte-identical to `uniq_vnotes_topic_title`'s so the planner can use the index. */
+/** The fold of the STORED title, as SQL. Byte-identical to `uniq_vnotes_topic_title`'s so
+ *  the planner can use the index. */
 const foldedTitle = sql`lower(btrim(regexp_replace(${vaultNotes.title}, '[[:space:]]+', ' ', 'g')))`;
+
+/** The same fold of a CANDIDATE title, also as SQL, so both sides of every comparison are
+ *  computed by the same engine under the same collation. This is what closes HIGH-1: with
+ *  a JS-computed right-hand side the case operation could disagree with the index, and the
+ *  lookup would miss a row the insert then collided with. Immutable functions over a bound
+ *  parameter, so the expression index is still usable. */
+const foldOf = (raw: string) => sql`lower(btrim(regexp_replace(${raw}::text, '[[:space:]]+', ' ', 'g')))`;
+
+/** Whether a failed insert is the title fold saying "somebody already has this subject".
+ *  Named rather than "any 23505": a foreign-key or check failure is a fault, and answering
+ *  it with "reuse the existing topic" would report a real defect as routine reuse. Drizzle
+ *  wraps driver errors from v0.36 on and keeps the `pg` error as `cause`; both shapes are
+ *  read rather than pinning a version — the same test `barrier.ts` makes. */
+function isTitleFoldConflict(e: unknown): boolean {
+  const err = (e as { code?: unknown; constraint?: unknown }).code
+    ? (e as { code?: unknown; constraint?: unknown })
+    : ((e as { cause?: { code?: unknown; constraint?: unknown } }).cause ?? {});
+  return err.code === "23505" && err.constraint === "uniq_vnotes_topic_title";
+}
 
 export async function resolveTopic(
   spaceId: string,
@@ -148,13 +181,7 @@ export async function resolveTopic(
   const raw = fitTopicTitle(nameOrHandle ?? "");
 
   // (7) default.
-  if (!raw) {
-    return {
-      id: await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY, ex),
-      title: TOPIC_LABELS[DEFAULT_TOPIC_KEY],
-      state: "default",
-    };
-  }
+  if (!raw) return { ...(await topicByKey(spaceId, DEFAULT_TOPIC_KEY, ex)), state: "default" };
 
   // (2) handle arm. A handle from ANOTHER space, or a fabricated one, falls through to
   // the title arms AS WORDS - never an error the model has to handle, and never a
@@ -185,25 +212,27 @@ export async function resolveTopic(
   // (6) secret screen. A topic title is destined for the ALWAYS-ON manifest tier, so a
   // secret-shaped name may not become one. Screened before the fold, so a credential
   // never even reserves a title under the unique index.
+  //
+  // Both fallback arms return the DEFAULT TOPIC'S OWN TITLE rather than
+  // `TOPIC_LABELS[DEFAULT_TOPIC_KEY]` (review LOW-3): the row the key landed on may be a
+  // user's own topic that the fold adopted, and quoting the label back at a caller whose
+  // stored title says something else is the display/identity conflation this module was
+  // built to end. Free, because `topicByKey` reads the title in the query it already runs.
   if (looksLikeSecret(raw)) {
-    return {
-      id: await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY, ex),
-      title: TOPIC_LABELS[DEFAULT_TOPIC_KEY],
-      state: "secret_fallback",
-    };
+    return { ...(await topicByKey(spaceId, DEFAULT_TOPIC_KEY, ex)), state: "secret_fallback" };
   }
 
   // (3)+(4). ONE read answers both: the index is title-only, so a tombstone is found by
   // the same query and told apart by `deleted_at`.
   //
-  // `topicTitleNorm`, NOT `text.ts::norm` (MED-11). `norm`'s own docstring states the rule
-  // in as many words after two prior instances: "a new persisted key gets its OWN frozen
-  // copy, it does not import this". This expression is the JS twin of a GENERATED,
-  // GIN-adjacent unique index over a populated table — computed once at write time and
-  // frozen — while `norm`'s live callers are explicitly free to change its answer whenever
-  // a better one is found. One function cannot hold both requirements, which is why
-  // `legacyIdemKeyNorm` and `dedupKeyNorm` already exist as separate frozen copies.
-  const folded = topicTitleNorm(raw);
+  // BOTH SIDES OF THIS COMPARISON ARE COMPUTED BY POSTGRES (review HIGH-1). It used to be
+  // `foldedTitle = ${topicTitleNorm(raw)}` — the index's expression on the left and a JS
+  // twin of it on the right — and the twin's case operation disagrees with `lower()` on
+  // this collation, so a title like the Turkish `I` missed here, collided on the index one
+  // statement later, and threw `vanished after insert` on the hot path of a turn. `norm`'s
+  // docstring says a persisted key gets its own frozen copy; what this taught is the
+  // corollary — when the copy cannot be frozen faithfully, do not compute the key in JS at
+  // all. `topicTitleNorm` survives for the message and the parity test.
   const [hit] = await ex
     .select({ id: vaultNotes.id, title: vaultNotes.title, deletedAt: vaultNodes.deletedAt })
     .from(vaultNotes)
@@ -211,7 +240,7 @@ export async function resolveTopic(
     .where(and(
       eq(vaultNotes.spaceId, spaceId),
       eq(vaultNotes.kind, "memory_topic"),
-      sql`${foldedTitle} = ${folded}`,
+      sql`${foldedTitle} = ${foldOf(raw)}`,
     ))
     .limit(1);
   if (hit && !hit.deletedAt) return { id: hit.id as TopicId, title: hit.title, state: "existing" };
@@ -224,40 +253,59 @@ export async function resolveTopic(
     return { id: hit.id as TopicId, title: hit.title, state: "revived" };
   }
 
-  // Miss: insert, racing on `uniq_vnotes_topic_title` with onConflictDoNothing + re-read
-  // - the shape `getOrCreateSpace` already uses. `topic_key := id`: agent- and
-  // user-created topics are nanoid-identified, opaque, and never rendered.
+  // Miss: insert the node and the note UNDER A SAVEPOINT, racing on
+  // `uniq_vnotes_topic_title`. `topic_key := id`: agent- and user-created topics are
+  // nanoid-identified, opaque, and never rendered.
+  //
+  // A savepoint rather than `onConflictDoNothing` (review HIGH-1), and it buys two things
+  // the older shape did not have. A plain insert RAISES on the conflict instead of
+  // returning an empty array, so the loser learns WHICH constraint refused it and a
+  // foreign-key or check failure can no longer be read as "somebody else got here first";
+  // and `rollback to savepoint` takes the node row back with the note attempt, so there is
+  // no orphan to delete by hand and no hard node delete in this module at all. The
+  // caller's transaction is untouched either way, which is the whole reason this is a
+  // savepoint and not a bare `try` around a poisoned transaction.
   const id = nanoid();
-  await insertNode({ id, spaceId, kind: "note" }, ex);
-  const inserted = await ex
-    .insert(vaultNotes)
-    .values({ id, spaceId, topicKey: id, title: raw, kind: "memory_topic", currentRevision: 1 })
-    .onConflictDoNothing()
-    .returning({ id: vaultNotes.id });
-  if (!inserted.length) {
-    // The loser of the race owns the cleanup, because the winner cannot see what it
-    // displaced. Hard, and this is `getOrCreateTopicNote`'s documented second hard node
-    // delete: the node is two statements old, has no edges, and lost its note.
-    await ex.delete(vaultNodes).where(eq(vaultNodes.id, id));
+  const lostTheRace = await ex
+    .transaction(async (sp) => {
+      await insertNode({ id, spaceId, kind: "note" }, sp);
+      await sp
+        .insert(vaultNotes)
+        .values({ id, spaceId, topicKey: id, title: raw, kind: "memory_topic", currentRevision: 1 });
+      return false;
+    })
+    .catch((e: unknown) => {
+      if (!isTitleFoldConflict(e)) throw e;
+      return true;
+    });
+  if (lostTheRace) {
+    // Re-read with the SQL fold — the same expression the index used to refuse us, so this
+    // finds the winner's row whatever the two case-folds think of each other. This is the
+    // DEGRADE that makes the case divergence survivable: a disagreement costs a wasted
+    // insert and reuses the existing topic, where it used to throw. `topicTitleNorm` is
+    // called here only to name the subject in the message that fires if the row is somehow
+    // still absent.
     const [won] = await ex
       .select({ id: vaultNotes.id, title: vaultNotes.title })
       .from(vaultNotes)
       .where(and(
         eq(vaultNotes.spaceId, spaceId),
         eq(vaultNotes.kind, "memory_topic"),
-        sql`${foldedTitle} = ${folded}`,
+        sql`${foldedTitle} = ${foldOf(raw)}`,
       ))
       .limit(1);
-    if (!won) throw new Error(`topic "${folded}" vanished after insert`);
+    if (!won) throw new Error(`topic "${topicTitleNorm(raw)}" vanished after insert`);
     return { id: won.id as TopicId, title: won.title, state: "existing" };
   }
   // Revision 1 for the new topic, through the ONE writer of a version row. Not through
   // `createNote`, which owns the whole node+note+version move: this arm needs the note
-  // insert to be an `onConflictDoNothing` racing on `uniq_vnotes_topic_title`, and a plain
-  // insert would raise 23505 and poison the caller's transaction instead of losing the race
-  // cleanly. What Task 4 collapses is the part that was duplicated — the version insert and
-  // the pointer update — so that "no path creates a note without a revision 1" is a
-  // property of `insertNoteVersion` having no second caller rather than of remembering.
+  // insert to be the one racing on `uniq_vnotes_topic_title`, and to lose that race without
+  // taking the caller's transaction with it. Task 4 read that requirement off an
+  // `onConflictDoNothing`; the savepoint above is the same requirement met by a construct
+  // that also says which constraint refused. What Task 4 collapses is the part that was
+  // duplicated — the version insert and the pointer update — so that "no path creates a
+  // note without a revision 1" is a property of `insertNoteVersion` having no second caller
+  // rather than of remembering.
   //
   // `ownerAuthored()`, so the horizon `createNote` would have armed is null here anyway: a
   // topic the person's own filing created is not agent content and does not expire.
@@ -291,12 +339,19 @@ export async function resolveTopic(
  *  retired space does not exist. */
 export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex?: Ex): Promise<TopicId> {
   if (!ex || ex === db) return db.transaction((tx) => getOrCreateTopicNote(spaceId, topicKey, tx));
+  return (await topicByKey(spaceId, topicKey, ex)).id;
+}
+
+/** The body of `getOrCreateTopicNote`, returning the row's TITLE as well — which the two
+ *  fallback arms of `resolveTopic` need and the public signature does not carry. Requires
+ *  a transaction: it is the same act, not a weaker one. */
+async function topicByKey(spaceId: string, topicKey: string, ex: Ex): Promise<{ id: TopicId; title: string }> {
   const [found] = await ex
-    .select({ id: vaultNotes.id })
+    .select({ id: vaultNotes.id, title: vaultNotes.title })
     .from(vaultNotes)
     .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.topicKey, topicKey), eq(vaultNotes.kind, "memory_topic")))
     .limit(1);
-  if (found) return found.id as TopicId;
+  if (found) return { id: found.id as TopicId, title: found.title };
   const label = TOPIC_LABELS[topicKey] ?? topicKey;
   const r = await resolveTopic(spaceId, label, ex);
   // A system topic is addressed BY KEY forever after, so the key is stamped on whatever
@@ -314,5 +369,5 @@ export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex
       eq(vaultNotes.id, r.id),
       or(isNull(vaultNotes.topicKey), eq(vaultNotes.topicKey, vaultNotes.id)),
     ));
-  return r.id;
+  return { id: r.id, title: r.title };
 }

@@ -37,6 +37,16 @@
  * `uniq_vnotes_topic_title`'s SQL expression. Same rule, third instance — which is why
  * that rule is written here rather than only at the two sites that first needed it.
  *
+ * AND THE THIRD CARRIES THE COROLLARY, because freezing was not enough for it. Its
+ * expression ends in `lower()`, and `lower()` follows the database's collation while
+ * `toLowerCase()` follows Unicode default casing: they disagree on U+0130 and on a
+ * word-final capital sigma, so the "frozen copy" was faithful in two of its three
+ * operations and quietly wrong in the third. A copy can only be frozen against something
+ * it can actually reproduce. Where it cannot — a collation-dependent fold, a
+ * locale-dependent comparison — the answer is not a better JS copy but NO JS copy: compute
+ * the key in SQL on both sides, as `topics.ts` now does, and keep the JS rendering for
+ * messages and for the parity test that says which operations it is still honest about.
+ *
  * Case-folded, trimmed, whitespace-collapsed, and deliberately nothing more. No language
  * list, no transliteration, no stemming: those are enumerated cases that go stale, and the
  * upgrade path for search is n-gram/embedding matching behind the same call site, not a

@@ -846,15 +846,15 @@ export const vaultNodes = pgTable("vault_nodes", {
  *
  * THE INVERSE: an edge is soft-deleted, never hard-deleted, so the graph can still explain
  * a tombstone. The `on delete cascade` above it fires only when a NODE row is hard-deleted,
- * and TWO sites in the whole system do that: the `spaces` cascade fired by
- * `purgeUserSpaces`, and `resolveTopic`'s race-loser rollback in `topics.ts` — a node two
- * statements old, with no edges, whose note lost a unique-index race, where a tombstone for
- * a note that never existed would be worse than no row. That second site used to read
- * "`getOrCreateTopicNote`'s rollback in `spaces.ts`" and is the SAME site: slice 2 moved
- * topics into their own module and made `getOrCreateTopicNote` a wrapper, so the one
- * rollback is now reached through the resolver instead of written twice. Read those two as
- * the closed enumeration — `nodes.ts`'s `deleteNode` docstring carries the reasoning; a
- * third would be a defect.
+ * and exactly ONE site in the whole system does that: the `spaces` cascade fired by
+ * `purgeUserSpaces`, hard because the space itself is going.
+ *
+ * It was two until the topic resolver's race-loser rollback stopped being a DELETE. That
+ * site hard-deleted a node whose note had just lost a unique-index race; it now inserts the
+ * node and the note under one SAVEPOINT, so losing the race rolls the node back rather than
+ * removing it, and no statement anywhere hard-deletes a node row on purpose. Read the one
+ * as the closed enumeration — `nodes.ts`'s `deleteNode` docstring carries the reasoning; a
+ * second would be a defect.
  */
 export const vaultEdges = pgTable("vault_edges", {
   id: text("id").primaryKey(),
@@ -1098,16 +1098,24 @@ export const vaultNotes = pgTable("vault_notes", {
    *
    * `[[:space:]]`, NOT `\s`, and the difference is not cosmetic. JavaScript's `\s` matches
    * U+00A0; Postgres's does not (it follows the database's ctype, and NBSP is not
-   * `[[:space:]]` under the C/UTF-8 collations this ships on). A title carrying a
+   * `[[:space:]]` under this database's ctype — measured on the live `en_US.utf8`, where
+   * `chr(160) ~ '[[:space:]]'` is false; it is a ctype property, not a C-locale one). A title carrying a
    * non-breaking space would then fold on the JS side and not on the SQL side — the
    * resolver would believe it had reused a topic while the index believed the two titles
    * differ, which is a silent duplicate topic under a constraint whose whole job is to
    * make one impossible. Both sides are pinned to ASCII whitespace, and the parity test
    * carries a non-ASCII case so the agreement is asserted where it actually broke.
    *
+   * THE CASE FOLD IS NOT PINNED AND CANNOT BE (review HIGH-1): `lower()` follows the
+   * database's collation and JavaScript's follows Unicode default casing, and they disagree
+   * on U+0130 and on a word-final capital sigma. `topics.ts` answers that by computing the
+   * fold IN SQL on both sides of every lookup, so this expression has no JS twin on the
+   * read path at all — see `topicTitleNorm`'s docstring, which enumerates all three
+   * operations and says which one is which.
+   *
    * drizzle-kit 0.45.2 emits this expression verbatim (migration `0066`) and a second
-   * `generate` finds nothing to do, so the hand-written form `0064` needed is not needed
-   * here. What proves the emitted SQL and `topicTitleNorm` actually agree is neither this
+   * `generate` finds nothing to do, so the hand-written form `0064` needed is unnecessary
+   * here. What proves the emitted SQL is what `topics.ts` compares against is neither this
    * comment nor the generator: it is `topics.integration.test.ts`'s 23505 case, which
    * inserts a differently-spelled title and requires the DATABASE to refuse it.
    */

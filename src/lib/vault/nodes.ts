@@ -46,17 +46,16 @@ export async function insertNode(
  * notes but SOFT-deletes sources — and a hard node delete would raise 23503 against the
  * source rows that deliberately survive.
  *
- * TWO sites in the whole system hard-delete a node row, and this is neither of them:
- * the `spaces` cascade fired by `purgeUserSpaces`, hard because the space itself is
- * going; and `resolveTopic`'s race-loser rollback in `topics.ts`, hard because the node
- * is two statements old, has no edges and lost its note to a concurrent creator — a
- * tombstone for a note that never existed would be worse than no row. That second site
- * read "`getOrCreateTopicNote`'s rollback in `spaces.ts`" until slice 2 moved topics into
- * their own module and made `getOrCreateTopicNote` a wrapper over the resolver; it is the
- * same rollback, reached one call further in, not a new one.
- * Anywhere ELSE a hard node delete fires `vault_edges`' `on delete cascade` and
- * hard-deletes edges, which is exactly what §2.4 forbids. Read those two as the closed
- * enumeration; a third would be a defect.
+ * ONE site in the whole system hard-deletes a node row, and this is not it: the `spaces`
+ * cascade fired by `purgeUserSpaces`, hard because the space itself is going.
+ *
+ * There were two. `resolveTopic`'s race loser used to hard-delete the node whose note had
+ * just lost the title index, and the argument for it was that a tombstone for a note that
+ * never existed would be worse than no row. That is still true and no longer needs a
+ * DELETE: the node and the note go in under one SAVEPOINT, so the loser rolls both back
+ * together. A hard delete that is not the space cascade would fire `vault_edges`'
+ * `on delete cascade` and hard-delete edges, which is exactly what §2.4 forbids — read the
+ * one as the closed enumeration; a second would be a defect.
  *
  * Idempotent by predicate: both writes are guarded on `deleted_at IS NULL`, so a
  * re-driven forget re-timestamps nothing.
