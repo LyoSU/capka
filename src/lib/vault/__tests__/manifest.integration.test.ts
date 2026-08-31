@@ -15,7 +15,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
-import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY, TOPIC_LABELS } from "../spaces";
+import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY, TOPIC_LABELS } from "../topics";
 import { confirmCandidate, proposeCandidate } from "../candidates";
 import { buildMemoryManifest } from "../manifest";
 

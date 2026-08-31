@@ -17,7 +17,7 @@ import { pool } from "@/lib/db";
 import { confirmClaim, createClaim, forgetClaim, updateClaim, type Actor } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { countWithheld, listManifestClaims, listManifestTopics, listMemoryToolRows } from "../model-view";
-import { DEFAULT_TOPIC_KEY, TOPIC_TITLE_MAX_CHARS, getOrCreateTopicNote } from "../spaces";
+import { DEFAULT_TOPIC_KEY, TOPIC_TITLE_MAX_CHARS, getOrCreateTopicNote } from "../topics";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 

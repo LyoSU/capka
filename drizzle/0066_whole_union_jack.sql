@@ -1,0 +1,11 @@
+-- The topic-title fold, as a constraint. See `vault_notes`' declaration in `schema.ts` for
+-- why the class is `[[:space:]]` and not `\s`, and `topics.ts`'s `topicTitleNorm` for the JS
+-- twin this expression is pinned to.
+--
+-- NO backfill accompanies it, deliberately: today's only producer of a `memory_topic` row is
+-- `getOrCreateTopicNote`, which writes one row per (space, topic_key), so an existing title
+-- resolves to ITSELF and nothing is forked or renamed. Two topics in one space whose titles
+-- already fold together would fail this statement — the whole migration rolls back, boot
+-- retries, and Postgres names the space and the title in its DETAIL line. That is the right
+-- outcome: which of two topics survives a merge is the owner's decision, not a migration's.
+CREATE UNIQUE INDEX "uniq_vnotes_topic_title" ON "vault_notes" USING btree (lower(btrim(regexp_replace("title", '[[:space:]]+', ' ', 'g'))),"space_id") WHERE "vault_notes"."kind" = 'memory_topic';

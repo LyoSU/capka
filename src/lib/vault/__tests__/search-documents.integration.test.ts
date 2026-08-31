@@ -15,7 +15,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { pool } from "@/lib/db";
 import { createClaim, updateClaim, forgetClaim, confirmClaim, type Actor } from "../claims";
 import { rebuildSearchDocuments } from "../search-documents";
-import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 import { norm } from "../text";
 import { testServerClass } from "./fixtures";
 

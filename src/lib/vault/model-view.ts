@@ -2,7 +2,8 @@ import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { noteClaims, vaultClaims, vaultNodes, vaultNotes } from "@/lib/db/schema";
 import { fitSlotKey, fitStatement, looksLikeSecret, type ClaimHead } from "./claims";
-import { TOPIC_LABELS, fitTopicTitle, type Ex } from "./spaces";
+import { type Ex } from "./spaces";
+import { TOPIC_LABELS, fitTopicTitle } from "./topics";
 import { norm } from "./text";
 
 /**

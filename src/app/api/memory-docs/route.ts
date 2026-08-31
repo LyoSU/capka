@@ -5,7 +5,7 @@ import { memoryDocs, projects, spaces, vaultNotes } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { listHeadClaims } from "@/lib/vault/claims";
 import { notCarried } from "@/lib/vault/migrate-memory-docs";
-import { DEFAULT_TOPIC_KEY } from "@/lib/vault/spaces";
+import { DEFAULT_TOPIC_KEY } from "@/lib/vault/topics";
 
 /**
  * The read side of the old memory editor, kept alive across the cutover on the

@@ -13,13 +13,12 @@ import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import {
-  DEFAULT_TOPIC_KEY,
   getOrCreateSpace,
-  getOrCreateTopicNote,
   retireProjectSpace,
   purgeUserSpaces,
   type Ex,
 } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 

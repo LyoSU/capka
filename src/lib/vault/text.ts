@@ -33,6 +33,10 @@
  * reason the rule is written here rather than only there: a new persisted key gets its
  * OWN frozen copy, it does not import this.
  *
+ * A THIRD now exists: `topics.ts`'s `topicTitleNorm`, the JS twin of
+ * `uniq_vnotes_topic_title`'s SQL expression. Same rule, third instance — which is why
+ * that rule is written here rather than only at the two sites that first needed it.
+ *
  * Case-folded, trimmed, whitespace-collapsed, and deliberately nothing more. No language
  * list, no transliteration, no stemming: those are enumerated cases that go stale, and the
  * upgrade path for search is n-gram/embedding matching behind the same call site, not a

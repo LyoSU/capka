@@ -234,7 +234,7 @@ run("vault schema", () => {
     expect(await count("knowledge_fragments", "id = $1", [fragment])).toBe(0);
   });
 
-  it("two topics with one KEY in a space are impossible; one title twice is not", async () => {
+  it("two topics in a space share neither a KEY nor a folded TITLE; plain notes may share both", async () => {
     const space = `${P}notes`;
     await mkSpace(space);
     const note = async (id: string, kind: string, topicKey: string | null, title = "Work") => {
@@ -249,11 +249,24 @@ run("vault schema", () => {
     };
 
     await note(`${space}-t1`, "memory_topic", "work");
-    await expect(note(`${space}-t2`, "memory_topic", "work")).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
-    // The point of moving the index off the title: two topics may legitimately end up
-    // SHOWING the same words (a user-named one colliding with a built-in label). What
-    // they may not share is the key. Under the old index this insert was the violation.
-    await note(`${space}-t3`, "memory_topic", "suppliers");
+    await expect(note(`${space}-t2`, "memory_topic", "work")).rejects.toMatchObject({
+      code: UNIQUE_VIOLATION,
+      constraint: "uniq_vnotes_memory_topic",
+    });
+    // TWO indexes now, and this one is slice 2's. The title stopped being the identity in
+    // slice 1 and it did NOT stop being unique: a second producer minting "  work " beside
+    // "Work" is the duplicate topic `resolveTopic` exists to prevent, so it is the database
+    // that refuses it rather than a lookup convention. A distinct key is no exemption -
+    // this row carries one and is still refused, which is the whole difference from the
+    // index above it.
+    await expect(note(`${space}-t3`, "memory_topic", "suppliers", "  work ")).rejects.toMatchObject({
+      code: UNIQUE_VIOLATION,
+      constraint: "uniq_vnotes_topic_title",
+    });
+    // A different subject is a different topic under both.
+    await note(`${space}-t4`, "memory_topic", "suppliers", "Suppliers");
+    // Both indexes are partial on `kind`, so a plain note is outside them and may repeat a
+    // title freely - which is what makes plan D2's free-form notes possible at all.
     await note(`${space}-n1`, "note", null);
     await note(`${space}-n2`, "note", null);
     expect(await count("vault_notes", "space_id = $1", [space])).toBe(4);

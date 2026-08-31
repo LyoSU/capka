@@ -21,7 +21,8 @@ import {
 } from "./claims";
 import { ownerAuthored } from "./grounding";
 import { listMemoryToolRows } from "./model-view";
-import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
+import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "./topics";
 // One home for the statement normalization the slot branch and the slotless dedup share —
 // and, since Task 9, the memory page's search box. See `text.ts` for why it is not copied.
 import { norm } from "./text";

@@ -23,7 +23,8 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
 import { pool } from "@/lib/db";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { readMemoryPage, type ScopeView } from "../memory-page";
-import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
+import { getOrCreateSpace } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 

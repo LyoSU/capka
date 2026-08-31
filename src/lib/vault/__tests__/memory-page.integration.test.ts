@@ -14,7 +14,8 @@ import { pool } from "@/lib/db";
 import { attachEvidence, confirmClaim, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { proposeCandidate } from "../candidates";
-import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
+import { getOrCreateSpace } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 import { FACT_LIMIT, readMemoryPage } from "../memory-page";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;

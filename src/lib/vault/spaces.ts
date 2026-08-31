@@ -8,11 +8,9 @@ import {
   projects,
   spaces,
   vaultClaims,
-  vaultNodes,
   vaultNotes,
 } from "@/lib/db/schema";
-import { deleteSpaceNodes, insertNode } from "./nodes";
-import { projectNoteDoc } from "./search-documents";
+import { deleteSpaceNodes } from "./nodes";
 
 /** A DB handle: the pool, or the caller's transaction. Every function here sends
  *  ALL of its statements through it — quietly falling back to the module-level
@@ -124,95 +122,6 @@ export async function spaceAcceptsWrites(spaceId: string, ex: Ex): Promise<boole
     .limit(1)
     .for("share");
   return !!row;
-}
-
-/** The topic a fact lands in when nothing else chose one — as a KEY, which is what
- *  `vault_notes.topic_key` holds and what `getOrCreateTopicNote` resolves on.
- *
- *  This used to be `DEFAULT_TOPIC = "General"`, a string that was simultaneously the
- *  database key and the text on screen. Renaming it from one language to the other
- *  therefore forked every topic that already existed: the claims were re-attached under
- *  a second note, both notes stayed, and `topicCounts` printed both to the model on
- *  every turn — four facts asserted where two existed. Nine reviews read the constant
- *  and saw nothing, because it looks correct in each of its two roles separately.
- *
- *  Lowercase, ASCII, and never shown to anyone: a key that could pass for a label is
- *  how this comes back. */
-export const DEFAULT_TOPIC_KEY = "general";
-
-/** What the AGENT sees a topic called, by key. English on purpose and separate from
- *  `messages/*.json`: the manifest is prompt structure, not UI, and it must be
- *  byte-identical across turns regardless of the reader's locale — a manifest that
- *  changed language with a setting would break the prompt cache on every switch.
- *  A key with no entry falls back to the stored title, which is what a user-named
- *  topic (plan D2) will have. */
-export const TOPIC_LABELS: Record<string, string> = { [DEFAULT_TOPIC_KEY]: "General" };
-
-/** A topic title is destined for the manifest, which is a byte-budgeted tier, so it is
- *  bounded at the one place that renders it and at every writer that produces one. */
-export const TOPIC_TITLE_MAX_CHARS = 64;
-
-/** Single-line, whitespace-collapsed, clamped. Not `norm`: this is what a PERSON reads,
- *  so case and punctuation survive — `norm` answers "is this the same wording", which is
- *  a different question with a different frozenness requirement. */
-export function fitTopicTitle(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim().slice(0, TOPIC_TITLE_MAX_CHARS);
-}
-
-/** A memory topic is a note of kind `memory_topic`, identified by `topic_key`; the
- *  partial unique index on (space, key) is scoped to that kind, so it is the same race
- *  and the same resolution as `getOrCreateSpace`.
- *
- *  The stored `title` is a SEED for display, not the identity: it is written once, at
- *  creation, from the label table, and nothing reads it to find a row. That is what
- *  makes a rename control safe to build in plan D2 — it will write `title` and leave
- *  `topic_key` alone. */
-export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex?: Ex): Promise<string> {
-  // Two rows are written now, not one — the note and its node — so without a transaction
-  // this stopped being a move and became a pair of autocommits: a crash between them
-  // leaves a PERMANENT orphan node, which is the state `insertNode`'s missing `ex` default
-  // exists to make unrepresentable. The `!ex || ex === db` shape is the one `createClaim`
-  // documents: `Ex` permits passing the pool explicitly, and "omitted" and "explicit db"
-  // must not mean different things.
-  if (!ex || ex === db) return db.transaction((tx) => getOrCreateTopicNote(spaceId, topicKey, tx));
-
-  // The FOURTH entrance into a space, and it is reachable: `migrateMemoryDocs` opens
-  // the topic note BEFORE its first claim, so a bullet-less legacy document migrating
-  // during the window between teardown's two transactions would commit an empty topic
-  // into a retired space without ever meeting the claim fence. One empty note and no
-  // user content is a small harm — but this feature's whole history is a guard standing
-  // at one entrance of two, so it is closed rather than noted. The migration itself
-  // does not rely on the throw: it checks and SKIPS, because a deleted project's
-  // document is nothing to carry, not a failure to retry every boot.
-  if (!(await spaceAcceptsWrites(spaceId, ex))) {
-    throw new Error(`space ${spaceId} is retired; refusing to open a topic in it`);
-  }
-  const where = and(
-    eq(vaultNotes.spaceId, spaceId),
-    eq(vaultNotes.topicKey, topicKey),
-    eq(vaultNotes.kind, "memory_topic"),
-  );
-  const found = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
-  if (found[0]) return found[0].id;
-  const noteId = nanoid();
-  await insertNode({ id: noteId, spaceId, kind: "note" }, ex);
-  const inserted = await ex
-    .insert(vaultNotes)
-    .values({ id: noteId, spaceId, topicKey, title: TOPIC_LABELS[topicKey] ?? topicKey, kind: "memory_topic" })
-    .onConflictDoNothing()
-    .returning({ id: vaultNotes.id });
-  // The insert can be a no-op (a concurrent creator won the partial unique index), and
-  // then the node row above belongs to a note that does not exist. Remove it rather than
-  // leaving an orphan the graph would walk into: the loser of the race owns the cleanup,
-  // because the winner cannot see what it displaced.
-  if (!inserted.length) await ex.delete(vaultNodes).where(eq(vaultNodes.id, noteId));
-  const [row] = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
-  if (!row) throw new Error(`memory topic "${topicKey}" vanished after insert`);
-  // The winner of the race projects; the loser projects the winner's row, which is a
-  // no-op upsert on the same unit key. Both are correct and neither has to know which it
-  // was - the alternative is a branch on a race, which is how one arm goes unexercised.
-  await projectNoteDoc(row.id, ex);
-  return row.id;
 }
 
 /** Deleting a project kills its MEMORY (claims, topics, candidates) but keeps its

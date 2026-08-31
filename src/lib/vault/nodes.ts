@@ -10,11 +10,15 @@ export type NodeKind = "note" | "claim" | "source";
  * a node row exists only as half of a subtype write, so there is no such thing as
  * creating one outside somebody else's transaction.
  *
- * Three call sites, which is why this is a function rather than three inline inserts:
- * `createClaim`, `updateClaim`'s successor, and `getOrCreateTopicNote`. A fourth — the
- * source writer that arrives with file ingestion in slice 3 — is not optional, and it is
- * the composite FK added in migration `0060` that will say so at the insert rather than
- * at review.
+ * It is a function rather than an inline insert at each writer because the PROPERTY has to
+ * hold at all of them and a count does not: a node row is never inserted except as half of
+ * a subtype write, in that write's own transaction. Counting them was a maintenance trap —
+ * this docstring said "three: `createClaim`, `updateClaim`'s successor and
+ * `getOrCreateTopicNote`" and slice 2 replaced the third with `resolveTopic` before adding
+ * `createNote` beside it.
+ * The source writer that arrives with file ingestion in slice 3 is the one still doing
+ * work here: it is not optional, and it is the composite FK added in migration `0060` that
+ * will say so at the insert rather than at review.
  *
  * `createdAt` is settable so a backfill can carry the subtype row's own timestamp; live
  * writers omit it.
@@ -44,9 +48,12 @@ export async function insertNode(
  *
  * TWO sites in the whole system hard-delete a node row, and this is neither of them:
  * the `spaces` cascade fired by `purgeUserSpaces`, hard because the space itself is
- * going; and `getOrCreateTopicNote`'s race-loser rollback in `spaces.ts`, hard because
- * the node is two statements old, has no edges and lost its note to a concurrent
- * creator — a tombstone for a note that never existed would be worse than no row.
+ * going; and `resolveTopic`'s race-loser rollback in `topics.ts`, hard because the node
+ * is two statements old, has no edges and lost its note to a concurrent creator — a
+ * tombstone for a note that never existed would be worse than no row. That second site
+ * read "`getOrCreateTopicNote`'s rollback in `spaces.ts`" until slice 2 moved topics into
+ * their own module and made `getOrCreateTopicNote` a wrapper over the resolver; it is the
+ * same rollback, reached one call further in, not a new one.
  * Anywhere ELSE a hard node delete fires `vault_edges`' `on delete cascade` and
  * hard-deletes edges, which is exactly what §2.4 forbids. Read those two as the closed
  * enumeration; a third would be a defect.

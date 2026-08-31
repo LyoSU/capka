@@ -847,9 +847,14 @@ export const vaultNodes = pgTable("vault_nodes", {
  * THE INVERSE: an edge is soft-deleted, never hard-deleted, so the graph can still explain
  * a tombstone. The `on delete cascade` above it fires only when a NODE row is hard-deleted,
  * and TWO sites in the whole system do that: the `spaces` cascade fired by
- * `purgeUserSpaces`, and `getOrCreateTopicNote`'s race-loser rollback in `spaces.ts`. Read
- * those two as the closed enumeration — `nodes.ts`'s `deleteNode` docstring carries the
- * reasoning; a third would be a defect.
+ * `purgeUserSpaces`, and `resolveTopic`'s race-loser rollback in `topics.ts` — a node two
+ * statements old, with no edges, whose note lost a unique-index race, where a tombstone for
+ * a note that never existed would be worse than no row. That second site used to read
+ * "`getOrCreateTopicNote`'s rollback in `spaces.ts`" and is the SAME site: slice 2 moved
+ * topics into their own module and made `getOrCreateTopicNote` a wrapper, so the one
+ * rollback is now reached through the resolver instead of written twice. Read those two as
+ * the closed enumeration — `nodes.ts`'s `deleteNode` docstring carries the reasoning; a
+ * third would be a defect.
  */
 export const vaultEdges = pgTable("vault_edges", {
   id: text("id").primaryKey(),
@@ -1074,6 +1079,41 @@ export const vaultNotes = pgTable("vault_notes", {
   // legitimately end up showing the same title (a user-named one colliding with a
   // built-in label); they may not share a key.
   uniqueIndex("uniq_vnotes_memory_topic").on(t.spaceId, t.topicKey).where(sql`${t.kind} = 'memory_topic'`),
+  /**
+   * THE topic-title fold, as a DATABASE CONSTRAINT rather than a lookup convention: a
+   * second producer minting "Work " beside "work" gets 23505 and is forced through
+   * `resolveTopic`.
+   *
+   * NO `deleted_at` clause, and its absence is a decision (H4): `vault_notes` has no such
+   * column and a partial index predicate cannot reference another table. So a soft-deleted
+   * topic KEEPS ITS TITLE RESERVED, and a normalized-title hit on a tombstone is an
+   * explicit REVIVE arm in the resolver — which is the better behavior anyway, since it
+   * restores the person's existing `contains` edges instead of building a parallel topic
+   * beside them.
+   *
+   * The expression is deliberately trivial so `topics.ts`'s `topicTitleNorm` and this can
+   * be pinned by one test. NEITHER is allowed to grow: `text.ts`'s docstring already
+   * records what happens when a JS normalizer and a SQL twin drift across a populated
+   * index.
+   *
+   * `[[:space:]]`, NOT `\s`, and the difference is not cosmetic. JavaScript's `\s` matches
+   * U+00A0; Postgres's does not (it follows the database's ctype, and NBSP is not
+   * `[[:space:]]` under the C/UTF-8 collations this ships on). A title carrying a
+   * non-breaking space would then fold on the JS side and not on the SQL side — the
+   * resolver would believe it had reused a topic while the index believed the two titles
+   * differ, which is a silent duplicate topic under a constraint whose whole job is to
+   * make one impossible. Both sides are pinned to ASCII whitespace, and the parity test
+   * carries a non-ASCII case so the agreement is asserted where it actually broke.
+   *
+   * drizzle-kit 0.45.2 emits this expression verbatim (migration `0066`) and a second
+   * `generate` finds nothing to do, so the hand-written form `0064` needed is not needed
+   * here. What proves the emitted SQL and `topicTitleNorm` actually agree is neither this
+   * comment nor the generator: it is `topics.integration.test.ts`'s 23505 case, which
+   * inserts a differently-spelled title and requires the DATABASE to refuse it.
+   */
+  uniqueIndex("uniq_vnotes_topic_title")
+    .on(sql`lower(btrim(regexp_replace(${t.title}, '[[:space:]]+', ' ', 'g')))`, t.spaceId)
+    .where(sql`${t.kind} = 'memory_topic'`),
   // Child -> parent, so NO `onDelete`: see `knowledge_source_node_fk`.
   foreignKey({
     name: "vault_note_node_fk",

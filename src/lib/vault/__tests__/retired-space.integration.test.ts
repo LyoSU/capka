@@ -19,7 +19,8 @@ import { vaultClaims } from "@/lib/db/schema";
 import { createClaim, updateClaim, type Actor } from "../claims";
 import { confirmCandidate, proposeCandidate } from "../candidates";
 import { extractCandidates } from "../extract";
-import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace } from "../spaces";
+import { getOrCreateSpace, retireProjectSpace } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;

@@ -11,7 +11,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { db, pool } from "@/lib/db";
 import { createClaim, forgetAllClaims, forgetClaim, updateClaim, type Actor } from "../claims";
 import { deleteNode } from "../nodes";
-import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY } from "../spaces";
+import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY } from "../topics";
 import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;

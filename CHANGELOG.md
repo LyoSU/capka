@@ -23,6 +23,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Memory topics now fold by normalized title inside a space, enforced by `uniq_vnotes_topic_title`; naming an existing subject reuses it instead of creating a second topic.
 - Claim trust classes are now minted by one module (`src/lib/vault/grounding.ts`); no other code path can state a `source_class`.
 - Memory search now matches by full text and trigram similarity instead of substring, so a misspelling or a different word order still finds the fact.
 - The "N saved items are marked sensitive" line `memory_search` appends now counts sensitive facts still awaiting confirmation, not only kept ones.
