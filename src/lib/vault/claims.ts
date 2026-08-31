@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import { deleteNode, insertNode } from "./nodes";
+import { projectClaimDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
@@ -420,6 +421,8 @@ export async function createClaim(
     // that outlived its space, which is the one thing this line exists to prevent.
     payload: { reviewStatus: "unverified", sensitive },
   });
+  // The projection is written by the same transaction that writes the row it projects.
+  await projectClaimDoc(id, ex);
   // `sensitive` travels back because the screen may have RAISED it: a caller that
   // tracks the flag it asked for would otherwise be tracking a value the row does not
   // hold.
@@ -643,6 +646,13 @@ export async function updateClaim(
       sensitive,
     },
   });
+  // The SUCCESSOR only. The predecessor's row is untouched by a supersede — `updateClaim`
+  // writes it `superseded_at` and nothing else, and its own comment says so ("the
+  // predecessor stays verbatim as it was recorded"); the re-clamping and re-screening
+  // happen on the SUCCESSOR's values. Since this table holds no lifecycle state, the
+  // predecessor's projection row is still correct, and it is the mint's join that stops
+  // it from being returned.
+  await projectClaimDoc(id, ex);
   return { ok: true, id, revision };
 }
 
@@ -822,6 +832,11 @@ export async function confirmClaim(
     })
     .where(and(eq(vaultClaims.id, claimId), isNull(vaultClaims.supersededAt)))
     .returning({ id: vaultClaims.id });
+  // Only when it HIT: a confirmation can RAISE `sensitive`, which is exactly the
+  // owner-side change §2.8 says a denormalized channel column would miss — and `hit` is
+  // the `.returning()` ARRAY, so `if (hit)` would be true on a missed CAS too and would
+  // re-project a row the confirmation never landed on.
+  if (hit.length) await projectClaimDoc(claimId, ex);
   return hit.length > 0;
 }
 

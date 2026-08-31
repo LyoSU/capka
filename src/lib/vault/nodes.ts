@@ -1,5 +1,6 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { vaultEdges, vaultNodes } from "@/lib/db/schema";
+import { unprojectNode, unprojectSpace } from "./search-documents";
 import type { Ex } from "./spaces";
 
 export type NodeKind = "note" | "claim" | "source";
@@ -72,6 +73,10 @@ export async function deleteNode(nodeId: string, spaceId: string, ex: Ex): Promi
         or(eq(vaultEdges.fromNodeId, nodeId), eq(vaultEdges.toNodeId, nodeId)),
       ),
     );
+  // The projection is deleted by the same transaction that deletes the row it projects -
+  // including the node SOFT delete, which is the entrance a "delete the row" rule written
+  // against `vault_claims` alone would miss, and which no foreign key can see.
+  await unprojectNode(nodeId, spaceId, ex);
 }
 
 /**
@@ -97,5 +102,11 @@ export async function deleteSpaceNodes(spaceId: string, ex: Ex): Promise<{ nodes
     .update(vaultEdges)
     .set({ deletedAt: now })
     .where(and(eq(vaultEdges.spaceId, spaceId), isNull(vaultEdges.deletedAt)));
+  // Same obligation, set-based. NOT left to a cascade: `retireProjectSpace` keeps the
+  // `spaces` row as a tombstone, so `vault_search_documents.space_id`'s cascade never
+  // fires for a retired project, and Ruling 10's soft node delete does not fire the node
+  // FK's cascade either. Two cascades that both look like they cover this and neither
+  // does — which is why the deletion goes through the owning module instead.
+  await unprojectSpace(spaceId, ex);
   return { nodes: nodes.length };
 }

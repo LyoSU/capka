@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- New admin-only `POST /api/admin/vault/reindex` (body `{"spaceId": "..."}`) rebuilds one space's memory search index.
+- The memory search index is now written with every fact and topic it projects; the boot migration back-fills every existing space.
 - Memory search is now full-text plus trigram. The boot migration runs `CREATE EXTENSION pg_trgm`; the database role must be allowed to create extensions or the migration fails.
 - New `vault_nodes` / `vault_edges` tables; applied automatically at boot, no operator action.
 - Every vault claim, note and document now has a `vault_nodes` row; the backfill runs in the boot migration.

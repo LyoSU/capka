@@ -12,6 +12,7 @@ import {
   vaultNotes,
 } from "@/lib/db/schema";
 import { deleteSpaceNodes, insertNode } from "./nodes";
+import { projectNoteDoc } from "./search-documents";
 
 /** A DB handle: the pool, or the caller's transaction. Every function here sends
  *  ALL of its statements through it — quietly falling back to the module-level
@@ -196,6 +197,10 @@ export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex
   if (!inserted.length) await ex.delete(vaultNodes).where(eq(vaultNodes.id, noteId));
   const [row] = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
   if (!row) throw new Error(`memory topic "${topicKey}" vanished after insert`);
+  // The winner of the race projects; the loser projects the winner's row, which is a
+  // no-op upsert on the same unit key. Both are correct and neither has to know which it
+  // was - the alternative is a branch on a race, which is how one arm goes unexercised.
+  await projectNoteDoc(row.id, ex);
   return row.id;
 }
 

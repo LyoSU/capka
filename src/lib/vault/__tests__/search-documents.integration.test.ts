@@ -13,6 +13,9 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  * row instead, which Task 11 asserts.
  */
 import { pool } from "@/lib/db";
+import { createClaim, updateClaim, forgetClaim, confirmClaim, type Actor } from "../claims";
+import { rebuildSearchDocuments } from "../search-documents";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../spaces";
 import { norm } from "../text";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -22,6 +25,7 @@ const OWNER = `${P}owner`;
 const SPACE_A = `${P}space-a`;
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 const cleanup = () => q(`DELETE FROM spaces WHERE id LIKE $1`, [`${P}%`]);
+const ACTOR: Actor = { kind: "user", id: OWNER };
 
 /** SQLSTATEs, per PostgreSQL Appendix A. 428C9 is ERRCODE_GENERATED_ALWAYS - the
  *  message line reads "cannot insert a non-DEFAULT value into column ..." and the words
@@ -74,6 +78,11 @@ run("vault_search_documents: the projection's own shape", () => {
   });
 
   it("generates the tsvectors and refuses to let a writer set them", async () => {
+    // BOTH columns, which the plural in the name always promised. `owner_tsv` was the one
+    // generated column nothing in the repo read: dropping it and its index left every test
+    // in this file green, and `tsc` cannot see a column either. The owner lane is the one
+    // the memory page searches, so losing it silently is not a smaller failure than losing
+    // the model lane - it is the same failure on the surface a person actually uses.
     await insertDoc(`${P}d1`, `${P}n1`, "claim", "", "reports go out on fridays", "reports go out on fridays");
     const hit = await q(
       `SELECT id FROM vault_search_documents
@@ -81,6 +90,12 @@ run("vault_search_documents: the projection's own shape", () => {
       ["fridays", SPACE_A],
     );
     expect(hit.rows).toHaveLength(1);
+    const ownerHit = await q(
+      `SELECT id FROM vault_search_documents
+       WHERE owner_tsv @@ websearch_to_tsquery('simple', $1) AND space_id = $2`,
+      ["fridays", SPACE_A],
+    );
+    expect(ownerHit.rows).toHaveLength(1);
     await expect(
       q(
         `INSERT INTO vault_search_documents (id, space_id, node_id, kind, owner_text, model_tsv)
@@ -88,6 +103,38 @@ run("vault_search_documents: the projection's own shape", () => {
         [`${P}d-bad`, SPACE_A, `${P}n2`],
       ),
     ).rejects.toMatchObject({ code: GENERATED_ALWAYS });
+    await expect(
+      q(
+        `INSERT INTO vault_search_documents (id, space_id, node_id, kind, owner_text, owner_tsv)
+         VALUES ($1,$2,$3,'claim','x', to_tsvector('simple','x'))`,
+        [`${P}d-bad2`, SPACE_A, `${P}n2`],
+      ),
+    ).rejects.toMatchObject({ code: GENERATED_ALWAYS });
+  });
+
+  it("keeps all four GIN indexes, with the operator classes the lanes need", async () => {
+    // `@@` and `%` are plain operators: they answer IDENTICALLY with the index dropped,
+    // with the wrong operator class, or with no index at all - only slower. So every other
+    // test in this file stays green through exactly the regression that turns the trigram
+    // lane into a sequential scan over every claim in the instance, and a regenerate of the
+    // migration is the event most likely to cause it. The operator class is asserted, not
+    // just the index: `gin_trgm_ops` is the half a plain `CREATE INDEX USING gin` omits.
+    const r = await q(
+      `SELECT c.relname AS index_name, am.amname, op.opcname
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_am am ON am.oid = c.relam
+         JOIN pg_opclass op ON op.oid = i.indclass[0]
+        WHERE c.relname IN ('vault_search_owner_fts','vault_search_model_fts',
+                            'vault_search_owner_trgm','vault_search_model_trgm')
+        ORDER BY c.relname`,
+    );
+    expect(r.rows).toEqual([
+      { index_name: "vault_search_model_fts", amname: "gin", opcname: "tsvector_ops" },
+      { index_name: "vault_search_model_trgm", amname: "gin", opcname: "gin_trgm_ops" },
+      { index_name: "vault_search_owner_fts", amname: "gin", opcname: "tsvector_ops" },
+      { index_name: "vault_search_owner_trgm", amname: "gin", opcname: "gin_trgm_ops" },
+    ]);
   });
 
   it("generates norm_* columns that agree with text.ts::norm", async () => {
@@ -153,18 +200,41 @@ run("vault_search_documents: the projection's own shape", () => {
     expect(left.rows[0].n).toBe(0);
   });
 
-  it("leaves norm_model_text NULL when there is no model-facing text", async () => {
+  it("leaves norm_model_text NULL when the body text is withheld", async () => {
     await insertDoc(`${P}d2`, `${P}n1`, "claim", "", "a withheld statement", null);
     const r = await q(`SELECT norm_model_text, model_tsv FROM vault_search_documents WHERE id = $1`, [`${P}d2`]);
     expect(r.rows[0].norm_model_text).toBeNull();
-    // The tsvector still exists (title || coalesce(model_text,'')) and is empty here,
-    // which is what keeps a withheld row from matching through its own text.
+    // The BODY does not reach the model lane, in either column.
     const hit = await q(
       `SELECT id FROM vault_search_documents
        WHERE space_id = $1 AND model_tsv @@ websearch_to_tsquery('simple', $2)`,
       [SPACE_A, "withheld"],
     );
     expect(hit.rows).toHaveLength(0);
+  });
+
+  it("does NOT withhold a title from the model FTS lane, whatever model_text says", async () => {
+    // The correction to this file's earlier claim, asserted rather than remembered.
+    // `model_tsv` is `to_tsvector('simple', title || ' ' || coalesce(model_text,''))`, so a
+    // withheld row with a NON-EMPTY title is still matchable through that title - while
+    // `norm_model_text` drops the title entirely, so the two model-lane columns disagree.
+    // The old fixture passed `title: ''` and therefore proved only the empty-title case
+    // while its comment claimed the general one.
+    //
+    // This is not a leak in the shipped system, and the reason is NOT this column:
+    // `projectClaimDoc` gives every claim an empty title (a claim is the only withholdable
+    // kind), and the mints join the authoritative row and apply `prompt_access` before
+    // returning anything. What this test pins is what the TABLE does, so nobody reads
+    // `model_tsv` alone and believes a NULL `model_text` gated it.
+    await insertDoc(`${P}d2t`, `${P}n1`, "claim", "quarterly severance schedule", "body text", null);
+    const byTitle = await q(
+      `SELECT id FROM vault_search_documents
+       WHERE space_id = $1 AND model_tsv @@ websearch_to_tsquery('simple', $2)`,
+      [SPACE_A, "severance"],
+    );
+    expect(byTitle.rows).toHaveLength(1);
+    const r = await q(`SELECT norm_model_text FROM vault_search_documents WHERE id = $1`, [`${P}d2t`]);
+    expect(r.rows[0].norm_model_text).toBeNull();
   });
 
   it("matches on a trigram near-miss", async () => {
@@ -189,5 +259,166 @@ run("vault_search_documents: the projection's own shape", () => {
     await q(`DELETE FROM spaces WHERE id = $1`, [SPACE_A]);
     const r = await q(`SELECT count(*)::int AS n FROM vault_search_documents WHERE space_id = $1`, [SPACE_A]);
     expect(r.rows[0].n).toBe(0);
+  });
+});
+
+run("vault_search_documents: written and unwritten by the same transaction as the row", () => {
+  const docFor = async (nodeId: string) =>
+    (
+      await q(`SELECT kind, title, owner_text, model_text FROM vault_search_documents WHERE node_id = $1`, [nodeId])
+    ).rows[0] ?? null;
+
+  beforeAll(async () => {
+    await q(
+      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+       VALUES ($1,'search doc test',$2,true,now(),now()) ON CONFLICT DO NOTHING`,
+      [OWNER, `${OWNER}@test.local`],
+    );
+    await cleanup();
+  });
+  afterAll(async () => {
+    await cleanup();
+    await q(`DELETE FROM "user" WHERE id = $1`, [OWNER]);
+  });
+  beforeEach(async () => {
+    await cleanup();
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'user',$2,$2)`, [SPACE_A, OWNER]);
+  });
+
+  it("projects a claim when createClaim writes it", async () => {
+    const c = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "reports go out on fridays",
+        origin: { kind: "test" },
+        sourceClass: "owner_authored",
+      },
+      ACTOR,
+    );
+    expect(await docFor(c.id)).toMatchObject({
+      kind: "claim",
+      owner_text: "reports go out on fridays",
+      model_text: "reports go out on fridays",
+    });
+  });
+
+  it("withholds model_text for a sensitive claim, and keeps owner_text", async () => {
+    // The owner surface must still find it; the model channel must have nothing to match.
+    const c = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "a private matter",
+        origin: { kind: "test" },
+        sensitive: true,
+        sourceClass: "owner_authored",
+      },
+      ACTOR,
+    );
+    expect(await docFor(c.id)).toMatchObject({ owner_text: "a private matter", model_text: null });
+    // AND its title is empty, which is the half the table itself does not enforce: a
+    // withheld row with a title stays matchable through `model_tsv` (asserted next door in
+    // the shape suite). The writers are what make that shape unreachable, so this is the
+    // assertion that would redden if `projectClaimDoc` ever started titling a claim.
+    expect((await docFor(c.id)).title).toBe("");
+    const leaked = await q(
+      `SELECT count(*)::int AS n FROM vault_search_documents
+       WHERE space_id = $1 AND model_text IS NULL AND title <> ''`,
+      [SPACE_A],
+    );
+    expect(leaked.rows[0].n).toBe(0);
+  });
+
+  it("re-projects when the owner raises sensitivity", async () => {
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "was public", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    expect((await docFor(c.id)).model_text).toBe("was public");
+    const hit = await confirmClaim(c.id, true, ACTOR);
+    expect(hit).toBe(true);
+    expect((await docFor(c.id)).model_text).toBeNull();
+  });
+
+  it("projects the successor and re-projects the predecessor on a supersede", async () => {
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    const upd = await updateClaim({
+      claimId: c.id,
+      expectedRevision: c.revision,
+      patch: { statement: "after" },
+      sourceClass: "owner_authored",
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    expect(upd.ok).toBe(true);
+    if (!upd.ok) return;
+    // BOTH rows stay in the projection - the predecessor is a live NODE with a
+    // superseded CLAIM, and it is the mint's join that hides it, not its absence here.
+    // That is the H7 property under test: no lifecycle state lives in this table.
+    expect(await docFor(c.id)).not.toBeNull();
+    expect((await docFor(upd.id)).owner_text).toBe("after");
+  });
+
+  it("removes the row when the node is soft-deleted", async () => {
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "forget me", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    await forgetClaim({ claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(await docFor(c.id)).toBeNull();
+  });
+
+  it("projects a topic note by title", async () => {
+    const id = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    expect(await docFor(id)).toMatchObject({ kind: "note", title: "General" });
+  });
+
+  it("rebuildSearchDocuments reproduces exactly what the writers wrote", async () => {
+    // The repair has to be a FUNCTION of the subtype tables, or it is not a repair. Wipe
+    // the projection, rebuild, and compare the rows - not the count, which a rebuild that
+    // wrote the wrong text would also match.
+    await createClaim(
+      { spaceId: SPACE_A, statement: "alpha", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "beta",
+        origin: { kind: "test" },
+        sensitive: true,
+        sourceClass: "owner_authored",
+      },
+      ACTOR,
+    );
+    await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    const before = await q(
+      `SELECT node_id, kind, title, owner_text, model_text FROM vault_search_documents
+       WHERE space_id = $1 ORDER BY node_id`,
+      [SPACE_A],
+    );
+    expect(before.rows.length).toBe(3);
+    await q(`DELETE FROM vault_search_documents WHERE space_id = $1`, [SPACE_A]);
+    const { written } = await rebuildSearchDocuments(SPACE_A);
+    expect(written).toBe(3);
+    const after = await q(
+      `SELECT node_id, kind, title, owner_text, model_text FROM vault_search_documents
+       WHERE space_id = $1 ORDER BY node_id`,
+      [SPACE_A],
+    );
+    expect(after.rows).toEqual(before.rows);
+  });
+
+  it("rebuild skips a soft-deleted node", async () => {
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "gone", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    await forgetClaim({ claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    await q(`DELETE FROM vault_search_documents WHERE space_id = $1`, [SPACE_A]);
+    await rebuildSearchDocuments(SPACE_A);
+    expect(await docFor(c.id)).toBeNull();
   });
 });

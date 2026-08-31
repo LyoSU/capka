@@ -898,7 +898,18 @@ export const vaultEdges = pgTable("vault_edges", {
  * makes `rebuildSearchDocuments` honest.
  *
  * `owner_text` is the full text and never leaves an owner surface. `model_text` is the
- * redacted projection; NULL means this unit has no model-facing text at all.
+ * redacted projection; NULL means this unit contributes no BODY text to the model lane.
+ *
+ * It does NOT mean the row is invisible to the model lane, and the earlier wording here
+ * ("no model-facing text at all") overclaimed: `model_tsv` is
+ * `to_tsvector('simple', title || ' ' || coalesce(model_text,''))`, so a withheld row's
+ * TITLE stays matchable in the model FTS lane — while `norm_model_text` (the trigram lane)
+ * drops the title entirely, so the two model-lane columns disagree about whether a title is
+ * model-facing. What keeps that from being a candidate-set leak is not this column: it is
+ * (a) `search-documents.ts` projecting every claim — the only kind that can be withheld —
+ * with an empty title, so no writer can produce the disagreeing shape, and (b) the mints'
+ * join to the authoritative row, where `prompt_access` and the liveness predicate actually
+ * gate what is returned. The gate is the join, not the column.
  *
  * The `norm_*` columns are GENERATED rather than written by `search-documents.ts`: the JS
  * normalizer runs on the query side and this expression on the stored side, and making the

@@ -502,6 +502,7 @@ run("vault: writes into a retired space", () => {
     // and what must be zero is what any reader can still reach.
     expect(await count("vault_nodes", "space_id = $1 AND deleted_at IS NULL", [projectSpaceId])).toBe(0);
     expect(await count("vault_edges", "space_id = $1 AND deleted_at IS NULL", [projectSpaceId])).toBe(0);
+    expect(await count("vault_search_documents", "space_id = $1", [projectSpaceId])).toBe(0);
     // The source's node is soft-deleted BESIDE its soft-deleted source row, so the two
     // halves of one entity are in the same state.
     const srcNode = await q(`SELECT deleted_at FROM vault_nodes WHERE id = $1`, [src]);
