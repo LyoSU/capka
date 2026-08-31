@@ -12,6 +12,7 @@ import { db, pool } from "@/lib/db";
 import { createClaim, forgetAllClaims, forgetClaim, updateClaim, type Actor } from "../claims";
 import { deleteNode } from "../nodes";
 import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY } from "../spaces";
+import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -90,7 +91,7 @@ run("vault: a subtype row and its node row are one write", () => {
 
   it("createClaim writes a claim node", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "the office closes at six", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "the office closes at six", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     expect(await nodeOf(c.id)).toMatchObject({ kind: "claim", space_id: SPACE_A, deleted_at: null });
@@ -98,14 +99,14 @@ run("vault: a subtype row and its node row are one write", () => {
 
   it("updateClaim's successor gets its own node", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "the office closes at six", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "the office closes at six", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const upd = await updateClaim({
       claimId: c.id,
       expectedRevision: c.revision,
       patch: { statement: "the office closes at seven" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -134,7 +135,7 @@ run("vault: a subtype row and its node row are one write", () => {
     const before = await nodeCount(SPACE_A);
     await q(`UPDATE spaces SET retired_at = now() WHERE id = $1`, [SPACE_A]);
     await expect(
-      createClaim({ spaceId: SPACE_A, statement: "written into a retired space", origin: { kind: "test" }, sourceClass: "owner_authored" }, ACTOR),
+      createClaim({ spaceId: SPACE_A, statement: "written into a retired space", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") }, ACTOR),
     ).rejects.toThrow(/retired/);
     expect(await nodeCount(SPACE_A)).toBe(before);
   });
@@ -150,7 +151,7 @@ run("vault: a subtype row and its node row are one write", () => {
     const beforeB = await nodeCount(SPACE_B);
     await expect(
       createClaim(
-        { spaceId: SPACE_A, statement: "filed under a stranger's topic", origin: { kind: "test" }, sourceClass: "owner_authored", topicNoteId: NOTE_B },
+        { spaceId: SPACE_A, statement: "filed under a stranger's topic", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored"), topicNoteId: NOTE_B },
         ACTOR,
       ),
     ).rejects.toThrow(/does not belong/);
@@ -226,7 +227,7 @@ run("vault: the node inverses", () => {
     // and must not have two terminal states. One row and all rows do not deliberately differ.
     const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "reports go out on fridays", origin: { kind: "test" }, sourceClass: "owner_authored", topicNoteId: topic },
+      { spaceId: SPACE_A, statement: "reports go out on fridays", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored"), topicNoteId: topic },
       ACTOR,
     );
     // BOTH directions, because the cascade's `or` has two disjuncts and one seeded edge
@@ -247,8 +248,8 @@ run("vault: the node inverses", () => {
   });
 
   it("forgetAllClaims soft-deletes every head's node", async () => {
-    const a = await createClaim({ spaceId: SPACE_A, statement: "one", origin: { kind: "test" }, sourceClass: "owner_authored" }, ACTOR);
-    const b = await createClaim({ spaceId: SPACE_A, statement: "two", origin: { kind: "test" }, sourceClass: "owner_authored" }, ACTOR);
+    const a = await createClaim({ spaceId: SPACE_A, statement: "one", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") }, ACTOR);
+    const b = await createClaim({ spaceId: SPACE_A, statement: "two", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") }, ACTOR);
     const { forgotten } = await forgetAllClaims(SPACE_A, ACTOR);
     expect(forgotten).toBe(2);
     expect((await nodeOf(a.id))?.deleted_at).not.toBeNull();
@@ -259,10 +260,10 @@ run("vault: the node inverses", () => {
     // The control that makes the two above mean something: `superseded_at` and
     // `vault_nodes.deleted_at` are different flags with different readers, and a
     // deleteNode on every supersede would erase history the page still renders.
-    const c = await createClaim({ spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: "owner_authored" }, ACTOR);
+    const c = await createClaim({ spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") }, ACTOR);
     const upd = await updateClaim({
       claimId: c.id, expectedRevision: c.revision, patch: { statement: "after" },
-      sourceClass: "owner_authored", allowedSpaceIds: [SPACE_A], actor: ACTOR,
+      sourceClass: testServerClass("owner_authored"), allowedSpaceIds: [SPACE_A], actor: ACTOR,
     });
     expect(upd.ok).toBe(true);
     expect((await nodeOf(c.id))?.deleted_at).toBeNull();
@@ -280,7 +281,7 @@ run("vault: the node inverses", () => {
     // teardown last ran instead of when the memory was removed.
     const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "the lease renews in April", origin: { kind: "test" }, sourceClass: "owner_authored", topicNoteId: topic },
+      { spaceId: SPACE_A, statement: "the lease renews in April", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored"), topicNoteId: topic },
       ACTOR,
     );
     await edge(`${P}e-idem`, topic, c.id, "contains");

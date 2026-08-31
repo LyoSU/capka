@@ -464,7 +464,7 @@ run("vault schema", () => {
       // The distinction is not pedantry — the mapping is a MIGRATION rule, not an invariant
       // of the table, and `createClaim` is designed to break it (it can only produce
       // `review_status = 'unverified'`, while its callers legitimately pass
-      // `sourceClass: "owner_authored"`). An unscoped version of this control therefore goes
+      // `ownerAuthored()`). An unscoped version of this control therefore goes
       // red whenever another suite's fixtures happen to be live during this query, which
       // `vitest.config.ts` permits — `fileParallelism` is only disabled in
       // `vitest.integration.db.config.ts`, and the command both briefs prescribe uses the

@@ -14,7 +14,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
-import { seedConfirmedClaim } from "./fixtures";
+import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY, TOPIC_LABELS } from "../spaces";
 import { confirmCandidate, proposeCandidate } from "../candidates";
 import { buildMemoryManifest } from "../manifest";
@@ -83,7 +83,7 @@ const addFact = (
       // contradictory things: a confirmed legacy head has to stay manifest-visible or
       // the clamp tests stop testing the clamp, and an unverified one is exactly what
       // the boot migration maps to `agent_inferred`.
-      sourceClass: confirmed ? ("legacy_confirmed" as const) : ("agent_inferred" as const),
+      sourceClass: testServerClass(confirmed ? "legacy_confirmed" : "agent_inferred"),
     };
     // Confirming is a SECOND write now, and the fixture makes it one: `createClaim`
     // cannot declare its own output approved, so an unverified fact is simply a claim
@@ -356,7 +356,7 @@ run("vault: memory manifest", () => {
     const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     for (const s of ["alpha fact", "beta fact"]) {
       await seedConfirmedClaim(
-        { spaceId: SPACE_A, statement: s, origin: {}, sourceClass: "legacy_confirmed", topicNoteId: topic },
+        { spaceId: SPACE_A, statement: s, origin: {}, sourceClass: testServerClass("legacy_confirmed"), topicNoteId: topic },
         ACTOR,
       );
     }
@@ -392,18 +392,18 @@ run("vault: memory manifest", () => {
       [topicB, SPACE_A],
     );
     await seedConfirmedClaim(
-      { spaceId: SPACE_A, statement: "confirmed one", origin: {}, sourceClass: "legacy_confirmed",
+      { spaceId: SPACE_A, statement: "confirmed one", origin: {}, sourceClass: testServerClass("legacy_confirmed"),
         topicNoteId: topicA },
       ACTOR,
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "unverified one", origin: {}, sourceClass: "agent_inferred",
+      { spaceId: SPACE_A, statement: "unverified one", origin: {}, sourceClass: testServerClass("agent_inferred"),
         topicNoteId: topicB },
       ACTOR,
     );
     await createClaim(
       { spaceId: SPACE_A, statement: "sensitive one", origin: {}, sensitive: true,
-        sourceClass: "legacy_confirmed", topicNoteId: topicB },
+        sourceClass: testServerClass("legacy_confirmed"), topicNoteId: topicB },
       ACTOR,
     );
     const built = await buildMemoryManifest({ userSpaceId: SPACE_A });

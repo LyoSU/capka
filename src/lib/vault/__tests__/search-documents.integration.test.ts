@@ -17,6 +17,7 @@ import { createClaim, updateClaim, forgetClaim, confirmClaim, type Actor } from 
 import { rebuildSearchDocuments } from "../search-documents";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../spaces";
 import { norm } from "../text";
+import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -291,7 +292,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
         spaceId: SPACE_A,
         statement: "reports go out on fridays",
         origin: { kind: "test" },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
       },
       ACTOR,
     );
@@ -310,7 +311,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
         statement: "a private matter",
         origin: { kind: "test" },
         sensitive: true,
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
       },
       ACTOR,
     );
@@ -330,7 +331,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
 
   it("re-projects when the owner raises sensitivity", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "was public", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "was public", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     expect((await docFor(c.id)).model_text).toBe("was public");
@@ -341,14 +342,14 @@ run("vault_search_documents: written and unwritten by the same transaction as th
 
   it("projects the successor and re-projects the predecessor on a supersede", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const upd = await updateClaim({
       claimId: c.id,
       expectedRevision: c.revision,
       patch: { statement: "after" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -363,7 +364,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
 
   it("removes the row when the node is soft-deleted", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "forget me", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "forget me", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await forgetClaim({ claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR });
@@ -380,7 +381,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
     // the projection, rebuild, and compare the rows - not the count, which a rebuild that
     // wrote the wrong text would also match.
     await createClaim(
-      { spaceId: SPACE_A, statement: "alpha", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "alpha", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await createClaim(
@@ -389,7 +390,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
         statement: "beta",
         origin: { kind: "test" },
         sensitive: true,
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
       },
       ACTOR,
     );
@@ -413,7 +414,7 @@ run("vault_search_documents: written and unwritten by the same transaction as th
 
   it("rebuild skips a soft-deleted node", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "gone", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "gone", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await forgetClaim({ claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR });

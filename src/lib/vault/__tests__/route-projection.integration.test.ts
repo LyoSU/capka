@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
-import { seedConfirmedClaim } from "./fixtures";
+import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -80,7 +80,7 @@ const mkClaim = async (
     // Follows the review status for the same reason the parameter exists: the
     // quarantine is what this file observes, so an unverified fixture must not also
     // claim a manifest-grade class.
-    sourceClass: confirmed ? ("owner_authored" as const) : ("agent_inferred" as const),
+    sourceClass: testServerClass(confirmed ? "owner_authored" : "agent_inferred"),
   };
   // Confirming is a separate write since the cutover: `createClaim` produces an
   // unverified claim and nothing else can. An "unverified" fixture is therefore simply
@@ -96,7 +96,7 @@ const mkSensitiveClaim = async (spaceId: string, statement: string) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
   await seedConfirmedClaim(
     { spaceId, statement, origin: { kind: "user_direct" }, sensitive: true, topicNoteId: noteId,
-      sourceClass: "owner_authored" },
+      sourceClass: testServerClass("owner_authored") },
     { kind: "user", id: OWNER },
   );
 };

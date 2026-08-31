@@ -58,15 +58,15 @@ vi.mock("../claims", async (importOriginal) => {
 import { pool } from "@/lib/db";
 import { confirmClaim, createClaim, updateClaim, type Actor } from "../claims";
 import { listMemoryToolRows } from "../model-view";
-import { seedConfirmedClaim } from "./fixtures";
+import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import {
   proposeCandidate,
   confirmCandidate,
   rejectCandidate,
   listOpenCandidates,
-  verifyDirectProvenance,
   type Provenance,
 } from "../candidates";
+import { verifyDirectProvenance } from "../quote-match";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -210,7 +210,7 @@ run("vault candidates", () => {
         value: over.value,
         sensitive: over.sensitive,
         origin: { kind: "user_direct" },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
       },
       ACTOR,
     );
@@ -288,7 +288,7 @@ run("vault candidates", () => {
     // The reply is now the one that writes LESS than the old one did — no candidate row,
     // where `pending` created one.
     const stale = await createClaim(
-      { spaceId: SPACE_A, statement: "Has a cat named Murchyk", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "Has a cat named Murchyk", origin: { kind: "legacy_memory_doc" }, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
 
@@ -308,7 +308,7 @@ run("vault candidates", () => {
     // these words for itself — and `known` would then be telling it something it had no
     // way to know. It lands `pending`, and the person decides.
     await createClaim(
-      { spaceId: SPACE_A, statement: "Read off a vendor page", origin: { kind: "web" }, sourceClass: "untrusted_derived" },
+      { spaceId: SPACE_A, statement: "Read off a vendor page", origin: { kind: "web" }, sourceClass: testServerClass("untrusted_derived") },
       ACTOR,
     );
     expect((await propose({ statement: "read off a vendor page" })).state).toBe("pending");
@@ -525,7 +525,7 @@ run("vault candidates", () => {
       claimId: contested.id,
       expectedRevision: 1,
       patch: { statement: "Works in Odesa" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -753,7 +753,7 @@ run("vault candidates", () => {
     // claim in the same slot, and `uniq_vclaims_active_slot` turned that into
     // `try_again` on every attempt, forever.
     const head = await createClaim(
-      { spaceId: SPACE_A, statement: "Deadline — Monday", slotKey: "supplier  acme", origin: {}, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "Deadline — Monday", slotKey: "supplier  acme", origin: {}, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
     expect((await claimRow(head.id)).slot_key).toBe("supplier acme");
@@ -795,7 +795,7 @@ run("vault candidates", () => {
         statement: "Works in Kyiv",
         slotKey: "city",
         origin: { kind: "legacy_memory_doc" },
-        sourceClass: "agent_inferred",
+        sourceClass: testServerClass("agent_inferred"),
       },
       ACTOR,
     );
@@ -823,7 +823,7 @@ run("vault candidates", () => {
         slotKey: "retention-confirm",
         value: { days: 30 },
         origin: { kind: "legacy_memory_doc" },
-        sourceClass: "agent_inferred",
+        sourceClass: testServerClass("agent_inferred"),
       },
       ACTOR,
     );
@@ -894,7 +894,7 @@ run("vault candidates", () => {
         slotKey: "retention-carry",
         value: { days: 30 },
         origin: { kind: "legacy_memory_doc" },
-        sourceClass: "agent_inferred",
+        sourceClass: testServerClass("agent_inferred"),
       },
       ACTOR,
     );
@@ -947,7 +947,7 @@ run("vault candidates", () => {
         statement: "Works in Kyiv",
         slotKey: "city",
         origin: { kind: "legacy_memory_doc" },
-        sourceClass: "agent_inferred",
+        sourceClass: testServerClass("agent_inferred"),
       },
       ACTOR,
     );
@@ -984,7 +984,7 @@ run("vault candidates", () => {
     // the fallback topic does not fire — otherwise confirm would quietly move a fact
     // out of the topic a human chose.
     const old = await seedConfirmedClaim(
-      { spaceId: SPACE_A, statement: "Works in Kyiv", slotKey: "city", origin: {}, topicNoteId: NOTE_A, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "Works in Kyiv", slotKey: "city", origin: {}, topicNoteId: NOTE_A, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const pending = await propose({ statement: "Works in Lviv", slotKey: "city", sensitive: true });
@@ -1035,7 +1035,7 @@ run("vault candidates", () => {
 
   it("one CAS loss means one retry, and the retry wins", async () => {
     await seedConfirmedClaim(
-      { spaceId: SPACE_A, statement: "the old head", slotKey: "city", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "the old head", slotKey: "city", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const pending = await propose({ statement: "the new head", slotKey: "city", sensitive: true });
@@ -1049,7 +1049,7 @@ run("vault candidates", () => {
 
   it("two CAS losses → try_again, and the candidate stays OPEN in the database", async () => {
     await seedConfirmedClaim(
-      { spaceId: SPACE_A, statement: "the old head", slotKey: "city", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "the old head", slotKey: "city", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const pending = await propose({ statement: "the new head", slotKey: "city", sensitive: true });
@@ -1108,7 +1108,7 @@ run("vault candidates", () => {
 
     // An unverified head — the shape the merge branch confirms rather than supersedes.
     const head = await createClaim(
-      { spaceId: SPACE_A, statement: "Works in Kyiv", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "Works in Kyiv", origin: { kind: "legacy_memory_doc" }, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
 
@@ -1146,7 +1146,7 @@ run("vault candidates", () => {
     // null` would commit that half-move into the savepoint and then retry on top of it —
     // two versions of one confirmation. Counting the rows is what sees the difference.
     const head = await createClaim(
-      { spaceId: SPACE_A, statement: "Works in Kyiv", slotKey: "city", origin: {}, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "Works in Kyiv", slotKey: "city", origin: {}, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
     const pending = await propose({ statement: "Works in Lviv", slotKey: "city" });
@@ -1258,7 +1258,7 @@ run("vault candidates", () => {
   it("does not answer merged or conflict about a sensitive head", async () => {
     await seedConfirmedClaim(
       { spaceId: SPACE_A, statement: "Attends a support group on Tuesdays", slotKey: "health/support-group",
-        origin: { kind: "user_direct" }, sensitive: true, topicNoteId: NOTE_A, sourceClass: "owner_authored" },
+        origin: { kind: "user_direct" }, sensitive: true, topicNoteId: NOTE_A, sourceClass: testServerClass("owner_authored") },
       { kind: "system" },
     );
 
@@ -1286,7 +1286,7 @@ run("vault candidates", () => {
     // the same thing twice.
     const sensitive = await seedConfirmedClaim(
       { spaceId: SPACE_A, statement: "Sees a therapist on Fridays", origin: { kind: "user_direct" },
-        sensitive: true, topicNoteId: NOTE_A, sourceClass: "owner_authored" },
+        sensitive: true, topicNoteId: NOTE_A, sourceClass: testServerClass("owner_authored") },
       { kind: "system" },
     );
     const proposed = await propose({
@@ -1313,7 +1313,7 @@ run("vault candidates", () => {
     // forever. From a screen: a Keep button that does nothing, permanently.
     const sensitive = await seedConfirmedClaim(
       { spaceId: SPACE_A, statement: "Sees a therapist on Fridays", slotKey: "health/therapy",
-        origin: { kind: "user_direct" }, sensitive: true, topicNoteId: NOTE_A, sourceClass: "owner_authored" },
+        origin: { kind: "user_direct" }, sensitive: true, topicNoteId: NOTE_A, sourceClass: testServerClass("owner_authored") },
       { kind: "system" },
     );
     const proposed = await propose({
@@ -1374,7 +1374,7 @@ run("vault candidates", () => {
     // into that head, or the store repeats itself back to the person.
     const head = await seedConfirmedClaim(
       { spaceId: SPACE_A, statement: "Works from the Lviv office", origin: { kind: "user_direct" },
-        topicNoteId: NOTE_A, sourceClass: "owner_authored" },
+        topicNoteId: NOTE_A, sourceClass: testServerClass("owner_authored") },
       { kind: "system" },
     );
     const proposed = await propose({

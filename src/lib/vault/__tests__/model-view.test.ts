@@ -165,10 +165,24 @@ describe("the three channels", () => {
       ManifestText: [OWNER],
       MemoryToolText: [OWNER],
       EvidenceText: [],
+      // THE STRUCTURAL CURE for what the deleted `it("lets only the confirm path choose a
+      // manifest-tier source class")` guarded, and it REPLACES that test rather than
+      // joining it — as its own comment said slice 2 would: "a type that cannot express
+      // the wrong call beats a grep for one". `ClaimInput.sourceClass` is `ServerClass`,
+      // so the blind spot the old guard NAMED — a class computed into a variable and
+      // passed as `sourceClass: cls` — is now closed by `tsc` rather than by a pattern,
+      // and so is the narrower residue slice 1 recorded but did not name in the test: the
+      // old regex matched double-quoted literals only, so `sourceClass: 'owner_authored'`
+      // would have passed it. A brand has no quote style.
+      ServerClass: ["src/lib/vault/grounding.ts"],
     };
     for (const [brand, want] of Object.entries(expected)) {
       expect(hits(new RegExp(`as ${brand}\\b`))).toEqual(want);
     }
+    // The test-only minter stays in the tests. `ALL_SRC` skips `__tests__`, so
+    // `fixtures.ts`'s cast is out of this walk's scope by construction — which is correct,
+    // because a test cannot ship. This asserts it never migrates into a file that can.
+    expect(hits(/testServerClass/)).toEqual([]);
     // No widening function: promotion must be impossible to express, not discouraged.
     expect(code(read(OWNER))).not.toMatch(/function\s+widen|toManifestText|asManifest\b/);
   });
@@ -201,33 +215,6 @@ describe("the three channels", () => {
       "src/lib/db/schema.ts",
       "src/lib/vault/claims.ts",
       "src/lib/vault/model-view.ts",
-    ]);
-  });
-
-  it("lets only the confirm path choose a manifest-tier source class", () => {
-    // THE WRITER HALF OF THE GATE, which shipped without one.
-    //
-    // Before the cutover the model-facing predicate was `review_status = 'confirmed'`, and
-    // `confirmed` had exactly one grantor, so "the model reads only what a person approved"
-    // was a property of the QUERY. Now the gate is `prompt_access`, generated from
-    // `source_class`, and three of the five classes mint the always-on `manifest` tier. The
-    // property therefore rests on the fact that today's callers all pass `owner_authored` —
-    // an argument about today's callers, which is the class of argument this file exists to
-    // replace. The reader half got a guard; this is the missing symmetric half.
-    //
-    // Exposure today is zero (every live claim is `legacy_confirmed`). The risk is forward:
-    // slice 2 adds note-version and dedup writers, slice 3 adds ingest, and a copy-pasted
-    // `sourceClass: "owner_authored"` in any of them opens the system prompt with nothing
-    // to fail.
-    //
-    // What this does NOT catch, stated rather than left to be discovered: a class computed
-    // into a variable and passed as `sourceClass: cls`. Closing THAT needs the class to
-    // carry its grounding in the type — slice 2's grounding union — and building it now
-    // would be slice 2 arriving early on a guess about what it needs. This is the
-    // slice-1-sized guard; when the union lands it replaces this test rather than joining
-    // it, because a type that cannot express the wrong call beats a grep for one.
-    expect(hits(/sourceClass\s*:\s*"(owner_authored|user_direct|legacy_confirmed)"/)).toEqual([
-      "src/lib/vault/candidates.ts",
     ]);
   });
 

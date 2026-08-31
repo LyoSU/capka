@@ -24,6 +24,7 @@ import {
   findCurrentHead,
   type Actor,
 } from "../claims";
+import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -123,7 +124,7 @@ const seed = (over: Partial<Parameters<typeof createClaim>[0]> = {}) =>
       statement: "the initial fact",
       origin: { type: "chat" },
       // Before the spread, so a test that is ABOUT the class can still override it.
-      sourceClass: "owner_authored" as const,
+      sourceClass: testServerClass("owner_authored"),
       ...over,
     },
     ACTOR,
@@ -212,7 +213,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement: "still ours", topicNoteId: NOTE_B },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
@@ -245,7 +246,7 @@ run("vault claims", () => {
       claimId: oldId,
       expectedRevision: 1,
       patch: { statement: "Works in Lviv", value: { city: "Lviv" } },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -303,7 +304,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { origin: { type: "correction" } },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -337,7 +338,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { value: { days: 60 } },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -352,7 +353,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 7,
       patch: { statement: "must not happen" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -378,7 +379,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       });
@@ -408,7 +409,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement: "updated" },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
@@ -434,7 +435,7 @@ run("vault claims", () => {
   it("authz: another space yields {ok:false, current:null} with no text leak", async () => {
     const secret = "a secret from another space";
     const foreign = await createClaim(
-      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
 
@@ -442,7 +443,7 @@ run("vault claims", () => {
       claimId: foreign.id,
       expectedRevision: 1,
       patch: { statement: "an attempt" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -494,7 +495,7 @@ run("vault claims", () => {
             claimId: id,
             expectedRevision: 1,
             patch: { statement: "after the failure" },
-            sourceClass: "owner_authored",
+            sourceClass: testServerClass("owner_authored"),
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
@@ -517,7 +518,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { statement: "after the rollback" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -533,7 +534,7 @@ run("vault claims", () => {
         claimId: cur.id,
         expectedRevision: cur.revision,
         patch: { statement: `version ${i}` },
-        sourceClass: "owner_authored",
+        sourceClass: testServerClass("owner_authored"),
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       });
@@ -599,7 +600,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { statement: "resurrection" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -618,7 +619,7 @@ run("vault claims", () => {
       claimId: c2.id,
       expectedRevision: 1,
       patch: { statement: "second, version 2" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -681,7 +682,7 @@ run("vault claims", () => {
             slotKey: "ex-created",
             origin: {},
             topicNoteId: NOTE_A,
-            sourceClass: "owner_authored",
+            sourceClass: testServerClass("owner_authored"),
           },
           ACTOR,
           tx,
@@ -695,7 +696,7 @@ run("vault claims", () => {
             claimId: upd.id,
             expectedRevision: 1,
             patch: { statement: "updated inside the transaction" },
-            sourceClass: "owner_authored",
+            sourceClass: testServerClass("owner_authored"),
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
@@ -757,7 +758,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch: { statement: `the deploy key is now ${secret}` },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -815,7 +816,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch,
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -837,7 +838,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch: { statement: "the deploy key is rotated twice a year" },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -877,7 +878,7 @@ run("vault claims", () => {
       claimId: claim.id,
       expectedRevision: 1,
       patch: { statement: "reworded, and quietly no longer sensitive", sensitive: false },
-      sourceClass: "owner_authored",
+      sourceClass: testServerClass("owner_authored"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -893,7 +894,7 @@ run("vault claims", () => {
 
   it("stores the class the caller stated, on a create", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "stated class", origin: { kind: "test" }, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "stated class", origin: { kind: "test" }, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
     const r = await q(`SELECT source_class, prompt_access FROM vault_claims WHERE id = $1`, [c.id]);
@@ -907,14 +908,14 @@ run("vault claims", () => {
     // agent wrote. That is the authority-laundering bound defeated by a default nobody
     // chose, which is why sourceClass sits OUTSIDE `patch`.
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const upd = await updateClaim({
       claimId: c.id,
       expectedRevision: c.revision,
       patch: { statement: "after" },
-      sourceClass: "agent_inferred",
+      sourceClass: testServerClass("agent_inferred"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -931,12 +932,12 @@ run("vault claims", () => {
   it("writes a normalized_hash on both inserts, folded the way norm folds", async () => {
     const a = await createClaim(
       { spaceId: SPACE_A, statement: "  Reports  go OUT on Fridays ", value: { day: "fri" },
-        origin: { kind: "test" }, sourceClass: "user_direct" },
+        origin: { kind: "test" }, sourceClass: testServerClass("user_direct") },
       ACTOR,
     );
     const b = await createClaim(
       { spaceId: SPACE_A, statement: "reports go out on fridays", value: { day: "fri" },
-        origin: { kind: "test" }, sourceClass: "user_direct" },
+        origin: { kind: "test" }, sourceClass: testServerClass("user_direct") },
       ACTOR,
     );
     const r = await q(`SELECT id, normalized_hash FROM vault_claims WHERE id = ANY($1)`, [[a.id, b.id]]);
@@ -953,12 +954,12 @@ run("vault claims", () => {
     // hash goes under an index, so it must not change once chosen.
     const a = await createClaim(
       { spaceId: SPACE_A, statement: "same fact", value: { a: 1, b: 2 },
-        origin: { kind: "test" }, sourceClass: "user_direct" },
+        origin: { kind: "test" }, sourceClass: testServerClass("user_direct") },
       ACTOR,
     );
     const b = await createClaim(
       { spaceId: SPACE_A, statement: "same fact", value: { b: 2, a: 1 },
-        origin: { kind: "test" }, sourceClass: "user_direct" },
+        origin: { kind: "test" }, sourceClass: testServerClass("user_direct") },
       ACTOR,
     );
     const r = await q(`SELECT id, normalized_hash FROM vault_claims WHERE id = ANY($1)`, [[a.id, b.id]]);

@@ -26,7 +26,7 @@ import { pool } from "@/lib/db";
 import { getOrCreateSpace, retireProjectSpace } from "../spaces";
 import { migrateMemoryDocs } from "../migrate-memory-docs";
 import { buildMemoryManifest } from "../manifest";
-import { seedConfirmedClaim } from "./fixtures";
+import { seedConfirmedClaim, testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -417,7 +417,7 @@ run("vault: memory_docs migration", () => {
     // already kept must not come back as a question.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedConfirmedClaim(
-      { spaceId, statement: "Likes   tea", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
+      { spaceId, statement: "Likes   tea", origin: { kind: "legacy_memory_doc" }, sourceClass: testServerClass("agent_inferred") },
       { kind: "user", id: OWNER },
     );
     await mkDoc(`${P}d6`, "- likes tea\n- something new");

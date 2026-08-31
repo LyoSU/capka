@@ -4,6 +4,10 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
+// Runtime, and it is safe: `grounding.ts` imports only the leaf `quote-match.ts` plus a
+// TYPE from here, so nothing travels back at runtime. `horizonFor` is called INSIDE both
+// inserts rather than passed in — see `ClaimInput.sourceClass`.
+import { horizonFor, type ServerClass } from "./grounding";
 import { deleteNode, insertNode } from "./nodes";
 import { projectClaimDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
@@ -50,10 +54,17 @@ export type ClaimInput = {
   origin: Record<string, unknown>;
   sensitive?: boolean;
   topicNoteId?: string;
-  /** REQUIRED, and the requirement is the fix. `source_class` is NOT NULL with no default,
-   *  so an unlisted writer cannot inherit the strongest class by omission — the compiler
-   *  asks every caller instead of a column answering for them. */
-  sourceClass: SourceClass;
+  /** REQUIRED, and BRANDED. `source_class` is NOT NULL with no default, so an unlisted
+   *  writer cannot inherit the strongest class by omission — and now it cannot state one
+   *  either: `ServerClass` is minted only by `grounding.ts`, so `sourceClass:
+   *  "owner_authored"` does not typecheck.
+   *
+   *  It also decides `expires_at`, which is why there is no `expiresAt` parameter beside
+   *  it: both inserts call `horizonFor` on the class they are ABOUT TO STORE. A supersede
+   *  therefore re-arms from the replacement's class and never inherits the predecessor's
+   *  horizon — the same rule, and the same reason, as the class itself not being
+   *  inherited. A parameter would be a second way to answer one question. */
+  sourceClass: ServerClass;
   /** The task that wrote it; `memory_forget`'s same-task bound reads it in slice 2. An
    *  owner action has no task and passes nothing. */
   createdTaskId?: string;
@@ -402,6 +413,8 @@ export async function createClaim(
     // `confirmClaim` is the only thing that moves it. See `ClaimInput`.
     sensitive,
     sourceClass: input.sourceClass,
+    // Armed HERE, from the class being stored, not by a caller and not by a trigger.
+    expiresAt: horizonFor(input.sourceClass),
     createdTaskId: input.createdTaskId ?? null,
     normalizedHash: normalizedHashOf(statement, input.value ?? null),
   });
@@ -468,7 +481,7 @@ export async function updateClaim(
      *  here would carry `legacy_confirmed`/`manifest` across text the agent wrote. A
      *  superseding row is stored at the replacement's class, never the predecessor's —
      *  the same rule, and the same reason, as `reviewStatus` not being settable. */
-    sourceClass: SourceClass;
+    sourceClass: ServerClass;
     allowedSpaceIds: string[];
     actor: Actor;
   },
@@ -610,6 +623,9 @@ export async function updateClaim(
     revision,
     supersedes: claimId,
     sourceClass,
+    // From the REPLACEMENT's class, never from `prev` — a successor re-arms its own
+    // horizon for the same reason it does not inherit its predecessor's class.
+    expiresAt: horizonFor(sourceClass),
     // `createdTaskId` IS inherited, and that is not the same decision as the class above:
     // it records which task authored the chain, not what authority the words carry, and
     // `memory_forget`'s bound asks "did I write this" — which a supersede inside the same

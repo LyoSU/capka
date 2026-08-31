@@ -1,5 +1,6 @@
 import { log } from "@/lib/log";
-import { proposeCandidate, spaceForScope, verifyDirectProvenance, type Provenance } from "./candidates";
+import { proposeCandidate, spaceForScope, type Provenance } from "./candidates";
+import { verifyDirectProvenance } from "./quote-match";
 
 /** What the caller's aux-model wrapper looks like from here. The runner builds it on
  *  the same `auxGenerate` path the old memory-doc reconcile used (in the since-deleted

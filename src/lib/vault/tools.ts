@@ -1,8 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { proposeCandidate, spaceForScope, verifyDirectProvenance } from "./candidates";
+import { proposeCandidate, spaceForScope } from "./candidates";
 import { findCurrentHead, type ClaimHead } from "./claims";
 import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolRow } from "./model-view";
+import { verifyDirectProvenance } from "./quote-match";
 import { getOrCreateSpace } from "./spaces";
 
 /** How many memory lines one search hands back. Memory rides in the turn's own

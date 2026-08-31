@@ -11,9 +11,13 @@ const { proposeCandidate, verifyDirectProvenance } = vi.hoisted(() => ({
 // exactly how the two came to answer it oppositely.
 vi.mock("../candidates", async (importOriginal) => ({
   proposeCandidate,
-  verifyDirectProvenance,
   spaceForScope: (await importOriginal<typeof import("../candidates")>()).spaceForScope,
 }));
+// `verifyDirectProvenance` moved to the leaf `quote-match.ts`, so the spy has to be
+// mounted THERE — `extract.ts` imports it from that module now. Left on `../candidates`
+// it would intercept nothing, and the two `not.toHaveBeenCalled()` assertions below would
+// pass because nothing calls a spy at all, which is the worst kind of green.
+vi.mock("../quote-match", () => ({ verifyDirectProvenance }));
 
 // So the two silent-total-loss branches (finishReason=length, unparseable output)
 // can be asserted on directly, and told apart from the legitimate "nothing to
@@ -138,12 +142,12 @@ describe("extractCandidates — provenance matrix", () => {
 });
 
 // These bypass the module mock above to run the REAL policy function from
-// candidates.ts, because the property under test is exactly whether the prompt's
+// quote-match.ts, because the property under test is exactly whether the prompt's
 // own instruction (reuse the user's wording, don't paraphrase) is what makes
 // `user_direct` reachable in practice — a mocked verifier can't show that.
 describe("extractCandidates — the prompt's guidance against the real verifier", () => {
   it("a literally-reused Ukrainian statement clears the real verifyDirectProvenance's 60% bar", async () => {
-    const real = await vi.importActual<typeof import("../candidates")>("../candidates");
+    const real = await vi.importActual<typeof import("../quote-match")>("../quote-match");
     const userTurnText = "Мій постачальник Акме дає відстрочку платежу 30 днів, запам'ятай це";
     // What the rewritten prompt now asks for: the SAME wording the user used, not a
     // paraphrase — this is exactly the property the prompt fix must produce.
@@ -152,7 +156,7 @@ describe("extractCandidates — the prompt's guidance against the real verifier"
   });
 
   it("the real verifier matches across a case ending, which whole-word containment could not", async () => {
-    const real = await vi.importActual<typeof import("../candidates")>("../candidates");
+    const real = await vi.importActual<typeof import("../quote-match")>("../quote-match");
     // `includes` was asymmetric: it found the short form inside the long one and never
     // the reverse, so the same Ukrainian fact verified or not depending on which case
     // form the model happened to write — and the loser fell into pending, which at the
@@ -168,7 +172,7 @@ describe("extractCandidates — the prompt's guidance against the real verifier"
   });
 
   it("a paraphrase into different wording — what the old prompt's example modelled — fails the real verifier", async () => {
-    const real = await vi.importActual<typeof import("../candidates")>("../candidates");
+    const real = await vi.importActual<typeof import("../quote-match")>("../quote-match");
     const userTurnText = "Мій постачальник Акме дає відстрочку платежу 30 днів, запам'ятай це";
     const paraphrased = "The supplier grants a one-month payment deferral";
     expect(real.verifyDirectProvenance(paraphrased, userTurnText)).toBe(false);

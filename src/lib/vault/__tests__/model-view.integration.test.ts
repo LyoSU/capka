@@ -15,7 +15,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  */
 import { pool } from "@/lib/db";
 import { confirmClaim, createClaim, forgetClaim, updateClaim, type Actor } from "../claims";
-import { seedConfirmedClaim } from "./fixtures";
+import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { countWithheld, listManifestClaims, listManifestTopics, listMemoryToolRows } from "../model-view";
 import { DEFAULT_TOPIC_KEY, TOPIC_TITLE_MAX_CHARS, getOrCreateTopicNote } from "../spaces";
 
@@ -75,8 +75,8 @@ run("vault: the model-facing projection", () => {
   });
 
   it("excludes a sensitive claim, and counts it separately", async () => {
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
 
     expect(await texts(SPACE_A)).toEqual(["the control fact"]);
     // An aggregate, computed independently of any query — see `countWithheld`.
@@ -89,13 +89,13 @@ run("vault: the model-facing projection", () => {
     // row came from, so an unconfirmed sensitive claim IS withheld rather than being
     // quarantined out of the sentence. Two classes, because a count that only saw one of
     // them would understate what exists on every search.
-    await createClaim({ spaceId: SPACE_A, statement: "ships under an embargo", sensitive: true, origin: {}, sourceClass: "agent_inferred" }, ACTOR);
-    await createClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    await createClaim({ spaceId: SPACE_A, statement: "ships under an embargo", sensitive: true, origin: {}, sourceClass: testServerClass("agent_inferred") }, ACTOR);
+    await createClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
     expect(await countWithheld(SPACE_A)).toBe(2);
 
     // The control on the other side: a RETIRED sensitive head is not withheld, it is
     // gone, and counting it would make the sentence overstate what exists.
-    const retired = await createClaim({ spaceId: SPACE_A, statement: "no longer kept", sensitive: true, origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    const retired = await createClaim({ spaceId: SPACE_A, statement: "no longer kept", sensitive: true, origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
     await q(`UPDATE vault_claims SET retired_at = now() WHERE id = $1`, [retired.id]);
     expect(await countWithheld(SPACE_A)).toBe(2);
   });
@@ -106,12 +106,12 @@ run("vault: the model-facing projection", () => {
     // alone), so the version this replaces — which asserted the model sees NEITHER row
     // between the supersede and the confirm — was asserting a property Task 10 removed.
     // Only a head is a fact; a predecessor is history, and that is unchanged.
-    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "works in Kyiv", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "works in Kyiv", origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
     const upd = await updateClaim({
       claimId: head.id,
       expectedRevision: 1,
       patch: { statement: "works in Lviv" },
-      sourceClass: "legacy_confirmed",
+      sourceClass: testServerClass("legacy_confirmed"),
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -125,13 +125,13 @@ run("vault: the model-facing projection", () => {
   });
 
   it("excludes a forgotten chain entirely", async () => {
-    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "an old fact", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "an old fact", origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
     await forgetClaim({ claimId: head.id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR });
     expect(await texts(SPACE_A)).toEqual([]);
   });
 
   it("never crosses a space boundary", async () => {
-    await seedConfirmedClaim({ spaceId: SPACE_B, statement: "another space's business", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_B, statement: "another space's business", origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
     expect(await texts(SPACE_A)).toEqual([]);
     expect(await countWithheld(SPACE_A)).toBe(0);
   });
@@ -164,7 +164,7 @@ run("vault: the model-facing projection", () => {
               ($2, $3, 'a same instant', '{}'::jsonb, 'confirmed', '2020-01-01', 'legacy_confirmed')`,
       [`${P}claim-b`, `${P}claim-a`, SPACE_A],
     );
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "newest", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "newest", origin: {}, sourceClass: testServerClass("legacy_confirmed") }, ACTOR);
 
     expect(await texts(SPACE_A)).toEqual(["newest", "a same instant", "b same instant"]);
     expect(await texts(SPACE_A)).toEqual(await texts(SPACE_A));
@@ -178,15 +178,15 @@ run("vault: the model-facing projection", () => {
    */
   it("admits a manifest-class head and refuses a memory_search-class one", async () => {
     const keep = await createClaim(
-      { spaceId: SPACE_A, statement: "manifest class", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "manifest class", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "memory tool class", origin: {}, sourceClass: "agent_inferred" },
+      { spaceId: SPACE_A, statement: "memory tool class", origin: {}, sourceClass: testServerClass("agent_inferred") },
       ACTOR,
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "evidence class", origin: {}, sourceClass: "untrusted_derived" },
+      { spaceId: SPACE_A, statement: "evidence class", origin: {}, sourceClass: testServerClass("untrusted_derived") },
       ACTOR,
     );
     const got = (await listManifestClaims(SPACE_A)).map((c) => String(c.statement));
@@ -196,11 +196,11 @@ run("vault: the model-facing projection", () => {
 
   it("refuses a retired head and keeps its live neighbour", async () => {
     const live = await createClaim(
-      { spaceId: SPACE_A, statement: "still live", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "still live", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const dead = await createClaim(
-      { spaceId: SPACE_A, statement: "retired", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "retired", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await q(`UPDATE vault_claims SET retired_at = now() WHERE id = $1`, [dead.id]);
@@ -209,11 +209,11 @@ run("vault: the model-facing projection", () => {
 
   it("refuses an expired head and keeps one whose horizon is in the future", async () => {
     const live = await createClaim(
-      { spaceId: SPACE_A, statement: "horizon ahead", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "horizon ahead", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     const dead = await createClaim(
-      { spaceId: SPACE_A, statement: "horizon passed", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "horizon passed", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await q(`UPDATE vault_claims SET expires_at = now() + interval '1 day' WHERE id = $1`, [live.id]);
@@ -223,7 +223,7 @@ run("vault: the model-facing projection", () => {
 
   it("refuses a head whose NODE is soft-deleted", async () => {
     const c = await createClaim(
-      { spaceId: SPACE_A, statement: "node gone", origin: {}, sourceClass: "owner_authored" },
+      { spaceId: SPACE_A, statement: "node gone", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
     );
     await q(`UPDATE vault_nodes SET deleted_at = now() WHERE id = $1`, [c.id]);
@@ -233,11 +233,11 @@ run("vault: the model-facing projection", () => {
   it("counts a topic's manifest-class heads and hides a topic with none", async () => {
     const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     await createClaim(
-      { spaceId: SPACE_A, statement: "counted", origin: {}, sourceClass: "owner_authored", topicNoteId: topic },
+      { spaceId: SPACE_A, statement: "counted", origin: {}, sourceClass: testServerClass("owner_authored"), topicNoteId: topic },
       ACTOR,
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "not counted", origin: {}, sourceClass: "agent_inferred", topicNoteId: topic },
+      { spaceId: SPACE_A, statement: "not counted", origin: {}, sourceClass: testServerClass("agent_inferred"), topicNoteId: topic },
       ACTOR,
     );
     expect(await listManifestTopics(SPACE_A)).toEqual([{ title: "General", count: 1 }]);
@@ -251,7 +251,7 @@ run("vault: the model-facing projection", () => {
   it("refuses a topic whose node is soft-deleted, and one that is retired", async () => {
     const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     await createClaim(
-      { spaceId: SPACE_A, statement: "x", origin: {}, sourceClass: "owner_authored", topicNoteId: topic },
+      { spaceId: SPACE_A, statement: "x", origin: {}, sourceClass: testServerClass("owner_authored"), topicNoteId: topic },
       ACTOR,
     );
     await q(`UPDATE vault_notes SET retired_at = now() WHERE id = $1`, [topic]);
@@ -273,7 +273,7 @@ run("vault: the model-facing projection", () => {
       [id, SPACE_A, "sk-live-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "filed under it", origin: {}, sourceClass: "owner_authored",
+      { spaceId: SPACE_A, statement: "filed under it", origin: {}, sourceClass: testServerClass("owner_authored"),
         topicNoteId: id },
       ACTOR,
     );
@@ -294,7 +294,7 @@ run("vault: the model-facing projection", () => {
       [id, SPACE_A, long],
     );
     await createClaim(
-      { spaceId: SPACE_A, statement: "filed", origin: {}, sourceClass: "owner_authored", topicNoteId: id },
+      { spaceId: SPACE_A, statement: "filed", origin: {}, sourceClass: testServerClass("owner_authored"), topicNoteId: id },
       ACTOR,
     );
     const [row] = await listManifestTopics(SPACE_A);

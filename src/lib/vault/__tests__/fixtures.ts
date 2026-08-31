@@ -1,5 +1,15 @@
-import { confirmClaim, createClaim, type Actor, type ClaimInput } from "../claims";
+import { confirmClaim, createClaim, type Actor, type ClaimInput, type SourceClass } from "../claims";
+import type { ServerClass } from "../grounding";
 import type { Ex } from "../spaces";
+
+/** A `ServerClass` for a fixture, and the ONLY cast outside `grounding.ts`.
+ *
+ *  It is legitimate and it is not a hole: the roster guard in `model-view.test.ts` walks
+ *  production files only (`ALL_SRC` skips `__tests__`), so this cast is out of its scope
+ *  by construction — which is correct, because a test cannot ship. The guard carries a
+ *  second assertion that `testServerClass` appears in ZERO production files, so the
+ *  escape hatch cannot migrate into one. */
+export const testServerClass = (c: SourceClass) => c as ServerClass;
 
 /**
  * A claim in the state a person has approved — which is now TWO writes, and that is the

@@ -13,6 +13,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { pool } from "@/lib/db";
 import { createClaim, updateClaim, type Actor, type SourceClass } from "../claims";
 import { listMemoryToolRows } from "../model-view";
+import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -53,9 +54,14 @@ run("vault: two-lane memory search", () => {
 
   // `SourceClass`, not the default's own literal type: `= "agent_inferred" as const` would
   // narrow the PARAMETER to that one value and every call passing another class would fail
-  // to compile - which is most of the channel assertions below.
+  // to compile - which is most of the channel assertions below. The `ServerClass` brand is
+  // minted HERE rather than at each call site, so the twenty-odd callers below stay
+  // readable positional literals.
   const seed = (spaceId: string, statement: string, sourceClass: SourceClass = "agent_inferred", sensitive = false) =>
-    createClaim({ spaceId, statement, origin: { kind: "test" }, sourceClass, sensitive }, ACTOR);
+    createClaim(
+      { spaceId, statement, origin: { kind: "test" }, sourceClass: testServerClass(sourceClass), sensitive },
+      ACTOR,
+    );
 
   it("finds a token match through the lexical lane", async () => {
     await seed(SPACE_A, "the quarterly report goes out on friday");
@@ -81,7 +87,7 @@ run("vault: two-lane memory search", () => {
     const c = await seed(SPACE_A, "the deadline is on monday");
     const upd = await updateClaim({
       claimId: c.id, expectedRevision: c.revision, patch: { statement: "the deadline is on tuesday" },
-      sourceClass: "agent_inferred", allowedSpaceIds: [SPACE_A], actor: ACTOR,
+      sourceClass: testServerClass("agent_inferred"), allowedSpaceIds: [SPACE_A], actor: ACTOR,
     });
     expect(upd.ok).toBe(true);
     const projected = await q(

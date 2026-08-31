@@ -41,9 +41,13 @@ vi.mock("../model-view", async (importOriginal) => ({
 // ONE answer to "where does an unqualified fact go", which a per-file stub would undo.
 vi.mock("../candidates", async (importOriginal) => ({
   proposeCandidate,
-  verifyDirectProvenance,
   spaceForScope: (await importOriginal<typeof import("../candidates")>()).spaceForScope,
 }));
+// `verifyDirectProvenance` moved to the leaf `quote-match.ts` and `tools.ts` imports it
+// from there, so the spy is mounted on THAT module. Left on `../candidates` it would
+// intercept nothing and the H1 assertions below would be asserting about a spy the code
+// never reaches.
+vi.mock("../quote-match", () => ({ verifyDirectProvenance }));
 
 import { makeVaultMemoryTools } from "../tools";
 
@@ -525,14 +529,14 @@ describe("H1 — a page cannot write, rewrite or erase memory on the user's mere
   const HEAD = "Acme invoices are paid monthly";
 
   beforeEach(async () => {
-    const real = await vi.importActual<typeof import("../candidates")>("../candidates");
+    const real = await vi.importActual<typeof import("../quote-match")>("../quote-match");
     verifyDirectProvenance.mockImplementation(real.verifyDirectProvenance);
   });
 
   it("the overlap really does pass — the gate would have opened", async () => {
     // The control. Without it every assertion below could be passing because the
     // predicate happens to say no, and the guard being tested would be untested.
-    const real = await vi.importActual<typeof import("../candidates")>("../candidates");
+    const real = await vi.importActual<typeof import("../quote-match")>("../quote-match");
     expect(real.verifyDirectProvenance(HEAD, MENTIONED)).toBe(true);
   });
 
