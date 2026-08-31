@@ -5,6 +5,7 @@ import { audioNeedsTranscode, NATIVE_IMAGE_FORMATS } from "@/lib/providers/regis
 import { downloadFile, execCommand } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import { log } from "@/lib/log";
+import { markMessageUntrusted } from "@/lib/tasks/turn-taint";
 
 // The native-attachment plumbing for a turn: pulling the user's multimodal files
 // out of the sandbox (bounded), transcoding audio the transport can't serialize,
@@ -288,6 +289,15 @@ export async function injectNativeFiles(
   userId: string,
   provider: string,
   files: FileRef[],
+  /**
+   * The message row that owns these attachments — `replyParentId ?? msgId` at both call
+   * sites. It is a parameter because this function takes `ModelMessage[]` and holds no
+   * row id of its own, and the mark has to land on a ROW: on a fresh turn that is the
+   * USER message the attachment rides, which is what keeps the mark alive when the
+   * assistant reply is regenerated; on a continuation it is `resumeMessageId`, which is
+   * the same row the turn taint flips, so the OR is unaffected either way.
+   */
+  attachmentRowId: string,
 ): Promise<FileRef[]> {
   if (files.length === 0) return [];
 
@@ -357,5 +367,12 @@ export async function injectNativeFiles(
       bytes: buf.length,
     })),
   });
+  // THE ATTACHMENT MARK. Bytes the user handed over are content this turn did not
+  // author, so the row they ride is untrusted from here on. Marked on the injected set
+  // being non-empty — not on `files` — because a native-eligible file that could not be
+  // delivered never reached the model and taints nothing. Awaited before the caller can
+  // act on the returned set, and monotonic, so the emergency re-injection below marking
+  // the same row a second time is a no-op at the database.
+  await markMessageUntrusted(attachmentRowId);
   return downloaded.map(({ index }) => files[pending[index].index]);
 }

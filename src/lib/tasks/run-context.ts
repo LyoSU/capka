@@ -66,6 +66,32 @@ export function userWordsFromAnswer(metadata: unknown): string {
 }
 
 /**
+ * Everything the SUSPENDED half of a turn left on its own row, in ONE read.
+ *
+ * Both values belong to the same message and are needed at the same moment, so they
+ * ride one select rather than two: the user's words inside an answered `ask`, and
+ * whether that half had already read untrusted content. The second is what makes the
+ * taint survive the split — an approval/`ask` continuation is a SECOND task, none of
+ * the construction sites re-runs for a rehydrated input, and a taint recomputed from
+ * this task alone would read clean while half 1's retrieved text sits verbatim in the
+ * context half 2 is reading. See `makeTurnTaint`, and `foldTurnHalves` for the
+ * precedent this follows.
+ *
+ * Exported so the seed has a reader a test can drive: prepareRun's resume arm is
+ * nothing but a call to this, and "the column is right and nobody reads it" is the
+ * failure an assertion on the column alone cannot see.
+ */
+export async function readResumeRow(resumeMessageId: string | null): Promise<{ answeredAsk: string; untrustedIngressSeeded: boolean }> {
+  if (!resumeMessageId) return { answeredAsk: "", untrustedIngressSeeded: false };
+  const [row] = await db
+    .select({ metadata: messages.metadata, untrustedIngress: messages.untrustedIngress })
+    .from(messages)
+    .where(eq(messages.id, resumeMessageId))
+    .limit(1);
+  return { answeredAsk: userWordsFromAnswer(row?.metadata), untrustedIngressSeeded: row?.untrustedIngress === true };
+}
+
+/**
  * Re-resolve everything needed to run a task from its persisted payload — the
  * "run context builder". `sessionKey` is the project (shared folder) or the chat
  * itself (see workspaceSessionKey). Memory is scoped to two vault spaces: the
@@ -150,15 +176,13 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // answer is durable on the message row, so it is folded in HERE, as one more source for
   // this SINGLE value. Anything else that ever makes the answer part of the transcript
   // folds in here too; a second consumer with its own derivation is precisely what F1 was.
-  const answeredAsk = payload.resumeMessageId
-    ? await db
-        .select({ metadata: messages.metadata })
-        .from(messages)
-        .where(eq(messages.id, payload.resumeMessageId))
-        .limit(1)
-        .then((r) => userWordsFromAnswer(r[0]?.metadata))
-    : "";
+  const { answeredAsk, untrustedIngressSeeded } = await readResumeRow(payload.resumeMessageId ?? null);
 
+  // NO TAINT MARK HERE, and the absence is the decision rather than an omission: this is
+  // the `user_authored` half. What a person typed — and what they typed inside an answered
+  // `ask`, which `userWordsFromAnswer` already narrows to free-text fields — is the one
+  // ingress the turn taint is measured AGAINST. Marking it would make every turn untrusted
+  // and the distinction empty.
   const userTurnText =
     (() => {
       const uiMessages = payload.uiMessages ?? [];
@@ -454,7 +478,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // against, so a second derivation of it downstream is not a duplicate value but a
     // second definition of who "the user" is — and the runner's own `modelMessages`
     // has synthetic `role:"user"` entries in it that this text must never be.
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText };
+    // `untrustedIngressSeeded` rides it because the turn taint is per-MESSAGE and this
+    // task may be the SECOND half writing that message — see readResumeRow.
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, untrustedIngressSeeded };
   } catch (e) {
     await closeAll();
     throw e;

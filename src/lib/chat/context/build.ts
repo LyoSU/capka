@@ -17,6 +17,9 @@ export interface ContextRow {
   parentId?: string | null;
   siblingIndex?: number;
   siblingCount?: number;
+  /** "Untrusted content sits behind this row." Optional here and not on `MessageRow`
+   *  because the shaping functions synthesize rows that never came from the table. */
+  untrustedIngress?: boolean | null;
 }
 
 /**
@@ -91,6 +94,14 @@ export function buildModelContext(rows: ContextRow[], opts: BuildOptions): Conte
       metadata: { parts: m.parts } satisfies Pick<MessageMeta, "parts">,
       createdAt: orig?.createdAt ?? null,
       platform: orig?.platform ?? "web",
+      // THE CHECKPOINT'S MARK, and this line is why the taint fold survives compaction.
+      // This branch does NOT spread `...orig` — it mints a fresh row because the summary
+      // is not any original message — and it is reached only for the checkpoint, whose
+      // role `applyCompaction` rewrote to "user". Dropping the column here would fold a
+      // compacted prompt CLEAN while the poisoned paragraph's summary sits in it, through
+      // an object literal rather than through a `role` check. The surviving-message branch
+      // above carries it through `...orig` and needs nothing.
+      untrustedIngress: orig?.untrustedIngress ?? null,
     };
   });
 }

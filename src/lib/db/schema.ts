@@ -198,6 +198,26 @@ export const messages = pgTable("messages", {
   platform: text("platform").default("web"),
   telegramMessageId: integer("telegram_message_id"),
   metadata: jsonb("metadata"),
+  /**
+   * "UNTRUSTED CONTENT SITS BEHIND THIS ROW." Written by three producers and read by one
+   * fold, and it is a COLUMN rather than a `metadata` key for a reason this file already
+   * records one table down: `metadata` is replaced wholesale by every snapshot and by
+   * finalization (see `message_effects`), and the one path that must never miss this write
+   * is the suspend for `ask` — precisely the path a throttled, wholesale-replaced blob
+   * would drop.
+   *
+   * ONE column serves all three marks because a compaction checkpoint IS a message row and
+   * all three mean the same sentence:
+   *   - an assistant row: this turn's prompt contained untrusted content (a tool result, a
+   *     provider-executed search, a replayed row that already carried the mark);
+   *   - a user row: this message injected native attachments;
+   *   - a checkpoint row: the OR of the marks of everything its summary replaced.
+   * A compacted prompt is therefore never CLEANER than the prompt it replaced.
+   *
+   * MONOTONIC: it only ever goes false -> true, so a concurrent or re-driven write can
+   * only set what is already set. No lock, no CAS, no sequencing against the snapshot.
+   */
+  untrustedIngress: boolean("untrusted_ingress").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_messages_chat_id").on(table.chatId),

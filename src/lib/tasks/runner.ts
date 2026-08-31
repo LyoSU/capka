@@ -49,6 +49,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
+import { makeTurnTaint, foldAssembledRows, untrustedOutputOf } from "./turn-taint";
 import { prepareRun } from "./run-context";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
@@ -362,8 +363,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, untrustedIngressSeeded } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
+    // Has this turn read anything it did not author? Keyed by the MESSAGE, not this task:
+    // an approval/`ask` continuation is a second task writing this same row, and none of
+    // the construction sites re-runs for its rehydrated input — so the first half's answer
+    // is seeded from the row rather than recomputed. See turn-taint.ts.
+    const taint = makeTurnTaint({ messageId: msgId, seeded: untrustedIngressSeeded });
     // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
     // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
     // what the row belongs to and this is the scope that owns it — and because a tool
@@ -573,8 +579,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       contextDeep = thinkingIsDeep(nodes, effectiveLimit);
       toolsCleared = shouldClearToolResults(provider, nodes, effectiveLimit);
       if (path.length) {
-        uiMessages = toUIMessages(buildModelContext(nodes as ContextRow[],
-          toolsCleared ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST } : {}));
+        const assembled = buildModelContext(nodes as ContextRow[],
+          toolsCleared ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST } : {});
+        uiMessages = toUIMessages(assembled);
+        // THE FOLD, over the ENTIRE assembled prompt — every row the model can see right
+        // now, replayed history included. Not "what this turn newly constructed": poison
+        // that arrives in turn 1 and acts in turn 5 is still verbatim in the prompt the
+        // model is reading as it writes, and a per-turn fold would call turn 5 clean,
+        // displacing the durable bound by exactly one turn.
+        //
+        // It reads the mark STORED AGAINST each row and nothing else — never `role`,
+        // never `type`, never any text the row contains. `applyCompaction` splices a
+        // summary as `role: "user"`, which is exactly the shape a naive fold would read as
+        // `user_authored`; that row's own column is what this reads instead.
+        //
+        // A turn with no parent path folds `false` by construction — there is no history
+        // to be tainted by — and that is correct rather than a hole: the first turn of a
+        // chat can only be tainted by its own construction sites, which run below.
+        if (foldAssembledRows(assembled)) await taint.mark("replayed_row");
       }
     }
     // Seal any tool call left dangling by an interrupted earlier turn (deadline,
@@ -616,8 +638,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
     let injectedFiles: FileRef[] = [];
     if (nativeFiles.length) {
-      injectedFiles = await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles);
+      // `replyParentId ?? msgId`: on a fresh turn that is the USER message the attachment
+      // rides — the row that survives a regenerate — and on a continuation it is
+      // `resumeMessageId`, which is `msgId` and therefore this taint's own target.
+      injectedFiles = await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
       injectedNative = injectedFiles.length > 0;
+      // The row above carries the mark durably; this carries it into THIS turn's own gate,
+      // which the fold above ran too early to see (the attachment is injected after it).
+      if (injectedNative) await taint.mark("native_attachment");
     }
     // Ground-truth "attached files" prompt block, built HERE (not in
     // buildSystemPrompt) because delivery is only known after injection: only a
@@ -1251,6 +1279,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // and `pg_notify`. Strip them once, here, so neither the DB write nor
             // the realtime publish below can choke. See stripNul.
             const output = stripNul(event.output);
+            // THE TAINT MARK, and it is here rather than inside `withEffectLedger`
+            // because this is the ONLY place the runner sees a result at all — the
+            // ledger's wrapper never runs for a provider-executed tool, which has no
+            // local `execute` and is returned untouched.
+            //
+            // Decided PER RESULT from the tool's own registration, not unconditionally:
+            // marking everything here would make `untrustedOutput: false` dead code one
+            // layer down, which is a stated exception that a second entrance walks past.
+            // `rawTools` is the pre-wrap set the runner still holds, so the declaration
+            // is readable by name; a tool that is absent from it (provider-executed) has
+            // no local execute and is untrusted by definition — a provider-side fetch is
+            // not Capka-authored. UNSET is untrusted, which is the whole fail-closed
+            // property now that the fold's own predicate is not a second belt.
+            if (untrustedOutputOf(rawTools, event.toolName)) await taint.mark("tool_result");
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
             turnOutputChars += outputChars(output);
             // Ledger of what this turn has actually DONE — recorded on the result,
@@ -1531,7 +1573,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Re-attach the turn's native files (the trim+reconvert produced fresh
       // model messages, dropping the bytes injected into the original set).
       if (injectedNative && nativeFiles.length) {
-        await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles);
+        // Same row id as the first injection — missing it here would drop the mark on
+        // exactly the turn that overflowed. Monotonic, so the repeat is a no-op.
+        await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
       }
       foldDiscarded();
       result = makeStream();
@@ -2121,9 +2165,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // (cached reads included), since the whole prefix occupies the window.
     if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
       void trackAux(
-        compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
-          .then(async (summary) => {
-            if (!summary) return;
+        // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
+        // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above
+        // and is not in scope here. It is already the fold over exactly those rows plus
+        // this turn's own marks, and it over-approximates in the safe direction: the
+        // summary covers this turn too.
+        compactConversation(model, systemMessages, modelMessages, taint.seen(), recordAuxUsage)
+          .then(async (result) => {
+            if (!result) return;
+            const summary = result.text;
             // Re-entrancy floor: if the summary itself would still trip the
             // compaction threshold, checkpointing it is pointless — the next turn
             // would overflow again and we'd thrash compact→overflow→compact. Bail
@@ -2147,6 +2197,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               id: checkpointId, chatId, parentId: msgId, role: "assistant", content: "",
               platform: payload.origin?.platform ?? "web",
               metadata: { status: "completed", compaction: { summary: stripNul(summary), summarizedUpTo: msgId, tokensSaved: budget.used } },
+              // The checkpoint IS a message row, so it carries the same column: the OR of
+              // the marks of everything its summary replaced. Written in the SAME insert —
+              // a checkpoint that existed for even a moment without its mark is a window
+              // in which the next turn folds a compacted prompt clean.
+              untrustedIngress: result.trust,
             });
             await db.update(chats).set({ activeLeafId: checkpointId }).where(eq(chats.id, chatId));
             // Tell the client so it reloads: the transcript gains the divider and

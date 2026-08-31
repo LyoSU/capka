@@ -6,12 +6,23 @@ vi.mock("@/lib/sandbox/client", () => ({
   execCommand: vi.fn(),
 }));
 
+// The taint mark is a database write; these cases are about which BYTES reach the
+// model. `turn-taint.integration.test.ts` is where the mark itself is asserted.
+vi.mock("@/lib/tasks/turn-taint", () => ({ markMessageUntrusted: vi.fn(async () => {}) }));
+
 import { downloadFile, execCommand } from "@/lib/sandbox/client";
+import { markMessageUntrusted } from "@/lib/tasks/turn-taint";
 import { injectNativeFiles } from "../run-attachments";
-import { MAX_NATIVE_FILE_BYTES } from "@/lib/constants";
+import { MAX_NATIVE_FILE_BYTES, type FileRef } from "@/lib/constants";
 
 const dl = vi.mocked(downloadFile);
 const exec = vi.mocked(execCommand);
+const marked = vi.mocked(markMessageUntrusted);
+
+/** Every case injects into the same row; only the mark cases care which. */
+const inject = (
+  msgs: ModelMessage[], sessionKey: string, userId: string, provider: string, files: FileRef[],
+): Promise<FileRef[]> => injectNativeFiles(msgs, sessionKey, userId, provider, files, "attach-row");
 
 /** A downloadFile result stub — the code only ever reads `arrayBuffer()`. */
 const asResponse = (buf: Buffer) =>
@@ -36,6 +47,7 @@ function partTypes(msgs: ModelMessage[]) {
 beforeEach(() => {
   dl.mockReset();
   exec.mockReset();
+  marked.mockClear();
   // Default: normalize reports the source already fine → keep original.
   exec.mockResolvedValue({ stdout: "__KEEP__", stderr: "", exitCode: 0 });
 });
@@ -44,7 +56,7 @@ describe("injectNativeFiles — honest injected-set return", () => {
   it("returns only the files whose bytes actually reached the model", async () => {
     dl.mockResolvedValue(asResponse(Buffer.alloc(1024)));
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+    const injected = await inject(msgs,"sess", "u1", "openai", [
       { name: "a.txt", type: "text/plain" },
       { name: "b.txt", type: "text/plain" },
     ]);
@@ -57,7 +69,7 @@ describe("injectNativeFiles — honest injected-set return", () => {
       path === "good.txt" ? asResponse(Buffer.alloc(1024)) : Promise.reject(new Error("gone")),
     );
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+    const injected = await inject(msgs,"sess", "u1", "openai", [
       { name: "good.txt", type: "text/plain" },
       { name: "gone.txt", type: "text/plain" },
     ]);
@@ -69,7 +81,7 @@ describe("injectNativeFiles — honest injected-set return", () => {
   it("drops a file over the per-file byte cap and omits it from the return", async () => {
     dl.mockResolvedValue(asResponse(Buffer.alloc(MAX_NATIVE_FILE_BYTES + 1)));
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+    const injected = await inject(msgs,"sess", "u1", "openai", [
       { name: "huge.pdf", type: "application/pdf" },
     ]);
     expect(injected).toEqual([]);
@@ -80,7 +92,7 @@ describe("injectNativeFiles — honest injected-set return", () => {
     // Three 19 MiB files: two fit under the 50 MiB aggregate, the third spills.
     dl.mockResolvedValue(asResponse(Buffer.alloc(19 * 1024 * 1024)));
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+    const injected = await inject(msgs,"sess", "u1", "openai", [
       { name: "1.pdf", type: "application/pdf" },
       { name: "2.pdf", type: "application/pdf" },
       { name: "3.pdf", type: "application/pdf" },
@@ -91,9 +103,28 @@ describe("injectNativeFiles — honest injected-set return", () => {
 
   it("returns [] and touches nothing when there is no user message", async () => {
     const msgs: ModelMessage[] = [{ role: "assistant", content: "hi" }];
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [{ name: "a.txt", type: "text/plain" }]);
+    const injected = await inject(msgs,"sess", "u1", "openai", [{ name: "a.txt", type: "text/plain" }]);
     expect(injected).toEqual([]);
     expect(dl).not.toHaveBeenCalled();
+  });
+
+  // Taint construction site 3. Bytes the user handed over are content this turn did not
+  // author, so the row they ride is untrusted — and it is the USER row, which is what
+  // keeps the mark alive when the assistant reply is regenerated.
+  it("marks the attachment's row untrusted once bytes actually reached the model", async () => {
+    dl.mockResolvedValue(asResponse(Buffer.alloc(1024)));
+    await inject(userMessages(),"sess", "u1", "openai", [{ name: "a.pdf", type: "application/pdf" }]);
+    expect(marked).toHaveBeenCalledWith("attach-row");
+  });
+
+  // The control, and it is the reason the mark reads the DELIVERED set rather than the
+  // requested one: a native-eligible file that could not be delivered never reached the
+  // model, so it taints nothing and the turn stays free to correct the user's own facts.
+  it("does NOT mark the row when nothing was delivered", async () => {
+    dl.mockRejectedValue(new Error("gone"));
+    const injected = await inject(userMessages(),"sess", "u1", "openai", [{ name: "a.pdf", type: "application/pdf" }]);
+    expect(injected).toEqual([]);
+    expect(marked).not.toHaveBeenCalled();
   });
 });
 
@@ -105,7 +136,7 @@ describe("injectNativeFiles — provider-aware inline budget (Google)", () => {
   it("skips a file over the Google budget and omits it from the delivered set", async () => {
     dl.mockResolvedValue(asResponse(Buffer.alloc(overGoogle)));
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "google", [
+    const injected = await inject(msgs,"sess", "u1", "google", [
       { name: "big.pdf", type: "application/pdf" },
     ]);
     expect(injected).toEqual([]);
@@ -115,7 +146,7 @@ describe("injectNativeFiles — provider-aware inline budget (Google)", () => {
   it("delivers the same file for a non-Google provider (still under its cap)", async () => {
     dl.mockResolvedValue(asResponse(Buffer.alloc(overGoogle)));
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+    const injected = await inject(msgs,"sess", "u1", "openai", [
       { name: "big.pdf", type: "application/pdf" },
     ]);
     expect(injected.map((f) => f.name)).toEqual(["big.pdf"]);
@@ -132,7 +163,7 @@ describe("injectNativeFiles — image normalization", () => {
       return asResponse(Buffer.alloc(400 * 1024));
     });
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    const injected = await inject(msgs,"sess", "u1", "anthropic", [
       { name: "photo.jpg", type: "image/jpeg" },
     ]);
     // Downloaded the hidden normalized copy…
@@ -151,7 +182,7 @@ describe("injectNativeFiles — image normalization", () => {
       return asResponse(Buffer.alloc(500 * 1024));
     });
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    const injected = await inject(msgs,"sess", "u1", "anthropic", [
       { name: "IMG_0001.heic", type: "image/heic" },
     ]);
     // The delivered bytes are the converted JPEG copy…
@@ -173,7 +204,7 @@ describe("injectNativeFiles — image normalization", () => {
       return asResponse(Buffer.alloc(1024));
     });
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    const injected = await inject(msgs,"sess", "u1", "anthropic", [
       { name: "broken.heic", type: "image/heic" },
     ]);
     expect(injected).toEqual([]);
@@ -189,7 +220,7 @@ describe("injectNativeFiles — image normalization", () => {
       return asResponse(Buffer.alloc(200 * 1024));
     });
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    const injected = await inject(msgs,"sess", "u1", "anthropic", [
       { name: "small.png", type: "image/png" },
     ]);
     expect(seen).toEqual(["small.png"]);
@@ -205,7 +236,7 @@ describe("injectNativeFiles — image normalization", () => {
       return asResponse(Buffer.alloc(1024));
     });
     const msgs = userMessages();
-    const injected = await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    const injected = await inject(msgs,"sess", "u1", "anthropic", [
       { name: "photo.webp", type: "image/webp" },
     ]);
     expect(seen).toEqual(["photo.webp"]);
@@ -216,7 +247,7 @@ describe("injectNativeFiles — image normalization", () => {
     exec.mockResolvedValue({ stdout: "__KEEP__", stderr: "", exitCode: 0 });
     dl.mockResolvedValue(asResponse(Buffer.alloc(1024)));
     const msgs = userMessages("what is this?");
-    await injectNativeFiles(msgs, "sess", "u1", "anthropic", [
+    await inject(msgs,"sess", "u1", "anthropic", [
       { name: "photo.jpg", type: "image/jpeg" },
     ]);
     // File first, user's text last — the image-then-text structure providers prefer.

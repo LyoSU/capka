@@ -65,6 +65,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Security
 
+- A turn that has read untrusted content (a tool result, a provider-side search, an attachment, or a compaction summary of any of those) can no longer replace a fact the user stated; the correction is recorded as a conflict instead. The mark is stored on `messages.untrusted_ingress` and survives compaction and approval continuations.
 - A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.
 - The boot-time memory migration logs only the error message on failure, so a failing statement's bound parameters no longer reach the log.
 - Memory audit events (`audit_events`) no longer carry a fact's slot key or a forget reason, so no memory text survives a project delete; `memory_forget` accordingly no longer takes a `reason`.

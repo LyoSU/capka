@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "untrusted_ingress" boolean DEFAULT false NOT NULL;

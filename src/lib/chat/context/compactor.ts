@@ -47,13 +47,21 @@ export function buildCompactionMessages(
  * if the model abstained / it failed — the caller then writes no checkpoint and
  * leaves the conversation as-is). Thin I/O wrapper, mirroring generateChatTitle:
  * the cache-critical assembly is buildCompactionMessages above.
+ *
+ * `sourceTrust` is carried through rather than computed: a summary is only ever as
+ * trustworthy as the prompt it summarized, so a checkpoint written from a tainted
+ * conversation must be tainted too — otherwise compaction launders a poisoned
+ * paragraph into a clean-looking recap and a compacted prompt ends up CLEANER than
+ * the prompt it replaced. It sits FOURTH, before the optional `onUsage`: a required
+ * parameter after an optional one is a call-site trap.
  */
 export async function compactConversation(
   model: LanguageModel,
   systemMessages: ModelMessage[],
   modelMessages: ModelMessage[],
+  sourceTrust: boolean,
   onUsage?: (usage: TokenUsage) => void,
-): Promise<string | null> {
+): Promise<{ text: string; trust: boolean } | null> {
   try {
     // Own root trace, like the other aux calls — compaction is fire-and-forget and
     // can outlive the turn that triggered it (see auxGenerate).
@@ -68,7 +76,7 @@ export async function compactConversation(
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);
     const summary = text.trim();
-    return summary.length > 0 ? summary : null;
+    return summary.length > 0 ? { text: summary, trust: sourceTrust } : null;
   } catch (e) {
     log.error("compaction failed", { err: String(e) });
     return null;
