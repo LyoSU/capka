@@ -394,8 +394,11 @@ export async function factWrite(a: {
     // is the point of N2: the settled attack's vehicle is retrieved content sitting in the
     // context, so the bar is drawn at "did this turn read anything it did not author".
     // Rule 1's tie between statement and quote narrows that attack sharply and does not
-    // close it — the predicate's documented blind spot is negation, and «… НЕ …» shares
-    // 100% of its long words with the user's own question.
+    // close it — the predicate's documented blind spot is negation, and "Acme invoices are
+    // NOT paid monthly" shares 100% of its long words with the user's own question about
+    // whether they are. `longWords` filters words of three characters or fewer, so the
+    // negation itself is not even weighed. The tie is a wording-overlap test and cannot be
+    // a meaning test, which is why the clean bar is drawn at the attack's actual vehicle.
     //
     // Neither condition REFUSES. A correction that may not supersede is stored live at its
     // own class with `conflicts_with` pointing at the target, which is the single-reader
