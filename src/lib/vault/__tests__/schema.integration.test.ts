@@ -35,6 +35,8 @@ const VAULT_TABLES = [
   "note_claims",
   "vault_claims",
   "claim_evidence",
+  "vault_note_versions",
+  "note_version_evidence",
   "memory_candidates",
   "message_citations",
   "audit_events",
@@ -148,7 +150,7 @@ run("vault schema", () => {
     ]);
   });
 
-  it("all 14 vault tables exist", async () => {
+  it("all 16 vault tables exist", async () => {
     const { rows } = await pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = ANY($1)`,
@@ -538,5 +540,16 @@ run("vault schema", () => {
       { column_name: "last_used_at", is_nullable: "YES", column_default: null },
       { column_name: "retired_at", is_nullable: "YES", column_default: null },
     ]);
+  });
+
+  it("keeps prompt_access byte-identical on claims and on note versions", async () => {
+    // Two generated columns, one rule. A generated column's expression lives in the
+    // DATABASE, so a shared TS constant could not keep an already-created column in
+    // step — the only honest pin is a comparison of what Postgres actually stored.
+    const expr = async (table: string) => (await q(`
+      SELECT pg_get_expr(d.adbin, d.adrelid) AS e
+        FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+       WHERE d.adrelid = $1::regclass AND a.attname = 'prompt_access'`, [table])).rows[0].e as string;
+    expect(await expr("vault_note_versions")).toBe(await expr("vault_claims"));
   });
 });

@@ -24,6 +24,7 @@ import {
   findCurrentHead,
   type Actor,
 } from "../claims";
+import { classify, ownerAuthored, HORIZON_DAYS } from "../grounding";
 import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -965,5 +966,53 @@ run("vault claims", () => {
     const r = await q(`SELECT id, normalized_hash FROM vault_claims WHERE id = ANY($1)`, [[a.id, b.id]]);
     const [h1, h2] = r.rows.map((x: { normalized_hash: string }) => x.normalized_hash);
     expect(h1).toBe(h2);
+  });
+
+  it("arms expires_at inside the writer, from the class it is about to store", async () => {
+    // The killing test the arming did not have: deleting either `expiresAt:
+    // horizonFor(...)` line from `claims.ts` left the whole suite green, so "at insert, by
+    // the writer, not by a trigger and not by a backfill" rested on inspection alone.
+    //
+    // The class comes out of `classify`, not out of `testServerClass`: the arming is a
+    // property of the writer/class PAIR, and a fixture-minted class would witness the
+    // column but not the path a real agent write takes to it.
+    const inferred = classify(
+      { kind: "agent_inference" },
+      { statement: "reports ship on the first Monday", userTurnText: "", untrustedIngressSeen: false },
+    );
+    expect(inferred.sourceClass).toBe("agent_inferred");
+
+    const armed = await seed({ statement: "reports ship on the first Monday", sourceClass: inferred.sourceClass });
+    const never = await seed({ statement: "the person stated this themselves", sourceClass: ownerAuthored() });
+
+    const horizons = await q(`SELECT id, expires_at FROM vault_claims WHERE id = ANY($1)`, [[armed.id, never.id]]);
+    const by = Object.fromEntries(
+      horizons.rows.map((r: { id: string; expires_at: Date | null }) => [r.id, r.expires_at]),
+    );
+    // The mirror half, and it is the one that fails if a writer ever arms unconditionally:
+    // the person said it, and a horizon on their own words is the system quietly
+    // forgetting what it was told.
+    expect(by[never.id]).toBeNull();
+    // A WINDOW, not an equality: `horizonFor` reads the clock, so the honest assertion is
+    // the one a 90-day horizon passes and a 30- or 365-day one fails.
+    expect(by[armed.id]).not.toBeNull();
+    const days = (by[armed.id]!.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(HORIZON_DAYS - 1);
+    expect(days).toBeLessThan(HORIZON_DAYS + 1);
+
+    // And a supersede RE-ARMS from the successor's own class rather than inheriting the
+    // predecessor's null — the second `horizonFor` call site, which the create case above
+    // cannot reach.
+    const res = await updateClaim({
+      claimId: never.id,
+      expectedRevision: 1,
+      patch: { statement: "the agent restated it" },
+      sourceClass: inferred.sourceClass,
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!res.ok) throw new Error("unreachable");
+    const successor = await q(`SELECT expires_at FROM vault_claims WHERE id = $1`, [res.id]);
+    expect(successor.rows[0].expires_at).not.toBeNull();
   });
 });

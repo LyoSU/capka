@@ -1039,9 +1039,9 @@ export const vaultNotes = pgTable("vault_notes", {
   topicKey: text("topic_key"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-  /** Retention horizon, armed at insert by the note writer; null = no horizon. Nothing arms
-   *  it in slice 1 — see `vaultClaims.expiresAt` for why the arming and the retire job have
-   *  to ship together. */
+  /** Retention horizon, armed at insert by the note writer; null = no horizon. No note
+   *  writer arms one yet — see `vaultClaims.expiresAt` for the arming rule and for why
+   *  slice 4's retire job and Restore surface are a deadline dependency of it. */
   expiresAt: timestamp("expires_at"),
   /** Horizon passed, or the owner hid it. `liveNoteForModel` reads it; the note survives. */
   retiredAt: timestamp("retired_at"),
@@ -1049,6 +1049,25 @@ export const vaultNotes = pgTable("vault_notes", {
    *  It sits on the note identity rather than a revision: fragmenting "when was this read"
    *  across a note's history answers a different question than the one retention asks. */
   lastUsedAt: timestamp("last_used_at"),
+  /**
+   * The head version's id, and it is NULLABLE ON PURPOSE AND PERMANENTLY.
+   *
+   * Not a weaker schema — an implementable one. `vault_note_versions.note_id` references
+   * this table, so every writer must insert the NOTE row before any version of it exists,
+   * and Postgres evaluates NOT NULL before the insert that would satisfy it. A `SET NOT
+   * NULL` here makes `resolveTopic`, `createNote`, `reviseNote` and every raw-SQL fixture
+   * illegal in the same stroke. What it would have guaranteed — that the backfill created
+   * a revision 1 for every note — is asserted in the migration itself, once, where it is
+   * about something.
+   *
+   * READS DO NOT DEPEND ON IT. Head-ness is `revision = current_revision`, an integer every
+   * row carries: a join condition doing duty as a predicate would drop every note out of
+   * every note-reading mint the moment the pointer was NULL, and this column is exactly the
+   * one that can be NULL for a statement or two.
+   */
+  currentVersionId: text("current_version_id").references((): AnyPgColumn => vaultNoteVersions.id),
+  /** WHAT HEAD-NESS COMPARES AGAINST, and what the note CAS writes. */
+  currentRevision: integer("current_revision").notNull().default(1),
 }, (t) => [
   index("idx_vnotes_space").on(t.spaceId),
   // Identity uniqueness applies ONLY to memory topics, and to the KEY. Two topics may
@@ -1061,6 +1080,90 @@ export const vaultNotes = pgTable("vault_notes", {
     columns: [t.spaceId, t.id],
     foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
   }),
+]);
+
+/**
+ * A note's CONTENT, immutable and revisioned. `vault_notes` stays the stable identity and
+ * the topic container; nothing here is ever UPDATEd, which is what makes "which revision
+ * said this" answerable.
+ *
+ * Content properties live HERE and lifecycle properties live on `vault_notes`, and the
+ * split is not cosmetic: a new revision must not silently reset or inherit a retention
+ * horizon, and `last_used_at` on a version would fragment "when was this note last read"
+ * across its history.
+ *
+ * `language` is deliberately absent — the search lane is `'simple'` and language-blind by
+ * design, so the column would have no producer, no consumer and no detection mechanism,
+ * and adding one would be exactly the per-language machinery the universality rule bans.
+ *
+ * THE INVERSE: versions cascade from the note; the note NODE's soft delete is what removes
+ * it from every list and from the graph. A version is never deleted on its own.
+ */
+export const vaultNoteVersions = pgTable("vault_note_versions", {
+  id: text("id").primaryKey(),
+  noteId: text("note_id").notNull().references(() => vaultNotes.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  title: text("title").notNull(),
+  /** Canonical edge tokens, never `[[Title]]`. A value a person may rename is never a key,
+   *  so a link stores an EDGE id and the renderer resolves it to the target's current
+   *  title. */
+  bodyMarkdown: text("body_markdown").notNull(),
+  /** The same five values and the same rule as `vault_claims.source_class`: NOT NULL, no
+   *  default, and no writer outside the note service — which takes a `ServerClass`. */
+  sourceClass: text("source_class", {
+    enum: ["legacy_confirmed", "owner_authored", "user_direct", "agent_inferred", "untrusted_derived"],
+  }).notNull(),
+  sensitive: boolean("sensitive").notNull().default(false),
+  /** Generated, byte-for-byte the same expression `vault_claims` carries. Two copies of
+   *  one rule, and they are pinned to each other by `schema.integration.test.ts` rather
+   *  than by a shared constant: a generated column's expression is stored in the
+   *  database, so a "shared" TS constant would not keep an already-created column in
+   *  step. The test compares the two `pg_get_expr` outputs. */
+  promptAccess: text("prompt_access", { enum: ["manifest", "memory_search", "knowledge_search", "owner_only"] })
+    .notNull()
+    .generatedAlwaysAs(
+      sql`case when sensitive then 'owner_only'
+               when source_class in ('legacy_confirmed','owner_authored','user_direct') then 'manifest'
+               when source_class = 'agent_inferred' then 'memory_search'
+               else 'knowledge_search' end`,
+    ),
+  provenance: jsonb("provenance").notNull(),          // {kind, messageId?, handles?, medium?}
+  createdTaskId: text("created_task_id"),
+  /** Set when a source version this note derives from is superseded. No writer until
+   *  slice 3 — the column ships with the table because adding it later means an ALTER on a
+   *  populated table for a value that is NULL on every existing row anyway. */
+  staleSince: timestamp("stale_since"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("uniq_vnote_versions_rev").on(t.noteId, t.revision),
+  check(
+    "ck_vnote_versions_source_class",
+    sql`${t.sourceClass} in ('legacy_confirmed','owner_authored','user_direct','agent_inferred','untrusted_derived')`,
+  ),
+]);
+
+/**
+ * The note-side equivalent of `claim_evidence`, and what makes `derived_from` point at a
+ * SPECIFIC source version rather than at a file in the abstract.
+ *
+ * `on delete set null` on the fragment matches `claim_evidence` exactly: the row keeps its
+ * own quote snapshot, so it is a record, not a pin. Every snapshot is taken from
+ * `knowledge_fragments.model_text`, never from `text` — the rule is on the writer in slice
+ * 3, which is the first slice that has a fragment to snapshot.
+ */
+export const noteVersionEvidence = pgTable("note_version_evidence", {
+  id: text("id").primaryKey(),
+  noteVersionId: text("note_version_id").notNull().references(() => vaultNoteVersions.id, { onDelete: "cascade" }),
+  blockOrdinal: integer("block_ordinal").notNull(),
+  fragmentId: text("fragment_id").references(() => knowledgeFragments.id, { onDelete: "set null" }),
+  messageId: text("message_id"),                      // no FK, same rationale as claim_evidence
+  quoteSnapshot: text("quote_snapshot"),
+  locatorSnapshot: jsonb("locator_snapshot"),
+  relation: text("relation", { enum: ["supports", "refutes", "derived_from"] }).notNull().default("supports"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [
+  index("idx_nve_version").on(t.noteVersionId),
+  index("idx_nve_fragment").on(t.fragmentId),
 ]);
 
 export const vaultClaims = pgTable("vault_claims", {
@@ -1141,10 +1244,20 @@ export const vaultClaims = pgTable("vault_claims", {
   normalizedHash: text("normalized_hash"),
   /** The task that wrote it — `memory_forget`'s DB-level same-task bound in slice 2. */
   createdTaskId: text("created_task_id"),
-  /** Retention horizon, armed at insert by the writer; null = no horizon. NOTHING arms it
-   *  in slice 1: the daily retire job and the "Older" group with its Restore control ship
-   *  together in slice 4, and a horizon armed without them would drop rows out of the
-   *  model at day 90 with no surface that explains it. */
+  /**
+   * Retention horizon, armed at insert by the writer; null = no horizon.
+   *
+   * ARMED FROM SLICE 2 — `horizonFor` in `src/lib/vault/grounding.ts`, called inside
+   * `createClaim` and `updateClaim`, gives an `agent_inferred` or `untrusted_derived` row
+   * 90 days and leaves the three manifest classes null. NOTHING RETIRES YET: the daily
+   * retire job and the "Older" group with its Restore control ship in slice 4, so until
+   * then this column is a recorded horizon and nothing reads it to drop a row.
+   *
+   * That makes slice 4 a DEADLINE DEPENDENCY, not a nice-to-have — a horizon that passes
+   * with no retire job is inert, and one that passes with a retire job but no Restore
+   * surface drops rows out of the model with nothing that explains it. The clock starts at
+   * the first wired agent write, not at this commit: today zero rows are armed.
+   */
   expiresAt: timestamp("expires_at"),
   /** Horizon passed, or the owner hid it. The row and its provenance survive. */
   retiredAt: timestamp("retired_at"),
