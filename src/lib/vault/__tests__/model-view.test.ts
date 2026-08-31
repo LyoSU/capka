@@ -35,7 +35,7 @@ const OWNER = "src/lib/vault/model-view.ts";
  *  below apply to it; that is the intended way to extend this list, and the reason it is
  *  a list rather than a directory walk is that "model-facing" is a judgment about
  *  AUDIENCE, which no path pattern encodes. */
-const MODEL_FACING = ["src/lib/vault/manifest.ts", "src/lib/vault/tools.ts"];
+const MODEL_FACING = ["src/lib/vault/manifest.ts", "src/lib/vault/tools.ts", "src/lib/vault/write-tools.ts"];
 
 /** Accessors that return claim text with NO admission decision attached. They exist for
  *  callers that must see every row — the ledger's dedup, the confirm path, the human
@@ -220,11 +220,20 @@ describe("the three channels", () => {
     //                  check to switch on, and never SELECTS on it — the same exclusion,
     //                  and the same reason, as `claims.ts` above. Stated rather than left
     //                  silent, because a silent entry reads as an oversight.
+    //   write-tools.ts REPORTS it back on `memory_fact_write`'s return (§4.5's Returns
+    //                  table), read off the row the write just made through
+    //                  `findCurrentHead` — so the value is the generated column's, not a
+    //                  channel clause this module decided. It does carry `accessOf`, which
+    //                  is the class→channel map MINUS the `sensitive` arm, for §4.5 step
+    //                  5's "equal or stronger" comparison; that is a rank over classes and
+    //                  not an admission decision, and it is pinned against the database in
+    //                  `fact-write.integration.test.ts` rather than trusted.
     expect(hits(/promptAccess|prompt_access/)).toEqual([
       "src/lib/db/schema.ts",
       "src/lib/vault/claims.ts",
       "src/lib/vault/model-view.ts",
       "src/lib/vault/notes.ts",
+      "src/lib/vault/write-tools.ts",
     ]);
   });
 

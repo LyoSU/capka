@@ -40,6 +40,14 @@ export type ClaimHead = {
    *  and written nowhere. `modelTextOf` is its only reader: the lost-CAS reply has to make
    *  the same decision as the mints, off a head the caller already had in hand. */
   promptAccess: PromptAccess;
+  /** The STORED trust tier, beside the channel it generates, and the two are not
+   *  interchangeable — which is why this is on the head rather than being re-derived from
+   *  `promptAccess` by whoever needs it. `sensitive` collapses every class to `owner_only`,
+   *  so a sensitive `user_direct` head and a sensitive `untrusted_derived` one are the same
+   *  channel and different tiers. §4.5 step 5 compares the REPLACEMENT's class against the
+   *  target's ("computed over the server-verified class"), and on `owner_only` heads that
+   *  comparison is answerable only from this column. */
+  sourceClass: SourceClass;
 };
 
 /**
@@ -82,6 +90,20 @@ export type ClaimInput = {
   /** The task that wrote it; `memory_forget`'s same-task bound reads it in slice 2. An
    *  owner action has no task and passes nothing. */
   createdTaskId?: string;
+  /** The head this claim CONTESTS — §4.5 step 5's "otherwise nothing is superseded". A
+   *  correction that may not supersede is stored live at its own class pointing here, and
+   *  the person resolves it; the target row is untouched. The composite FK
+   *  (`vault_claims_conflicts_with_fk`) makes a cross-space or dangling pointer
+   *  unrepresentable, so this is passed with the same space the claim is written into or
+   *  the insert fails — never something a reader has to notice afterwards. */
+  conflictsWith?: string;
+  /** AUDIT ONLY, and the only reason it is a parameter at all (§4.5 NEW-4). Which of rule
+   *  1's four clauses failed goes to the `claim.create` payload and the owner's row detail,
+   *  and NEVER into the tool's return: naming it to the model is a rephrase-until-it-passes
+   *  gradient that exact-hash dedup does not stop, because a one-word rephrase has a
+   *  different `normalized_hash`, can land `user_direct`, and leaves both rows stored.
+   *  It authorizes nothing — the class it explains was already decided by `classify`. */
+  failedClause?: 1 | 2 | 3 | 4 | null;
 };
 
 export type EvidenceInput = {
@@ -103,6 +125,7 @@ const HEAD = {
   reviewStatus: vaultClaims.reviewStatus,
   sensitive: vaultClaims.sensitive,
   promptAccess: vaultClaims.promptAccess,
+  sourceClass: vaultClaims.sourceClass,
 };
 
 /** The version chain cannot cycle: `uniq_vclaims_one_successor` allows at most
@@ -441,6 +464,7 @@ export async function createClaim(
     // Armed HERE, from the class being stored, not by a caller and not by a trigger.
     expiresAt: horizonFor(input.sourceClass),
     createdTaskId: input.createdTaskId ?? null,
+    conflictsWith: input.conflictsWith ?? null,
     normalizedHash: normalizedHashOf(statement, input.value ?? null),
   });
   if (input.topicNoteId) {
@@ -470,7 +494,14 @@ export async function createClaim(
     // addresses the row, and while that row exists it holds the slot key itself. After
     // the retire the row is gone and there is nothing left to address — only content
     // that outlived its space, which is the one thing this line exists to prevent.
-    payload: { reviewStatus: "unverified", sensitive },
+    // `failedClause` rides here and nowhere else. It is a number, not text — the rule
+    // above about content outliving its space is why it is the only thing rule 1 leaves
+    // behind, and why the statement it explains does not come with it.
+    payload: {
+      reviewStatus: "unverified",
+      sensitive,
+      ...(input.failedClause ? { failedClause: input.failedClause } : {}),
+    },
   });
   // The projection is written by the same transaction that writes the row it projects.
   await projectClaimDoc(id, ex);
@@ -1020,6 +1051,54 @@ export async function headBySlot(spaceId: string, slotKey: string, ex: Ex = db):
     .where(
       and(eq(vaultClaims.spaceId, spaceId), eq(vaultClaims.slotKey, slotKey), isNull(vaultClaims.supersededAt)),
     )
+    .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * §4.5 step 4, and §8's "exact matches only": is this fact ALREADY in this space, letter
+ * for letter, under `normalized_hash`?
+ *
+ * It computes the key the way the two writers compute it — `normalizedHashOf` over
+ * `fitStatement(statement)` and `value ?? null` — rather than taking a hash from the
+ * caller, because a caller that clamped differently would ask a question about text
+ * nobody stored. That is also why the reader lives beside them: the key is a FROZEN
+ * expression under an index (see `dedupKeyNorm`), and a second module computing it is a
+ * second thing to keep frozen.
+ *
+ * NULL `normalized_hash` is "no exact match", not "matches everything": rows written
+ * before the column existed are never backfilled, so `eq` on a hex string simply does not
+ * find them. A pre-existing duplicate is therefore stored twice and resolved by the person
+ * on the memory page, which is the same answer §8 gives for near-duplicates.
+ *
+ * RETIRED rows are excluded along with superseded ones, and the two exclusions are not the
+ * same decision. A superseded row is not the fact any more; a retired row IS the fact and
+ * is merely hidden, so answering "known" off one would leave the person with a fact that
+ * is in the table, invisible to them and to the model, and unwritable for as long as it
+ * sits there. The horizon re-arms on the fresh row instead.
+ */
+export async function findExactDuplicate(
+  spaceId: string,
+  statement: string,
+  value: unknown,
+  ex: Ex = db,
+): Promise<{ id: string; revision: number } | null> {
+  const [row] = await ex
+    .select({ id: vaultClaims.id, revision: vaultClaims.revision })
+    .from(vaultClaims)
+    .where(
+      and(
+        eq(vaultClaims.spaceId, spaceId),
+        eq(vaultClaims.normalizedHash, normalizedHashOf(fitStatement(statement), value ?? null)),
+        isNull(vaultClaims.supersededAt),
+        isNull(vaultClaims.retiredAt),
+      ),
+    )
+    // Two live rows can carry one hash — nothing enforces uniqueness on it, and slice 1's
+    // own history says a unique index over model-authored text is the wrong instrument.
+    // Newest first, `id` breaking a tie between rows one transaction wrote, exactly as
+    // `headBySlot` orders for the same reason.
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id))
     .limit(1);
   return row ?? null;

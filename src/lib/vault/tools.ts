@@ -4,10 +4,12 @@ import type { TurnTaint } from "@/lib/tasks/turn-taint";
 import { MEMORY_SEARCH_MAX_RESULTS, type VaultBudget } from "./budget";
 import type { HandleMap } from "./handles";
 import { proposeCandidate, spaceForScope } from "./candidates";
-import { findCurrentHead, type ClaimHead, type SourceClass } from "./claims";
+import { findCurrentHead, STATEMENT_MAX_CHARS, type ClaimHead, type SourceClass } from "./claims";
 import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolText } from "./model-view";
 import { verifyDirectProvenance } from "./quote-match";
 import { getOrCreateSpace } from "./spaces";
+import { TOPIC_TITLE_MAX_CHARS } from "./topics";
+import { factWrite, type WriteCtx } from "./write-tools";
 
 /**
  * WHAT ONE SEARCH HANDS BACK, and why it is JSON with handles in it rather than the
@@ -233,6 +235,24 @@ export async function makeVaultMemoryTools(ctx: {
     return (await findCurrentHead(claimId, [userSpaceId])) ? userSpaceId : null;
   };
 
+  /** The write tools' half of this turn's context, built ONCE beside the spaces for the
+   *  same reason they are: all of it has the turn's lifetime, and a second copy would give
+   *  the turn a second answer to "what can I see" and "what have I spent". */
+  const writeCtx: WriteCtx = {
+    userSpaceId,
+    projectSpaceId,
+    handles: ctx.handles,
+    taint: ctx.taint,
+    budget: ctx.budget,
+    taskId: ctx.taskId,
+    messageId: ctx.messageId,
+    userTurnText: ctx.userTurnText,
+    // The AGENT wrote it, whatever class the words earned. `source_class` records what the
+    // words are worth; the actor records who moved, and no grounding makes the model into
+    // the person — which is exactly the distinction `ownerAuthored()` exists to keep.
+    actor: { kind: "agent" },
+  };
+
   return {
     memory_search: tool({
       description:
@@ -311,6 +331,79 @@ export async function makeVaultMemoryTools(ctx: {
         // exists to prevent, arrived at from the other direction.
         return ctx.budget.emit(JSON.stringify({ results, omitted, withheld, note: ABSENCE_NOTE }));
       },
+    }),
+
+    /**
+     * THE WRITE, and it writes — there is no confirmation step and no `pending`. What it
+     * stores appears on the person's memory page in this same release with one-click undo,
+     * which is what makes an additive, visible, undoable creation a different act from a
+     * mutation and the reason the maintainer's no-gate decision is implementable at all.
+     *
+     * `op` and `grounding` are REQUIRED DISCRIMINATED UNIONS, not optional flags beside a
+     * string enum: a producer that forgets to say where a fact came from must fail to
+     * compile, and a fourth grounding kind must be added to a union every switch re-exhausts.
+     * The wire names are the spec's snake_case; the mapping to `factWrite`'s TS names
+     * happens in one place, right below, so neither side has to speak the other's.
+     */
+    memory_fact_write: tool({
+      description:
+        "Save a fact to memory, or replace one you found with memory_search. It is saved immediately — the user sees it on their memory page and can undo it there, so do not ask them to confirm. Say where the fact came from in 'grounding': quote the user's own words when they stated it, list the handles you read it from when it came from saved memory or a document, or say it is your own inference. A fact about the person goes to scope 'user' and follows them into every chat; a fact about this project goes to scope 'project'. The reply tells you how it was recorded — read it, because a correction that cannot be traced to the user is stored beside the old fact instead of replacing it.",
+      inputSchema: z.object({
+        op: z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("create"),
+            scope: z
+              .enum(["user", "project"])
+              .describe("'user' = about the person, follows them everywhere; 'project' = about this project"),
+          }),
+          z.object({
+            kind: z.literal("replace"),
+            target_handle: z.string().describe("The m-handle of the fact being replaced, from memory_search"),
+            expected_revision: z.number().int().min(1),
+          }),
+        ]),
+        statement: z.string().min(3).max(STATEMENT_MAX_CHARS),
+        grounding: z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("current_user_quote"),
+            quote: z
+              .string()
+              .describe("The user's own words from THIS turn, verbatim, that the statement is made of"),
+          }),
+          z.object({
+            kind: z.literal("retrieved"),
+            handles: z.array(z.string()).min(1).max(8).describe("The handles this fact was read from"),
+          }),
+          z.object({ kind: z.literal("agent_inference") }),
+        ]),
+        topic: z
+          .string()
+          .max(TOPIC_TITLE_MAX_CHARS)
+          .optional()
+          .describe("The subject in the user's words, or an n-handle of an existing topic. Default: General"),
+        sensitive: z.boolean().optional().describe("Set true for health/politics/religion/private-life facts"),
+        value_json: z.string().max(2000).optional().describe("Optional structured value as a JSON string"),
+      }),
+      execute: async ({ op, statement, grounding, topic, sensitive, value_json }) =>
+        // Through the SAME per-turn ceiling every vault answer goes through: a write's
+        // reply is re-sent on every later step of the tool-calling loop exactly like a
+        // search's, so it is spent from one allowance and not from a second.
+        writeCtx.budget.emit(
+          JSON.stringify(
+            await factWrite({
+              op:
+                op.kind === "create"
+                  ? { kind: "create", scope: op.scope }
+                  : { kind: "replace", targetHandle: op.target_handle, expectedRevision: op.expected_revision },
+              statement,
+              grounding,
+              topic,
+              sensitive,
+              valueJson: value_json,
+              ctx: writeCtx,
+            }),
+          ),
+        ),
     }),
 
     memory_propose: tool({

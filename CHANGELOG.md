@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- The assistant now saves facts to memory immediately, with no confirmation step; everything it saves appears on the memory page with one-click undo.
 - Vault tool results are capped per call and per turn (50,000 bytes across all memory and document tools), so prompt cost stays flat as the vault grows.
 - Topic membership is now written to `vault_edges` alongside `note_claims`; existing memberships are back-filled at boot, a parity check runs on every write outside production, and `POST /api/admin/vault/reindex` reports it as `containsParity`.
 - Notes are searchable by the assistant: `memory_search` now returns note rows beside facts, filtered by the note's own trust class.
@@ -26,6 +27,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- A correction the assistant cannot prove came from the user is stored beside the existing fact as a conflict rather than replacing it.
 - `memory_search` now takes several query wordings per call and returns short run-local handles instead of `[id@revision]` addresses.
 - Memory topics now fold by normalized title inside a space, enforced by `uniq_vnotes_topic_title`; naming an existing subject reuses it instead of creating a second topic.
 - Two pre-existing memory topics in one space whose titles differ only in case or spacing block that migration: it retries and the schema stays at `0065` until they are merged, while the app keeps serving without the constraint. The first `[db] auto-migration failed` log line names the space and the title; later retries name only the index.
