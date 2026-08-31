@@ -322,9 +322,12 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
   // writers and its memory never removed.
   //
   // It runs LAST of the removals so the node rows outlive the subtype rows within this
-  // transaction, which the child -> parent FK requires; the source node ends up in the
-  // same state as its source row, which is the property that made this correct rather than
-  // merely working.
+  // transaction. NOT because an FK requires that order — `deleteSpaceNodes` soft-deletes,
+  // and no FK constrains the order of an UPDATE; the earlier wording here said it did and
+  // was simply vacuous. The real reason is the end state: the source node finishes in the
+  // same state as its source row, which is what made this correct rather than merely
+  // working, and running it last is what keeps the two soft-deletes from disagreeing if a
+  // later removal throws.
   const { nodes } = await deleteSpaceNodes(spaceId, ex);
 
   // Exactly one event per project deletion, and the condition is "no event yet",

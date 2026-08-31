@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * ONE ROUTE FROM STORED TEXT TO THE MODEL.
@@ -55,6 +55,44 @@ const code = (text: string) =>
     .filter((l) => !l.startsWith("*") && !l.startsWith("//") && !l.startsWith("/*"))
     .join("\n");
 
+/** Every non-test `.ts`/`.tsx` under `src/`, read once, prose stripped.
+ *
+ *  A WALK, not a list, and that is the point. The guards below used to iterate a
+ *  hand-written array of four files, which made each of them a claim about the files
+ *  someone remembered — while this module's own docstring argues that enumerating
+ *  entrances has demonstrably failed. The slice proved the docstring twice: it added
+ *  `search-documents.ts` and an admin reindex route as new entrances to the projection and
+ *  put neither in any array, and a real second-reader idiom (the table named inside a raw
+ *  `sql` template) walked past the guard until the REGEX was widened — the list never was.
+ *
+ *  Inverted, the assertion becomes "these files and no others", which binds a file that
+ *  does not exist yet. That is the only form of these guards that can still hold when
+ *  slice 2 adds note versions, a dedup reader and an ingest path. */
+const ALL_SRC: ReadonlyMap<string, string> = (() => {
+  const out = new Map<string, string>();
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name !== "__tests__") walk(p);
+      } else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) {
+        out.set(p, code(read(p)));
+      }
+    }
+  };
+  walk("src");
+  return out;
+})();
+
+/** Which files' CODE — never their prose — mention `re`, sorted so the expectation reads
+ *  as a roster. A comment explaining why a module must NOT reach for something is not a
+ *  second implementation of the rule; see `code`. */
+const hits = (re: RegExp) =>
+  [...ALL_SRC]
+    .filter(([, c]) => re.test(c))
+    .map(([f]) => f)
+    .sort();
+
 describe("the model-facing readers go through one projection", () => {
   // THREE CONTROLS WERE DELETED HERE, not weakened, and the difference matters. Task 11
   // removed `listModelClaims`, `modelVisible` and the single `ModelText` brand, so the
@@ -70,16 +108,26 @@ describe("the model-facing readers go through one projection", () => {
   });
 
   it("leaves no second reader of the search projection", () => {
-    // The mints are the only readers. A tool, a page or a ledger that queried
-    // vault_search_documents directly would be a second entrance carrying whatever
-    // predicate its author remembered.
+    // A tool, a page, a ledger or a route that queried vault_search_documents directly
+    // would be a second entrance carrying whatever predicate its author remembered.
     //
     // BOTH idioms, because the owner itself uses the second one: the fused query in
     // model-view.ts names the table inside a raw `sql` template, so a copy of it into
     // another module would carry no `vaultSearchDocuments` identifier and a guard that
     // greps only the Drizzle symbol would pass a second reader written the owner's own way.
-    const others = [...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
-    for (const f of others) expect(code(read(f))).not.toMatch(/vaultSearchDocuments|vault_search_documents/);
+    //
+    // The roster, and why each is on it — add one here only with a reason:
+    //   schema.ts            declares the table.
+    //   model-view.ts        the mints, which are the only model-facing readers.
+    //   search-documents.ts  the writer and its two inverses.
+    // `nodes.ts` and the admin reindex route are entrances to the projection and are
+    // deliberately ABSENT: both go through search-documents.ts's functions and neither
+    // names the table in code, which is exactly the property this asserts.
+    expect(hits(/vaultSearchDocuments|vault_search_documents/)).toEqual([
+      "src/lib/db/schema.ts",
+      "src/lib/vault/model-view.ts",
+      "src/lib/vault/search-documents.ts",
+    ]);
   });
 
   it("has no listModelClaims and no modelVisible left anywhere", () => {
@@ -109,7 +157,6 @@ describe("the three channels", () => {
     // A wrapper object would be constructible by anyone; three distinct `unique symbol`s
     // put the discrimination in the type system, where a bypass fails tsc. What a type
     // cannot catch is a deliberate cast, so that is what this asserts.
-    const files = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/claims.ts"];
     // `EvidenceText` is expected to be minted NOWHERE in this slice: the mint that
     // produces it (`listEvidenceRows`) ships with its only reader, `knowledge_search`.
     // The assertion is the same one in both cases — nobody but the owner casts — and
@@ -120,8 +167,7 @@ describe("the three channels", () => {
       EvidenceText: [],
     };
     for (const [brand, want] of Object.entries(expected)) {
-      const casters = files.filter((f) => new RegExp(`as ${brand}\\b`).test(code(read(f))));
-      expect(casters).toEqual(want);
+      expect(hits(new RegExp(`as ${brand}\\b`))).toEqual(want);
     }
     // No widening function: promotion must be impossible to express, not discouraged.
     expect(code(read(OWNER))).not.toMatch(/function\s+widen|toManifestText|asManifest\b/);
@@ -144,15 +190,59 @@ describe("the three channels", () => {
     // The SQL half, the same shape as the review_status assertion above it: a second
     // `prompt_access = 'manifest'` written out by hand somewhere is a second copy of the
     // rule even when it is correct today.
-    const files = [OWNER, ...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
-    const writers = files.filter((f) => /promptAccess/.test(code(read(f))));
-    expect(writers).toEqual([OWNER]);
+    //
+    //   schema.ts      declares the generated column.
+    //   claims.ts      READS it into `ClaimHead.promptAccess` and never selects on it —
+    //                  the head shape has to carry the value for `modelTextOf` to switch
+    //                  on. An exclusion, stated: it was previously silent, which reads as
+    //                  an oversight rather than as the decision it is.
+    //   model-view.ts  the owner: every channel clause, all three arms.
+    expect(hits(/promptAccess|prompt_access/)).toEqual([
+      "src/lib/db/schema.ts",
+      "src/lib/vault/claims.ts",
+      "src/lib/vault/model-view.ts",
+    ]);
+  });
+
+  it("lets only the confirm path choose a manifest-tier source class", () => {
+    // THE WRITER HALF OF THE GATE, which shipped without one.
+    //
+    // Before the cutover the model-facing predicate was `review_status = 'confirmed'`, and
+    // `confirmed` had exactly one grantor, so "the model reads only what a person approved"
+    // was a property of the QUERY. Now the gate is `prompt_access`, generated from
+    // `source_class`, and three of the five classes mint the always-on `manifest` tier. The
+    // property therefore rests on the fact that today's callers all pass `owner_authored` —
+    // an argument about today's callers, which is the class of argument this file exists to
+    // replace. The reader half got a guard; this is the missing symmetric half.
+    //
+    // Exposure today is zero (every live claim is `legacy_confirmed`). The risk is forward:
+    // slice 2 adds note-version and dedup writers, slice 3 adds ingest, and a copy-pasted
+    // `sourceClass: "owner_authored"` in any of them opens the system prompt with nothing
+    // to fail.
+    //
+    // What this does NOT catch, stated rather than left to be discovered: a class computed
+    // into a variable and passed as `sourceClass: cls`. Closing THAT needs the class to
+    // carry its grounding in the type — slice 2's grounding union — and building it now
+    // would be slice 2 arriving early on a guess about what it needs. This is the
+    // slice-1-sized guard; when the union lands it replaces this test rather than joining
+    // it, because a type that cannot express the wrong call beats a grep for one.
+    expect(hits(/sourceClass\s*:\s*"(owner_authored|user_direct|legacy_confirmed)"/)).toEqual([
+      "src/lib/vault/candidates.ts",
+    ]);
   });
 
   it("finds the files at all", () => {
     // The control, extended: a test pointed at a renamed export finds no violations and
     // passes for the wrong reason. It names every mint, so a rename cannot leave the
     // guards above pointing at nothing.
+    //
+    // The walk needs the same control and needs it more, because an empty walk is not
+    // obviously empty: `hits()` would return [] for every pattern, and the one expectation
+    // in this file whose answer IS [] (`as EvidenceText`) would pass while asserting
+    // nothing at all. So: it found a codebase, and it found the owner inside it.
+    expect(ALL_SRC.size).toBeGreaterThan(200);
+    expect(ALL_SRC.has(OWNER)).toBe(true);
+    for (const f of MODEL_FACING) expect(ALL_SRC.has(f)).toBe(true);
     expect(read(OWNER)).toContain("export async function listManifestClaims");
     expect(read(OWNER)).toContain("export async function listManifestTopics");
     expect(read(OWNER)).toContain("export async function listMemoryToolRows");

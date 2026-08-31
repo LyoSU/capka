@@ -41,12 +41,16 @@ import { DEFAULT_TOPIC_KEY } from "@/lib/vault/spaces";
  *  this filter. `listHeadClaims` deliberately returns sensitive heads — the memory
  *  tools have to be able to look one up to correct or forget it, so the data layer
  *  cannot default to hiding them — which leaves every projection to remember on its
- *  own. There are now three enforcement points and no owner: `recentFacts` and
- *  `topicCounts` in `manifest.ts` (agent-facing), and this one (human-facing). This
- *  route was the one that forgot, and printed "confirmed sensitive" statements
- *  verbatim on the settings page while the prompt correctly withheld them. A single
- *  admission policy every reader must pass through is plan D's to build; until it
- *  exists, a new projection has to be added to this list by hand.
+ *  own. This route was the one that forgot, and printed "confirmed sensitive"
+ *  statements verbatim on the settings page while the prompt correctly withheld them.
+ *
+ *  THE OWNER NOW EXISTS, for the agent-facing half only. The paragraph here used to say
+ *  "three enforcement points and no owner: `recentFacts` and `topicCounts` in
+ *  `manifest.ts`, and this one" — `topicCounts` is deleted and both agent-facing
+ *  projections now go through `model-view.ts`'s mints, which is exactly the single
+ *  admission policy that paragraph said did not exist. This route is human-facing and
+ *  deliberately outside it: it serves the owner their own text, so it keeps its own
+ *  filter and remains the one reader that has to be edited by hand.
  *
  *  FILTERED, not redacted, and the choice is narrow. A marker ("1 sensitive fact
  *  hidden") would be friendlier — the user cannot currently tell that anything is

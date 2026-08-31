@@ -86,9 +86,12 @@ export async function projectClaimDoc(claimId: string, ex: Ex): Promise<void> {
     .where(eq(vaultClaims.id, claimId))
     .limit(1);
   if (!row) return;
-  // The slot key is searchable text on the owner side - `memory_search` matches it today
-  // and the page's search box does too - and it is NOT model-facing on its own: it rides
-  // the model channel only as part of a statement the mint already admitted.
+  // The slot key is searchable text on the owner side - `memory_search` matches it today -
+  // and it is NOT model-facing on its own: it rides the model channel only as part of a
+  // statement the mint already admitted. The memory page's search box is NOT a second
+  // reason: it filters `norm(h.statement)` in JavaScript (`memory-page.ts`) and never looks
+  // at `slotKey`. That claim used to stand here as half the justification for this
+  // concatenation, and it was never true.
   const ownerText = row.slotKey ? `${row.statement} ${row.slotKey}` : row.statement;
   await upsert(
     {

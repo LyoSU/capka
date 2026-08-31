@@ -1002,7 +1002,7 @@
     "memory": {
       "title": "Agent memory",
       "subtitle": "What the AI remembers across conversations. It records these facts itself as you work.",
-      "searchImproved": "The assistant still proposes facts for you to confirm. Memory search is now more accurate.",
+      "searchImproved": "The assistant still proposes facts for you to confirm. When it looks something up in its own memory, it now finds it more reliably.",
       "saveFailed": "Failed to save memory",
       "loadError": "Could not load memory. Please refresh the page.",
       "enabled": "Remember things about me",

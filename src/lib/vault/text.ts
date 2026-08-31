@@ -5,9 +5,23 @@
  * Shared by `candidates.ts` (does a proposal duplicate a head that exists right now?),
  * `memory-page.ts` (does a head's text contain the search words typed right now?) and
  * `eval/topic-reuse.ts`. Every one of those questions is asked fresh against the current
- * data every time, so every one of them is free to change this function's answer whenever
- * a better one is found — an apostrophe folded, a non-breaking space collapsed, Unicode
- * NFC applied.
+ * data every time, so each of those three is free to change this function's answer whenever
+ * a better one is found.
+ *
+ * A FOURTH CALLER TOOK THAT FREEDOM AWAY, and it is the one an edit will not think to look
+ * for: `model-view.ts`'s `fusedCandidates` normalizes the model's query words here and then
+ * matches them against `vault_search_documents.norm_model_text` / `norm_title` — which are
+ * `GENERATED ALWAYS` columns computed by the SQL `normalized()` expression in `schema.ts`,
+ * over every stored row, behind GIN indexes. So this function is now PINNED to a SQL twin
+ * across a populated table, and the three edits this docstring used to offer as examples —
+ * folding an apostrophe, collapsing a non-breaking space, applying NFC — are precisely the
+ * ones that would desynchronize the query side from every row already projected.
+ *
+ * Changing it therefore means: widen `normalized()` in `schema.ts` in the same commit, and
+ * rebuild the generated columns for every existing row. The parity test in
+ * `search-documents.integration.test.ts` fails the mismatch rather than letting it ship —
+ * and it points a reader here for the reasoning, which is why this paragraph has to be
+ * true and not merely present.
  *
  * TWO callers used to share this function to build a PERSISTED key and no longer do:
  * `migrate-memory-docs.ts` (`memory_candidates.idempotency_key`, under `uniq_mcand_idem`)

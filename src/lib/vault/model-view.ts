@@ -336,9 +336,25 @@ const memoryToolColumns = {
  * `liveClaimForModel`.
  *
  * WITH `queries`, it selects candidates from `vault_search_documents` by fused relevance
- * and then JOINS the authoritative row here — filtering after fusion and before the limit,
- * so a retired or superseded row cannot consume a slot. WITHOUT `queries`, it returns
- * every eligible row newest first, which is the shape the ledger's dedup asks for.
+ * and then JOINS the authoritative row here. WITHOUT `queries`, it returns every eligible
+ * row newest first, which is the shape the ledger's dedup asks for.
+ *
+ * WHAT THE JOIN GUARANTEES, precisely, because a wider statement was written here first and
+ * was false: an ineligible row cannot consume one of the `limit` slots. It CAN consume one
+ * of the `LANE_DEPTH` candidate slots, because `fusedCandidates` caps each lane before the
+ * join and filters on `space_id` alone — not on `kind`, not on liveness. Two kinds of row
+ * therefore rank and take space and are then dropped: every superseded revision of a claim
+ * (the projection deliberately keeps the predecessor's row), and every topic note, which
+ * this mint has no arm for in slice 1. A claim with a long revision history, or a space
+ * with many topics, can push eligible heads out of the candidate set entirely — and
+ * `omitted` will honestly report a number that counts only what the join saw.
+ *
+ * Nothing WRONG is returned; the ceiling is just spent on rows that cannot be answers. It
+ * is stated rather than fixed because the fix is a `d.kind = 'claim'` predicate in both
+ * lanes, which closes the notes half and not the supersede half, exercised only by the
+ * integration suites — a predicate on the one query that carries model-authored words is
+ * not a thing to add on a slice's last commit without running them. Slice 2's note arm
+ * removes the notes half by making those rows eligible.
  *
  * `last_used_at` is written HERE, not by the caller (M1): "one place, because two would
  * drift" is only true if the place is the mint.

@@ -13,7 +13,7 @@ export type NodeKind = "note" | "claim" | "source";
  * Three call sites, which is why this is a function rather than three inline inserts:
  * `createClaim`, `updateClaim`'s successor, and `getOrCreateTopicNote`. A fourth — the
  * source writer that arrives with file ingestion in slice 3 — is not optional, and it is
- * the composite FK added in migration `00NN` that will say so at the insert rather than
+ * the composite FK added in migration `0060` that will say so at the insert rather than
  * at review.
  *
  * `createdAt` is settable so a backfill can carry the subtype row's own timestamp; live
