@@ -223,11 +223,16 @@ describe("the three channels", () => {
     //   write-tools.ts REPORTS it back on `memory_fact_write`'s return (§4.5's Returns
     //                  table), read off the row the write just made through
     //                  `findCurrentHead` — so the value is the generated column's, not a
-    //                  channel clause this module decided. It does carry `accessOf`, which
-    //                  is the class→channel map MINUS the `sensitive` arm, for §4.5 step
-    //                  5's "equal or stronger" comparison; that is a rank over classes and
-    //                  not an admission decision, and it is pinned against the database in
-    //                  `fact-write.integration.test.ts` rather than trusted.
+    //                  channel clause this module decided, and `promptAccess` is the only
+    //                  token of this vocabulary the file contains.
+    //
+    // WHAT THIS TOKEN DOES NOT COVER, stated because round 1 of this entry implied
+    // otherwise (review MED-2): a module that copies the three channel NAMES without ever
+    // writing `promptAccess` walks straight past this roster, and no roster stands over
+    // those literals. `write-tools.ts` used to be such a module — its step-5 comparison
+    // ranked `manifest`/`memory_search`/`knowledge_search` — and the fix was to delete the
+    // copy rather than widen the grep: it ranks `SourceClass` directly now, so the entrance
+    // this guard cannot see has nothing standing in it.
     expect(hits(/promptAccess|prompt_access/)).toEqual([
       "src/lib/db/schema.ts",
       "src/lib/vault/claims.ts",

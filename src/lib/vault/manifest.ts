@@ -110,8 +110,20 @@ export async function buildMemoryManifest(args: {
     if (projectBlock) blocks.push(projectBlock);
   }
 
+  // THE ONLY PLACE THE PROMPT NAMES A WRITER, which is why it names the one that actually
+  // writes. It said `memory_propose` until slice 2 gave the agent `memory_fact_write`, and
+  // an always-on instruction steering every turn to the tool that parks the fact behind a
+  // confirmation gate this slice removes is how a shipped feature rides inert (review
+  // MED-4; the egress allowlist did exactly that for two releases).
+  //
+  // `memory_propose` is deliberately NOT mentioned. It is still live and still callable —
+  // its retirement is its own commit — but a sentence that named both would ask the model to
+  // choose between two writers with opposite semantics, and a sentence that promised its
+  // removal would be a claim about a commit that has not happened. Not naming it also means
+  // this line stays true THROUGH that retirement rather than becoming a prompt that names a
+  // tool the turn does not hold.
   blocks.push(
-    "Use memory_search before assuming facts about the user or project; propose new facts with memory_propose.",
+    "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write.",
   );
 
   return blocks.join("\n\n");

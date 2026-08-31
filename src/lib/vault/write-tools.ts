@@ -102,8 +102,11 @@ export const SAID: Record<FactWriteStatus, string> = {
   recorded_conflict: "Recorded next to the existing fact as a disagreement - it does not replace it. The user will see both.",
   refused_scope:
     "A fact learned from a document or a web page cannot be saved as personal memory. Save it to the project, or state it as your own conclusion.",
+  // ONE sentence for two routes into one circumstance, which is why it says both halves:
+  // the model asked for `scope: "project"` where there is none, or the fact came out
+  // untrusted and only a project could have held it. §4.5's wording is the second half.
   refused_no_project:
-    "This chat is not inside a project, so there is no project memory to save to - including anything taken from a document or a web page. Nothing was saved.",
+    "This chat is not inside a project, so there is no project memory to save to, and nowhere to store knowledge taken from documents or web pages. Nothing was saved.",
   downgraded: "Saved, but not as something the user stated - recorded as your conclusion.",
   topic_secret_fallback: "The topic name looked like a credential, so it was filed under General instead.",
   revision_mismatch: "That fact has moved on. Run memory_search and re-issue against what is there.",
@@ -144,23 +147,45 @@ export type FactWriteResult =
   | { status: "refused_scope" | "refused_no_project" | "retired" | "bad_handle" | "bad_value_json"; said: string };
 
 /**
- * THE CHANNEL A CLASS GENERATES, as a rank, for §4.5 step 5 and for nothing else.
+ * THE SUPERSEDE RANK — over `SourceClass` ITSELF, with no channel vocabulary in it.
  *
- * It is the `prompt_access` expression MINUS its `sensitive` arm, and that omission is the
- * point rather than an approximation: `sensitive` collapses every class to `owner_only`,
- * which is a display bound and not a trust tier, so ranking on the stored `prompt_access`
- * would refuse a person's own correction of their own sensitive fact. The spec says the
- * comparison is "computed over the server-verified class", and this is that.
+ * §4.5 step 5 compares the replacement's authority against the target's, "computed over the
+ * server-verified class" and never over the stored `prompt_access`: `sensitive` collapses
+ * every class to `owner_only`, which is a display bound and not a trust tier, so ranking on
+ * that column would refuse a person's own correction of their own sensitive fact.
  *
- * It is a second rendering of a generated column, so it is PINNED against the database
- * rather than trusted: `it("ranks on the same channel the database generates")` inserts one
- * claim per class and compares. Without that pin this drifts silently the day the column's
- * expression gains a class.
+ * WRITTEN AS A TOTAL MAP RATHER THAN A TERNARY, and that is the whole of review MED-1. The
+ * ternary this replaces named the three channels and fell through to the STRONGEST of them,
+ * while the generated column it mirrored falls through to the WEAKEST — so a sixth
+ * `source_class` (that enum is touched most slices) would have arrived with maximum
+ * supersede authority, silently, on the one comparison the spec calls a bound. `satisfies
+ * Record<SourceClass, …>` makes a sixth class a COMPILE ERROR instead: there is no default
+ * arm to be wrong, because there is no default arm.
+ *
+ * And it is no longer a second rendering of `prompt_access` (MED-2). The three trusted
+ * classes share a rank because they share an authority, which is the same reason they share
+ * a channel — a common cause, not a copy — so a module that needs the CHANNEL still has
+ * exactly one place to read it: the generated column.
  */
-const ACCESS_RANK = { manifest: 3, memory_search: 2, knowledge_search: 1 } as const;
+const CLASS_RANK = {
+  legacy_confirmed: 3,
+  owner_authored: 3,
+  user_direct: 3,
+  agent_inferred: 2,
+  untrusted_derived: 1,
+} satisfies Record<SourceClass, 1 | 2 | 3>;
 
-const accessOf = (c: SourceClass): keyof typeof ACCESS_RANK =>
-  c === "untrusted_derived" ? "knowledge_search" : c === "agent_inferred" ? "memory_search" : "manifest";
+/**
+ * The class half of §4.5 step 5: may a replacement at class `replacement` supersede a target
+ * at class `target`? EQUAL OR STRONGER, so equality passes — which is what makes the turn's
+ * taint the load-bearing second condition rather than a belt on this one.
+ *
+ * EXPORTED so the pin can call the real thing. The previous test compared the database
+ * against a third hand-written copy of the map while this function stayed module-private, so
+ * the drift it claimed to catch was exactly the drift it could not see (MED-2).
+ */
+export const mayOutrank = (replacement: SourceClass, target: SourceClass): boolean =>
+  CLASS_RANK[replacement] >= CLASS_RANK[target];
 
 /** An arbitrary value travels as a JSON STRING: `asSchema` collapses an open
  *  `z.record`/`z.unknown` into `additionalProperties: false` and the provider receives a
@@ -334,7 +359,19 @@ export async function factWrite(a: {
     // work in every later chat instead of being trapped in the project where it was said.
     // The residual is misfiling, not leakage, and the row is visible with its scope shown.
     if (verdict.sourceClass === "untrusted_derived" && spaceId === ctx.userSpaceId) {
-      return { status: "refused_scope", said: SAID.refused_scope };
+      // WHICH refusal, and it is a choice of TEACHING SENTENCE rather than a second rule:
+      // both refuse, both write nothing, and step 4 is unreachable either way.
+      //
+      // `refused_scope` says "save it to the project, or state it as your own conclusion",
+      // and in a chat with no project space BOTH halves are dead ends — there is no project,
+      // and a tainted turn floors an inference at `untrusted_derived` too, so restating it
+      // as a conclusion lands right back here. §4.5 gives that circumstance its own sentence
+      // for exactly this reason, and round 1 emitted it only when the model had literally
+      // typed `scope: "project"` (review MED-3). The circumstance is the absent project, not
+      // the word the model used to reach it.
+      return ctx.projectSpaceId
+        ? { status: "refused_scope", said: SAID.refused_scope }
+        : { status: "refused_no_project", said: SAID.refused_no_project };
     }
 
     // STEP 4 — an exact `normalized_hash` duplicate in this space. Nothing is written, the
@@ -365,12 +402,11 @@ export async function factWrite(a: {
     // mechanism the person resolves on their page; the target row is untouched.
     let conflictReason: "weaker_class" | "untrusted_turn" | null = null;
     if (target) {
-      conflictReason =
-        ACCESS_RANK[accessOf(verdict.sourceClass)] < ACCESS_RANK[accessOf(target.sourceClass)]
-          ? "weaker_class"
-          : ctx.taint.seen()
-            ? "untrusted_turn"
-            : null;
+      conflictReason = !mayOutrank(verdict.sourceClass, target.sourceClass)
+        ? "weaker_class"
+        : ctx.taint.seen()
+          ? "untrusted_turn"
+          : null;
     }
 
     // STEP 6 — the topic, and the `contains` edge beside it, in THIS transaction. A blank

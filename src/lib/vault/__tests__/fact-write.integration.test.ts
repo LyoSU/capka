@@ -16,8 +16,22 @@ import { makeTurnTaint } from "@/lib/tasks/turn-taint";
 import { makeVaultBudget } from "../budget";
 import { createClaim, type SourceClass } from "../claims";
 import { makeHandleMap, type HandleMap } from "../handles";
-import { SAID, factWrite, type WriteCtx } from "../write-tools";
+import { SAID, factWrite, mayOutrank, type WriteCtx } from "../write-tools";
 import { testServerClass } from "./fixtures";
+
+/** Every `SourceClass`, and exhaustive BY CONSTRUCTION rather than by care — written as the
+ *  KEYS OF A TOTAL RECORD, not as an array, because `satisfies SourceClass[]` would only
+ *  check that each entry IS a class and would happily accept four of the five. A sixth class
+ *  is a compile error here exactly as it is in `CLASS_RANK`, so the pin below cannot quietly
+ *  stop covering one — which is the failure mode review MED-1 found in the code and MED-2
+ *  found in this test's predecessor. */
+const CLASSES = Object.keys({
+  legacy_confirmed: true,
+  owner_authored: true,
+  user_direct: true,
+  agent_inferred: true,
+  untrusted_derived: true,
+} satisfies Record<SourceClass, true>) as SourceClass[];
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "fwtest-";
@@ -161,6 +175,36 @@ run("memory_fact_write", () => {
     expect(r.status).toBe("refused_scope");
     expect(await claimCount(US)).toBe(1);
     expect((await claimById(target.id)).superseded_at).toBeNull();
+  });
+
+  it("step 3 — an untrusted fact with no project to hold it gets the no-project sentence, not the scope one", async () => {
+    // The route round 1 missed (review MED-3): the model asked for `scope: "user"`, so the
+    // hoisted no-project arm never ran, and the class came out `untrusted_derived` in a
+    // tainted turn — refused at the fence with a sentence that says "save it to the project,
+    // or state it as your own conclusion". There is no project, and restating it as an
+    // inference floors at `untrusted_derived` again, so BOTH halves of that sentence are
+    // dead ends in exactly the circumstance §4.5 wrote a different one for.
+    const r = await factWrite({
+      op: { kind: "create", scope: "user" },
+      statement: "The supplier ships on Fridays",
+      grounding: { kind: "agent_inference" },
+      ctx: tainted({ project: null }),
+    });
+    expect(r.status).toBe("refused_no_project");
+    expect(r.said).toContain("nowhere to store knowledge taken from documents or web pages");
+    // Asserted as a DIFFERENCE, not only as a status: the two sentences are the finding.
+    expect(r.said).not.toBe(SAID.refused_scope);
+    expect(await claimCount(US)).toBe(0);
+
+    // The control on the same fence: WITH a project, the same call is `refused_scope`,
+    // because "save it to the project" is then an instruction the model can follow.
+    const withProject = await factWrite({
+      op: { kind: "create", scope: "user" },
+      statement: "The supplier ships on Fridays",
+      grounding: { kind: "agent_inference" },
+      ctx: tainted(),
+    });
+    expect(withProject.status).toBe("refused_scope");
   });
 
   it("step 4 — an exact normalized_hash duplicate writes nothing and returns the existing handle", async () => {
@@ -408,21 +452,56 @@ run("memory_fact_write", () => {
     expect(await claimCount(PS)).toBe(0);
   });
 
-  it("ranks on the same channel the database generates", async () => {
-    // `accessOf` in `write-tools.ts` is the `prompt_access` expression MINUS its
-    // `sensitive` arm, which is a second rendering of a generated column and therefore has
-    // to be pinned rather than trusted: the day that column's expression gains a class,
-    // step 5 would compare on a stale map with nothing failing.
-    const expected: Record<string, string> = {
-      legacy_confirmed: "manifest",
-      owner_authored: "manifest",
-      user_direct: "manifest",
-      agent_inferred: "memory_search",
-      untrusted_derived: "knowledge_search",
-    };
-    for (const [cls, channel] of Object.entries(expected)) {
-      const seeded = await seedHead(PS, `class probe ${cls}`, cls as SourceClass);
-      expect((await claimById(seeded.id)).prompt_access, cls).toBe(channel);
+  it("step 5's rank agrees with the authority the database grants, derived from it", async () => {
+    // THE PIN, and it calls the REAL comparison. Round 1 of this test compared the database
+    // against a third hand-written copy of the map while `accessOf` stayed module-private,
+    // so the one thing it claimed to catch was the one thing it could not see (review
+    // MED-2). `mayOutrank` is `write-tools.ts`'s own exported function here, and the
+    // expectation is DERIVED from `prompt_access` — no literal class→channel table.
+    //
+    // The channel is not the rank and this test does not say it is: it says the two must not
+    // DISAGREE. Two classes the database puts on one channel carry one authority, so neither
+    // may outrank the other; two it separates carry different authority, so the rank must be
+    // strict in exactly one direction. That is the whole of the agreement, and all of it
+    // comes off the rows.
+    const channelOf: Record<string, string> = {};
+    for (const cls of CLASSES) {
+      const seeded = await seedHead(PS, `class probe ${cls}`, cls);
+      // Seeded non-sensitive on purpose: `sensitive` collapses every class to `owner_only`,
+      // which is the display bound step 5 deliberately does not rank on.
+      channelOf[cls] = (await claimById(seeded.id)).prompt_access;
+    }
+    // The control: if every class came back on one channel, the pairwise assertions below
+    // would all take the "same channel" arm and pass without testing an ordering at all.
+    expect(new Set(Object.values(channelOf)).size).toBeGreaterThan(1);
+
+    for (const a of CLASSES) {
+      for (const b of CLASSES) {
+        const same = channelOf[a] === channelOf[b];
+        const label = `${a}(${channelOf[a]}) vs ${b}(${channelOf[b]})`;
+        if (same) {
+          expect(mayOutrank(a, b) && mayOutrank(b, a), label).toBe(true);
+        } else {
+          expect(mayOutrank(a, b) !== mayOutrank(b, a), label).toBe(true);
+        }
+      }
+    }
+
+    // DIRECTION, which no column can supply — which channel is the strongest is a product
+    // decision, not a database fact — so it is pinned once, as the bound it comes from:
+    // §10.1 bound 4, "an untrusted claim cannot supersede a trusted one". The trusted set is
+    // read off the rows rather than listed: it is whatever the database admits to the
+    // always-on prompt.
+    const manifestClasses = CLASSES.filter((c) => channelOf[c] === "manifest");
+    expect(manifestClasses.length).toBeGreaterThan(0);
+    for (const trusted of manifestClasses) {
+      expect(mayOutrank("untrusted_derived", trusted), trusted).toBe(false);
+      expect(mayOutrank(trusted, "untrusted_derived"), trusted).toBe(true);
+      // And the middle tier, for the same reason and in the same direction.
+      for (const mid of CLASSES.filter((c) => channelOf[c] === "memory_search")) {
+        expect(mayOutrank(mid, trusted), `${mid} -> ${trusted}`).toBe(false);
+        expect(mayOutrank(trusted, mid), `${trusted} -> ${mid}`).toBe(true);
+      }
     }
   });
 
