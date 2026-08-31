@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { noteClaims, vaultClaims, vaultNodes, vaultNotes } from "@/lib/db/schema";
-import { fitSlotKey, fitStatement, looksLikeSecret, type ClaimHead } from "./claims";
+import { noteClaims, vaultClaims, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
+import { fitSlotKey, fitStatement, looksLikeSecret, type ClaimHead, type SourceClass } from "./claims";
+import { fitNoteTitle } from "./notes";
 import { type Ex } from "./spaces";
 import { TOPIC_LABELS, fitTopicTitle } from "./topics";
 import { norm } from "./text";
@@ -90,26 +91,24 @@ function liveClaimForModel() {
 }
 
 /**
- * Used by listManifestTopics (and, from slice 2, by listMemoryToolRows' note arm and
- * listEvidenceRows' note arm).
+ * Used by `listManifestTopics` and by `listMemoryToolRows`' note arm.
  *
- * TWO CLAUSES ARE MISSING AND THEIR ABSENCE IS DATED, not an oversight:
- *   eq(vaultNoteVersions.sensitive, false)
- *   eq(vaultNoteVersions.revision, vaultNotes.currentRevision)
- * Both read `vault_note_versions`, whose rows migration step 4 creates in slice 2. Adding
- * them now would join against an empty table and drop EVERY note out of every note-reading
- * mint — the manifest would lose its `Topics:` block on live turns, and the byte-identity
- * parity control would fire on a cause that has nothing to do with the predicate it is
- * meant to be checking. They go in beside these three in the same commit that backfills
- * revision 1, and head-ness compares `revision` to `current_revision`, NOT the id pointer
- * (NEW-7: a join condition doing duty as a predicate, over a column that is nullable
- * during the backfill window).
+ * The two version clauses land HERE, in the slice that created the rows they read. Head-
+ * ness compares `revision` to `current_revision` — an INTEGER every row carries — and not
+ * `current_version_id` to `id` (NEW-7): a join condition doing duty as a predicate drops
+ * every note out of every note-reading mint the moment the pointer is NULL, which the
+ * backfill window and any future repair can both produce.
+ *
+ * The `vault_note_versions` join is the MINT'S obligation, exactly like the `vault_nodes`
+ * one; each arm assumes both have been made.
  */
 function liveNoteForModel() {
   return and(
     isNull(vaultNodes.deletedAt),
     isNull(vaultNotes.retiredAt),
     or(isNull(vaultNotes.expiresAt), gt(vaultNotes.expiresAt, sql`now()`)),
+    eq(vaultNoteVersions.sensitive, false),
+    eq(vaultNoteVersions.revision, vaultNotes.currentRevision),
   );
 }
 
@@ -122,23 +121,29 @@ function liveNoteForModel() {
  *
  * The name the MODEL reads is resolved from the KEY, not from the stored title: the title
  * is a display seed a rename control may overwrite, and the manifest must be
- * byte-identical across turns. A key with no label falls back to the stored title, which
- * is what a user-named topic has.
+ * byte-identical across turns. A key with no label falls back to the HEAD VERSION's title,
+ * which is what a user-named topic has — the version is where a rename will land, and
+ * `vault_notes.title` is the compatibility copy the fold indexes.
  *
- * Private, and it serves `listManifestTopics` today and `listMemoryToolRows`' `topic`
- * label from slice 2 — one query, two mints, no reader outside the module.
+ * Private, and it serves `listManifestTopics` — one query, one mint, no reader outside the
+ * module. (`listMemoryToolRows`' note arm resolves its own `topic` label the same way and
+ * from the same table, because it needs it per NOTE rather than per topic with a count.)
  */
 async function topicRows(spaceId: string, ex: Ex): Promise<{ title: string; count: number }[]> {
   const rows = await ex
     .select({
       id: vaultNotes.id,
       topicKey: vaultNotes.topicKey,
-      title: vaultNotes.title,
+      title: vaultNoteVersions.title,
       count: sql<number>`count(${vaultClaims.id})::int`,
     })
     .from(vaultNotes)
-    // The mint's own obligation: the arms above assume this join has been made.
+    // The mint's own obligation: the arms above assume BOTH of these joins have been made.
+    // The version join carries no head-ness condition of its own — that clause is in
+    // `liveNoteForModel`, so a mint that made the join and forgot the arm returns every
+    // revision instead of silently returning none.
     .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+    .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
     .leftJoin(noteClaims, eq(noteClaims.noteId, vaultNotes.id))
     .leftJoin(
       vaultClaims,
@@ -169,7 +174,7 @@ async function topicRows(spaceId: string, ex: Ex): Promise<{ title: string; coun
       ),
     )
     .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.kind, "memory_topic"), liveNoteForModel()))
-    .groupBy(vaultNotes.id, vaultNotes.topicKey, vaultNotes.title)
+    .groupBy(vaultNotes.id, vaultNotes.topicKey, vaultNoteVersions.title)
     // Deterministic, because the byte-identity requirement depends on it: `id` (nanoid) is
     // the only stable key here — `createdAt` is not guaranteed to differ at millisecond
     // resolution between topics inserted in one transaction.
@@ -309,18 +314,35 @@ async function fusedCandidates(
   }));
 }
 
-/** One claim as a memory TOOL may see it. `value` is not model-facing text and is not
- *  branded: it rides along because the ledger's "is this already known" comparison has to
- *  read it, and that comparison must ask the same question this projection answers, not a
- *  wider one. */
-export type MemoryToolRow = {
-  id: string;
-  revision: number;
-  kind: "claim";
-  excerpt: MemoryToolText;
-  slotKey: MemoryToolText | null;
-  value: unknown;
-};
+/** One row as a memory TOOL may see it — a DISCRIMINATED UNION since slice 2, because the
+ *  mint returns notes beside claims and the two carry different text.
+ *
+ *  `value` is not model-facing text and is not branded: it rides along because the ledger's
+ *  "is this already known" comparison has to read it, and that comparison must ask the same
+ *  question this projection answers, not a wider one.
+ *
+ *  A `kind` discriminant rather than optional fields on one shape: a formatter has to
+ *  re-exhaust a switch when a third node kind arrives, which is the same reason `op` and
+ *  `grounding` are unions on the write tools. */
+export type MemoryToolRow =
+  | {
+      id: string;
+      revision: number;
+      kind: "claim";
+      excerpt: MemoryToolText;
+      slotKey: MemoryToolText | null;
+      value: unknown;
+    }
+  | {
+      id: string;
+      revision: number;
+      kind: "note";
+      title: MemoryToolText;
+      excerpt: MemoryToolText;
+      topic: MemoryToolText | null;
+      sourceClass: SourceClass;
+      spaceId: string;
+    };
 
 /** The columns every branch of the mint below reads. Written once because two copies of a
  *  select list is how one branch quietly stops returning a field the projection maps. */
@@ -331,6 +353,77 @@ const memoryToolColumns = {
   slotKey: vaultClaims.slotKey,
   value: vaultClaims.value,
 };
+
+/** The note arm's columns. `revision` is the NOTE's `current_revision` and not the version
+ *  row's: `[id@revision]` is how the model addresses a note in a later revise, and what it
+ *  has to hold for the CAS is the number `reviseNote` compares against. */
+const memoryToolNoteColumns = {
+  id: vaultNotes.id,
+  spaceId: vaultNotes.spaceId,
+  revision: vaultNotes.currentRevision,
+  noteKind: vaultNotes.kind,
+  topicKey: vaultNotes.topicKey,
+  title: vaultNoteVersions.title,
+  body: vaultNoteVersions.bodyMarkdown,
+  sourceClass: vaultNoteVersions.sourceClass,
+};
+
+/** The claim projection, lifted out of the mint because the query branch and the
+ *  no-queries branch both apply it. Clamped and single-lined HERE, not only at the
+ *  writers: a row recorded before `fitStatement` existed still renders into a tool
+ *  reply. */
+const asClaimRow = (r: {
+  id: string;
+  revision: number;
+  statement: string;
+  slotKey: string | null;
+  value: unknown;
+}): MemoryToolRow => {
+  const slot = fitSlotKey(r.slotKey);
+  return {
+    id: r.id,
+    revision: r.revision,
+    kind: "claim",
+    excerpt: mintMemoryTool(fitStatement(r.statement)),
+    slotKey: slot ? mintMemoryTool(slot) : null,
+    value: r.value,
+  };
+};
+
+/** The note projection.
+ *
+ *  `topic` is the label the manifest would print for this note IF it is a topic container,
+ *  resolved from the KEY exactly as `topicRows` resolves it, and `null` for a plain note.
+ *  Null is a fact here rather than a lookup nobody wrote: in this slice a plain note has no
+ *  containing topic — `note_claims` links a topic to CLAIMS — so there is nothing to name,
+ *  and inventing a parent for it would be the mint asserting a relationship the graph does
+ *  not hold.
+ *
+ *  The body is clamped by `fitStatement` for the same reason a statement is: this excerpt
+ *  is one line of a bounded tool reply, and a note body is the one kind of stored text that
+ *  is deliberately long. The full text is what `memory_open` is for (T12). */
+const asNoteRow = (r: {
+  id: string;
+  spaceId: string;
+  revision: number;
+  noteKind: string;
+  topicKey: string | null;
+  title: string;
+  body: string;
+  sourceClass: SourceClass;
+}): MemoryToolRow => ({
+  id: r.id,
+  revision: r.revision,
+  kind: "note",
+  title: mintMemoryTool(fitNoteTitle(r.title)),
+  excerpt: mintMemoryTool(fitStatement(r.body)),
+  topic:
+    r.noteKind === "memory_topic"
+      ? mintMemoryTool(fitTopicTitle(TOPIC_LABELS[r.topicKey ?? ""] ?? r.title))
+      : null,
+  sourceClass: r.sourceClass,
+  spaceId: r.spaceId,
+});
 
 /**
  * THE memory-tool channel: `prompt_access in ('manifest','memory_search')` ANDed with
@@ -343,31 +436,35 @@ const memoryToolColumns = {
  * WHAT THE JOIN GUARANTEES, precisely, because a wider statement was written here first and
  * was false: an ineligible row cannot consume one of the `limit` slots. It CAN consume one
  * of the `LANE_DEPTH` candidate slots, because `fusedCandidates` caps each lane before the
- * join and filters on `space_id` alone — not on `kind`, not on liveness. Two kinds of row
- * therefore rank and take space and are then dropped: every superseded revision of a claim
- * (the projection deliberately keeps the predecessor's row), and every topic note, which
- * this mint has no arm for in slice 1. A claim with a long revision history, or a space
- * with many topics, can push eligible heads out of the candidate set entirely — and
- * `omitted` will honestly report a number that counts only what the join saw.
+ * join and filters on `space_id` alone — not on `kind`, not on liveness. Slice 1 recorded
+ * TWO kinds of row that ranked and were then dropped, and exactly one of them is closed
+ * here:
  *
- * Nothing WRONG is returned; the ceiling is just spent on rows that cannot be answers. It
- * is stated rather than fixed because the fix is a `d.kind = 'claim'` predicate in both
- * lanes, which closes the notes half and not the supersede half, exercised only by the
- * integration suites — a predicate on the one query that carries model-authored words is
- * not a thing to add on a slice's last commit without running them. Slice 2's note arm
- * removes the notes half by making those rows eligible.
+ *   - Topic notes, which this mint had no arm for. CLOSED: the note arm below makes those
+ *     rows eligible, so a candidate slot spent on a note is now a slot that can be an
+ *     answer.
+ *   - Every superseded revision of a claim, because the projection deliberately keeps the
+ *     predecessor's row. STILL OPEN, and unchanged by this slice: a claim with a long
+ *     revision history can still push eligible heads out of the candidate set, and
+ *     `omitted` reports only what the join saw.
+ *
+ * Nothing WRONG is returned; the remaining ceiling is spent on rows that cannot be answers.
  *
  * `last_used_at` is written HERE, not by the caller (M1): "one place, because two would
- * drift" is only true if the place is the mint.
+ * drift" is only true if the place is the mint. Both tables are stamped, each on its own
+ * identity row — `vault_notes.last_used_at` sits on the note rather than the version,
+ * because "when was this read" is a question about the note.
  *
  * It returns `{ rows, omitted }`, not a bare array. A response that hits a cap has to say
  * how many it left out — a silent truncation reads to the model as "that is all there is"
  * — and the count can only be computed where the slice happens, which is here. The
  * no-queries branch omits nothing by construction and returns 0.
  *
- * The note arm is absent by date, not by omission: a note has no `source_class` until
- * slice 2's versions, so there is no channel value to filter it on, and inventing one here
- * would be the second entrance this module exists to close.
+ * THE NOTE ARM IS IN THE QUERY BRANCH ONLY, which is a decision and not an omission. The
+ * no-queries branch is the ledger's dedup asking "does this space already hold these
+ * words" of the claims it is about to write; it has no rank to merge a second kind into,
+ * and handing it notes would widen a comparison whose whole correctness argument is that
+ * it asks exactly the question the projection answers.
  */
 export async function listMemoryToolRows(
   spaceIds: string[],
@@ -382,39 +479,8 @@ export async function listMemoryToolRows(
     liveClaimForModel(),
   );
 
-  let omitted = 0;
-  let rows: { id: string; revision: number; statement: string; slotKey: string | null; value: unknown }[];
-  if (opts?.queries?.length) {
-    const candidates = await fusedCandidates(spaceIds, opts.queries, ex);
-    if (!candidates.length) return { rows: [], omitted: 0 };
-    const rank = new Map(candidates.map((c, i) => [c.nodeId, i]));
-    const eligible = await ex
-      .select(memoryToolColumns)
-      .from(vaultClaims)
-      // The mint's own obligation: `liveClaimForModel` assumes this join has been made.
-      .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
-      .where(and(channel, inArray(vaultClaims.id, candidates.map((c) => c.nodeId))));
-    // Re-order by the fused rank, THEN slice: the database returned the eligible subset in
-    // whatever order it liked, and the limit must fall on the ranked list.
-    const ranked = eligible.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
-    omitted = Math.max(0, ranked.length - limit);
-    rows = ranked.slice(0, limit);
-    // THE STAMP LIVES IN THIS BRANCH, and its placement is the rule, not an optimization.
-    // `last_used_at` means "the model received this row", and only a query branch can say
-    // that. The no-queries branch below is a SET read — the ledger's dedup asking "does
-    // this space already hold these words" — and stamping there would re-timestamp every
-    // live claim in the space on every post-turn extraction, on the hot path, inside that
-    // caller's transaction: a row lock over the whole space, and a retention signal that
-    // stops meaning "the model read this" and starts meaning "the user had a turn".
-    // An unstamped use is a smaller error than a space-wide stamp that destroys the signal.
-    if (rows.length) {
-      await ex
-        .update(vaultClaims)
-        .set({ lastUsedAt: new Date() })
-        .where(inArray(vaultClaims.id, rows.map((r) => r.id)));
-    }
-  } else {
-    rows = await ex
+  if (!opts?.queries?.length) {
+    const rows = await ex
       .select(memoryToolColumns)
       .from(vaultClaims)
       .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
@@ -422,25 +488,66 @@ export async function listMemoryToolRows(
       // The second order key is not decorative: `recorded_at` is identical across every
       // claim one transaction wrote.
       .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
-    // No stamp. See the query branch above for why.
+    // No stamp. See the query branch below for why.
+    return { omitted: 0, rows: rows.map(asClaimRow) };
   }
 
-  return {
-    omitted,
-    rows: rows.map((r) => {
-      // Clamped and single-lined at the projection, not only at the writers: a row
-      // recorded before `fitStatement` existed still renders into a tool reply.
-      const slot = fitSlotKey(r.slotKey);
-      return {
-        id: r.id,
-        revision: r.revision,
-        kind: "claim" as const,
-        excerpt: mintMemoryTool(fitStatement(r.statement)),
-        slotKey: slot ? mintMemoryTool(slot) : null,
-        value: r.value,
-      };
-    }),
-  };
+  const candidates = await fusedCandidates(spaceIds, opts.queries, ex);
+  if (!candidates.length) return { rows: [], omitted: 0 };
+  const rank = new Map(candidates.map((c, i) => [c.nodeId, i]));
+  const candidateIds = candidates.map((c) => c.nodeId);
+
+  const claims = await ex
+    .select(memoryToolColumns)
+    .from(vaultClaims)
+    // The mint's own obligation: `liveClaimForModel` assumes this join has been made.
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+    .where(and(channel, inArray(vaultClaims.id, candidateIds)));
+
+  const notes = await ex
+    .select(memoryToolNoteColumns)
+    .from(vaultNotes)
+    // Two obligations, both the mint's: `liveNoteForModel` assumes the node join AND the
+    // version join. The version join is unconditional on purpose — head-ness is a clause
+    // in the arm, not a join condition (NEW-7).
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+    .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
+    .where(
+      and(
+        inArray(vaultNotes.spaceId, spaceIds),
+        inArray(vaultNoteVersions.promptAccess, ["manifest", "memory_search"]),
+        liveNoteForModel(),
+        inArray(vaultNotes.id, candidateIds),
+      ),
+    );
+
+  // Re-order by the fused rank, THEN slice: the database returned the eligible subset in
+  // whatever order it liked, the two arms are two separate reads, and the limit must fall
+  // on the merged ranked list rather than on either arm's share of it.
+  const ranked = [...claims.map(asClaimRow), ...notes.map(asNoteRow)].sort(
+    (a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity),
+  );
+  const omitted = Math.max(0, ranked.length - limit);
+  const rows = ranked.slice(0, limit);
+
+  // THE STAMP LIVES IN THIS BRANCH, and its placement is the rule, not an optimization.
+  // `last_used_at` means "the model received this row", and only a query branch can say
+  // that. The no-queries branch above is a SET read — the ledger's dedup asking "does this
+  // space already hold these words" — and stamping there would re-timestamp every live
+  // claim in the space on every post-turn extraction, on the hot path, inside that caller's
+  // transaction: a row lock over the whole space, and a retention signal that stops meaning
+  // "the model read this" and starts meaning "the user had a turn".
+  // An unstamped use is a smaller error than a space-wide stamp that destroys the signal.
+  const stampedClaims = rows.filter((r) => r.kind === "claim").map((r) => r.id);
+  const stampedNotes = rows.filter((r) => r.kind === "note").map((r) => r.id);
+  if (stampedClaims.length) {
+    await ex.update(vaultClaims).set({ lastUsedAt: new Date() }).where(inArray(vaultClaims.id, stampedClaims));
+  }
+  if (stampedNotes.length) {
+    await ex.update(vaultNotes).set({ lastUsedAt: new Date() }).where(inArray(vaultNotes.id, stampedNotes));
+  }
+
+  return { omitted, rows };
 }
 
 /** The same decision for a head the caller ALREADY read — the lost-CAS reply, whose head

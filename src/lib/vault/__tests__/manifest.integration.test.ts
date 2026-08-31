@@ -37,6 +37,17 @@ const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
   q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
 
+/** The revision 1 of a note a raw fixture wrote by hand, on the same argument as
+ *  `seedNode`. Slice 2 made head-ness a JOIN, so a version-less fixture note is invisible
+ *  to the manifest — and the two tests below assert an ABSENCE, which would then hold for
+ *  a reason that has nothing to do with the gate each of them names. */
+const seedNoteVersion = (noteId: string, title: string, body = "") =>
+  q(
+    `INSERT INTO vault_note_versions (id, note_id, revision, title, body_markdown, source_class, provenance)
+     VALUES ($1, $2, 1, $3, $4, 'owner_authored', '{}'::jsonb)`,
+    [`${noteId}-v1`, noteId, title, body],
+  );
+
 /** users.email is unique too — a targeted ON CONFLICT (id) would throw 23505
  *  on a leftover row with the same email, and that would look like a skipped
  *  test rather than a fixture bug. */
@@ -278,6 +289,7 @@ run("vault: memory manifest", () => {
       `${P}emptytopic`,
       SPACE_A,
     ]);
+    await seedNoteVersion(`${P}emptytopic`, "General");
 
     const manifest = await buildMemoryManifest({ userSpaceId: SPACE_A });
 
@@ -391,6 +403,7 @@ run("vault: memory manifest", () => {
        VALUES ($1,$2,'Reporting',$1,'memory_topic')`,
       [topicB, SPACE_A],
     );
+    await seedNoteVersion(topicB, "Reporting");
     await seedConfirmedClaim(
       { spaceId: SPACE_A, statement: "confirmed one", origin: {}, sourceClass: testServerClass("legacy_confirmed"),
         topicNoteId: topicA },

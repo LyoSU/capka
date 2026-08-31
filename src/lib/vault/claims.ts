@@ -14,6 +14,19 @@ import { spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
 
+/** The channel a stored row may ever reach a model through — the TS name for
+ *  `vault_claims.prompt_access` and `vault_note_versions.prompt_access`, which are two
+ *  copies of one generated expression.
+ *
+ *  It lives here beside `SourceClass` because it is that column's function and this module
+ *  is where the claim head reads it. It is EXPORTED rather than written inline because
+ *  `NoteHead` needs the same four values: slice 2 would otherwise have spelled the union a
+ *  third time, and a fourth channel added to one copy and not the others is the shape this
+ *  file's history is made of. Naming it is not a second implementation of the rule — the
+ *  rule is the generated column, and `model-view.ts` remains the only module that SELECTS
+ *  on it. */
+export type PromptAccess = "manifest" | "memory_search" | "knowledge_search" | "owner_only";
+
 export type ClaimHead = {
   id: string;
   revision: number;
@@ -25,7 +38,7 @@ export type ClaimHead = {
   /** The channel that may ever show this row to a model — GENERATED, so it is read here
    *  and written nowhere. `modelTextOf` is its only reader: the lost-CAS reply has to make
    *  the same decision as the mints, off a head the caller already had in hand. */
-  promptAccess: "manifest" | "memory_search" | "knowledge_search" | "owner_only";
+  promptAccess: PromptAccess;
 };
 
 /**

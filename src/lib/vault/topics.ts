@@ -1,11 +1,12 @@
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
+import { vaultNodes, vaultNotes } from "@/lib/db/schema";
 import { looksLikeSecret } from "./claims";
 import { ownerAuthored } from "./grounding";
 import { HANDLE_RE, type HandleTarget } from "./handles";
 import { insertNode } from "./nodes";
+import { insertNoteVersion } from "./notes";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
@@ -250,14 +251,21 @@ export async function resolveTopic(
     if (!won) throw new Error(`topic "${folded}" vanished after insert`);
     return { id: won.id as TopicId, title: won.title, state: "existing" };
   }
-  // Revision 1 for the new topic. Inline here and NOT via `notes.ts`'s `createNote`,
-  // which does not exist yet at this task; Task 4 collapses these five lines onto it.
-  const versionId = nanoid();
-  await ex.insert(vaultNoteVersions).values({
-    id: versionId, noteId: id, revision: 1, title: raw, bodyMarkdown: "",
-    sourceClass: ownerAuthored(), provenance: { kind: "topic_created" },
-  });
-  await ex.update(vaultNotes).set({ currentVersionId: versionId }).where(eq(vaultNotes.id, id));
+  // Revision 1 for the new topic, through the ONE writer of a version row. Not through
+  // `createNote`, which owns the whole node+note+version move: this arm needs the note
+  // insert to be an `onConflictDoNothing` racing on `uniq_vnotes_topic_title`, and a plain
+  // insert would raise 23505 and poison the caller's transaction instead of losing the race
+  // cleanly. What Task 4 collapses is the part that was duplicated — the version insert and
+  // the pointer update — so that "no path creates a note without a revision 1" is a
+  // property of `insertNoteVersion` having no second caller rather than of remembering.
+  //
+  // `ownerAuthored()`, so the horizon `createNote` would have armed is null here anyway: a
+  // topic the person's own filing created is not agent content and does not expire.
+  await insertNoteVersion(
+    { noteId: id, revision: 1, title: raw, bodyMarkdown: "", sourceClass: ownerAuthored(),
+      provenance: { kind: "topic_created" } },
+    ex,
+  );
   await projectNoteDoc(id, ex);
   return { id: id as TopicId, title: raw, state: "created" };
 }

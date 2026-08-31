@@ -374,8 +374,13 @@ export async function proposeCandidate(input: {
   // known, it is recording that it contests a named head.
   if (!input.forceConflict) {
     const { rows: knownRows } = await listMemoryToolRows([input.spaceId], undefined, ex);
+    // `h.kind === "claim"` is the union narrowing, and it is also the honest predicate:
+    // this comparison asks whether a CLAIM already says these words. The no-queries branch
+    // returns nothing else today, so the guard costs a row nothing — but `MemoryToolRow`
+    // became a discriminated union in slice 2, and a dedup that silently started comparing
+    // note bodies to a proposed fact would suppress the candidate for the wrong reason.
     const known = knownRows.find(
-      (h) => norm(h.excerpt) === norm(statement) && valueAgrees(h.value, input.value),
+      (h) => h.kind === "claim" && norm(h.excerpt) === norm(statement) && valueAgrees(h.value, input.value),
     );
     // No write of any kind, the candidate row included: a fact already in memory is not
     // a decision to put in front of anybody.

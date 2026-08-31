@@ -18,8 +18,18 @@ const SEARCH_LIMIT = 20;
  *  the slot key on that shape are `MemoryToolText`, which only `model-view.ts` can mint,
  *  so a future reader that pulls a row off `listHeadClaims` and formats it here does not
  *  compile — and a `ManifestText` cannot be substituted either, because the three symbols
- *  are mutually unassignable. */
-const line = (c: MemoryToolRow) => `[${c.id}@${c.revision}] ${c.excerpt}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
+ *  are mutually unassignable.
+ *
+ *  It SWITCHES on `kind`, because the mint returns notes as well as claims from slice 2.
+ *  A switch over a discriminated union is deliberate rather than an `in` check: a third
+ *  node kind must re-exhaust it, which is the same reason `op` and `grounding` are unions
+ *  on the write tools. (T8 replaces this formatter entirely with the handle-based JSON
+ *  shape; it is narrowed here anyway, because the union widens in this commit and a task
+ *  must leave `master` green on its own.) */
+const line = (c: MemoryToolRow) =>
+  c.kind === "claim"
+    ? `[${c.id}@${c.revision}] ${c.excerpt}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`
+    : `[${c.id}@${c.revision}] ${c.title}: ${c.excerpt}`;
 
 /** What search says about sensitive claims: that they exist, and nothing else.
  *

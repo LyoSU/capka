@@ -198,6 +198,11 @@ describe("the three channels", () => {
     for (const f of others) {
       expect(code(read(f))).not.toMatch(/liveClaimForModel\s*\(\s*\)\s*\{|liveNoteForModel\s*\(\s*\)\s*\{/);
     }
+    // The version join is the mint's obligation. A note-reading mint that forgot it would
+    // compile and silently return every revision, so the arm's own text is asserted here:
+    // if somebody deletes a clause, this fails rather than the manifest quietly widening.
+    expect(owner).toMatch(/eq\(vaultNoteVersions\.revision,\s*vaultNotes\.currentRevision\)/);
+    expect(owner).toMatch(/eq\(vaultNoteVersions\.sensitive,\s*false\)/);
   });
 
   it("writes the prompt_access channel clause in exactly one module", () => {
@@ -211,10 +216,15 @@ describe("the three channels", () => {
     //                  on. An exclusion, stated: it was previously silent, which reads as
     //                  an oversight rather than as the decision it is.
     //   model-view.ts  the owner: every channel clause, all three arms.
+    //   notes.ts       READS it into `NoteHead.promptAccess` for `memory_open`'s channel
+    //                  check to switch on, and never SELECTS on it — the same exclusion,
+    //                  and the same reason, as `claims.ts` above. Stated rather than left
+    //                  silent, because a silent entry reads as an oversight.
     expect(hits(/promptAccess|prompt_access/)).toEqual([
       "src/lib/db/schema.ts",
       "src/lib/vault/claims.ts",
       "src/lib/vault/model-view.ts",
+      "src/lib/vault/notes.ts",
     ]);
   });
 

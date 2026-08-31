@@ -35,6 +35,19 @@ const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source") =>
   q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [id, spaceId, kind]);
 
+/** The revision 1 of a note a raw fixture wrote by hand, and the same argument as
+ *  `seedNode`: a fixture that writes `vault_notes` directly owns every row the writers
+ *  would have written beside it. Slice 2 made head-ness a JOIN — `liveNoteForModel`
+ *  compares `revision` to `current_revision` — so a version-less fixture note is invisible
+ *  to every note-reading mint, and a test asserting an ABSENCE would then pass for a reason
+ *  that has nothing to do with the clause it names. */
+const seedNoteVersion = (noteId: string, title: string, body = "") =>
+  q(
+    `INSERT INTO vault_note_versions (id, note_id, revision, title, body_markdown, source_class, provenance)
+     VALUES ($1, $2, 1, $3, $4, 'owner_authored', '{}'::jsonb)`,
+    [`${noteId}-v1`, noteId, title, body],
+  );
+
 const mkUser = (id: string) =>
   q(
     `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
@@ -272,6 +285,7 @@ run("vault: the model-facing projection", () => {
        VALUES ($1,$2,$3,$1,'memory_topic')`,
       [id, SPACE_A, "sk-live-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
     );
+    await seedNoteVersion(id, "sk-live-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     await createClaim(
       { spaceId: SPACE_A, statement: "filed under it", origin: {}, sourceClass: testServerClass("owner_authored"),
         topicNoteId: id },
@@ -293,6 +307,7 @@ run("vault: the model-facing projection", () => {
        VALUES ($1,$2,$3,$1,'memory_topic')`,
       [id, SPACE_A, long],
     );
+    await seedNoteVersion(id, long);
     await createClaim(
       { spaceId: SPACE_A, statement: "filed", origin: {}, sourceClass: testServerClass("owner_authored"), topicNoteId: id },
       ACTOR,

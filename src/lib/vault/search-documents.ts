@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { vaultClaims, vaultNodes, vaultNotes, vaultSearchDocuments } from "@/lib/db/schema";
+import { vaultClaims, vaultNodes, vaultNotes, vaultNoteVersions, vaultSearchDocuments } from "@/lib/db/schema";
 import type { Ex } from "./spaces";
 
 /**
@@ -34,6 +34,14 @@ import type { Ex } from "./spaces";
  * half of somebody else's transaction and there is no such thing as doing it alone.
  * `rebuildSearchDocuments` is the exception - it is the repair, and it owns its own
  * transaction.
+ *
+ * LOW-3 (slice 1's parked finding): `owner_text` / `norm_owner_text` / `owner_tsv` and
+ * their two GIN indexes now have a reader — the memory page's search box moves onto the
+ * owner lane in Task 15, because a page that filters `norm(statement)` in JavaScript
+ * cannot find a NOTE at all, and slice 2 is the release that gives a person notes to
+ * find. Until that task lands they are written and unread, which is the same state slice
+ * 1 recorded; what changes here is that the reader has a task number instead of a
+ * promise.
  */
 
 const upsert = async (
@@ -110,12 +118,39 @@ export async function projectClaimDoc(claimId: string, ex: Ex): Promise<void> {
   );
 }
 
-/** Project one note. Its body is a compatibility column until slice 2's versions land;
- *  the title is what the manifest and the memory page both search on today. */
+/** Project one note FROM ITS HEAD VERSION. It reads the row back rather than taking a
+ *  caller's values, for the same reason `projectClaimDoc` does: the secret screen may have
+ *  RAISED `sensitive` inside the note writer, and a caller projecting what it asked for
+ *  would index text the row does not consider showable.
+ *
+ *  Head-ness is `revision = current_revision`, NOT the id pointer, which is the same rule
+ *  every note reader holds: both note writers pass through a moment where the pointer is
+ *  NULL, and this function is called from inside one of them.
+ *
+ *  `model_text` is NULL for a withheld version. Say what that does and does not buy:
+ *  `model_tsv` includes `title`, so a withheld note's TITLE stays matchable in the model
+ *  FTS lane. THE GATE IS NOT THIS COLUMN — it is the mint's join to the head version,
+ *  where `prompt_access` and `liveNoteForModel` decide. A NULL narrows the candidate set
+ *  early; it authorizes nothing.
+ *
+ *  A NOTE WITH NO HEAD VERSION PROJECTS NOTHING, and that is a state `src/` cannot produce:
+ *  `createNote` and `resolveTopic` both mint revision 1 in the transaction that inserts the
+ *  note, and `0065` backfilled every row that predated them. What can still produce one is
+ *  a raw-SQL fixture that writes `vault_notes` by hand — which owns its version row the
+ *  same way it already owns its `vault_nodes` row. */
 export async function projectNoteDoc(noteId: string, ex: Ex): Promise<void> {
   const [row] = await ex
-    .select({ spaceId: vaultNotes.spaceId, title: vaultNotes.title, body: vaultNotes.body })
+    .select({
+      spaceId: vaultNotes.spaceId,
+      title: vaultNoteVersions.title,
+      body: vaultNoteVersions.bodyMarkdown,
+      sensitive: vaultNoteVersions.sensitive,
+    })
     .from(vaultNotes)
+    .innerJoin(
+      vaultNoteVersions,
+      and(eq(vaultNoteVersions.noteId, vaultNotes.id), eq(vaultNoteVersions.revision, vaultNotes.currentRevision)),
+    )
     .where(eq(vaultNotes.id, noteId))
     .limit(1);
   if (!row) return;
@@ -126,10 +161,7 @@ export async function projectNoteDoc(noteId: string, ex: Ex): Promise<void> {
       kind: "note",
       title: row.title,
       ownerText: row.body,
-      // Notes carry no class of their own until slice 2's versions, so nothing here is
-      // withheld. The mint's note arm is what decides visibility, and it reads
-      // `vault_notes`, not this row.
-      modelText: row.body,
+      modelText: row.sensitive ? null : row.body,
     },
     ex,
   );
