@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "platform-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["CAPKA_SCROLL_HARNESS=1", "npm", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}
