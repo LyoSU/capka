@@ -419,6 +419,14 @@ describe("memory_search", () => {
   });
 
   it("scope narrows the spaces; the default takes both", async () => {
+    // A CONTROL WAS RETIRED HERE BY DESIGN, not lost in the edit: "an overflowing project
+    // does not crowd the user space off the list" asserted the per-space quota that split
+    // the ceiling 10/10. Task 11 deleted the quota deliberately — a fused score IS
+    // comparable across spaces, so the ceiling is spent on relevance, and a guaranteed
+    // per-space share is exactly what that buys back at the cost of showing worse matches.
+    // The property has a successor rather than no replacement: `scope` is the caller's
+    // escape hatch, and this test is the one that pins it. Recorded so the deletion reads
+    // as a decision instead of netting out as "+1 test".
     const tools = await make();
     await run(tools.memory_search, { query: "x", scope: "user" });
     expect(listMemoryToolRows.mock.calls.map((c) => c[0])).toEqual([[USER_SPACE]]);

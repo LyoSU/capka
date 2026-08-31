@@ -73,8 +73,13 @@ describe("the model-facing readers go through one projection", () => {
     // The mints are the only readers. A tool, a page or a ledger that queried
     // vault_search_documents directly would be a second entrance carrying whatever
     // predicate its author remembered.
+    //
+    // BOTH idioms, because the owner itself uses the second one: the fused query in
+    // model-view.ts names the table inside a raw `sql` template, so a copy of it into
+    // another module would carry no `vaultSearchDocuments` identifier and a guard that
+    // greps only the Drizzle symbol would pass a second reader written the owner's own way.
     const others = [...MODEL_FACING, "src/lib/vault/candidates.ts", "src/lib/vault/memory-page.ts"];
-    for (const f of others) expect(code(read(f))).not.toMatch(/vaultSearchDocuments/);
+    for (const f of others) expect(code(read(f))).not.toMatch(/vaultSearchDocuments|vault_search_documents/);
   });
 
   it("has no listModelClaims and no modelVisible left anywhere", () => {
