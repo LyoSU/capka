@@ -50,8 +50,8 @@ vi.mock("../candidates", async (importOriginal) => ({
 vi.mock("../quote-match", () => ({ verifyDirectProvenance }));
 
 import { makeVaultMemoryTools } from "../tools";
-import { makeVaultBudget } from "../budget";
-import { makeHandleMap } from "../handles";
+import { MEMORY_SEARCH_MAX_RESULTS, makeVaultBudget } from "../budget";
+import { HANDLE_RE, makeHandleMap } from "../handles";
 import { makeTurnTaint } from "@/lib/tasks/turn-taint";
 
 const USER_SPACE = "space-user";
@@ -100,19 +100,63 @@ const head = (
 
 /** A row as the memory-tool mint hands it back: already filtered to the channel AND
  *  already matched, ranked and sliced by the database, which is why this shape carries no
- *  flags to filter on and no text for this module to search. */
-const visible = (over: Partial<{ id: string; revision: number; excerpt: string; slotKey: string | null }> = {}) => ({
+ *  flags to filter on and no text for this module to search.
+ *
+ *  `spaceId` and `sourceClass` are on it because slice 2's result shape describes both, and
+ *  both come off the authoritative claim row in the mint's join rather than off the search
+ *  projection. The default is the PROJECT space, so `scope` has a value that can be wrong:
+ *  a fold that always answered "user" would pass a fixture defaulted the other way. */
+const visible = (
+  over: Partial<{
+    id: string;
+    revision: number;
+    excerpt: string;
+    slotKey: string | null;
+    spaceId: string;
+    sourceClass: string;
+  }> = {},
+) => ({
   id: "c1",
+  spaceId: PROJECT_SPACE,
   revision: 1,
   kind: "claim" as const,
   excerpt: "The client pays in hryvnia",
   slotKey: null,
   value: null,
+  sourceClass: "user_direct",
   ...over,
 });
 
-/** The sentence `memory_search` appends to EVERY reply, empty ones included. */
+/** A NOTE row, the second arm of the union the mint returns from slice 2. `topic` is the
+ *  note's OWN label when it is a topic container and `null` otherwise — never a lookup of a
+ *  containing topic, which the mint deliberately does not do. */
+const visibleNote = (
+  over: Partial<{ id: string; revision: number; title: string; excerpt: string; topic: string | null; spaceId: string }> = {},
+) => ({
+  id: "n1",
+  spaceId: USER_SPACE,
+  revision: 4,
+  kind: "note" as const,
+  title: "Quarterly ledger",
+  excerpt: "Reports go out on Fridays",
+  topic: "Acme",
+  sourceClass: "agent_inferred",
+  ...over,
+});
+
+/** The sentence `memory_search` ships on EVERY reply, empty ones included. */
 const NOTE = "No lexical match is not evidence of absence - try other wordings.";
+
+/** What the model actually receives: one JSON object, parsed back. */
+const searched = async (
+  tools: Awaited<ReturnType<typeof makeVaultMemoryTools>>,
+  args: Record<string, unknown>,
+): Promise<{
+  results: { handle: string; kind: string; title: string | null; excerpt: string; revision: number; sourceClass: string; scope: string; topic: string | null }[];
+  omitted: number;
+  withheld: number;
+  note: string;
+}> => JSON.parse(await run(tools.memory_search, args));
 
 const make = (over: Partial<Parameters<typeof makeVaultMemoryTools>[0]> = {}) =>
   makeVaultMemoryTools({
@@ -399,38 +443,92 @@ describe("memory_forget — refuses, and says who can", () => {
 });
 
 describe("memory_search", () => {
-  it("formats id@revision lines from the rows the mint handed back", async () => {
-    // MATCHING IS NO LONGER THIS MODULE'S JOB. The two-lane fusion and the channel join
-    // happen in the mint, against a database, and are proved in
-    // `vault-search.integration.test.ts`; what is checked here is the one thing that
-    // exists only in this file — how the returned rows are rendered for the model.
+  it("returns handles, never persistent ids", async () => {
+    // THE POINT OF THE SLICE-2 SHAPE. A persistent id in a tool result is an id an injected
+    // page can quote back at a write tool; a handle is void the moment the run ends. The
+    // assertion is over the WHOLE serialized row rather than over `handle` alone, because
+    // the leak this guards against is a second field carrying the id beside the handle —
+    // which is exactly what `[id@revision]` was.
     listMemoryToolRows.mockResolvedValue({
       rows: [
-        visible({ id: "c1", revision: 2, excerpt: "The client pays in Hryvnia" }),
-        visible({ id: "c2", revision: 1, excerpt: "Nothing in common", slotKey: "hryvnia/rate" }),
+        visible({ id: "claim-real-id-1", revision: 2, excerpt: "The client pays in Hryvnia" }),
+        visibleNote({ id: "note-real-id-2" }),
       ],
       omitted: 0,
     });
-    const tools = await make();
-    const out = await run(tools.memory_search, { query: "hryvni" });
-    expect(out).toBe(`[c1@2] The client pays in Hryvnia\n[c2@1] Nothing in common (slot: hryvnia/rate)\n${NOTE}`);
+    const out = await searched(await make(), { queries: ["acme"] });
+    expect(out.results).toHaveLength(2);
+    for (const r of out.results) {
+      expect(r.handle).toMatch(HANDLE_RE);
+      expect(JSON.stringify(r)).not.toContain("claim-real-id-1");
+      expect(JSON.stringify(r)).not.toContain("note-real-id-2");
+    }
+    // The LETTER is the whole of what a handle says about its target: `m` a fact, `n` a note.
+    expect(out.results.map((r) => r.handle)).toEqual(["m1", "n1"]);
   });
 
-  it("asks the mint ONCE, across both spaces, with the query and the ceiling", async () => {
+  it("describes each row by kind, trust tier and which memory it came from", async () => {
+    // MATCHING IS NO LONGER THIS MODULE'S JOB. The two-lane fusion and the channel join
+    // happen in the mint, against a database, and are proved in
+    // `vault-search.integration.test.ts`; what is checked here is the one thing that exists
+    // only in this file — how a returned row is described to the model.
+    //
+    // `scope` is FOLDED from the space id and the id itself never appears: the model is told
+    // which memory a row came from, not the row's storage key.
+    listMemoryToolRows.mockResolvedValue({
+      rows: [visible({ spaceId: PROJECT_SPACE }), visibleNote({ spaceId: USER_SPACE })],
+      omitted: 0,
+    });
+    const out = await searched(await make(), { queries: ["hryvni"] });
+    expect(out.results[0]).toEqual({
+      handle: "m1",
+      kind: "claim",
+      // A claim has no title, and no containing-topic lookup exists in the mint's claim arm.
+      title: null,
+      topic: null,
+      excerpt: "The client pays in hryvnia",
+      revision: 1,
+      sourceClass: "user_direct",
+      scope: "project",
+    });
+    expect(out.results[1]).toEqual({
+      handle: "n1",
+      kind: "note",
+      title: "Quarterly ledger",
+      topic: "Acme",
+      excerpt: "Reports go out on Fridays",
+      revision: 4,
+      sourceClass: "agent_inferred",
+      scope: "user",
+    });
+    expect(JSON.stringify(out)).not.toContain(PROJECT_SPACE);
+    expect(JSON.stringify(out)).not.toContain(USER_SPACE);
+  });
+
+  it("asks the mint ONCE, across both spaces, with every wording and the ceiling", async () => {
     // The assertion that this reader carries no copy of the admission rule and no search
-    // of its own. One call, not one per space: a fused score is comparable across spaces,
-    // so the ceiling is spent on relevance instead of on an arithmetic split — which is
-    // what the deleted `quota` was.
+    // of its own. One call, not one per space and not one per WORDING: a fused score is
+    // comparable across spaces and across query variants, so the ceiling is spent on
+    // relevance instead of on an arithmetic split — which is what the deleted `quota` was.
     const tools = await make();
-    await run(tools.memory_search, { query: "x" });
+    await run(tools.memory_search, { queries: ["rakhunok", "invoice"] });
     expect(listMemoryToolRows.mock.calls).toEqual([
-      [[PROJECT_SPACE, USER_SPACE], { queries: ["x"], limit: 20 }],
+      [
+        [PROJECT_SPACE, USER_SPACE],
+        { queries: ["rakhunok", "invoice"], limit: MEMORY_SEARCH_MAX_RESULTS, kinds: undefined },
+      ],
     ]);
   });
 
-  it("an empty result is a sentence, not an empty string", async () => {
+  it("passes kinds and a narrowed limit through to the mint", async () => {
     const tools = await make();
-    expect(await run(tools.memory_search, { query: "nothing" })).toBe(`No saved memory matches.\n${NOTE}`);
+    await run(tools.memory_search, { queries: ["x"], kinds: ["note"], limit: 3 });
+    expect(listMemoryToolRows.mock.calls[0][1]).toEqual({ queries: ["x"], limit: 3, kinds: ["note"] });
+  });
+
+  it("an empty result is still a well-formed object with the note on it", async () => {
+    const out = await searched(await make(), { queries: ["nothing"] });
+    expect(out).toEqual({ results: [], omitted: 0, withheld: 0, note: NOTE });
   });
 
   it("scope narrows the spaces; the default takes both", async () => {
@@ -443,79 +541,107 @@ describe("memory_search", () => {
     // escape hatch, and this test is the one that pins it. Recorded so the deletion reads
     // as a decision instead of netting out as "+1 test".
     const tools = await make();
-    await run(tools.memory_search, { query: "x", scope: "user" });
+    await run(tools.memory_search, { queries: ["x"], scope: "user" });
     expect(listMemoryToolRows.mock.calls.map((c) => c[0])).toEqual([[USER_SPACE]]);
   });
 
-  it("says how many matches it left out, rather than truncating in silence", async () => {
-    // A silent truncation reads to the model as "that is all there is". The count comes
-    // from the mint, which is the only place the slice happens.
+  it("reports what it omitted rather than truncating silently", async () => {
+    // A silent truncation reads to the model as "that is all there is", which is the same
+    // wrong conclusion the absence note exists to prevent, arrived at from the other
+    // direction. The count comes from the mint, which is the only place the slice happens —
+    // this module must neither invent it nor drop it.
     listMemoryToolRows.mockResolvedValue({
-      rows: Array.from({ length: 20 }, (_, i) => visible({ id: `c${i}`, excerpt: `fact ${i}` })),
+      rows: Array.from({ length: MEMORY_SEARCH_MAX_RESULTS }, (_, i) =>
+        visible({ id: `c${i}`, excerpt: `fact ${i}` }),
+      ),
       omitted: 10,
     });
-    const tools = await make();
-    const lines = (await run(tools.memory_search, { query: "fact" })).split("\n");
-    expect(lines).toHaveLength(22);
-    expect(lines[20]).toBe("10 more matches were not shown.");
-    expect(lines[21]).toBe(NOTE);
-  });
-
-  it("counts one left-out match in the singular, and prints nothing when none were", async () => {
-    // Noun and verb inflect together — "1 more match was", "10 more matches were". The
-    // singular used to read "1 more match were not shown."; the string is pinned in both
-    // numbers so a future edit to one form cannot silently unfix the other.
-    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 1 });
-    const tools = await make();
-    expect(await run(tools.memory_search, { query: "fact" })).toContain("1 more match was not shown.");
+    const out = await searched(await make(), { queries: ["fact"] });
+    expect(out.results).toHaveLength(MEMORY_SEARCH_MAX_RESULTS);
+    expect(out.omitted).toBe(10);
+    // And zero is EMITTED, not omitted: a missing field reads as "unknown", which is the
+    // one thing it is not.
     listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
-    expect(await run(tools.memory_search, { query: "fact" })).not.toContain("not shown");
+    expect(await searched(await make(), { queries: ["fact"] })).toMatchObject({ omitted: 0 });
   });
 
-  it("appends the absence note to EVERY reply, not only empty ones", async () => {
+  it("ships the absence note on EVERY response, not only empty ones", async () => {
     // An agent that reads it only on zero results has already concluded absence on a thin
     // result set, which is the wrong conclusion this sentence exists to prevent.
-    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
+    listMemoryToolRows.mockImplementation(async (_ids: string[], o: { queries: string[] }) =>
+      o.queries[0] === "acme" ? { rows: [visible()], omitted: 0 } : { rows: [], omitted: 0 },
+    );
     const tools = await make();
-    expect(await run(tools.memory_search, { query: "hryvnia" })).toContain(NOTE);
-    listMemoryToolRows.mockResolvedValue({ rows: [], omitted: 0 });
-    expect(await run(tools.memory_search, { query: "hryvnia" })).toContain(NOTE);
+    expect((await searched(tools, { queries: ["acme"] })).note).toMatch(/not evidence of absence/);
+    expect((await searched(tools, { queries: ["zzzz"] })).note).toMatch(/not evidence of absence/);
   });
 
-  it("the withheld notice is an aggregate, and says the same thing whatever was asked", async () => {
+  it("the withheld count is an aggregate, and is the same whatever was asked", async () => {
     // Withholding the text while still MATCHING on it is not withholding: a hit for
     // "diagnosis" confirms the category the withholding exists to protect. The count
     // comes from its own aggregate over rows the projection never returns, so it cannot
-    // vary with the query even by accident.
-    listMemoryToolRows.mockImplementation(async (_ids: string[], opts: { queries: string[] }) =>
-      opts.queries[0] === "hryvnia"
+    // vary with the query even by accident — and it is a bare NUMBER, with no handle
+    // beside it, because there is no operation the agent could perform on one of those rows.
+    listMemoryToolRows.mockImplementation(async (_ids: string[], o: { queries: string[] }) =>
+      o.queries[0] === "hryvnia"
         ? { rows: [visible({ id: "c2", excerpt: "The client pays in hryvnia" })], omitted: 0 }
         : { rows: [], omitted: 0 },
     );
     countWithheld.mockImplementation(async (spaceId: string) => (spaceId === PROJECT_SPACE ? 1 : 0));
     const tools = await make();
 
-    const probe = await run(tools.memory_search, { query: "diagnosed" });
-    expect(probe).toContain("No saved memory matches.");
-    const other = await run(tools.memory_search, { query: "hryvnia" });
-    expect(other).toContain("[c2@1]");
+    const probe = await searched(tools, { queries: ["diagnosed"] });
+    expect(probe.results).toEqual([]);
+    const other = await searched(tools, { queries: ["hryvnia"] });
+    expect(other.results).toHaveLength(1);
 
-    const notice = /1 saved item is marked sensitive/;
-    expect(probe).toMatch(notice);
-    expect(other).toMatch(notice);
+    expect(probe.withheld).toBe(1);
+    expect(other.withheld).toBe(1);
   });
 
   it("outside a project scope:'project' substitutes no space and returns empty", async () => {
     const tools = await make({ projectId: null, projectOwnerUserId: undefined });
-    expect(await run(tools.memory_search, { query: "x", scope: "project" })).toBe(
-      `No saved memory matches.\n${NOTE}`,
-    );
+    expect(await searched(tools, { queries: ["x"], scope: "project" })).toEqual({
+      results: [],
+      omitted: 0,
+      withheld: 0,
+      note: NOTE,
+    });
     // The mint IS asked, and it is asked about NOTHING — which is the honest shape: the
     // model requested a scope that does not exist here, and no space is substituted for
-    // it. `countWithheld` is not called at all, so the sentence about sensitive records
-    // cannot leak a count out of a space that was not in scope.
+    // it. `countWithheld` is not called at all, so the count of sensitive records cannot
+    // leak out of a space that was not in scope.
     expect(listMemoryToolRows.mock.calls.map((c) => c[0])).toEqual([[]]);
     expect(countWithheld).not.toHaveBeenCalled();
+  });
+
+  it("spends the turn's vault budget, and says so when it is gone", async () => {
+    // THE CEILING BECOMES LIVE IN THIS COMMIT. `ctx.budget` has been threaded since T7 and
+    // read by nothing, so the 50,000-byte per-turn allowance was inert: this is the first
+    // result that goes through `emit`, and without that call a turn could spend the whole
+    // context on twenty searches. A tiny ceiling is the cheapest way to observe the wiring.
+    const budget = makeVaultBudget(40);
+    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
+    const tools = await make({ budget });
+    const out = await run(tools.memory_search, { queries: ["hryvnia"] });
+    expect(out).toContain("reached their budget");
+    expect(() => JSON.parse(out)).toThrow();
+    // And it is CHARGED, not merely consulted: a `spentBytes` of 0 would mean the wrapper
+    // returned the text without accounting for it.
+    const roomy = makeVaultBudget();
+    await run((await make({ budget: roomy })).memory_search, { queries: ["hryvnia"] });
+    expect(roomy.spentBytes()).toBeGreaterThan(0);
+  });
+
+  it("mints ONE handle for a row seen twice in the same run", async () => {
+    // The map is per RUN and per target, so a row that comes back in two searches of one
+    // turn is addressed by one name. Two names for one row is a distinction the model would
+    // have to invent a meaning for.
+    listMemoryToolRows.mockResolvedValue({ rows: [visible()], omitted: 0 });
+    const tools = await make();
+    const first = await searched(tools, { queries: ["a"] });
+    const second = await searched(tools, { queries: ["b"] });
+    expect(second.results[0].handle).toBe(first.results[0].handle);
   });
 });
 
@@ -637,6 +763,40 @@ describe("the schemas the provider actually sees", () => {
         expect(spec.propertyNames, `${name}.${field}`).toBeUndefined();
       }
     }
+  });
+
+  it("rejects 0 and 6 queries at the schema", async () => {
+    // THE BOUND IS ON THE SCHEMA, not in `execute`, which is what makes it the provider's
+    // problem rather than ours: a model that sends six wordings is corrected before a
+    // database is touched. Zero is the other end and is the one that would otherwise pass
+    // silently — `listMemoryToolRows` reads an empty `queries` as "no queries at all" and
+    // returns every eligible row in the space.
+    //
+    // Validated through `asSchema(...).validate`, which is the path the AI SDK itself takes
+    // on a tool call, rather than through the raw `safeParse` — "at the schema" means the
+    // provider-facing contract, and a bound that only a direct Zod call could see is not it.
+    const schema = asSchema((await make()).memory_search.inputSchema as never);
+    const accepts = async (v: unknown) => (await schema.validate!(v)).success;
+
+    expect(await accepts({ queries: [] })).toBe(false);
+    expect(await accepts({ queries: ["a", "b", "c", "d", "e", "f"] })).toBe(false);
+    expect(await accepts({ queries: ["a"] })).toBe(true);
+    expect(await accepts({ queries: ["a", "b", "c", "d", "e"] })).toBe(true);
+    // An empty wording is not a wording either.
+    expect(await accepts({ queries: [""] })).toBe(false);
+    // And the per-call ceiling is the schema's too, so `limit` cannot buy more than the
+    // budget's constant allows.
+    expect(await accepts({ queries: ["a"], limit: MEMORY_SEARCH_MAX_RESULTS + 1 })).toBe(false);
+    expect(await accepts({ queries: ["a"], limit: 0 })).toBe(false);
+  });
+
+  it("memory_search offers the model no persistent-id field to send back", async () => {
+    // The other half of "handles, never ids": a result that shows only handles is undone by
+    // an input that still accepts a raw id, because the model would learn to keep one.
+    const js = asSchema((await make()).memory_search.inputSchema).jsonSchema as {
+      properties?: Record<string, unknown>;
+    };
+    expect(Object.keys(js.properties ?? {}).sort()).toEqual(["kinds", "limit", "queries", "scope"]);
   });
 
   it("memory_update requires the statement outright, so there is no refine to lose", async () => {

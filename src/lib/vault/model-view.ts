@@ -374,6 +374,19 @@ export type MemoryToolRow =
       excerpt: MemoryToolText;
       slotKey: MemoryToolText | null;
       value: unknown;
+      /**
+       * WHICH TRUST TIER and WHICH SPACE this claim came from, both read off `vault_claims`
+       * in the join below and NOT off `vault_search_documents`. The projection carries a
+       * `space_id` of its own and is rebuilt by a writer that can lag; the authoritative row
+       * is what the channel clause was evaluated against, so it is also what may be
+       * described to the model. Same rule the note arm already followed.
+       *
+       * `spaceId` is not itself model-facing — `memory_search` folds it into `"user"` /
+       * `"project"` and the raw id never leaves the process. It is on the row because that
+       * fold needs it, and because `handles.mint` addresses a node by `(space, node)`.
+       */
+      sourceClass: SourceClass;
+      spaceId: string;
     }
   | {
       id: string;
@@ -404,10 +417,12 @@ export type MemoryToolRow =
  *  select list is how one branch quietly stops returning a field the projection maps. */
 const memoryToolColumns = {
   id: vaultClaims.id,
+  spaceId: vaultClaims.spaceId,
   revision: vaultClaims.revision,
   statement: vaultClaims.statement,
   slotKey: vaultClaims.slotKey,
   value: vaultClaims.value,
+  sourceClass: vaultClaims.sourceClass,
 };
 
 /** The note arm's columns. `revision` is the NOTE's `current_revision` and not the version
@@ -430,19 +445,23 @@ const memoryToolNoteColumns = {
  *  reply. */
 const asClaimRow = (r: {
   id: string;
+  spaceId: string;
   revision: number;
   statement: string;
   slotKey: string | null;
   value: unknown;
+  sourceClass: SourceClass;
 }): MemoryToolRow => {
   const slot = fitSlotKey(r.slotKey);
   return {
     id: r.id,
+    spaceId: r.spaceId,
     revision: r.revision,
     kind: "claim",
     excerpt: mintMemoryTool(fitStatement(r.statement)),
     slotKey: slot ? mintMemoryTool(slot) : null,
     value: r.value,
+    sourceClass: r.sourceClass,
   };
 };
 
@@ -534,10 +553,17 @@ const asNoteRow = (r: {
  * words" of the claims it is about to write; it has no rank to merge a second kind into,
  * and handing it notes would widen a comparison whose whole correctness argument is that
  * it asks exactly the question the projection answers.
+ *
+ * `kinds` NARROWS WHICH ARMS RUN, and it does so by not issuing an arm's query at all rather
+ * than by filtering the merged list afterwards. That is the difference between `omitted`
+ * meaning "eligible matches you did not get" and meaning "rows I fetched and then threw
+ * away": a kind the caller excluded was never an answer, so counting it as omitted would
+ * promise the model more of what it asked for than exists. It has no arm to narrow in the
+ * no-queries branch, which returns claims by construction.
  */
 export async function listMemoryToolRows(
   spaceIds: string[],
-  opts?: { queries?: string[]; limit?: number },
+  opts?: { queries?: string[]; limit?: number; kinds?: ("claim" | "note")[] },
   ex: Ex = db,
 ): Promise<{ rows: MemoryToolRow[]; omitted: number }> {
   if (!spaceIds.length) return { rows: [], omitted: 0 };
@@ -566,29 +592,38 @@ export async function listMemoryToolRows(
   const rank = new Map(candidates.map((c, i) => [c.nodeId, i]));
   const candidateIds = candidates.map((c) => c.nodeId);
 
-  const claims = await ex
-    .select(memoryToolColumns)
-    .from(vaultClaims)
-    // The mint's own obligation: `liveClaimForModel` assumes this join has been made.
-    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
-    .where(and(channel, inArray(vaultClaims.id, candidateIds)));
+  // Default BOTH, written out rather than left to `?? undefined` reaching each `includes`:
+  // an absent `kinds` and `kinds: []` would otherwise differ, and an empty array asking for
+  // every kind is the sort of coincidence a caller relies on once and a refactor deletes.
+  const kinds = opts.kinds?.length ? opts.kinds : (["claim", "note"] as const);
 
-  const notes = await ex
-    .select(memoryToolNoteColumns)
-    .from(vaultNotes)
-    // Two obligations, both the mint's: `liveNoteForModel` assumes the node join AND the
-    // version join. The version join is unconditional on purpose — head-ness is a clause
-    // in the arm, not a join condition (NEW-7).
-    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
-    .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
-    .where(
-      and(
-        inArray(vaultNotes.spaceId, spaceIds),
-        inArray(vaultNoteVersions.promptAccess, ["manifest", "memory_search"]),
-        liveNoteForModel(),
-        inArray(vaultNotes.id, candidateIds),
-      ),
-    );
+  const claims = !kinds.includes("claim")
+    ? []
+    : await ex
+        .select(memoryToolColumns)
+        .from(vaultClaims)
+        // The mint's own obligation: `liveClaimForModel` assumes this join has been made.
+        .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+        .where(and(channel, inArray(vaultClaims.id, candidateIds)));
+
+  const notes = !kinds.includes("note")
+    ? []
+    : await ex
+        .select(memoryToolNoteColumns)
+        .from(vaultNotes)
+        // Two obligations, both the mint's: `liveNoteForModel` assumes the node join AND the
+        // version join. The version join is unconditional on purpose — head-ness is a clause
+        // in the arm, not a join condition (NEW-7).
+        .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+        .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
+        .where(
+          and(
+            inArray(vaultNotes.spaceId, spaceIds),
+            inArray(vaultNoteVersions.promptAccess, ["manifest", "memory_search"]),
+            liveNoteForModel(),
+            inArray(vaultNotes.id, candidateIds),
+          ),
+        );
 
   // Re-order by the fused rank, THEN slice: the database returned the eligible subset in
   // whatever order it liked, the two arms are two separate reads, and the limit must fall

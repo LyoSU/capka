@@ -26,11 +26,12 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- `memory_search` now takes several query wordings per call and returns short run-local handles instead of `[id@revision]` addresses.
 - Memory topics now fold by normalized title inside a space, enforced by `uniq_vnotes_topic_title`; naming an existing subject reuses it instead of creating a second topic.
 - Two pre-existing memory topics in one space whose titles differ only in case or spacing block that migration: it retries and the schema stays at `0065` until they are merged, while the app keeps serving without the constraint. The first `[db] auto-migration failed` log line names the space and the title; later retries name only the index.
 - Claim trust classes are now minted by one module (`src/lib/vault/grounding.ts`); no other code path can state a `source_class`.
 - Memory search now matches by full text and trigram similarity instead of substring, so a misspelling or a different word order still finds the fact.
-- The "N saved items are marked sensitive" line `memory_search` appends now counts sensitive facts still awaiting confirmation, not only kept ones.
+- The `withheld` count `memory_search` returns now includes sensitive facts still awaiting confirmation, not only kept ones.
 - A proposed fact that duplicates one `memory_search` can already find — including a fact still awaiting confirmation — is answered "already known" and writes nothing, so the review queue no longer fills with duplicates.
 - Agent memory is now a structured vault: facts with provenance, quarantine for web/tool-derived facts, full audit trail; existing memory documents migrate automatically at boot. The old memory editor is read-only until the new memory page ships.
 - The memory page now shows topics, each fact's source conversation and what it replaced, and the facts set aside awaiting the user's confirmation (migration 0057).

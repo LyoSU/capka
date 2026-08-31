@@ -1,55 +1,71 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { TurnTaint } from "@/lib/tasks/turn-taint";
-import type { VaultBudget } from "./budget";
+import { MEMORY_SEARCH_MAX_RESULTS, type VaultBudget } from "./budget";
 import type { HandleMap } from "./handles";
 import { proposeCandidate, spaceForScope } from "./candidates";
-import { findCurrentHead, type ClaimHead } from "./claims";
-import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolRow } from "./model-view";
+import { findCurrentHead, type ClaimHead, type SourceClass } from "./claims";
+import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolText } from "./model-view";
 import { verifyDirectProvenance } from "./quote-match";
 import { getOrCreateSpace } from "./spaces";
 
-/** How many memory lines one search hands back. Memory rides in the turn's own
- *  context, so this ceiling is not "how much is interesting" but "how much we can
- *  afford to spend". */
-const SEARCH_LIMIT = 20;
+/**
+ * WHAT ONE SEARCH HANDS BACK, and why it is JSON with handles in it rather than the
+ * `[id@revision]` lines this tool printed until slice 2.
+ *
+ * ```json
+ * { "results": [{ "handle": "m1", "kind": "claim", "title": null, "excerpt": "…",
+ *                 "revision": 3, "sourceClass": "user_direct", "scope": "user",
+ *                 "topic": null }],
+ *   "omitted": 17, "withheld": 3, "note": "…" }
+ * ```
+ *
+ * `handle` IS THE ONLY ADDRESS. A persistent claim or note id is never shown to the model
+ * and never accepted from it: a handle is minted per RUN, so one that arrives from a
+ * previous turn, from a fetched page, or from the model's own invention resolves to
+ * nothing, and the write tools reject the whole mutation rather than proceed with a hole.
+ * An id in a tool result is an id an injected page can quote back.
+ *
+ * THERE IS NO `resultSet` FIELD, and its absence is a decision rather than an omission —
+ * recorded here because a test asserting it could not fail (this tool has never had one)
+ * and a control that cannot fail is decoration. The draft shape carried a `resultSet`
+ * token for a later call to page through; nothing consumed it, and `omitted` already says
+ * the one thing the model needs to know about what it did not get.
+ *
+ * `title` and `topic` are `null` on a claim. `title` because a claim has no title — it is
+ * one sentence. `topic` because the mint's claim arm has no containing-topic lookup: the
+ * label a note carries is the note's OWN label when it is a topic container, and naming a
+ * claim's parent topic needs the `contains` edge read, not a wider projection.
+ *
+ * The whole thing goes through `ctx.budget.emit`, which is what makes the per-turn ceiling
+ * reachable at all — every byte here is re-sent on every later step of the same
+ * tool-calling loop, so the cost is per step and not per call.
+ *
+ * THE TEXT FIELDS ARE BRANDED, and that is what the deleted `line()` formatter was for:
+ * `MemoryToolText` is mintable only inside `model-view.ts`, so a future reader that pulls a
+ * row off `listHeadClaims` and builds one of these does not compile, and a `ManifestText`
+ * cannot be substituted either — the three channel symbols are mutually unassignable.
+ * `JSON.stringify` is indifferent to a brand; `tsc` is not.
+ */
+type SearchResult = {
+  handle: string;
+  kind: "claim" | "note";
+  title: MemoryToolText | null;
+  excerpt: MemoryToolText;
+  revision: number;
+  sourceClass: SourceClass;
+  scope: "user" | "project";
+  topic: MemoryToolText | null;
+};
 
-/** One line for the model: `[id@revision]` is how it addresses a claim in update
- *  afterwards, so search and the mismatch reply print it identically.
+/** "No lexical match is not evidence of absence" ships on EVERY response, not only empty
+ *  ones: an agent that reads it only on zero results has already concluded absence on a
+ *  thin result set, which is the same wrong conclusion arrived at from the other direction.
  *
- *  It accepts a `MemoryToolRow` and nothing else, which is the point: the statement and
- *  the slot key on that shape are `MemoryToolText`, which only `model-view.ts` can mint,
- *  so a future reader that pulls a row off `listHeadClaims` and formats it here does not
- *  compile — and a `ManifestText` cannot be substituted either, because the three symbols
- *  are mutually unassignable.
- *
- *  It SWITCHES on `kind`, because the mint returns notes as well as claims from slice 2.
- *  A switch over a discriminated union is deliberate rather than an `in` check: a third
- *  node kind must re-exhaust it, which is the same reason `op` and `grounding` are unions
- *  on the write tools. (T8 replaces this formatter entirely with the handle-based JSON
- *  shape; it is narrowed here anyway, because the union widens in this commit and a task
- *  must leave `master` green on its own.) */
-const line = (c: MemoryToolRow) =>
-  c.kind === "claim"
-    ? `[${c.id}@${c.revision}] ${c.excerpt}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`
-    : `[${c.id}@${c.revision}] ${c.title}: ${c.excerpt}`;
-
-/** What search says about sensitive claims: that they exist, and nothing else.
- *
- *  Query-independent BY CONSTRUCTION, which is the whole point. Withholding a
- *  statement while still matching on it is not withholding — `memory_search("
- *  diagnosis")` returning a hit confirms the category the withholding exists to
- *  protect, and a slot key like `health/hiv-status` names it outright. So the query
- *  sees none of these claims, and this sentence is appended to every answer in a
- *  space that holds one, whatever was asked.
- *
- *  No address either, deliberately: an id would be useless. `memory_forget` requires
- *  the user to name the fact, and the fact's text is exactly what is withheld — so
- *  there is no operation the agent can perform on one of these claims, and offering a
- *  handle would only invite it to try. Telling the user the record exists is the one
- *  thing it CAN do, and a count is enough for that. */
-const withheldNotice = (n: number) =>
-  `${n} saved item${n === 1 ? " is" : "s are"} marked sensitive: not searchable, and the contents are not shown here. Tell the user such a record exists if it matters; only they can act on it.`;
+ *  The spec's sentence ends "…and knowledge_search for documents". That half is NOT shipped
+ *  here: `knowledge_search` is slice 3, and pointing the model at a tool its turn does not
+ *  hold teaches it to report a search it could not run. It joins this line with the tool. */
+const ABSENCE_NOTE = "No lexical match is not evidence of absence - try other wordings.";
 
 /** How the world looks NOW, when the claim the model addressed is not what it thought.
  *  `current: null` deliberately does not separate "the chain was forgotten" from "that
@@ -220,12 +236,29 @@ export async function makeVaultMemoryTools(ctx: {
   return {
     memory_search: tool({
       description:
-        "Search saved memory (facts about the user and this project). Returns claims as [id@revision] lines — use those ids with memory_update.",
+        "Search saved memory (facts about the user and this project). Send several wordings of the same question in one call — Ukrainian and English, or a synonym — rather than searching repeatedly. Each result carries a short handle like m1 or n2, which is how you address it in a later call; saved items marked sensitive are never searched and never shown, and 'withheld' counts them, so if one matters tell the user such a record exists — only they can act on it.",
       inputSchema: z.object({
-        query: z.string().min(1).describe("Words to look for; Ukrainian or English"),
+        queries: z
+          .array(z.string().min(1))
+          .min(1)
+          .max(5)
+          .describe("1-5 wordings of the same question; Ukrainian or English"),
         scope: z.enum(["user", "project", "all"]).optional().describe("Default: all"),
+        kinds: z
+          .array(z.enum(["claim", "note"]))
+          .min(1)
+          .max(2)
+          .optional()
+          .describe("Default: both. 'claim' = a saved fact, 'note' = a written note or topic"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MEMORY_SEARCH_MAX_RESULTS)
+          .optional()
+          .describe(`Default: ${MEMORY_SEARCH_MAX_RESULTS}`),
       }),
-      execute: async ({ query, scope }) => {
+      execute: async ({ queries, scope, kinds, limit }) => {
         // Outside a project, `scope: "project"` yields an empty list of spaces — more
         // honest than quietly substituting the user space: the model asked for something
         // else.
@@ -240,25 +273,43 @@ export async function makeVaultMemoryTools(ctx: {
         // with nothing to merge them BY. A fused score is comparable across spaces, so the
         // ceiling is spent on relevance instead of on an arithmetic split.
         const { rows: hits, omitted } = await listMemoryToolRows(spaceIds, {
-          queries: [query],
-          limit: SEARCH_LIMIT,
+          queries,
+          limit: limit ?? MEMORY_SEARCH_MAX_RESULTS,
+          kinds,
         });
         // An aggregate over what the mint excludes, computed independently of the query
-        // and never matched against — see `withheldNotice`. Counting it off the returned
-        // rows would be counting the wrong set, since they are precisely the rows that are
-        // NOT withheld.
+        // and never matched against. Withholding a statement while still MATCHING on it is
+        // not withholding — a hit for `memory_search("diagnosis")` confirms the category the
+        // withholding exists to protect — so the count is the whole of what may be said, and
+        // it carries no handle: `memory_forget` requires the user to name the fact, the
+        // fact's text is exactly what is withheld, and an address would only invite a try.
+        // Counting it off the returned rows would count the wrong set, since those are
+        // precisely the rows that are NOT withheld.
         let withheld = 0;
         for (const spaceId of spaceIds) withheld += await countWithheld(spaceId);
-        const body = hits.length ? hits.map(line).join("\n") : "No saved memory matches.";
-        // A response that hits the cap says how many it left out. A silent truncation reads
-        // to the model as "that is all there is", which is the same wrong conclusion the
-        // note below exists to prevent, arrived at from the other direction.
-        const more = omitted ? `${omitted} more ${omitted === 1 ? "match was" : "matches were"} not shown.` : "";
-        // "No lexical match is not evidence of absence" ships on EVERY response, not only
-        // empty ones: an agent that reads it only on zero results has already concluded
-        // absence on a thin result set.
-        const note = "No lexical match is not evidence of absence - try other wordings.";
-        return [body, more, note, withheld ? withheldNotice(withheld) : ""].filter(Boolean).join("\n");
+
+        const results = hits.map(
+          (r): SearchResult => ({
+            // The handle is minted from `(space, node)` because that pair is what the write
+            // tools resolve back to. `m` for a fact, `n` for a note — the letter is the whole
+            // of what a handle says about its target.
+            handle: ctx.handles.mint({ kind: r.kind === "claim" ? "m" : "n", spaceId: r.spaceId, nodeId: r.id }),
+            kind: r.kind,
+            title: r.kind === "note" ? r.title : null,
+            excerpt: r.excerpt,
+            revision: r.revision,
+            sourceClass: r.sourceClass,
+            // Folded from the space id, which never leaves this function: the model is told
+            // WHICH memory a row came from, not the row's storage key. A row can only be in
+            // a space this call asked about, so "not the project space" is the user space.
+            scope: r.spaceId === projectSpaceId ? "project" : "user",
+            topic: r.kind === "note" ? r.topic : null,
+          }),
+        );
+        // `omitted` says how many eligible matches did not fit. A silent truncation reads to
+        // the model as "that is all there is", which is the same wrong conclusion the note
+        // exists to prevent, arrived at from the other direction.
+        return ctx.budget.emit(JSON.stringify({ results, omitted, withheld, note: ABSENCE_NOTE }));
       },
     }),
 
@@ -343,9 +394,16 @@ export async function makeVaultMemoryTools(ctx: {
       },
     }),
 
+    // AN INTERIM WINDOW, deliberate and short: `memory_search` stopped printing persistent
+    // ids in this commit, so nothing in a turn now hands the model a `claim_id` to pass
+    // here. That is the plan's ordering, not an oversight — the write tools that take a
+    // HANDLE (`memory_fact_write`) land next, and they retire this tool and `memory_forget`
+    // with them. The description says "from memory_search" no longer, because that would be
+    // an instruction the model cannot follow; what it says instead is true in the window and
+    // after it.
     memory_update: tool({
       description:
-        "Record a correction to an existing memory fact. Requires the claim id and revision from memory_search. The correction is saved for the user to approve on their memory page; the existing fact is unchanged until they do.",
+        "Record a correction to an existing memory fact, addressed by its claim id and revision. The correction is saved for the user to approve on their memory page; the existing fact is unchanged until they do.",
       inputSchema: z.object({
         claim_id: z.string(),
         expected_revision: z.number().int().min(1),

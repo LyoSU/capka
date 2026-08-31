@@ -360,6 +360,63 @@ run("vault: the model-facing projection", () => {
     expect(note && note.kind === "note" ? note.topic : "row was not a note").toBeNull();
   });
 
+  it("narrows to one kind by not asking the other arm, and keeps `omitted` honest", async () => {
+    // `kinds` gates each ARM of the ranked branch rather than filtering the merged list, and
+    // the difference is visible in `omitted`: a kind the caller excluded was never an answer,
+    // so counting it as left-out would promise the model more of what it asked for than
+    // exists. The claim and the note carry the SAME query word, so both are candidates and
+    // an arm that ran anyway would show up here.
+    const noteId = `${P}kinds-note`;
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [noteId, SPACE_A]);
+    await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1,$2,'Deadlines','note')`, [
+      noteId,
+      SPACE_A,
+    ]);
+    await seedNoteVersion(noteId, "Deadlines", "the embargo deadline is in March");
+    await createClaim(
+      { spaceId: SPACE_A, statement: "the embargo deadline moved", origin: {}, sourceClass: testServerClass("owner_authored") },
+      ACTOR,
+    );
+    await rebuildSearchDocuments(SPACE_A);
+
+    // The control first: with no `kinds` the caller gets both, so a narrowed answer below
+    // is the option working and not a query that matches nothing.
+    const both = await listMemoryToolRows([SPACE_A], { queries: ["embargo deadline"] });
+    expect(both.rows.map((r) => r.kind).sort()).toEqual(["claim", "note"]);
+
+    const claimsOnly = await listMemoryToolRows([SPACE_A], { queries: ["embargo deadline"], kinds: ["claim"] });
+    expect(claimsOnly.rows.map((r) => r.kind)).toEqual(["claim"]);
+    // Not 1: the note was never an answer to this call.
+    expect(claimsOnly.omitted).toBe(0);
+
+    const notesOnly = await listMemoryToolRows([SPACE_A], { queries: ["embargo deadline"], kinds: ["note"] });
+    expect(notesOnly.rows.map((r) => r.kind)).toEqual(["note"]);
+    expect(notesOnly.omitted).toBe(0);
+  });
+
+  it("carries the trust tier and the space off the authoritative row, for both kinds", async () => {
+    // `sourceClass` and `spaceId` are read from `vault_claims`/`vault_notes` in the join, not
+    // from `vault_search_documents`: the projection is rebuilt by a writer that can lag, and
+    // the authoritative row is the one the channel clause was evaluated against. Two classes,
+    // because a projection defaulting every row to one tier would pass a single-class test.
+    await createClaim(
+      { spaceId: SPACE_A, statement: "the ledger closes on Friday", origin: {}, sourceClass: testServerClass("owner_authored") },
+      ACTOR,
+    );
+    await createClaim(
+      { spaceId: SPACE_A, statement: "the ledger probably closes early", origin: {}, sourceClass: testServerClass("agent_inferred") },
+      ACTOR,
+    );
+    await rebuildSearchDocuments(SPACE_A);
+
+    const rows = await listMemoryToolRows([SPACE_A], { queries: ["ledger closes"], kinds: ["claim"] });
+    expect(rows.rows.map((r) => r.kind === "claim" && r.sourceClass).sort()).toEqual([
+      "agent_inferred",
+      "owner_authored",
+    ]);
+    for (const r of rows.rows) expect(r.kind === "claim" && r.spaceId).toBe(SPACE_A);
+  });
+
   it("clamps a long topic title to TOPIC_TITLE_MAX_CHARS", async () => {
     const id = `${P}long-topic`;
     // WORDS, not one long run: `looksLikeSecret` screens an unbroken 28+ character run,

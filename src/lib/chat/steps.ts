@@ -273,7 +273,12 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   // first-class now; they get their own name and their own icon.
   switch (name) {
     case "memory_search": {
-      const query = clip(args.query, 40);
+      // `queries` since slice 2 — several wordings of one question per call. The label shows
+      // the FIRST, which is the one the model wrote before it started paraphrasing itself;
+      // listing all five would push the rest of the sentence off a phone. `args.query` is the
+      // pre-slice-2 shape and is still read, because a step row persisted before this
+      // release renders in the timeline forever.
+      const query = clip(Array.isArray(args.queries) ? args.queries[0] : args.query, 40);
       return {
         iconKey: "bookmark",
         label: query ? t("searchedMemoryFor", { query }) : t("searchedMemory"),
