@@ -324,3 +324,10 @@ surfaces as *"7 skipped tests in a failed suite"*, which reads exactly like an
 unset `RUN_INTEGRATION` gate. Two different causes, one reading — so a skip count
 tells you a precondition collapsed, never WHICH one.
 <!-- END:shared-worktree-rules -->
+
+**`npm run build` cannot run in a worktree whose `node_modules` is a symlink pointing
+outside the project root** — Turbopack panics on it (vitest and tsc are fine with the
+symlink). For verifying a commit's build, make the throwaway worktree on the same
+filesystem and hard-link the module tree (`cp -al`) instead of symlinking; remove the
+worktree after. Found verifying the knowledge-graph slice; the symlink recipe above
+remains correct for tests and typechecking.
