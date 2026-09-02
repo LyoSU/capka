@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, type SQL } from "drizzle-orm";
 import { vaultEdges, vaultNodes } from "@/lib/db/schema";
 import { unprojectNode, unprojectSpace } from "./search-documents";
 import type { Ex } from "./spaces";
@@ -60,6 +60,18 @@ export async function insertNode(
  * Idempotent by predicate: both writes are guarded on `deleted_at IS NULL`, so a
  * re-driven forget re-timestamps nothing.
  *
+ * `onlyIf` IS AN EXTRA CONDITION ON THE NODE UPDATE'S OWN `WHERE`, and it exists for
+ * `memory_forget`'s same-task bound (§4.9): the bound is a column comparison IN THE DB WRITE,
+ * not a check the caller makes first, because reachability is not authority and this repo's
+ * history says a rule enforced at one entrance grows a second. When it is passed and the
+ * update matches nothing, THE CASCADE DOES NOT RUN and this returns `false` — the caller
+ * wrote nothing at all. Without it the cascade is unconditional, which is the existing
+ * contract and the reason a re-driven forget still closes edges the first one somehow left.
+ *
+ * The condition itself is built by the module that owns the columns it names — a note's
+ * same-task bound lives on the HEAD VERSION, which is `notes.ts`' business — so what arrives
+ * here is SQL and not a table this module would otherwise import.
+ *
  * THE EDGE HALF NOW MOVES REAL ROWS. Until §11.5's dual-write, `vault_edges` was empty in
  * every live space and this update was a statement nothing had yet exercised outside a
  * seeded fixture; `claims.ts` now writes a `contains` edge beside every `note_claims` row,
@@ -69,12 +81,29 @@ export async function insertNode(
  * claim on purpose, and a control that read that as a divergence would fire on ordinary
  * use.
  */
-export async function deleteNode(nodeId: string, spaceId: string, ex: Ex): Promise<void> {
+export async function deleteNode(
+  nodeId: string,
+  spaceId: string,
+  ex: Ex,
+  opts?: { onlyIf: SQL },
+): Promise<boolean> {
   const now = new Date();
-  await ex
+  const closed = await ex
     .update(vaultNodes)
     .set({ deletedAt: now })
-    .where(and(eq(vaultNodes.id, nodeId), eq(vaultNodes.spaceId, spaceId), isNull(vaultNodes.deletedAt)));
+    .where(
+      and(
+        eq(vaultNodes.id, nodeId),
+        eq(vaultNodes.spaceId, spaceId),
+        isNull(vaultNodes.deletedAt),
+        ...(opts ? [opts.onlyIf] : []),
+      ),
+    )
+    .returning({ id: vaultNodes.id });
+  // A GUARDED delete that matched nothing wrote nothing, so nothing is cascaded either. An
+  // UNGUARDED one falls through whatever it matched, which is the contract every existing
+  // caller has: it is called beside a supersede that already moved the row.
+  if (opts && !closed.length) return false;
   // Both directions: the walk is undirected, so "the edges of this node" is not a
   // one-sided question, and a `contains` edge points AT a claim while a `derived_from`
   // edge points FROM one.
@@ -92,6 +121,7 @@ export async function deleteNode(nodeId: string, spaceId: string, ex: Ex): Promi
   // including the node SOFT delete, which is the entrance a "delete the row" rule written
   // against `vault_claims` alone would miss, and which no foreign key can see.
   await unprojectNode(nodeId, spaceId, ex);
+  return true;
 }
 
 /**

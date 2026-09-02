@@ -7,6 +7,7 @@ import {
   attachToTopic,
   createClaim,
   findCurrentHead,
+  forgetClaim,
   findExactDuplicate,
   secretShaped,
   updateClaim,
@@ -18,7 +19,7 @@ import { linkNodes, unlinkReferencesFrom } from "./edges";
 import { classify, type Grounding } from "./grounding";
 import type { HandleMap } from "./handles";
 import { appendLinkBlock, serializeBlocks, type NoteBlock } from "./links";
-import { createNote, noteHead, reviseNote } from "./notes";
+import { createNote, forgetNote, noteHead, reviseNote } from "./notes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 import { resolveTopic } from "./topics";
 
@@ -1171,5 +1172,132 @@ export async function memoryFile(a: {
       // because that is the half it did NOT choose by name.
       said: `Filed under «${container.title}».`,
     };
+  });
+}
+
+/* ------------------------------------------------------------------------------------------
+ * FORGETTING — `memory_forget` (§4.9)
+ * ---------------------------------------------------------------------------------------- */
+
+export type MemoryForgetStatus =
+  | "forgotten"
+  | "requires_owner_ui"
+  | "revision_mismatch"
+  | "not_found"
+  | "wrong_kind"
+  | "retired";
+
+/**
+ * §4.9's sentences.
+ *
+ * `requires_owner_ui` IS THE INTERESTING ONE, and it says where the thing is rather than
+ * that the model may not have it: the person asked for a fact to be forgotten, and the only
+ * useful answer is the one that gets it forgotten. "No approval gate" removed the APPROVAL of
+ * writes; it did not hand retrieved documents deletion authority, and the two are unrelated
+ * decisions.
+ *
+ * The `f`/`e`/`g` refusals exist because `knowledge_sources` and `vault_edges` carry no
+ * `created_task_id`: A BOUND THAT CANNOT BE EXPRESSED MUST NOT BE IMPLIED. They are refused
+ * rather than checked, and the sentences say who can.
+ */
+export const FORGET_SAID: Record<MemoryForgetStatus, string> = {
+  forgotten: "Removed. It is off the user's memory page and out of future chats.",
+  requires_owner_ui:
+    "This saved item can only be removed by the owner, on the memory page in settings. Tell them where it is and what to look for.",
+  revision_mismatch: "That item has moved on. Run memory_search and re-issue against what is there.",
+  not_found: "There is nothing at that address. Run memory_search and use a handle it returned.",
+  wrong_kind: "Fragments and links are not removable on their own.",
+  retired: "This project's memory was deleted. Nothing to remove.",
+};
+
+/** The `f` arm, which is a different sentence because a document has a different answer: a
+ *  person removes it, and there is a page where they do it. */
+const FORGET_DOCUMENT = "A document is removed by its owner on the memory page.";
+
+export type MemoryForgetResult =
+  | { status: "forgotten"; said: string }
+  | { status: "revision_mismatch"; revision: number; said: string }
+  | { status: "requires_owner_ui" | "not_found" | "wrong_kind" | "retired"; said: string };
+
+/**
+ * `memory_forget` (§4.9): the agent may soft-delete ONLY a node whose `created_task_id`
+ * equals THIS run's `taskId` — enough to undo its own malformed write in the same turn, and
+ * nothing more.
+ *
+ * THE BOUND IS A COLUMN COMPARISON IN THE DB WRITE, not the handle map, and it is not this
+ * function: `forgetClaim` takes `requireCreatedTaskId` and puts it in its own `WHERE`, and
+ * `forgetNote` builds the equivalent `EXISTS` over the head version and hands it to
+ * `deleteNode` as an extra clause on the node UPDATE. Reachability is not authority, and this
+ * repo's history says a rule enforced at one entrance grows a second — so it is enforced
+ * where the row is written and nowhere else.
+ *
+ * An approval/`ask` continuation is a SECOND task with its own `makeVaultMemoryTools` call
+ * (§4.1, L8), so handles minted in the first half are void in the second AND this bound
+ * cannot reach the first half's writes. Both are correct and both are stated so nobody
+ * re-derives them as bugs.
+ */
+export async function memoryForget(a: {
+  handle: string;
+  expectedRevision: number;
+  ctx: WriteCtx;
+}): Promise<MemoryForgetResult> {
+  const { ctx } = a;
+  const allowedSpaceIds = ctx.projectSpaceId ? [ctx.userSpaceId, ctx.projectSpaceId] : [ctx.userSpaceId];
+  const t = ctx.handles.resolve(a.handle);
+  if (!t || !allowedSpaceIds.includes(t.spaceId)) return { status: "not_found", said: FORGET_SAID.not_found };
+  // `m` and `n` ONLY (M9). `f`, `e` and `g` are REFUSED and never checked, because the tables
+  // behind them carry no `created_task_id` and a bound that cannot be expressed must not be
+  // implied. Two sentences, because a document has an owner surface and a fragment does not.
+  if (t.kind === "f") return { status: "wrong_kind", said: FORGET_DOCUMENT };
+  if (t.kind !== "m" && t.kind !== "n") return { status: "wrong_kind", said: FORGET_SAID.wrong_kind };
+  const spaceId = t.spaceId;
+
+  return db.transaction(async (tx): Promise<MemoryForgetResult> => {
+    if (!(await spaceAcceptsWrites(spaceId, tx))) return { status: "retired", said: FORGET_SAID.retired };
+
+    if (t.kind === "m") {
+      // The pre-read is for the REPORT, never for the decision: the bound is in the statement
+      // below, and this only lets the two failure modes be told apart. A `revision_mismatch`
+      // the model can re-read beats a `requires_owner_ui` it cannot cross.
+      const head = await findCurrentHead(t.nodeId, [spaceId], tx);
+      if (!head) return { status: "not_found", said: FORGET_SAID.not_found };
+      if (head.revision !== a.expectedRevision) {
+        return { status: "revision_mismatch", revision: head.revision, said: FORGET_SAID.revision_mismatch };
+      }
+      const done = await forgetClaim(
+        {
+          claimId: t.nodeId,
+          expectedRevision: a.expectedRevision,
+          allowedSpaceIds: [spaceId],
+          actor: ctx.actor,
+          requireCreatedTaskId: ctx.taskId,
+        },
+        tx,
+      );
+      // Zero rows with a matching revision means the BOUND refused it — the row is older than
+      // this task. `forgetClaim` deliberately does not say which of its conditions failed, and
+      // it does not need to: the revision was just checked one statement up.
+      return done.ok
+        ? { status: "forgotten", said: FORGET_SAID.forgotten }
+        : { status: "requires_owner_ui", said: FORGET_SAID.requires_owner_ui };
+    }
+
+    const done = await forgetNote(
+      {
+        noteId: t.nodeId,
+        spaceId,
+        expectedRevision: a.expectedRevision,
+        createdTaskId: ctx.taskId,
+        actor: ctx.actor,
+      },
+      tx,
+    );
+    if (done.ok) return { status: "forgotten", said: FORGET_SAID.forgotten };
+    if (done.reason === "revision_mismatch") {
+      return { status: "revision_mismatch", revision: done.revision as number, said: FORGET_SAID.revision_mismatch };
+    }
+    return done.reason === "not_found"
+      ? { status: "not_found", said: FORGET_SAID.not_found }
+      : { status: "requires_owner_ui", said: FORGET_SAID.requires_owner_ui };
   });
 }

@@ -769,7 +769,24 @@ export async function updateClaim(
  *  Whoever wants "why" on a deletion should take it from the human doing the
  *  deleting, on plan D's own screen, and answer the retention question there. */
 export async function forgetClaim(
-  args: { claimId: string; expectedRevision: number; allowedSpaceIds: string[]; actor: Actor },
+  args: {
+    claimId: string;
+    expectedRevision: number;
+    allowedSpaceIds: string[];
+    actor: Actor;
+    /**
+     * §4.9's SAME-TASK BOUND, and it is a COLUMN COMPARISON IN THIS STATEMENT'S `WHERE`
+     * rather than a check the caller makes first. That is the whole of the rule: the agent
+     * may undo its own malformed write inside the turn that made it and nothing more, and
+     * "reachability is not authority" — a legitimately obtained handle for an older row must
+     * fail, and it must fail in the statement, because this repo's history says a rule
+     * enforced at one entrance grows a second.
+     *
+     * Absent for an OWNER's forget, which is not bounded by anybody's task: the person's
+     * action on the memory page remains the only server-verifiable way to destroy a fact.
+     */
+    requireCreatedTaskId?: string;
+  },
   ex?: Ex,
 ): Promise<{ ok: true } | { ok: false; current: ClaimHead | null }> {
   if (!ex || ex === db) return db.transaction((tx) => forgetClaim(args, tx));
@@ -784,9 +801,16 @@ export async function forgetClaim(
         eq(vaultClaims.revision, expectedRevision),
         isNull(vaultClaims.supersededAt),
         inArray(vaultClaims.spaceId, allowedSpaceIds),
+        ...(args.requireCreatedTaskId
+          ? [eq(vaultClaims.createdTaskId, args.requireCreatedTaskId)]
+          : []),
       ),
     )
     .returning({ spaceId: vaultClaims.spaceId, revision: vaultClaims.revision });
+  // Zero rows, and the caller cannot tell WHY from the statement — the revision moved, the
+  // row is gone, or the bound refused it. That is deliberate: `memory_forget` answers a
+  // refused bound with `requires_owner_ui` after re-reading the head, and telling the model
+  // which of the three it hit would be a probe into rows it may not touch.
   if (!prev) return { ok: false, current: await findCurrentHead(claimId, allowedSpaceIds, ex) };
 
   // N10: the SAME terminal state as `forgetAllClaims`. Round 1 gave this obligation to

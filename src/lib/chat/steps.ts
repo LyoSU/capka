@@ -286,18 +286,30 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         category: "search",
       };
     }
-    // NEUTRAL, attempted-action labels — never an outcome. The descriptor is chosen from
-    // the tool NAME alone and never sees the result, while these three calls settle as
-    // pending, conflict, retired, refused, or not-found far more often than they settle
-    // as done: since the authority cutover a proposal always waits for the person and
-    // `memory_forget` always refuses. "Saved to memory" over a refusal is not a cosmetic
-    // slip — it is the security gate's outcome misreported in the one place someone
-    // reviewing an incident would look. If an output-aware label is ever added here, it
-    // has to map every policy state, not only the happy one.
-    case "memory_propose":
-      return { iconKey: "bookmark", label: t("memoryProposal"), activeLabel: t("savingToMemory"), category: "other" };
-    case "memory_update":
-      return { iconKey: "bookmark", label: t("memoryCorrection"), activeLabel: t("updatingMemory"), category: "other" };
+    // NEUTRAL, attempted-action labels — never an outcome. The descriptor is chosen from the
+    // tool NAME alone and never sees the result, and these calls settle as refused, retired,
+    // conflicted, not-found or moved-on far more often than a name suggests: a write can be
+    // refused by scope, a note update by the turn's taint, a forget by the same-task bound.
+    // "Saved to memory" over a refusal is not a cosmetic slip — it is the security gate's
+    // outcome misreported in the one place someone reviewing an incident would look. If an
+    // output-aware label is ever added here, it has to map every status, not only the happy
+    // one.
+    //
+    // `memory_propose` and `memory_update` were retired with the vault's write tools; their
+    // cases and their two label keys went in the same commit, because a case for a tool no
+    // turn holds is copy nothing can reach and a catalog entry nothing renders.
+    case "memory_fact_write":
+      return { iconKey: "bookmark", label: t("memoryWrite"), activeLabel: t("writingToMemory"), category: "other" };
+    case "memory_note_write":
+      return { iconKey: "bookmark", label: t("memoryNote"), activeLabel: t("writingMemoryNote"), category: "other" };
+    case "memory_file":
+      return { iconKey: "bookmark", label: t("memoryFiling"), activeLabel: t("filingInMemory"), category: "other" };
+    case "memory_link":
+      return { iconKey: "bookmark", label: t("memoryLink"), activeLabel: t("linkingInMemory"), category: "other" };
+    // A READ, so it is a `search` step like `memory_search` beside it: what the user wants to
+    // know from this row is where the agent looked, not that something changed.
+    case "memory_open":
+      return { iconKey: "bookmark", label: t("memoryRead"), activeLabel: t("readingMemory"), category: "search" };
     case "memory_forget":
       return { iconKey: "bookmark", label: t("memoryRemoval"), activeLabel: t("removingFromMemory"), category: "other" };
   }

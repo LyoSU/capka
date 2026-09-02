@@ -225,8 +225,8 @@ const FAILURE_LOG: Record<ExtractionFailure, string> = {
  * no branch that activates and `user_direct` gates nothing — and the secret screen sits
  * lower still, on `vault_claims`' own two writers, where no caller can get behind it.
  * Extraction is one writer among several, which is exactly why it holds neither rule: it
- * used to hold the screen, and `memory_propose` walked straight past it into an active
- * claim.
+ * used to hold the screen, and the retired `memory_propose` walked straight past it into
+ * an active claim.
  */
 export async function extractCandidates(args: {
   userSpaceId: string;
@@ -271,7 +271,7 @@ export async function extractCandidates(args: {
       userSpaceId: args.userSpaceId,
       projectSpaceId: args.projectSpaceId,
     });
-    // An explicit project scope with no project to file into. `memory_propose` REFUSES
+    // An explicit project scope with no project to file into. `memory_fact_write` REFUSES
     // this and tells the model to re-send; nothing here has anyone to ask, so the item
     // is dropped instead. What it must not do is take the third option and widen it
     // into the user space: that answers the same input differently from the tool path

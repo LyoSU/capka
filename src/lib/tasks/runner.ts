@@ -2069,13 +2069,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     // Mine the finished turn for durable facts (fire-and-forget). Each one lands in
-    // the candidate ledger, which decides on its own whether it activates or waits
-    // for the user — the agent's memory_propose tool is the deliberate path to the
-    // same place. Gated on a clean completion (like the title): a cancelled/failed
+    // the candidate ledger and waits for a person; the agent's own deliberate path is
+    // `memory_fact_write`, which since slice 2 writes STRAIGHT to memory rather than to
+    // this ledger, so the two no longer land in the same place. Extraction is the
+    // after-the-fact sweep for what the agent did not think to save.
+    // Gated on a clean completion (like the title): a cancelled/failed
     // turn shouldn't quietly spend tokens mining facts the user may have aborted.
     //
     // What the user said this turn is `userTurnText`, taken off the bundle — the SAME
-    // value `memory_propose` is checked against, and deliberately not re-derived here.
+    // value the write tools locate a quote in (§4.5 rule 1), and deliberately not
+    // re-derived here.
     // The old derivation read `modelMessages.findLast(role === "user")`, which is not
     // the transcript: `carryEffectsIntoRestart` pushes the recovery note onto it as a
     // user message and nothing takes it off again, so every turn that continued after a

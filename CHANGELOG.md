@@ -30,6 +30,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The assistant can undo a memory write it made in the same turn; anything older is still removable only by the owner on the memory page.
 - Chat UI: one accent colour (ink-blue) for the focus ring and the unread dot only; hover/active surfaces and hairlines are a full step stronger, so the current chat and the hovered row are visible at a glance.
 - The model and thinking controls now live in the composer footer on every screen; the floating pill under the greeting and the copy in the chat header are gone.
 - The new-chat screen drops the "Recent" list (it duplicated the sidebar) and the drag-a-file hint; the greeting and mark are smaller.
@@ -90,6 +91,10 @@ All notable changes to Capka are documented here. Format follows
 - The boot migration's audit event no longer carries a document hash or character count, which together allowed a deleted document's text to be recovered by dictionary attack.
 - The credential screen is now shape-based only (a long opaque run) and is documented as an advisory flag rather than a boundary; its English-only word list is removed, since it flagged `password: …` and missed the same sentence in every other language.
 - A memory confirmation can no longer land on a fact that was superseded while the user was deciding; `vault_claims.approved_at`/`approved_by_user_id` record who approved each fact (migration 0058).
+
+### Removed
+
+- Removed `memory_propose` and `memory_update`; the assistant writes facts directly and records corrections as conflicts.
 
 ## [0.37.0] - 2026-08-29
 

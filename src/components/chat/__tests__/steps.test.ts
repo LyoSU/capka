@@ -9,23 +9,30 @@ const t = (key: string, values?: Record<string, string | number>) =>
 /**
  * L1 — the settled label of a memory step is an ATTEMPT, never an outcome.
  *
- * `describeStep` is chosen from the tool NAME alone and never sees the result, while
- * these three calls settle as pending, conflict, retired, refused or not-found far more
- * often than as done: since the authority cutover a proposal always waits for the
- * person, and `memory_forget` always refuses. "Saved to memory" over a refusal is not a
- * cosmetic slip — it is the security gate's outcome misreported in the one place
- * someone reviewing an incident would look.
+ * `describeStep` is chosen from the tool NAME alone and never sees the result, while these
+ * calls settle as refused, retired, conflicted, moved-on or not-found far more often than a
+ * name suggests: a write can be refused by scope, a note update by the turn's taint, a forget
+ * by the same-task bound. "Saved to memory" over a refusal is not a cosmetic slip — it is the
+ * security gate's outcome misreported in the one place someone reviewing an incident would
+ * look.
  *
- * These assertions are on the KEYS, not on English words, because the copy is
- * translated and a key is what the two locale files agree on. If an output-aware label
- * is ever added here, it has to map every policy state, not only the happy one.
+ * These assertions are on the KEYS, not on English words, because the copy is translated and
+ * a key is what the two locale files agree on. If an output-aware label is ever added here, it
+ * has to map every status, not only the happy one.
+ *
+ * `memory_propose` and `memory_update` are GONE from the turn, so their two cases and their
+ * label keys went with them: a case for a tool nothing can call is dead code, and a catalog
+ * entry nothing renders is dead copy (`messages.test.ts` fails on the second).
  */
 describe("describeStep — a memory step names the attempt, not the outcome", () => {
   const SUCCESS_KEYS = ["savedToMemory", "updatedMemory", "removedFromMemory"];
 
   it.each([
-    ["memory_propose", "memoryProposal"],
-    ["memory_update", "memoryCorrection"],
+    ["memory_fact_write", "memoryWrite"],
+    ["memory_note_write", "memoryNote"],
+    ["memory_file", "memoryFiling"],
+    ["memory_link", "memoryLink"],
+    ["memory_open", "memoryRead"],
     ["memory_forget", "memoryRemoval"],
   ])("%s settles as %s", (tool, key) => {
     const d = describeStep(t, tool, {});
@@ -33,11 +40,23 @@ describe("describeStep — a memory step names the attempt, not the outcome", ()
     expect(SUCCESS_KEYS).not.toContain(d.label);
   });
 
+  it("the retired pair falls through to the generic label rather than to a dead key", () => {
+    // A step row PERSISTED before the retirement renders in the timeline forever, so the
+    // question is not whether the tools exist but what a stored row does now. It reads as an
+    // unknown tool — a prettified name — which is honest, and it is why removing the cases is
+    // safe while removing the keys would not have been if anything still referenced them.
+    for (const tool of ["memory_propose", "memory_update"]) {
+      const d = describeStep(t, tool, {});
+      expect(d.label).toContain("Memory");
+      expect(d.category).toBe("other");
+    }
+  });
+
   it("keeps memory steps off the web-search branch", () => {
     // `memory_search` contains "search", and the heuristic below it rendered a globe —
     // the one step where a user's trust depends on knowing WHERE the agent looked.
     expect(describeStep(t, "memory_search", { query: "acme" }).iconKey).toBe("bookmark");
-    for (const tool of ["memory_propose", "memory_update", "memory_forget"]) {
+    for (const tool of ["memory_fact_write", "memory_note_write", "memory_file", "memory_link", "memory_open", "memory_forget"]) {
       expect(describeStep(t, tool, {}).iconKey).toBe("bookmark");
     }
   });

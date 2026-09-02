@@ -1,10 +1,10 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { noteVersionEvidence, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
-import { looksLikeSecret, type PromptAccess, type SourceClass } from "./claims";
+import { auditEvents, noteVersionEvidence, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
+import { looksLikeSecret, type Actor, type PromptAccess, type SourceClass } from "./claims";
 import { horizonFor, type ServerClass } from "./grounding";
-import { insertNode } from "./nodes";
+import { deleteNode, insertNode } from "./nodes";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
@@ -416,4 +416,64 @@ export async function attachNoteEvidence(
     locatorSnapshot: ev.locatorSnapshot ?? null,
     relation: ev.relation ?? "supports",
   });
+}
+
+/**
+ * A NOTE'S SOFT DELETE, bounded to the task that wrote its head version (§4.9).
+ *
+ * THE BOUND IS A COLUMN COMPARISON INSIDE THE WRITE, exactly as it is for a claim — and for a
+ * note that column is on the HEAD VERSION rather than on the identity: `vault_notes` carries
+ * no `created_task_id`, and it should not grow one, because "who wrote this" is a property of
+ * a revision. So the condition is an `EXISTS` over `vault_note_versions` at
+ * `revision = current_revision`, handed to `deleteNode` as the extra clause on ITS statement.
+ * Reachability is not authority, and a rule enforced at one entrance grows a second.
+ *
+ * IT GOES THROUGH `deleteNode`, not around it: the node's tombstone and the cascade of its
+ * live edges are one act, and this module does not own that pair. What this function owns is
+ * the note-shaped question — which revision is the head, and who wrote it.
+ *
+ * The three outcomes the tool needs are distinguished HERE and not in the statement: the
+ * statement can only say "nothing matched", and a caller that reported that as one thing
+ * would tell a person their own note is un-deletable when they simply held a stale revision.
+ */
+export async function forgetNote(
+  a: { noteId: string; spaceId: string; expectedRevision: number; createdTaskId: string; actor: Actor },
+  ex?: Ex,
+): Promise<
+  { ok: true } | { ok: false; reason: "not_found" | "revision_mismatch" | "not_this_task"; revision: number | null }
+> {
+  if (!ex || ex === db) return db.transaction((tx) => forgetNote(a, tx));
+
+  const deleted = await deleteNode(a.noteId, a.spaceId, ex, {
+    onlyIf: sql`exists (
+      select 1 from ${vaultNoteVersions} v
+       where v.note_id = ${a.noteId}
+         and v.revision = ${a.expectedRevision}
+         and v.revision = (select n.current_revision from ${vaultNotes} n where n.id = ${a.noteId})
+         and v.created_task_id = ${a.createdTaskId})`,
+  });
+  if (!deleted) {
+    // WHY it matched nothing, read back after the fact. The order is the order the model can
+    // act on: a revision it can re-read beats a bound it cannot cross.
+    const head = await noteHead(a.noteId, [a.spaceId], ex);
+    if (!head) return { ok: false, reason: "not_found", revision: null };
+    if (head.revision !== a.expectedRevision) {
+      return { ok: false, reason: "revision_mismatch", revision: head.revision };
+    }
+    return { ok: false, reason: "not_this_task", revision: head.revision };
+  }
+
+  // §2.11's `node.delete`, and the owner's own delete gets one too when slice 4 builds it
+  // (L9): an owner action with no audit row is the thing this feature has been asked about
+  // most. No text in the payload — the audit log is read more widely than the space itself.
+  await ex.insert(auditEvents).values({
+    id: nanoid(),
+    spaceId: a.spaceId,
+    actor: a.actor,
+    action: "node.delete",
+    subjectType: "note",
+    subjectId: a.noteId,
+    payload: { revision: a.expectedRevision, createdTaskId: a.createdTaskId },
+  });
+  return { ok: true };
 }

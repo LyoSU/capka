@@ -32,9 +32,12 @@ import { norm } from "./text";
  *     even counted in its topic's counter.
  *   - `memory_search` (`tools.ts`) — statement plus `[id@revision]`; a sensitive one
  *     withheld behind a query-independent aggregate count.
- *   - `mismatch` (`tools.ts`, the lost-CAS reply of memory_update/memory_forget) —
- *     statement, and withheld for a sensitive head, or a lost CAS would be a second way
- *     to read out what the manifest hides.
+ *   - `memory_open` (`read-tools.ts`) — the whole of one item, through the mint for its
+ *     channel; a sensitive one is not found at all, because `owner_only` reaches no model
+ *     channel and a per-handle "that one is withheld" would confirm the category.
+ *     (The third reader used to be `mismatch`, the lost-CAS reply of the retired
+ *     `memory_update`. It went with the tool: the new writers report a REVISION and never
+ *     the text, so a lost CAS is no longer a way to read anything out.)
  *
  * THIS reader sends the text, sensitive or not, and marks it so the page can render the
  * advisory. It used to withhold, on a rule borrowed from those three, and that cost two

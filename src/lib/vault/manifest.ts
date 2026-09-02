@@ -110,20 +110,26 @@ export async function buildMemoryManifest(args: {
     if (projectBlock) blocks.push(projectBlock);
   }
 
-  // THE ONLY PLACE THE PROMPT NAMES A WRITER, which is why it names the one that actually
-  // writes. It said `memory_propose` until slice 2 gave the agent `memory_fact_write`, and
-  // an always-on instruction steering every turn to the tool that parks the fact behind a
-  // confirmation gate this slice removes is how a shipped feature rides inert (review
-  // MED-4; the egress allowlist did exactly that for two releases).
+  // THE ONLY PLACE THE PROMPT NAMES A WRITER, which is why it names the ones that actually
+  // write. It said `memory_propose` until slice 2 gave the agent `memory_fact_write`, and an
+  // always-on instruction steering every turn to the tool that parks the fact behind a
+  // confirmation gate this slice removes is how a shipped feature rides inert (review MED-4;
+  // the egress allowlist did exactly that for two releases).
   //
-  // `memory_propose` is deliberately NOT mentioned. It is still live and still callable —
-  // its retirement is its own commit — but a sentence that named both would ask the model to
-  // choose between two writers with opposite semantics, and a sentence that promised its
-  // removal would be a claim about a commit that has not happened. Not naming it also means
-  // this line stays true THROUGH that retirement rather than becoming a prompt that names a
-  // tool the turn does not hold.
+  // The retired pair is not named, and cannot be: `memory_propose` and `memory_update` are
+  // gone from the turn (§4.10), so a prompt mentioning either would name a tool the model
+  // does not hold — which is the same defect as naming the wrong one, arrived at from the
+  // other side. This line was written not to mention them so that it would stay true THROUGH
+  // that retirement, and it did.
+  //
+  // TWO WRITERS AND ONE READER, and no more than that: the manifest is the uncached volatile
+  // tier, rebuilt on every turn, so every word here is paid for on every turn of every
+  // account. `memory_file`, `memory_link`, `memory_open` and `memory_forget` are reachable
+  // from their own descriptions once the model is already in the memory tools; what the
+  // always-on tier has to say is the thing a model will otherwise not do at all, which is
+  // look before it asserts and write when it learns.
   blocks.push(
-    "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write.",
+    "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write, and longer notes with memory_note_write.",
   );
 
   return blocks.join("\n\n");

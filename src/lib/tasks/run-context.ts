@@ -159,10 +159,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       ? await getOrCreateSpace({ type: "project", refId: project.id, ownerUserId: project.userId })
       : undefined;
 
-  // The text of the turn's last user message, which is what `memory_propose` checks
-  // a proposed fact against before it can activate without the user's confirmation.
-  // An empty string is a fail-safe, not an error: provenance then reads `derived`
-  // and the fact waits for confirmation instead of going in on the model's word.
+  // The text of the turn's last user message — §4.5 rule 1's clause 1, which is what
+  // `memory_fact_write` and `memory_note_write` locate a quote in before a write may be
+  // classified as something the person stated. An empty string is a fail-safe, not an
+  // error: the clause then fails and the write lands as the agent's own conclusion.
   //
   // Computed ONCE, here, and handed to every consumer on the bundle — the memory
   // tools and the runner's post-turn extraction both. The runner used to re-derive

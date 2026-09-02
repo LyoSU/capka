@@ -47,8 +47,8 @@ export type CandidateRow = typeof memoryCandidates.$inferSelect;
  * than the bug it would be guarding: on the propose side it manufactures conflicts
  * out of a plain restatement, and on the confirm side it supersedes the head to
  * `value = null` — silently destroying the very number this comparison exists to
- * protect. Clearing a value on purpose is `memory_update`'s job, with an explicit
- * value; extraction never gets to do it by omission.
+ * protect. Clearing a value on purpose takes an explicit value — `memory_fact_write`'s
+ * `value_json`, on a replace; extraction never gets to do it by omission.
  *
  * `isDeepStrictEqual` rather than serialized text: jsonb does not preserve key order,
  * so `{days,tier}` and `{tier,days}` come back from the same row in either shape, and
@@ -249,8 +249,9 @@ class Retry extends Error {}
  *
  * WHY THERE IS NO CONTENT TEST HERE ANY MORE, because the deleted code looked
  * reasonable and somebody will want it back. This used to activate a proposal whose
- * words overlapped the user's own turn (`verifyDirectProvenance`), and use the same
- * test in `memory_update` and `memory_forget`. The attack is decisive and no better
+ * words overlapped the user's own turn (`verifyDirectProvenance`), and the two retired
+ * write tools spent the same test on a mutation and a deletion. The attack is decisive and
+ * no better
  * predicate exists: the user asks *"check whether Acme invoices are still paid
  * monthly"*, an injected vendor page tells the model to forget the claim it just
  * searched for, and every long word of that claim is in the user's own turn — so the
@@ -287,9 +288,15 @@ export async function proposeCandidate(input: {
   evidence?: EvidenceInput[];
   /**
    * Record this proposal as contesting a NAMED head rather than as a plain pending
-   * fact. `memory_update` is its one producer: a correction is not a fact somebody can
-   * weigh on its own, so the page has to render "keeping this replaces «…»" and needs
-   * both halves to do it.
+   * fact: a correction is not a fact somebody can weigh on its own, so the page has to
+   * render "keeping this replaces «…»" and needs both halves to do it.
+   *
+   * IT HAS NO PRODUCER LEFT IN `src/`. `memory_update` was its one caller and is retired
+   * (§4.10); the agent records a correction as a `conflicts_with` row on a live claim now,
+   * which the memory page reads through `readConflicts`. This parameter survives for the
+   * ARCHIVE — `memory_candidates` keeps its unresolved rows for 30 days (§2.12) and the page
+   * still renders the ones already written this way — and it is deliberately not deleted
+   * with the tool, because the rows it produced outlive it.
    *
    * The claim id is required, and that requirement is the fix: this used to be a bare
    * `forceState?: "conflict"` flag, and the one caller that used it had the contested id
