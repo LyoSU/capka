@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- The assistant edits a memory file in place (replace a passage, insert a paragraph, rename it) instead of rewriting the whole file.
 - Topic sections (You / Topics / Areas / People); the assistant records what it learns as short topic files during the chat.
 - A dismissible "saved to memory" notice after any turn that wrote memory, with one-click undo on each item.
 - When a fact the assistant saved contradicts one already stored, the memory page shows both side by side and one click keeps either or both.
