@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // A right-edge "minimap" of the conversation: one pill per user turn, collapsed
 // to a thin rail and expanding into a jump list. Lets you skim a long chat and
@@ -29,6 +29,22 @@ export function ChatNav({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // One highlight for the whole list, gliding between rows, instead of a fill per
+  // row that lights up and goes out. It rests on the active turn and follows the
+  // pointer — or keyboard focus, which gets the same treatment — then glides back
+  // when they leave. A single element moving says "the same thing moved"; two
+  // backgrounds toggling reads as two unrelated events. Measured after commit
+  // from the row's own box, so the list's padding and gaps never appear here as
+  // numbers. Reduced motion collapses the transition through the global reset.
+  const [hot, setHot] = useState<number | null>(null);
+  const activeIndex = items.findIndex((it) => it.id === activeId);
+  const target = hot ?? (activeIndex >= 0 ? activeIndex : null);
+  const [glide, setGlide] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = target == null ? null : itemRefs.current[target];
+    setGlide(el ? { top: el.offsetTop, height: el.offsetHeight } : null);
+  }, [target, items]);
 
   // Opening with Enter used to leave focus on the trigger, which the same click
   // turns `opacity-0 pointer-events-none` — the focus ring simply vanished and
@@ -70,8 +86,9 @@ export function ChatNav({
       // Close once focus leaves the whole nav (keyboard tab-out); staying within
       // it (rail → list items) keeps it open.
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setOpen(false); setHot(null); }
       }}
+      onMouseLeave={() => setHot(null)}
     >
       {/* Collapsed rail — one pill per turn, the active one longer and darker.
           It's the trigger: a real button, so Tab reaches it and Enter opens the
@@ -115,6 +132,18 @@ export function ChatNav({
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >
+        {/* The glider. First in DOM and absolutely positioned; the rows are
+            `relative` so they paint above it. Stronger when resting on the active
+            turn, lighter while following the pointer — the same two weights the
+            rows used to carry themselves. Inset by the list's own padding so it
+            spans exactly a row. */}
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute left-2.5 right-2.5 rounded-lg transition-[top,height,background-color,opacity] duration-200 [transition-timing-function:var(--ease-strong)] ${
+            hot != null && hot !== activeIndex ? "bg-hover" : "bg-hover-strong"
+          } ${glide ? "opacity-100" : "opacity-0"}`}
+          style={glide ? { top: glide.top, height: glide.height } : undefined}
+        />
         {items.map((it, i) => {
           const active = it.id === activeId;
           return (
@@ -126,9 +155,9 @@ export function ChatNav({
                 onJump(it.id);
                 setOpen(false);
               }}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-micro ${
-                active ? "bg-hover-strong" : "hover:bg-hover"
-              }`}
+              onMouseEnter={() => setHot(i)}
+              onFocus={() => setHot(i)}
+              className="relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-micro"
             >
               {/* Same weight as the rail's marks — here the row's own text already
                   says which turn it is, so the bullet is orientation, not label. */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { CircleQuestionMark, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -258,13 +258,50 @@ function Pager({ page, total, onGo, disabled }: {
  *    consequential tap in the product, so touch gets a 40px row and the pointer
  *    case stays compact.
  */
-const chipClass = (active: boolean) =>
+const chipClass = (active: boolean, filled: boolean) =>
   [
-    "inline-flex min-h-10 items-center rounded-full px-3.5 text-sm transition-micro sm:min-h-8",
+    "relative inline-flex min-h-10 items-center rounded-full px-3.5 text-sm transition-micro sm:min-h-8",
     active
-      ? "bg-primary font-medium text-primary-foreground"
+      ? // A multi-select fills each chip itself (bg-primary): several can be on at
+        // once, and one glider cannot mark three. A single choice leaves the chip
+        // transparent and lets the glider below be the fill.
+        `font-medium text-primary-foreground ${filled ? "bg-primary" : "bg-transparent"}`
       : "bg-background text-muted-foreground shadow-btn hover:bg-hover hover:text-foreground",
   ].join(" ");
+
+/**
+ * The single-choice fill, as one pill that glides between options.
+ *
+ * Marking the chosen option by moving the same shape to it says "your choice
+ * moved", where a fill switching off on one chip and on on another reads as two
+ * events. Positioned from the active chip's own offset box inside the `relative`
+ * chip row — chips wrap, so this is a 2D move — and re-measured when the row
+ * resizes. Mounts with the tile pop the first time something is chosen (there is
+ * nowhere to glide from), then transitions. Reduced motion collapses both through
+ * the global reset.
+ */
+function ChoiceGlider({ row, active }: { row: React.RefObject<HTMLDivElement | null>; active: string | undefined }) {
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = active == null ? null : row.current?.querySelector<HTMLElement>(`[data-value="${CSS.escape(active)}"]`);
+      setBox(el ? { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } : null);
+    };
+    measure();
+    if (!row.current) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(row.current);
+    return () => ro.disconnect();
+  }, [row, active]);
+  if (!box) return null;
+  return (
+    <span
+      aria-hidden
+      className="animate-pop-in pointer-events-none absolute rounded-full bg-primary transition-[left,top,width,height] duration-200 [transition-timing-function:var(--ease-strong)]"
+      style={box}
+    />
+  );
+}
 
 /** One field: a choice (single/multi chips), free text, a number, or a yes/no. */
 function Field({ field, value, onSet, onToggle, onEnter }: {
@@ -275,20 +312,24 @@ function Field({ field, value, onSet, onToggle, onEnter }: {
   onEnter?: () => void;
 }) {
   const t = useTranslations("chat.ask");
+  const rowRef = useRef<HTMLDivElement>(null);
+  const single = typeof value === "string" ? value : undefined;
   return (
     <div>
       <div className="text-sm text-foreground">{field.label}</div>
       {field.kind === "choice" && field.options ? (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div ref={rowRef} className="relative mt-2 flex flex-wrap gap-2">
+          {!field.multi && <ChoiceGlider row={rowRef} active={single} />}
           {field.options.map((op) => {
             const active = field.multi ? Array.isArray(value) && value.includes(op.value) : value === op.value;
             return (
               <button
                 key={op.value}
                 type="button"
+                data-value={op.value}
                 aria-pressed={active}
                 onClick={() => { haptic("tap"); if (field.multi) onToggle(field.id, op.value); else onSet(field.id, op.value); }}
-                className={chipClass(active)}
+                className={chipClass(active, !!field.multi)}
               >
                 {op.label}
               </button>
@@ -296,14 +337,16 @@ function Field({ field, value, onSet, onToggle, onEnter }: {
           })}
         </div>
       ) : field.kind === "boolean" ? (
-        <div className="mt-2 flex gap-2">
+        <div ref={rowRef} className="relative mt-2 flex gap-2">
+          <ChoiceGlider row={rowRef} active={single} />
           {[["true", t("yes")], ["false", t("no")]].map(([v, label]) => (
             <button
               key={v}
               type="button"
+              data-value={v}
               aria-pressed={value === v}
               onClick={() => { haptic("tap"); onSet(field.id, v); }}
-              className={chipClass(value === v)}
+              className={chipClass(value === v, false)}
             >
               {label}
             </button>
