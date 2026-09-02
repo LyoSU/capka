@@ -51,8 +51,11 @@ pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
 
 # GNU grep is not what runs here by default: BSD grep has no -P, and matching Cyrillic by
-# its UTF-8 lead bytes under LC_ALL=C is exact on both (U+0400-U+04FF is the only range
-# whose encoding starts 0xD0-0xD3, and those bytes are never continuation bytes).
+# its UTF-8 lead bytes under LC_ALL=C is exact on both for the Cyrillic BLOCK (U+0400-U+04FF
+# is the only range whose encoding starts 0xD0-0xD3, and those bytes are never continuation
+# bytes). It does NOT cover Cyrillic Supplement (U+0500+, lead 0xD4) or the Extended blocks
+# (U+2DE0+, U+A640+) - irrelevant for the Ukrainian and Russian this catalogue holds, but
+# the exactness claim is about the block, not about the script.
 CYRILLIC=$'[\xd0-\xd3]'
 
 # THE KNOWN-ANSWER PLANTS FOR THE TWO GREP CHECKS.
