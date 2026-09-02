@@ -64,10 +64,22 @@ export function migrationInferred(): ServerClass {
  * fence in the process. Carrying the stored value changes nothing at all, which is exactly
  * what an undo should change about authority.
  *
- * ONE CALLER, and it has to stay that way, because the argument is a plain `SourceClass`: a
- * caller passing a LITERAL would be minting after all, which is the hole the brand closes.
- * Read it off the row you are restoring and from nowhere else. `model-view.test.ts` asserts
- * the roster.
+ * WHERE THE BRAND RESTS FOR THIS FUNCTION, stated plainly because it moved. Everywhere else
+ * in this module the guarantee is `tsc`'s: `sourceClass: "owner_authored"` does not compile,
+ * and the three casts are the only widenings. Here it is not. This signature is a TOTAL,
+ * UNCONDITIONAL widening from the unbranded union to the brand, so `carriedClass("owner_
+ * authored")` compiles, and nothing about a call site proves the argument came off a row.
+ * The property — promotion impossible to EXPRESS, not merely discouraged — is therefore
+ * carried by two assertions in `model-view.test.ts` and by nothing else: a file roster over
+ * a walk of `src/`, and, because a roster cannot see a SECOND call inside a file already on
+ * it, an emptiness assertion on `carriedClass(` followed by a quote. Read the class off the
+ * row you are restoring and from nowhere else; a literal here is a mint wearing this name.
+ *
+ * The `tsc`-level cure was weighed and is not this round's: branding the STORED value would
+ * have to start at `vault_note_versions.source_class`'s `$type` in `schema.ts` — a file
+ * three sessions share — and every writer of that column passes a `ServerClass`, so the two
+ * brands would have to become a hierarchy. That is a larger change than the hole, and it
+ * costs this module its one import.
  */
 export function carriedClass(stored: SourceClass): ServerClass {
   return mint(stored);

@@ -208,6 +208,12 @@ describe("the three channels", () => {
     // is the hole this roster closes, and it is a roster rather than a comment because the
     // one legitimate caller reads the value off the row it is restoring.
     expect(hits(/\bcarriedClass\b/)).toEqual(["src/lib/vault/grounding.ts", "src/lib/vault/notes.ts"]);
+    // And the argument itself, which the file roster above cannot see: a SECOND call inside
+    // `notes.ts` — precisely where a future `reviseNote` edit would put one — keeps that
+    // roster green while minting a class from a literal. This is the assertion the brand
+    // used to be: `carriedClass("owner_authored")` compiles, so the widening it forbids has
+    // to be forbidden here instead. Read the class off the row; never type one.
+    expect(hits(/carriedClass\(\s*["'`]/)).toEqual([]);
   });
 
   it("keeps the liveness arms side by side in the owner module and nowhere else", () => {
