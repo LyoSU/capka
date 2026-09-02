@@ -74,9 +74,13 @@ const edited = (w: Pick<TurnWrite, "kind" | "revision">) => w.kind === "note" &&
  * history to find it in. `expectedRevision` is what turns that into a refusal (409) instead.
  *
  * A DELETE SENDS NO SUCH THING, because there is nothing to be stale about: the wish is
- * that the row not be there, and a row somebody else already removed satisfies it. That
- * asymmetry is the same one that makes 404 a success for a delete and a failure for a
- * revert.
+ * that the row not be there, and a row somebody else already removed satisfies it.
+ *
+ * A 404 is treated the same way on BOTH verbs, and that is not the asymmetry above leaking:
+ * from this notice a 404 on a revert can only mean the row is gone, because `not_revertable`
+ * — the route's other 404 — is unreachable once `expectedRevision` matches the head. So the
+ * item leaves the notice either way, and the case that genuinely differs is the 409, which
+ * only a revert can receive.
  *
  * The id is ENCODED here, not at the call site: it is part of what "which row" means, and a
  * path built by interpolation somewhere else is the copy that forgets.
