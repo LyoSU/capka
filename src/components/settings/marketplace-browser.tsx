@@ -237,10 +237,11 @@ export function MarketplaceBrowser() {
       {!catalogLoading &&
         selected &&
         sections.map(({ cat, items }) => (
-          <div key={cat} className="space-y-2">
-            <p className="px-1 text-xs font-medium text-muted-foreground">{cat}</p>
+          <div key={cat} className="space-y-1">
+            <p className="text-[13px] font-medium text-muted-foreground">{cat}</p>
+            <div className="divide-y">
             {items.map((c) => (
-              <div key={c.name} className="flex items-start justify-between gap-4 rounded-xl bg-card p-4 shadow-panel">
+              <div key={c.name} className="flex items-start justify-between gap-4 py-4">
                 <div className="flex flex-1 items-start gap-3">
                   <PluginIcon name={c.name} homepage={c.homepage} size={40} />
                   <div className="min-w-0 flex-1 space-y-1">
@@ -290,6 +291,7 @@ export function MarketplaceBrowser() {
                 </div>
               </div>
             ))}
+            </div>
           </div>
         ))}
       {!catalogLoading && selected && catalog.length > 0 && sections.length === 0 && (

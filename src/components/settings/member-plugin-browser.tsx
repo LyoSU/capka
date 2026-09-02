@@ -87,9 +87,9 @@ export default function MemberPluginBrowser() {
       {catalogLoading ? (
         <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : (
-        <div className="space-y-2">
+        <div className="divide-y">
           {filtered.map((c) => (
-            <div key={c.name} className="flex items-center gap-3 rounded-xl bg-card p-3 shadow-panel">
+            <div key={c.name} className="flex items-center gap-3 py-3">
               <PluginIcon name={c.name} homepage={c.homepage} size={36} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

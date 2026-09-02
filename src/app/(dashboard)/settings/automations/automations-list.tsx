@@ -187,7 +187,7 @@ export default function AutomationsList() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />{t("create")}
@@ -196,7 +196,7 @@ export default function AutomationsList() {
       {automations.map((a) => {
         const status = statusOf(a);
         return (
-          <div key={a.id} className="flex items-start gap-3 rounded-xl bg-card p-3.5 shadow-panel">
+          <div key={a.id} className="flex items-start gap-3 border-t py-4">
             <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
               <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             </div>

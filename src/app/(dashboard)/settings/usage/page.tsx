@@ -382,7 +382,7 @@ export default function UsagePage() {
 
               {/* Technical detail — token counts and per-million rates. Collapsed by
                   default: engineer metrics, not what an admin acts on day to day. */}
-              <details className="group rounded-xl bg-card shadow-panel">
+              <details className="group rounded-xl border">
                 <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   {t("technicalDetails")}
                   <span className="text-xs text-muted-foreground/70 group-open:hidden">{t("tokensSummary", { tokens: compact(totalTok) })}</span>
@@ -488,7 +488,7 @@ export default function UsagePage() {
                       return <SettingsEmpty icon={Clock} title={t("noRecentForUser")} hint={t("noRecentForUserHint")} />;
                     }
                     return (
-                      <div className="overflow-hidden rounded-xl bg-card shadow-panel">
+                      <div>
                         {rows.map((r, i) => (
                           <RecentItem key={r.id} row={r} money={moneyPrecise} compact={compact} locale={locale} t={t} border={i > 0} />
                         ))}
@@ -721,8 +721,8 @@ function UsageSkeleton() {
 
 function Stat({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: React.ReactNode }) {
   return (
-    <div className="rounded-xl bg-card p-4 shadow-panel">
-      <p className="text-[13px] text-muted-foreground">{label}</p>
+    <div className="border-t py-3">
+      <p className="text-sm text-muted-foreground">{label}</p>
       <div className="mt-1 flex items-baseline justify-between gap-2">
         <p className="text-xl font-semibold tabular-nums tracking-tight">{value}</p>
         {delta}
@@ -794,7 +794,7 @@ function Breakdown({
     return <SettingsEmpty icon={BarChart3} title={t("emptyBreakdown")} hint={t("emptyBreakdownHint")} />;
   }
   return (
-    <div className="overflow-hidden rounded-xl bg-card shadow-panel">
+    <div>
       {rows.map((r, i) => {
         const share = total > 0 ? r.cost / total : 0;
         const selected = selectedKey === r.key;
@@ -902,7 +902,7 @@ function DailyChart({
           hover meant aiming at a 4px column on a 90-day window, and the browser's
           own <title> tooltip took a second to appear and could not be styled. */}
       <div
-        className="relative rounded-xl bg-card p-3 shadow-panel"
+        className="relative rounded-xl border p-3"
         onPointerMove={(e) => {
           const box = e.currentTarget.getBoundingClientRect();
           const ratio = (e.clientX - box.left - 12) / (box.width - 24);

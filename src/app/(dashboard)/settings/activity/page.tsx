@@ -181,12 +181,12 @@ export default function ActivityPage() {
                   const cs = chips(e);
                   const actor = e.actorName || e.actorEmail || t("systemActor");
                   return (
-                    <div key={e.id} className="flex items-start gap-3 px-4 py-3">
+                    <div key={e.id} className="flex items-start gap-3 py-3.5">
                       <div className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full", GROUP_TINT[grp])}>
                         <Icon className="h-3.5 w-3.5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm">
+                        <p className="text-[15px]">
                           {actionLabel(e.action)}
                           {target ? <span className="font-medium"> {target}</span> : null}
                           {cs.map((c) => (

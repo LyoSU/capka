@@ -220,7 +220,7 @@ function CapabilityRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-micro hover:bg-hover"
+      className="-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-3 rounded-lg px-3 py-3 text-left transition-micro hover:bg-hover"
     >
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(item.capabilityType === "skill" ? "skills" : "connectors")} />
       <span className="min-w-0 flex-1">

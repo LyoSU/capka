@@ -32,10 +32,10 @@ export default function MembersInstallToggle() {
   if (!loaded) return null;
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-card px-4 py-3.5 shadow-panel">
+    <div className="flex items-center justify-between gap-3 border-b py-4">
       <div className="min-w-0">
-        <p className="text-sm font-medium">{t("memberInstallTitle")}</p>
-        <p className="text-[13px] text-muted-foreground">{t("memberInstallHint")}</p>
+        <p className="text-[15px]">{t("memberInstallTitle")}</p>
+        <p className="text-sm text-muted-foreground">{t("memberInstallHint")}</p>
       </div>
       <Switch checked={on} onCheckedChange={toggle} aria-label={t("memberInstallTitle")} />
     </div>

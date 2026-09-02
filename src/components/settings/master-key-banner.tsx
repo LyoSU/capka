@@ -47,7 +47,7 @@ export function MasterKeyBanner() {
   if (!status) {
     return section(
       <SettingsGroup>
-        <div className="flex items-center gap-2.5 px-4 py-3.5">
+        <div className="flex items-center gap-2.5 py-4">
           <Skeleton className="size-4 rounded-full" />
           <Skeleton className="h-4 w-56 rounded" />
         </div>
@@ -127,7 +127,7 @@ export function MasterKeyBanner() {
   // "all is well" looks like a state and not like a footnote.
   return section(
     <SettingsGroup>
-      <div className="flex items-center gap-2.5 px-4 py-3.5 text-sm">
+      <div className="flex items-center gap-2.5 py-4 text-[15px]">
         <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
         {t("secureClean")}
       </div>

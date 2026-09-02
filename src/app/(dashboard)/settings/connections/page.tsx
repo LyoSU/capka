@@ -284,10 +284,10 @@ export default function ConnectionsPage() {
         title={t("listTitle")}
         action={<AddProviderDialog isAdmin={isAdmin} onAdded={fetchConfigs} />}
       >
-        <div className="space-y-2">
+        <div className="divide-y">
           {loading &&
             Array.from({ length: 2 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-xl bg-card px-3 py-2.5 shadow-panel">
+              <div key={i} className="flex items-center gap-2 py-3.5">
                 <Skeleton className="h-4 w-4 rounded" />
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="ml-auto h-4 w-16" />

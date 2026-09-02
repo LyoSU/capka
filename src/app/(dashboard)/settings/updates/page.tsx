@@ -98,10 +98,10 @@ export default function UpdatesSettingsPage() {
           The version is a name, not code: mono only for the real tag and its
           short sha, never for the "development build" sentence. */}
       <SettingsGroup>
-        <div className="px-4 py-3.5">
+        <div className="py-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">{t("running")}</p>
+            <p className="text-[15px]">{t("running")}</p>
             <p className={isDev ? "text-[13px] text-muted-foreground" : "font-mono text-[13px] text-muted-foreground"}>
               {isDev ? t("devBuild") : status!.current}
               {status?.sha ? <span className="ml-1.5 opacity-60">({status.sha.slice(0, 7)})</span> : null}

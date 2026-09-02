@@ -131,7 +131,7 @@ export function TelegramLinkCard() {
         </div>
       ) : linked ? (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-3.5 shadow-panel">
+          <div className="flex items-center gap-2 border-y py-4">
             <Link2 className="h-4 w-4 text-success" />
             <span className="text-sm">
               {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
@@ -158,7 +158,7 @@ export function TelegramLinkCard() {
             </div>
           )}
           {linkCode ? (
-            <div className="space-y-3 rounded-xl bg-card p-4 shadow-panel">
+            <div className="space-y-3 rounded-xl border p-4">
               {botUsername ? (
                 <>
                   <p className="text-sm text-muted-foreground">{t("link.openBotHint")}</p>

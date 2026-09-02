@@ -39,10 +39,10 @@ export function SettingsPage({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-2xl")}>
+    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-3xl")}>
       <div className="space-y-1.5">
-        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-        {description && <p className="text-[15px] leading-relaxed text-muted-foreground">{description}</p>}
+        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+        {description && <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {children}
     </div>
@@ -130,22 +130,22 @@ export function SettingsChoice<K extends string>({
             disabled={disabled}
             onClick={() => onChange(o.key)}
             className={cn(
-              "flex w-full items-start gap-3 px-4 py-3.5 text-left outline-none transition-micro",
-              "hover:bg-hover focus-visible:bg-hover disabled:pointer-events-none disabled:opacity-60",
+              "group/choice flex w-full items-start gap-3 py-4 text-left outline-none transition-micro",
+              "disabled:pointer-events-none disabled:opacity-60",
             )}
           >
             <span
               aria-hidden
               className={cn(
                 "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-micro",
-                on ? "border-foreground" : "border-border-strong",
+                on ? "border-foreground" : "border-border-strong group-hover/choice:border-foreground group-focus-visible/choice:border-foreground",
               )}
             >
               <span className={cn("size-2 rounded-full bg-foreground transition-micro", on ? "scale-100" : "scale-0")} />
             </span>
             <span className="min-w-0 space-y-0.5">
-              <span className="block text-sm font-medium">{o.label}</span>
-              {o.hint && <span className="block text-[13px] leading-relaxed text-muted-foreground">{o.hint}</span>}
+              <span className="block text-[15px]">{o.label}</span>
+              {o.hint && <span className="block text-sm leading-relaxed text-muted-foreground">{o.hint}</span>}
             </span>
           </button>
         );
@@ -179,7 +179,7 @@ export function SettingsSkeleton({
     // `wide` has to mirror SettingsPage: a skeleton fixed at max-w-2xl in front of
     // a max-w-5xl page snaps sideways the moment the real content lands, which is
     // the same jump this component exists to prevent — just on the other axis.
-    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-2xl")} aria-hidden>
+    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-3xl")} aria-hidden>
       {/* `Skeleton`, not hand-rolled `animate-pulse` divs. Tailwind's default pulse
           is a 2s ease-in-out that globals.css already calls out as reading sluggish
           for a loading state — the whole reason `animate-pulse-fast` exists — and
@@ -196,7 +196,7 @@ export function SettingsSkeleton({
         <Skeleton className="h-4 w-24 rounded" />
         <SettingsGroup>
           {Array.from({ length: rows }, (_, i) => (
-            <div key={i} className="flex items-center justify-between gap-4 px-4 py-3.5">
+            <div key={i} className="flex items-center justify-between gap-4 py-4">
               <div className="min-w-0 flex-1 space-y-1.5">
                 <Skeleton className="h-4 w-1/3 rounded" />
                 <Skeleton className="h-3 w-2/3 rounded" />
@@ -250,7 +250,7 @@ export function SettingsError({ message, action }: { message: string; action?: R
     // Same grammar as the chat's ErrorNotice: a calm panel carrying one saturated
     // 20px mark, rather than a tinted slab that shouts before it's been read.
     // Two error looks for one product is one too many.
-    <div role="alert" className="flex items-start gap-2.5 rounded-xl bg-card px-4 py-3 text-sm shadow-panel">
+    <div role="alert" className="flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm">
       <span
         aria-hidden
         className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
@@ -304,15 +304,23 @@ export function ShowMore({ shown, total, onMore }: { shown: number; total: numbe
   );
 }
 
-/** One card holding several rows separated by hairlines, instead of one card
- *  per row. This is what turns a wall of boxes back into a list. */
+/**
+ * Several rows separated by hairlines, laid straight on the page — no box.
+ *
+ * Two generations of this component: first one card per row (a wall of boxes),
+ * then one card per group. The card is gone now too. With a near-white page a
+ * white card on top of it reads as a second surface for no reason, and the
+ * rows' own hairlines already say "these belong together" — which is how the
+ * reference settings screens (claude.ai, macOS) draw a list. The whole settings
+ * area goes through this one component, so the skin lives here alone.
+ */
 export function SettingsGroup({
   children,
   className,
   ...rest
 }: { children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("divide-y overflow-hidden rounded-xl bg-card shadow-panel", className)} {...rest}>
+    <div className={cn("divide-y", className)} {...rest}>
       {children}
     </div>
   );
@@ -323,9 +331,11 @@ export function SettingsGroup({
  * geometry as {@link SettingsGroup}, with padding built in.
  *
  * The settings screens had grown four card skins: `rounded-md border`,
- * `rounded-lg border`, `rounded-xl border`, and the shadow-ringed panel the
- * groups use. Side by side on one page they read as four kinds of thing. There
- * is one kind of thing — a card — and this is its only skin.
+ * `rounded-lg border`, `rounded-xl border`, and a shadow-ringed panel. Side by
+ * side on one page they read as four kinds of thing. There is one kind of thing
+ * — a bordered box for something that is not a list row: a form being filled
+ * in, a warning with its button — and this is its only skin. Lists are NOT
+ * cards; they are {@link SettingsGroup}.
  */
 export function SettingsCard({
   children,
@@ -333,7 +343,7 @@ export function SettingsCard({
   ...rest
 }: { children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("rounded-xl bg-card p-4 shadow-panel", className)} {...rest}>
+    <div className={cn("rounded-xl border p-4", className)} {...rest}>
       {children}
     </div>
   );
@@ -356,7 +366,7 @@ export function SettingsNote({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-start gap-2.5 rounded-xl bg-field px-4 py-3 text-sm leading-relaxed", className)}>
+    <div className={cn("flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm leading-relaxed", className)}>
       {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -420,11 +430,12 @@ export function SettingsRow({
       // from the top of the document.
       tabIndex={id ? -1 : undefined}
       className={cn(
-        "px-4 py-3.5 outline-none transition-colors",
-        onLabelClick && !disabled && "hover:bg-hover",
+        "py-4 outline-none transition-colors",
         // scroll-mt clears the sticky page header when jumped to from search.
         id && "scroll-mt-24",
-        highlighted && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+        // The jump-target tint bleeds 12px past the text column on each side, so
+        // it reads as a spotlight on the row rather than a bar exactly its width.
+        highlighted && "-mx-3 rounded-lg bg-brand-soft px-3",
       )}
     >
       <div className={cn("flex items-center justify-between gap-4", disabled && "opacity-60")}>
@@ -432,15 +443,18 @@ export function SettingsRow({
           className={cn("min-w-0 space-y-0.5", onLabelClick && !disabled && "cursor-pointer select-none")}
           onClick={onLabelClick && !disabled ? onLabelClick : undefined}
         >
+          {/* Regular weight, 15px: on a flat page the label IS the row, and a
+              bold label on every row makes a page of thirty bold lines. Weight is
+              kept for the section title above them. */}
           {labelFor ? (
-            <label htmlFor={labelFor} className="block text-sm font-medium">{title}</label>
+            <label htmlFor={labelFor} className="block text-[15px]">{title}</label>
           ) : (
-            <p className="text-sm font-medium">{title}</p>
+            <p className="text-[15px]">{title}</p>
           )}
-          {/* 13px, not 12: the hint is the sentence a non-technical reader
+          {/* 14px, not 12: the hint is the sentence a non-technical reader
               actually decides by, and it was the smallest text on the page. */}
-          {hint && <p className="text-[13px] leading-relaxed text-muted-foreground">{hint}</p>}
-          {warning && <p className="text-[13px] font-medium text-warning-text">{warning}</p>}
+          {hint && <p className="text-sm leading-relaxed text-muted-foreground">{hint}</p>}
+          {warning && <p className="text-sm font-medium text-warning-text">{warning}</p>}
         </div>
         {control && <div className="shrink-0">{control}</div>}
       </div>

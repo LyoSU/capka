@@ -53,10 +53,9 @@ export function AgentModeSection({
   const anyLocked = CAPABILITY_GROUPS.some(lockedGroup) || personaLocked || sessionLocked;
 
   return (
-    // Same card shape as SettingsGroup (rounded-xl / bg-card): this section sits
-    // directly under one on both pages that use it, and a slightly different
-    // radius on adjacent cards is the kind of mismatch you feel before you see.
-    <div className="space-y-3 rounded-xl bg-card p-4 shadow-panel">
+    // Flat, like every SettingsGroup around it: the settings pages draw rows on
+    // the page, not cards, and this picker sits directly under such rows.
+    <div className="space-y-3">
       <div className="space-y-0.5">
         <Label>{t("label")}</Label>
         <p className="text-xs text-muted-foreground">{t(scope === "org" ? "hintOrg" : `hint.${preset}`)}</p>

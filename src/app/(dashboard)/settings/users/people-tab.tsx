@@ -191,8 +191,8 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
           ? <SettingsEmpty icon={Search} title={t("noMatches")} hint={t("noMatchesHint")} />
           : <SettingsEmpty icon={Users} title={t("empty")} hint={t("emptyHint")} />
       ) : (
-      <div className="overflow-hidden rounded-xl bg-card shadow-panel">
-        <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b px-4 py-2.5 text-[13px] font-medium text-muted-foreground sm:grid">
+      <div>
+        <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b py-2.5 text-sm text-muted-foreground sm:grid">
           <span>{t("colUser")}</span>
           <span>{t("colAccess")}</span>
           <span className="text-right">{t("colUsage")}</span>
@@ -212,13 +212,13 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
               onClick={() => setOpenId(user.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(user.id); } }}
               aria-label={t("openDetails", { name: user.name || user.email })}
-              className="grid cursor-pointer grid-cols-[1fr_auto] items-center gap-4 border-b px-4 py-3 text-left outline-none transition-colors last:border-0 hover:bg-hover focus-visible:bg-hover sm:grid-cols-[1fr_9rem_5rem_9rem_6rem]"
+              className="-mx-3 grid cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-lg px-3 py-3.5 text-left outline-none transition-micro hover:bg-hover focus-visible:bg-hover sm:grid-cols-[1fr_9rem_5rem_9rem_6rem] [&+&]:border-t"
             >
               {/* person */}
               <div className="flex min-w-0 items-center gap-2.5">
                 <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{user.name || user.email}</p>
+                  <p className="truncate text-[15px]">{user.name || user.email}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {user.email}
                     {user.lastActivityAt ? ` · ${t("activePrefix", { when: relTime(locale, user.lastActivityAt) })}` : ""}

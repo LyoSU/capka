@@ -30,7 +30,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
-- Settings: every page is built from one set of blocks (page title, section with its one action on the title line, card of rows, radio choice, note), with three type sizes for page, section and row; the tab/filter switcher is the same control on every page.
+- Settings: every page is built from one set of blocks (page title, section with its one action on the title line, rows divided by hairlines straight on the page instead of cards, radio choice, note), with three type sizes for page, section and row; the tab/filter switcher is the same control on every page.
 - Settings: the sidebar search field is gone; the app sidebar's search button (⌘K) already finds every setting. The people, analytics and activity switchers, the key-mode picker and the sign-in page now use the shared controls.
 - Settings → Providers: the model-filter limits are rows with the value read back in words; "Add provider" sits on the section title. Settings → Security: the encryption-key section now shows its status as a row instead of a heading over nothing.
 - Settings → Agent and Keys & limits: Save appears only once something differs from what is stored, instead of a permanently greyed-out button. The empty "User tiers" section was removed from Keys & limits.

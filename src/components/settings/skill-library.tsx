@@ -372,7 +372,7 @@ function SkillGroup({
           </button>
         }
       />
-      <CollapsibleContent className="space-y-2 overflow-hidden">
+      <CollapsibleContent className="divide-y overflow-hidden">
         {group.skills.map((s) => (
           <SkillRow key={s.id} skill={s} canDelete={s.mine || isAdmin} onToggle={onToggle} onRemove={onRemove} t={t} />
         ))}
@@ -396,7 +396,7 @@ function SkillRow({
 }) {
   const noDescription = !skill.description?.trim();
   return (
-    <div className="flex items-start gap-3 rounded-xl bg-card p-3.5 shadow-panel">
+    <div className="flex items-start gap-3 py-4">
       <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
         <Puzzle className="h-3.5 w-3.5 text-muted-foreground" />
       </div>

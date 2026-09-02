@@ -50,7 +50,7 @@ export function UsageLimitCard() {
   const capped = billing.limits?.windows.filter((w) => w.limit !== null) ?? [];
   if (capped.length === 0) {
     return (
-      <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-3 shadow-panel">
+      <div className="flex items-center gap-2 border-y py-4">
         <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           {t("turns30d", { turns: billing.turns30d })}
@@ -77,7 +77,7 @@ export function UsageLimitCard() {
         )}
       </div>
 
-      <div className="space-y-3 rounded-xl bg-card px-4 py-3.5 shadow-panel">
+      <div className="space-y-3 border-y py-4">
         {capped.map((w) => {
           const committedPct = w.limit ? Math.min(999, Math.round((w.committed / w.limit) * 100)) : 0;
           const reservedPct = w.limit ? Math.round((w.reserved / w.limit) * 100) : 0;
