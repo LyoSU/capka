@@ -1048,6 +1048,7 @@
       "reveal": "Show",
       "hide": "Hide",
       "sensitiveBlurred": "Marked sensitive, so it is hidden here until you show it, and the assistant never reads it.",
+      "sensitiveRow": "{reason} Under {section}, updated {date}.",
       "replacedOn": "It replaced this, saved {date}:",
       "conflictReplacesOn": "Keeping this replaces the fact saved {date}:",
       "trustExplainer": "Each fact is tagged with where it came from, so you can tell what you said from what the assistant worked out.",

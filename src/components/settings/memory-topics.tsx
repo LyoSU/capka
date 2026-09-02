@@ -569,11 +569,32 @@ function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: numb
 function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
   const t = useTranslations("settings.memory");
   const locale = useLocale();
+  // THE ROW'S OWN NAME, when its title is not readable. `aria-hidden` text contributes
+  // nothing to an accessible name, and this row carries no reveal — so without this, two
+  // blurred files are the same string to a screen reader and to voice control, and neither
+  // can be asked for by name (4.1.2, 2.4.4). Built from the reason, the section heading and
+  // the date: material that cannot be a secret. NEVER the title, which would put the words
+  // on the one output channel a blur does not cover.
+  //
+  // Through `useReveal` rather than the flag — the hook exists for a decision that is not
+  // the rendering of the words, and it is what keeps the second reader from appearing here.
+  // `aria-label` overrides the whole subtree, so an unconditional one would take the title
+  // away from every ordinary row.
+  const { shown } = useReveal(topic.title);
   return (
     <div className="py-1">
       <button
         type="button"
         onClick={onOpen}
+        aria-label={
+          shown
+            ? undefined
+            : t("sensitiveRow", {
+                reason: t("sensitiveBlurred"),
+                section: t(SECTION_KEY[topic.section]),
+                date: formatDay(topic.updatedAt, locale),
+              })
+        }
         className="group/topic -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-center gap-x-4 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] sm:gap-x-6"
       >
         {/* Through `Statement`, like every other stored string on this page: a title is

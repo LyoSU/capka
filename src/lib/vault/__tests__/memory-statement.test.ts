@@ -142,6 +142,30 @@ describe("a statement's legibility is decided in one place", () => {
     expect(row).not.toMatch(/<p[\s>]/);
   });
 
+  it("names a blurred list row without naming the file", () => {
+    // Removing the row's reveal made the blur permanent on this surface, and `aria-hidden`
+    // text contributes nothing to an accessible name. So a sensitive row's name was the
+    // reason sentence and the date and nothing else, and two such files were the same
+    // string to a screen reader or to voice control (4.1.2 / 2.4.4).
+    //
+    // The name is therefore explicit, and built from material that cannot be a secret: the
+    // reason, the section heading and the date. NOT the title — an `aria-label` carrying it
+    // would put the exact words on the one output channel the blur cannot cover.
+    //
+    // Gated on the REVEAL and never on the flag: `aria-label` overrides the whole subtree,
+    // so an unconditional one would strip every ordinary row of its title.
+    const owner = readFileSync(OWNER, "utf8");
+    const row = owner.slice(owner.indexOf("function TopicRow"), owner.indexOf("const SECTION_KEY"));
+    const button = codeLines(row).join("\n").match(/<button\b[\s\S]*?>/)?.[0];
+    expect(button).toBeDefined();
+    expect(button).toMatch(/aria-label=/);
+    // The escape hatch this closes: a label that interpolates the very string the row is
+    // blurring. `topic.title` may be READ for its reveal; its `.text` may not travel here.
+    expect(button).not.toMatch(/title\.text/);
+    // Conditional, so a non-sensitive row keeps its own title as its name.
+    expect(button).toMatch(/shown\s*\?|!\s*\w*[Ss]hown/);
+  });
+
   it("gives the open file ONE reveal over its title and its body", () => {
     // The detail view holds a `reveal` for the body — a markdown body cannot go through
     // `Statement`, so the gate is explicit there — and the title's own `Statement` was
