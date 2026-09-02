@@ -1024,6 +1024,12 @@ export const NOTE_EDIT_SAID = {
   renamed: "The file has been renamed. Its text is unchanged.",
   bad_link:
     "Links are not typed into a file. Add one with a node_link block in memory_note_write, or with memory_link.",
+  /** THE SECOND SENTENCE UNDER ONE STATUS, and the only place in this table that happens.
+   *  Both are `bad_link`: the edit is wrong about a link either way, which is what the status
+   *  is for. But the two are wrong in opposite directions — one invents a link, one destroys
+   *  half of one — and the advice cannot be shared, because "do not type links" says nothing
+   *  useful to a model that was trying to delete a sentence next to one. */
+  split_link: "That edit would cut through a link. Select the whole [[link]] in old_str, or leave it out.",
   too_long: "That would make the file longer than a memory file may be. Start a second file on the subject instead.",
   title_taken: "A file with that title already exists; open it and edit it instead.",
   not_readable:
@@ -1110,6 +1116,8 @@ function editRefusal(r: Exclude<EditResult, { ok: true }>, revision: number, giv
       return { status: "ambiguous_link", said: saidAmbiguousLink(r.title) };
     case "bad_link":
       return { status: "bad_link", said: NOTE_EDIT_SAID.bad_link };
+    case "split_link":
+      return { status: "bad_link", said: NOTE_EDIT_SAID.split_link };
   }
 }
 

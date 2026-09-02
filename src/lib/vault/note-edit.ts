@@ -1,4 +1,4 @@
-import { UNRESOLVED_LINK, edgeIdsIn, edgeToken } from "./links";
+import { EDGE_TOKEN_RE, UNRESOLVED_LINK, edgeIdsIn, edgeToken } from "./links";
 
 /**
  * THE ARITHMETIC OF AN IN-PLACE NOTE EDIT — pure, no database, no mint, no turn context.
@@ -37,6 +37,11 @@ export type EditRefusal =
   /** A canonical token appeared in the replacement text without having been in the text it
    *  replaces. Links are not typed into existence. */
   | { ok: false; reason: "bad_link" }
+  /** The edit would leave a `[[capka-edge:` that no longer closes — a token cut in half by a
+   *  match that started or ended inside one, or a half-written one in the replacement text.
+   *  A severed token stops matching the pattern, so the raw edge id renders verbatim on
+   *  every surface, and the link counts as removed on the way past. */
+  | { ok: false; reason: "split_link" }
   | { ok: false; reason: "no_match" }
   /** The 1-based lines each occurrence starts on, so the reply can say where to add
    *  context. */
@@ -140,6 +145,34 @@ export function mapRenderedToStored(
   });
   return ambiguous === null ? { ok: true, text } : { ok: false, reason: "ambiguous_link", title: ambiguous };
 }
+
+/**
+ * THE STORED SPAN OF EVERY COMPLETE EDGE TOKEN, so a splice can be checked against them.
+ *
+ * A token is the one region of a body that has no interior a text edit may address: it is an
+ * opaque id with brackets, and half of one is not a shorter link but a printed id. So an edit
+ * may replace a token WHOLE, and may span one, and may not begin or end inside one.
+ */
+function tokenSpans(body: string): { start: number; end: number }[] {
+  const re = new RegExp(EDGE_TOKEN_RE.source, "g");
+  const out: { start: number; end: number }[] = [];
+  for (const m of body.matchAll(re)) out.push({ start: m.index, end: m.index + m[0].length });
+  return out;
+}
+
+/** How many `[[capka-edge:` openings a body holds that no complete token accounts for. A
+ *  COUNT rather than a presence test: a body that somehow already holds a severed token must
+ *  stay editable everywhere else, and refusing every edit to it is the one way to make the
+ *  damage permanent. What is forbidden is ADDING one. */
+function orphanTokenCount(body: string): number {
+  const rest = body.replace(new RegExp(EDGE_TOKEN_RE.source, "g"), "");
+  return rest.split("[[capka-edge:").length - 1;
+}
+
+/** Whether a splice at `[start, end)` would cut through a token of `body`. Touching a
+ *  boundary is fine — that is replacing the token whole, or the text beside it. */
+const cutsAToken = (body: string, start: number, end: number): boolean =>
+  tokenSpans(body).some((t) => (start > t.start && start < t.end) || (end > t.start && end < t.end));
 
 /** Every start offset of `needle` in `haystack`. Overlapping occurrences count once each
  *  from where they start, which is what a line report has to say. */
@@ -263,7 +296,14 @@ export function applyStrReplace(a: {
   }
 
   const [span] = spans;
+  // TOKEN-ATOMIC, and checked on the SPAN before the splice rather than on the result alone:
+  // `droppedLinks` reads a severed token as an absent one and the writer would then close a
+  // live edge the person never asked to remove, so the refusal has to come first.
+  if (cutsAToken(a.storedBody, span.start, span.end)) return { ok: false, reason: "split_link" };
   const body = a.storedBody.slice(0, span.start) + mappedNew.text + a.storedBody.slice(span.end);
+  // The second half: replacement text carrying a `[[capka-edge:` that never closes. It is
+  // not a complete token, so the `bad_link` check above does not see it, and it prints an id.
+  if (orphanTokenCount(body) > orphanTokenCount(a.storedBody)) return { ok: false, reason: "split_link" };
   return {
     ok: true,
     body,
@@ -296,9 +336,13 @@ export function applyInsert(a: { storedBody: string; insertLine: number; insertT
   const text = a.insertText.replace(/\r?\n$/, "");
   const added = text.split("\n");
   const next = [...lines.slice(0, a.insertLine), ...added, ...lines.slice(a.insertLine)];
+  const body = next.join("\n");
+  // An insert lands on whole lines and a token holds no newline, so it cannot CUT one. What
+  // it can still do is carry a half-written token in its own text.
+  if (orphanTokenCount(body) > orphanTokenCount(a.storedBody)) return { ok: false, reason: "split_link" };
   return {
     ok: true,
-    body: next.join("\n"),
+    body,
     // An insert adds text; it can drop no token, so there is nothing to close.
     linksRemoved: [],
     changedFrom: a.insertLine + 1,

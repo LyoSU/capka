@@ -113,6 +113,88 @@ describe("str_replace", () => {
     expect(r.linksRemoved).toEqual([]);
   });
 
+  it("refuses an edit whose match STARTS inside a stored token", () => {
+    // The model wants to rewrite the words after a link and copies the closing brackets with
+    // them. Byte-exact matching finds that inside the token, and splicing there leaves half a
+    // token: it no longer matches the pattern, so the raw edge id renders verbatim to the
+    // model and to the person's memory page, and the link counts as removed on the way out.
+    const stored = `Ask Olena about ${edgeToken(E1)} and Payroll.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "]] and Payroll.",
+      newStr: ".",
+    });
+    expect(r).toEqual({ ok: false, reason: "split_link" });
+  });
+
+  it("refuses an edit whose match ENDS inside a stored token", () => {
+    const stored = `Intro ${edgeToken(E1)} outro.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Intro [[capka",
+      newStr: "Intro ",
+    });
+    expect(r).toEqual({ ok: false, reason: "split_link" });
+  });
+
+  it("refuses replacement text that carries a half-written token", () => {
+    // Not a complete token, so the `bad_link` check does not see it - but it leaves the body
+    // with a `[[capka-edge:` that resolves to nothing and prints an id.
+    const r = applyStrReplace({
+      storedBody: "one two",
+      edges: [],
+      oldStr: "two",
+      newStr: "see [[capka-edge:abc",
+    });
+    expect(r).toEqual({ ok: false, reason: "split_link" });
+    expect(applyInsert({ storedBody: "one", insertLine: 1, insertText: "[[capka-edge:abc" })).toEqual({
+      ok: false,
+      reason: "split_link",
+    });
+  });
+
+  it("still allows an edit that replaces a WHOLE token, and one that spans one", () => {
+    // The control: the guard is about cutting a token, not about touching one. A rendered
+    // link selected whole is still removable, and text on both sides of one is still editable.
+    const stored = `Ask Olena about ${edgeToken(E1)} and Payroll.`;
+    const whole = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "[[Reporting]] and Payroll.",
+      newStr: "nothing.",
+    });
+    if (!whole.ok) throw new Error(`expected ok, got ${whole.reason}`);
+    expect(whole.body).toBe("Ask Olena about nothing.");
+    expect(whole.linksRemoved).toEqual([E1]);
+
+    const around = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Ask Olena about [[Reporting]] and Payroll.",
+      newStr: "Ask Olena about [[Reporting]] and nothing else.",
+    });
+    if (!around.ok) throw new Error(`expected ok, got ${around.reason}`);
+    expect(around.body).toBe(`Ask Olena about ${edgeToken(E1)} and nothing else.`);
+    expect(around.linksRemoved).toEqual([]);
+  });
+
+  it("a body that is ALREADY broken stays editable elsewhere", () => {
+    // The guard compares the count before and after, not the presence after: a file that
+    // somehow holds a severed token must not become impossible to repair, and refusing every
+    // edit to it is exactly that.
+    const stored = "Broken [[capka-edge:abc and a second sentence.";
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [],
+      oldStr: "a second sentence.",
+      newStr: "another sentence.",
+    });
+    if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
+    expect(r.body).toBe("Broken [[capka-edge:abc and another sentence.");
+  });
+
   it("refuses a canonical token typed into new_str that old_str did not carry", () => {
     const r = applyStrReplace({
       storedBody: "plain body",
