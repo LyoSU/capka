@@ -542,7 +542,15 @@ async function hydrateFacts(spaceId: string, userId: string, heads: HeadRow[]): 
  * A SCOPE'S TOPIC FILES, the facts under each, and the facts under none.
  *
  * LIVE NOTES, of both kinds, joined to their HEAD VERSION — see `TopicView` for why the
- * kind is not filtered. Head-ness is `revision = current_revision` and never the
+ * kind is not filtered. The one thing the kind decides is EMPTINESS: a `memory_topic`
+ * container with no prose and no facts is dropped, which is the same `count > 0` reasoning
+ * `listManifestTopics` applies to the manifest, arrived at from the page's side. Every
+ * `memory_note_write` naming a topic mints such a container, so listing them all puts a
+ * title-and-a-date row beside every file the person actually got. A plain `note` is never
+ * dropped: an empty one is a file somebody made and is the only surface it can be deleted
+ * from, and a container that holds anything at all still has a row to open.
+ *
+ * Head-ness is `revision = current_revision` and never the
  * `current_version_id` pointer, for the reason that column's own docstring gives: the
  * pointer is legitimately NULL for a statement or two inside both note writers, and a
  * reader that joined on it would answer "no such note" for a note that exists.
@@ -570,6 +578,7 @@ async function topicsOf(
   const noteRows = await db
     .select({
       id: vaultNotes.id,
+      kind: vaultNotes.kind,
       section: vaultNotes.section,
       revision: vaultNotes.currentRevision,
       title: vaultNoteVersions.title,
@@ -621,6 +630,13 @@ async function topicsOf(
   const topics: TopicView[] = [];
   for (const n of noteRows) {
     const body = await renderBody(n.bodyMarkdown, spaceId);
+    const factsTotal = filedUnder.get(n.id)?.length ?? 0;
+    // The emptiness gate, measured on the RENDERED body rather than the stored markdown —
+    // what the reader would see is what decides whether there is a row worth opening. A
+    // container holding only a token therefore keeps its row: the token renders as the
+    // removed-link text, which is content, and the row is where a person deletes the file.
+    // See the docstring for why only a container is droppable at all.
+    if (n.kind === "memory_topic" && !body.trim() && !factsTotal) continue;
     topics.push({
       id: n.id,
       section: n.section,
@@ -631,7 +647,7 @@ async function topicsOf(
       updatedAt: n.createdAt.toISOString(),
       trust: trustTagOf(n.sourceClass, n.provenance),
       facts: viewsOf(slices.get(n.id) ?? []),
-      factsTotal: filedUnder.get(n.id)?.length ?? 0,
+      factsTotal,
     });
   }
   const order = (s: TopicSection) => TOPIC_SECTIONS.indexOf(s);

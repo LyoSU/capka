@@ -13,12 +13,16 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *  rather than none, a topic's row says what its file opens with, and deleting a file does
  *  not take the facts filed under it. */
 import { db, pool } from "@/lib/db";
+import { makeTurnTaint } from "@/lib/tasks/turn-taint";
+import { makeVaultBudget } from "../budget";
 import { attachEvidence, confirmClaim, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { proposeCandidate } from "../candidates";
 import { linkNodes } from "../edges";
+import { makeHandleMap } from "../handles";
 import { UNRESOLVED_LINK, edgeToken } from "../links";
 import { createNote, forgetNote, restoreNote } from "../notes";
+import { noteWrite, type WriteCtx } from "../write-tools";
 import { getOrCreateSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 import {
@@ -84,6 +88,23 @@ const seedSupersede = async (
   }
   return upd;
 };
+
+/** The agent's own writing context, for the one case here that has to go through the TOOL
+ *  rather than through a fixture: what the page shows after `memory_note_write` is a fact
+ *  about the pair, and a fixture that minted the container itself could not see the pair
+ *  disagree. Untainted and project-less — the fence and the scope arms are `write-tools`'
+ *  own subject. */
+const agentCtx = (userSpaceId: string): WriteCtx => ({
+  userSpaceId,
+  projectSpaceId: null,
+  handles: makeHandleMap(),
+  taint: makeTurnTaint({ messageId: `${P}msg`, seeded: false, write: async () => {} }),
+  budget: makeVaultBudget(),
+  taskId: `${P}task`,
+  messageId: `${P}msg`,
+  userTurnText: "Write down that Acme pays net 30 from the invoice date.",
+  actor: { kind: "agent" },
+});
 
 /** A file whose body LINKS a fact, in the shape `memory_link` writes one: the edge and the
  *  token that mentions it inside one transaction, the edge created between the note row that
@@ -589,6 +610,25 @@ run("vault: memory page projection", () => {
     // The CONTROL: it is not ALSO reported under a topic. A membership read that fell back
     // to "everything" for a note with no rows would satisfy the assertion above.
     expect(scope.topics.flatMap((t) => t.facts)).toEqual([]);
+  });
+
+  it("a file the agent saves under a topic is ONE row, not a row plus a blank one", async () => {
+    // The manifest steers the model to `memory_note_write` with a `topic` in the person's own
+    // words, and every such call resolves a CONTAINER: a title, a `topic_key`, an empty body
+    // and no facts. Listed as a file, that container is a row with nothing under it — a title
+    // and a date — beside the file the person actually got.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const r = await noteWrite({
+      op: { kind: "create", scope: "user" },
+      title: "Acme payment terms",
+      content: [{ kind: "markdown", text: "Net 30 from the invoice date." }],
+      grounding: { kind: "agent_inference" },
+      topic: "Acme",
+      ctx: agentCtx(spaceId),
+    });
+    expect(r.status).toBe("created");
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.topics.map((t) => t.title.text)).toEqual(["Acme payment terms"]);
   });
 
   it("caps the UNFILED list and reports its count independently of the cap", async () => {
