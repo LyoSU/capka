@@ -144,10 +144,15 @@ export type ExtractionOutcome =
   | {
       ok: true;
       /** Positional, and holes are kept. `null` marks an entry the model returned that
-       *  carried no usable statement. Compacting the array here would renumber the
-       *  entries after it — and the index is half of the caller's idempotency key, so a
-       *  retry of the same finished extraction would write duplicates instead of being
-       *  the no-op the ledger's unique index makes it. The hole is the invariant. */
+       *  carried no usable statement.
+       *
+       *  WHAT THE ORDINAL IS FOR, now that the ledger and its idempotency key are gone:
+       *  it is the ONLY name a dropped item has. `runExtraction` logs a drop — a hole, a
+       *  project-scoped item with no project, a refused untrusted fact, a write that threw
+       *  — as `{ messageId, ordinal }` and NEVER as the statement, because the text is the
+       *  one thing an operator's log may not carry. Compacting here would renumber every
+       *  entry after the hole, so the same turn re-run would report a different item under
+       *  the same number and the log would name the wrong fact. The hole is the invariant. */
       items: (ExtractedItem | null)[];
     }
   | { ok: false; reason: ExtractionFailure; detail?: Record<string, unknown> };

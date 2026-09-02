@@ -543,9 +543,11 @@ function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: numb
  * agent writes prose into it, and it is a NUMBER — nothing about it can be sensitive, which
  * the first linked fact's statement (the other candidate) very much can be.
  *
- * THE DATE IS NOT ON ITS OWN COLUMN. A right-aligned stamp needs a width that fits «29
- * a long-form Ukrainian date and "29 August" alike, which on a narrow pane is width taken from the title —
- * the one thing the reader is scanning. It sits under the preview as a caption instead.
+ * THE DATE GETS ITS OWN COLUMN ONLY FROM 640px UP. A right-aligned stamp has to be wide
+ * enough for the longest date the reader's language produces — a long-form Ukrainian date is
+ * several characters wider than "29 August" — and on a narrow pane that width comes out of
+ * the title, the one thing the reader is scanning. So below `sm` the date drops to the
+ * second row as a caption under the title, and above it takes the third column.
  *
  * THE HOVER IS AN INSET ROUNDED SURFACE, not a flush band. `-mx-3 px-3` is what makes both
  * halves of that true at once: the highlight is wider than the text on both sides, so no

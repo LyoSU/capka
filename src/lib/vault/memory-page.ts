@@ -366,7 +366,8 @@ function sourceOf(
  *
  * `legacy_confirmed` shares the `user_direct` arm because it means the same thing to the
  * person reading it: a pre-cutover claim they confirmed on this page IS something they
- * told Capka. That is a display equivalence, not a class equivalence — the two are still
+ * told the assistant — the same words the page itself uses for it, rather than the product
+ * name. That is a display equivalence, not a class equivalence: the two are still
  * different values in `source_class`, and `CLASS_RANK` in `write-tools.ts` is where their
  * shared authority is expressed for the supersede decision.
  *

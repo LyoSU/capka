@@ -253,14 +253,15 @@ export default function MemoryPage() {
       });
   };
 
-  // `load` has more than one caller — the mount effect, every `onChanged` a child fires
-  // after a delete or a confirm, and the composer twice per turn — so a sequence token has
-  // to live outside any one of them. The ref holds whichever request is currently allowed
-  // to win: starting a new one aborts whatever it is still holding, so a re-read fired
-  // while an older one is in flight can no longer have the older response land second and
-  // overwrite the newer one. Aborting also turns a failing STALE request into a no-op
-  // instead of a false "load failed" panel that replaces the whole page — including the
-  // composer — after a newer request already succeeded.
+  // `load` has more than one caller — the mount effect, and every `onChanged` a child
+  // fires after a delete, an undo or a confirm — so a sequence token has to live outside
+  // any one of them. A delete and its Undo are two of those calls in quick succession,
+  // which is the pair that makes the order matter. The ref holds whichever request is
+  // currently allowed to win: starting a new one aborts whatever it is still holding, so a
+  // re-read fired while an older one is in flight can no longer have the older response
+  // land second and overwrite the newer one. Aborting also turns a failing STALE request
+  // into a no-op instead of a false "load failed" panel that replaces the whole page after
+  // a newer request already succeeded.
   const inFlight = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -290,9 +291,9 @@ export default function MemoryPage() {
     return () => inFlight.current?.abort();
   }, [load]);
 
-  // WHICH FILE IS OPEN, by note id, and it survives a re-read: the composer's turn edits
-  // the file the person is looking at, so a state keyed on the object rather than the id
-  // would close the detail view every time the list refreshed. A file that was deleted
+  // WHICH FILE IS OPEN, by note id, and it survives a re-read: a per-fact delete inside
+  // the open file re-reads the whole page, so a state keyed on the object rather than the
+  // id would close the detail view every time the list refreshed. A file that was deleted
   // between two reads resolves to `undefined` and the list comes back, which is the right
   // answer — the thing being viewed is gone.
   const [openId, setOpenId] = useState<string | null>(null);

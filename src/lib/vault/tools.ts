@@ -36,9 +36,14 @@ import { factWrite, memoryFile, memoryForget, memoryLink, noteWrite, type WriteC
  * the one thing the model needs to know about what it did not get.
  *
  * `title` and `topic` are `null` on a claim. `title` because a claim has no title — it is
- * one sentence. `topic` because the mint's claim arm has no containing-topic lookup: the
- * label a note carries is the note's OWN label when it is a topic container, and naming a
- * claim's parent topic needs the `contains` edge read, not a wider projection.
+ * one sentence. `topic` is a COST DECISION about this projection, and no longer a statement
+ * that the lookup does not exist: `openClaimForModel` performs exactly it (`note_claims`
+ * joined to the container's label), so `memory_open` on a handle from these results does
+ * name the topic. What search will not do is run that join per ROW — this list is capped in
+ * the tens and re-sent on every later step of the same tool-calling loop, so a field the
+ * model can ask for one row at a time is not worth a join and a wider payload for all of
+ * them. §4.2's example shows a non-null topic here; filling it is a slice-3 change, not a
+ * missing read.
  *
  * The whole thing goes through `ctx.budget.emit`, which is what makes the per-turn ceiling
  * reachable at all — every byte here is re-sent on every later step of the same

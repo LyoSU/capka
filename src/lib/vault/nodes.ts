@@ -135,13 +135,15 @@ export async function deleteNode(
  * un-timestamped restore would have to reopen every edge of the node, which is how an undo
  * resurrects relationships nobody asked to have back.
  *
- * WHY THE EDGES MUST COME BACK AT ALL, since `resolveTopic`'s revive arm deliberately does
- * not bring them: `containsParity` compares `note_claims` against LIVE `contains` edges,
- * scoped to LIVE nodes. While the topic's node is a tombstone the pair is out of scope and
- * agrees; the moment the node is live again with its edges still closed, every fact filed
- * under it reads as "only in note_claims" — and `assertContainsParity` throws inside the
- * next `contains` write anywhere in that space, outside production. So a restore that
- * skipped this would not merely lose a relationship, it would poison the next write.
+ * WHY THE EDGES MUST COME BACK AT ALL — and it is the reason `resolveTopic`'s revive arm
+ * calls this function instead of clearing the tombstone itself, which is what it used to do:
+ * `containsParity` compares `note_claims` against LIVE `contains` edges, scoped to LIVE
+ * nodes. While the topic's node is a tombstone the pair is out of scope and agrees; the
+ * moment the node is live again with its edges still closed, every fact filed under it reads
+ * as "only in note_claims" — and `assertContainsParity` throws inside the next `contains`
+ * write anywhere in that space, outside production. So a restore that skipped this would not
+ * merely lose a relationship, it would poison the next write. Every path that brings a node
+ * back therefore comes through here.
  *
  * `false` when nothing matched: the node is already live, or it is not in this space. A
  * caller that reported that as a failure would tell a person their undo broke for a row
@@ -150,8 +152,9 @@ export async function deleteNode(
  * THE PROJECTION IS THE CALLER'S HALF, which is the one asymmetry with `deleteNode` —
  * `unprojectNode` is kind-blind and the two re-projectors are not (`projectNoteDoc`,
  * `projectClaimDoc`), so a switch here would be this module deciding a question the
- * subtype services own. `resolveTopic`'s revive arm already sets that precedent: it clears
- * the tombstone and calls `projectNoteDoc` itself.
+ * subtype services own. All three callers hold that half themselves: `restoreNote` and
+ * `resolveTopic`'s revive arm call `projectNoteDoc`, `restoreClaim` calls
+ * `projectClaimDoc`.
  */
 export async function restoreNode(
   nodeId: string,
