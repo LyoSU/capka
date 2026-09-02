@@ -36,7 +36,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
-- The assistant saves to memory immediately as short topic files; everything it saves is on the memory page to open, undo or delete. Similar topics are not merged automatically yet.
+- Similar topics are not merged automatically yet; the assistant edits the existing file instead of opening a second one.
 - Opening an existing chat shows a quiet transcript skeleton until its history arrives, instead of an empty pane.
 - Images in replies load into a reserved box and fade in; a broken image shows a labelled chip instead of disappearing.
 - Markdown tables in replies drop the grey header band, take their content width, use tabular digits, and show their copy/download controls on hover.
