@@ -226,9 +226,11 @@
   --hover: oklch(0.928 0.004 88);
   --hover-strong: oklch(0.898 0.006 92);
   /* The ONE hue the palette spends. Graphite stays achromatic for identity and
-     hierarchy; this cool ink-blue is reserved for "the thing you act on next":
-     the send button, the focus ring, the unread dot, a selected chip. Never a
-     background wash, never a heading, never decoration — the moment it appears
+     hierarchy; this cool ink-blue is reserved for the two signals nothing else
+     can carry: the focus ring and the unread dot. Not the send button — that is
+     ink, as in ChatGPT and Codex; a lone saturated disc on an achromatic page
+     read as a foreign object. Never a background wash, never a heading, never
+     decoration — the moment it appears
      in a second role it stops meaning anything. Cool against the warm paper on
      purpose: the temperature contrast is what makes it read as intentional
      rather than as a leftover default. 0.47 L: 5.3:1 on the page, 5.8:1 under

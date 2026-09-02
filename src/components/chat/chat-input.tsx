@@ -342,7 +342,7 @@ export function ChatInput({
                 <Hint label={isLoading ? t("queue") : t("send")}>
                   <Button
                     size="icon"
-                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full bg-brand text-brand-foreground transition-transform hover:bg-brand/90 active:scale-90"
+                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full transition-transform active:scale-90"
                     disabled={!canSend}
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send.
