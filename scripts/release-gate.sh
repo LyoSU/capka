@@ -12,8 +12,25 @@
 # has, Ukrainian text in code rather than in the catalogue, a symbol deleted everywhere but
 # one reference, an empty Unreleased section, and a red typecheck.
 
-set -uo pipefail
-cd "$(dirname "$0")/.."
+# `-e` so a command nobody wrapped in an `if` stops the run instead of being skipped
+# silently; every check below is written as a condition or with `|| rc=$?`, so `-e` never
+# fires on an ordinary red check and all eight still run. `-u` catches a typo'd variable
+# name, which in a gate reads as an empty value and therefore as agreement.
+set -euo pipefail
+
+# GUARDED, because the two grep checks below scan RELATIVE paths: from the wrong directory
+# `src/` does not exist, grep says so on stderr, and an unguarded script would carry on and
+# report the resulting silence as a clean tree. `exit 2` rather than 1 - this is the gate
+# failing to run, not a tree failing a check.
+cd "$(dirname "$0")/.." || { echo "FAIL  cannot cd to the repository root" >&2; exit 2; }
+[ -f package.json ] || { echo "FAIL  $(pwd) is not the repository root (no package.json)" >&2; exit 2; }
+
+# One scratch tree per run, so two concurrent runs never read each other's evidence - up to
+# five sessions share this working directory.
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/release-gate.XXXXXX")
+trap 'rm -rf "$SCRATCH"' EXIT
+CONTROL="$SCRATCH/control"
+mkdir -p "$CONTROL"
 
 fails=0
 pass() { printf 'PASS  %s\n' "$1"; }
@@ -23,6 +40,24 @@ fail() { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
 # its UTF-8 lead bytes under LC_ALL=C is exact on both (U+0400-U+04FF is the only range
 # whose encoding starts 0xD0-0xD3, and those bytes are never continuation bytes).
 CYRILLIC=$'[\xd0-\xd3]'
+
+# THE KNOWN-ANSWER PLANTS FOR THE TWO GREP CHECKS.
+#
+# A grep check answers with SILENCE, and silence is produced by a clean tree and by a grep
+# that never ran - a missing directory, the wrong working directory, a shim that dies on the
+# pattern. Both are `PASS` to a script that only asks whether the output was empty. So each
+# grep check runs its pattern against a file that MUST match first, and fails if it does
+# not: a check that cannot go red is decoration.
+printf 'const s = "%s";\n' 'Привіт' > "$CONTROL/cyrillic-plant.ts"
+printf 'resolveMemoryChat memory-composer memory-chat\n' > "$CONTROL/symbol-plant.ts"
+
+# Run a grep and SAY WHAT ITS EXIT STATUS MEANT, instead of inferring it from empty output.
+# 0 = matched, 1 = no match, 2+ = grep itself failed. Sets `g_rc`, `g_out`, `g_err`.
+grep_scan() {
+  g_rc=0
+  g_err=$(mktemp "$SCRATCH/grep-err.XXXXXX")
+  g_out=$("$@" 2>"$g_err") || g_rc=$?
+}
 
 echo "== 1. migrations are generated and the snapshots agree =="
 if ./node_modules/.bin/drizzle-kit check >/tmp/rg-check.log 2>&1; then
@@ -111,26 +146,48 @@ echo "== 5. no Cyrillic in src/ outside the exception list =="
 # UI copy lives in messages/*.json. The exceptions are the locale roster itself, the error
 # page that renders before any provider is mounted, and the extraction/eval corpus, whose
 # specimens are Ukrainian by design.
-offenders=$(LC_ALL=C grep -rlI "$CYRILLIC" src/ 2>/dev/null | grep -v \
-  -e '^src/i18n/config\.ts$' \
-  -e '^src/app/global-error\.tsx$' \
-  -e '^src/lib/vault/extract\.ts$' \
-  -e '^src/lib/vault/__tests__/extract\.test\.ts$' \
-  -e '^src/lib/vault/eval/' | sort)
-if [ -z "$offenders" ]; then
-  pass "no Cyrillic outside the 5 exceptions"
+# The positive control first: the same pattern, the same grep, against a planted file.
+LC_ALL=C grep_scan grep -rlI "$CYRILLIC" "$CONTROL"
+if [ "$g_rc" -ne 0 ]; then
+  fail "control: the Cyrillic pattern did not match a planted file (grep exit $g_rc)"$'\n'"$(cat "$g_err")"
 else
-  fail "Cyrillic in code:"$'\n'"$offenders"
+  LC_ALL=C grep_scan grep -rlI "$CYRILLIC" src/
+  case "$g_rc" in
+    0)
+      offenders=$(printf '%s\n' "$g_out" | grep -v \
+        -e '^src/i18n/config\.ts$' \
+        -e '^src/app/global-error\.tsx$' \
+        -e '^src/lib/vault/extract\.ts$' \
+        -e '^src/lib/vault/__tests__/extract\.test\.ts$' \
+        -e '^src/lib/vault/eval/' | sort) || offenders=""
+      if [ -z "$offenders" ]; then
+        pass "no Cyrillic outside the 5 exceptions ($(printf '%s\n' "$g_out" | wc -l | tr -d ' ') matched file(s), all excepted)"
+      else
+        fail "Cyrillic in code:"$'\n'"$offenders"
+      fi
+      ;;
+    1) pass "no Cyrillic anywhere under src/" ;;
+    *) fail "grep failed while scanning src/ (exit $g_rc):"$'\n'"$(cat "$g_err")" ;;
+  esac
 fi
 
 echo "== 6. the removed memory-chat symbols are gone everywhere =="
 # `chats.kind` and its unique index were dropped; a surviving reference means one of the
 # two halves of that removal did not land.
 for sym in resolveMemoryChat memory-composer memory-chat; do
-  hits=$(grep -rn "$sym" src drizzle 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$hits" = "0" ]; then pass "$sym: 0 hits in src drizzle"; else
-    fail "$sym: $hits hit(s)"$'\n'"$(grep -rn "$sym" src drizzle 2>/dev/null | head -5)"
+  # Control first, for the same reason as check 5: 0 hits is also what a grep that never
+  # ran reports, and this symbol is the one file where it must be found.
+  grep_scan grep -rn "$sym" "$CONTROL"
+  if [ "$g_rc" -ne 0 ]; then
+    fail "control: '$sym' was not found in the planted file (grep exit $g_rc)"$'\n'"$(cat "$g_err")"
+    continue
   fi
+  grep_scan grep -rn "$sym" src drizzle
+  case "$g_rc" in
+    0) fail "$sym: $(printf '%s\n' "$g_out" | wc -l | tr -d ' ') hit(s)"$'\n'"$(printf '%s\n' "$g_out" | head -5)" ;;
+    1) pass "$sym: 0 hits in src drizzle" ;;
+    *) fail "grep failed while scanning for '$sym' (exit $g_rc):"$'\n'"$(cat "$g_err")" ;;
+  esac
 done
 
 echo "== 7. CHANGELOG has a non-empty [Unreleased] section =="
