@@ -156,6 +156,17 @@ run("memory_open", () => {
     expect(r.body).not.toContain("capka-edge");
     expect(r.links).toEqual([expect.stringMatching(HANDLE_RE)]);
     expect(r.cursor).toBeNull();
+
+    // WITH LINE NUMBERS, `cat -n` style, because `insert_line` and the duplicate refusal
+    // both address a line: a model that has to count them itself gets it wrong.
+    expect(r.body.split("\n")).toEqual([
+      "     1\tThe deadline is the fifteenth.",
+      "     2\t",
+      "     3\t[[Reporting]]",
+    ]);
+    // And the header says which lines these are, so a paged read is still addressable.
+    expect(r.said).toContain("lines 1-3 of 3");
+    expect(r.said).toContain("«Deadlines»");
   });
 
   it("a link to an off-channel note renders as text and never as its title", async () => {
@@ -231,16 +242,24 @@ run("memory_open", () => {
     // NOT SPLIT MID-CHARACTER: a replacement character is what a byte-offset cut produces.
     expect(first.body).not.toContain("�");
 
+    // ONE LINE, longer than a page: the continuation keeps the SAME line number, because a
+    // second number for one line would be an address that addresses nothing.
+    expect(first.body.startsWith("     1\t")).toBe(true);
+
     // The pages CONCATENATE to the stored body — which is the property a cursor has to have
-    // and the one a "roughly right" implementation loses.
-    let assembled = first.body;
+    // and the one a "roughly right" implementation loses. The line prefix is stripped back
+    // off, which is the only thing the numbering added.
+    const unnumber = (page: string) => page.replace(/^ *\d+\t/, "");
+    let assembled = unnumber(first.body);
     let cursor = first.cursor;
     let pages = 1;
     while (cursor) {
       const next = await memoryOpen({ handle: note.handle, cursor, ctx: ctx() });
       if (next.status !== "opened" || next.kind !== "note") throw new Error("narrowing");
       expect(next.body).not.toContain("�");
-      assembled += next.body;
+      expect(next.body.startsWith("     1\t")).toBe(true);
+      expect(Buffer.byteLength(next.body, "utf8")).toBeLessThanOrEqual(MEMORY_OPEN_MAX_BYTES);
+      assembled += unnumber(next.body);
       cursor = next.cursor;
       pages += 1;
       if (pages > 10) throw new Error("cursor did not terminate");
@@ -250,17 +269,35 @@ run("memory_open", () => {
     expect(assembled.endsWith("TAIL")).toBe(true);
   });
 
+  it("pages a multi-line note on LINE boundaries and numbers each page from where it is", async () => {
+    const note = await seedNote(PS, "Long note", ["alpha", "beta", "gamma"].join("\n"));
+    const first = await memoryOpen({ handle: note.handle, maxBytes: 20, ctx: ctx() });
+    if (first.status !== "opened" || first.kind !== "note") throw new Error("narrowing");
+    // Two whole lines fit in twenty bytes (7 + 5 + 1 + 7 + 4 = 24 is too many, so one does).
+    expect(first.body).toBe("     1\talpha");
+    expect(first.cursor).toBe("1");
+    expect(first.said).toContain("lines 1-1 of 3");
+
+    const second = await memoryOpen({ handle: note.handle, cursor: first.cursor!, maxBytes: 20, ctx: ctx() });
+    if (second.status !== "opened" || second.kind !== "note") throw new Error("narrowing");
+    expect(second.body).toBe("     2\tbeta");
+    expect(second.said).toContain("lines 2-2 of 3");
+  });
+
   it("a fabricated cursor is refused rather than repaired", async () => {
     const body = MULTIBYTE.repeat(10);
     const note = await seedNote(PS, "Long note", body);
-    // Mid-sequence: byte 1 of the leading two-byte character. A reader that snapped it
-    // forward would hand back a page starting one character late and call it the note.
+    // One line, so a line cursor past 0 addresses a line the note does not have.
     expect((await memoryOpen({ handle: note.handle, cursor: "1", ctx: ctx() })).status).toBe("bad_cursor");
     expect((await memoryOpen({ handle: note.handle, cursor: "999999", ctx: ctx() })).status).toBe("bad_cursor");
     expect((await memoryOpen({ handle: note.handle, cursor: "nope", ctx: ctx() })).status).toBe("bad_cursor");
-    // The control: an even offset IS a boundary here, so the refusals above are about the
-    // cursor and not about cursors in general.
-    expect((await memoryOpen({ handle: note.handle, cursor: "2", ctx: ctx() })).status).toBe("opened");
+    // Mid-sequence: byte 1 of the leading two-byte character of line 0. A reader that
+    // snapped it forward would hand back a page starting one character late.
+    expect((await memoryOpen({ handle: note.handle, cursor: "0.1", ctx: ctx() })).status).toBe("bad_cursor");
+    // The control: byte 2 IS a boundary and line 0 exists, so the refusals above are about
+    // these cursors and not about cursors in general.
+    expect((await memoryOpen({ handle: note.handle, cursor: "0.2", ctx: ctx() })).status).toBe("opened");
+    expect((await memoryOpen({ handle: note.handle, cursor: "0", ctx: ctx() })).status).toBe("opened");
   });
 
   it("stamps last_used_at INSIDE the mint, not from here (M1)", async () => {
@@ -316,7 +353,7 @@ run("memory_open", () => {
     const note = await seedNote(PS, "Deadlines", `see ${edgeToken("zzqqfabricated")}`);
     const r = await memoryOpen({ handle: note.handle, ctx: ctx() });
     if (r.status !== "opened" || r.kind !== "note") throw new Error("narrowing");
-    expect(r.body).toBe("see [[link removed]]");
+    expect(r.body).toBe("     1\tsee [[link removed]]");
     expect(r.body).not.toContain("zzqqfabricated");
   });
 });

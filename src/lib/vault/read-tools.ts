@@ -1,6 +1,7 @@
 import { MEMORY_OPEN_MAX_BYTES } from "./budget";
 import type { SourceClass } from "./claims";
 import type { HandleKind } from "./handles";
+import { pageLines } from "./line-view";
 import type { NodeKind } from "./nodes";
 import {
   openClaimForModel,
@@ -115,42 +116,16 @@ export type MemoryOpenResult =
   | { status: "not_found" | "off_channel" | "wrong_kind" | "bad_cursor"; said: string };
 
 /**
- * ONE PAGE of a body, cut on a UTF-8 CHARACTER BOUNDARY.
+ * THE HEADER OF A NOTE PAGE, in the shape Claude's own file view uses, because that is the
+ * format the model already knows how to read and to address.
  *
- * Bytes, because the turn budget is bytes (see `MEMORY_OPEN_MAX_BYTES`) — and a cut taken at
- * a byte offset lands mid-sequence roughly two times in three for Cyrillic text, which would
- * hand the model a replacement character at both seams and make the two pages disagree with
- * the stored body. So the end is snapped DOWN off any continuation byte, and a cursor that
- * does not itself sit on a boundary is refused rather than repaired: a cursor this tool did
- * not hand out is a fabricated address, and §4.1's answer to one of those is never "guess".
- *
- * The unit of pagination is the BODY and not the JSON, which is what keeps a page from ever
- * splitting a JSON structure: the body is one string value inside the object, and every other
- * field is emitted whole on every page.
+ * It NAMES THE TITLE, and doing so mints nothing: the value interpolated is the one this
+ * function was handed by `openNoteForModel`, and it also travels on the reply's own `title`
+ * field. Reading a title out of a row here would be the leak §3.4's NEW-3 is about; quoting
+ * the mint's own answer back is not.
  */
-function page(
-  body: string,
-  cursor: string | undefined,
-  maxBytes: number,
-): { text: string; next: string | null } | null {
-  const buf = Buffer.from(body, "utf8");
-  let start = 0;
-  if (cursor !== undefined) {
-    if (!/^[0-9]{1,10}$/.test(cursor)) return null;
-    start = Number(cursor);
-    // Past the end, or mid-sequence: both are addresses this tool never emitted.
-    if (start > buf.length) return null;
-    if (start < buf.length && (buf[start] & 0xc0) === 0x80) return null;
-  }
-  let end = Math.min(buf.length, start + maxBytes);
-  // `buf[end]` is the FIRST byte AFTER the page. If it is a continuation byte the page ends
-  // inside a character, so walk back until it does not.
-  while (end > start && (buf[end] & 0xc0) === 0x80) end -= 1;
-  return {
-    text: buf.subarray(start, end).toString("utf8"),
-    next: end < buf.length ? String(end) : null,
-  };
-}
+const noteHeader = (title: string, revision: number, from: number, to: number, total: number) =>
+  `Here's the content of «${title}» (revision ${revision}, lines ${from}-${to} of ${total}) with line numbers:`;
 
 /**
  * `memory_open` (§4.3): one saved item, in full, addressed by the handle a search returned.
@@ -208,7 +183,7 @@ export async function memoryOpen(a: {
     const out = await openNoteForModel(t.spaceId, t.nodeId);
     if (!out.ok) return { status: out.reason, said: OPEN_SAID[out.reason] };
     const n = out.item;
-    const p = page(n.body, a.cursor, a.maxBytes ?? MEMORY_OPEN_MAX_BYTES);
+    const p = pageLines(n.body, a.cursor, a.maxBytes ?? MEMORY_OPEN_MAX_BYTES);
     if (!p) return { status: "bad_cursor", said: OPEN_SAID.bad_cursor };
     return {
       status: "opened",
@@ -217,8 +192,9 @@ export async function memoryOpen(a: {
       revision: n.revision,
       title: n.title,
       // The page, not the brand: a SLICE of `MemoryToolText` is a plain string, and typing it
-      // back to the brand here would be this module minting. What keeps the bytes honest is
-      // that they came out of the mint's value and nothing was added to them.
+      // back to the brand here would be this module minting. The LINE NUMBERS added around
+      // it carry no content of the row — they are the value's own line structure counted —
+      // so the bytes that came out of the mint are still the only text of the row here.
       body: p.text,
       sourceClass: n.sourceClass,
       staleSince: n.staleSince?.toISOString() ?? null,
@@ -230,9 +206,9 @@ export async function memoryOpen(a: {
         ctx.handles.mint({ kind: HANDLE_FOR_NODE[x.kind], spaceId: t.spaceId, nodeId: x.nodeId }),
       ),
       cursor: p.next,
-      said: p.next
-        ? "There is more of this note - call memory_open again with the cursor to read on."
-        : "",
+      said: `${noteHeader(n.title, n.revision, p.from, p.to, p.total)}${
+        p.next ? " There is more of this note - call memory_open again with the cursor to read on." : ""
+      }`,
     };
   }
 
