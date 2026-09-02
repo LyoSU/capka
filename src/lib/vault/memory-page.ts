@@ -170,7 +170,14 @@ function sourceOf(
 ): FactSource {
   const named = rows.filter((r): r is { chatId: string; chatTitle: string | null; at: Date } => !!r.chatId && !!r.at);
   if (!named.length) {
-    return (origin as { kind?: string } | null)?.kind === "legacy_memory_doc"
+    // TWO origin kinds, and both are live data rather than one being history.
+    // `legacy_memory_doc` is what the ledger stamped on a legacy PROVENANCE and what the
+    // rows confirmed before slice 2 carry; `legacy_document` is what `migrateMemoryDocs`
+    // now writes straight onto the claim (§11.11). Reading only the newer one would turn
+    // "carried over from your earlier notes" into "the conversation is no longer
+    // available" for every fact a person had already kept.
+    const kind = (origin as { kind?: string } | null)?.kind;
+    return kind === "legacy_memory_doc" || kind === "legacy_document"
       ? { kind: "legacy" }
       : { kind: "unknown" };
   }

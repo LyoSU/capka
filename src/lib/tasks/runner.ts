@@ -33,7 +33,7 @@ import { auxGenerate } from "@/lib/chat/context/aux";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
-import { extractCandidates } from "@/lib/vault/extract";
+import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
@@ -2097,15 +2097,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && userTurnText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
-      void trackAux(extractCandidates({
+      void trackAux(extractFacts({
         userSpaceId,
         projectSpaceId,
         // The assistant row this turn is writing — the same id the snapshots use, so
-        // every candidate's provenance points at the message it came from.
+        // every saved fact's origin and evidence point at the message it came from.
         messageId: msgId,
         taskId,
         userText: userTurnText,
         assistantText: getFullText(),
+        // §4.5's class computation reads the TURN's fold, and the runner is the only
+        // place that holds it: `taint` is per-MESSAGE and seeded from the row, so a
+        // resumed continuation carries half 1's marks instead of recomputing false.
+        // Read at DISPATCH, exactly as the compaction call below reads it — extraction
+        // runs after the reply is delivered and nothing marks the turn after that.
+        untrustedIngressSeen: taint.seen(),
         // The module knows nothing about providers or usage accounting; binding
         // model/provider and billing the spend to this turn's key is the call site's
         // job. Labelled "memory" so the aux span says which pass it was.

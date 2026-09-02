@@ -3,21 +3,25 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vites
 /**
  * Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run src/lib/vault
  *
- * Migrating legacy memory_docs into the REVIEW QUEUE. Nothing but `proposeCandidate`
- * is mocked: the whole point of this module is the CAS on the document row and which
- * rows Postgres rolls back along with `migrated_at` when something fails mid-document.
- * An in-memory double would be testing its own imagination.
+ * Migrating legacy memory_docs into MEMORY. Nothing but `createClaim` is mocked, and
+ * only so a failure can be injected: the whole point of this module is the CAS on the
+ * document row and which rows Postgres rolls back along with `migrated_at` when
+ * something fails mid-document. An in-memory double would be testing its own
+ * imagination.
  *
- * WHAT CHANGED, because most of this suite used to assert the opposite: bullets became
- * CONFIRMED CLAIMS, written straight through `createClaim` with `reviewStatus:
- * "confirmed"`. That is a writer declaring its own output approved — unattended, at
- * boot, on free text that both the user and the agent wrote into and nobody reviewed.
- * They become pending candidates now, and the person keeps their own facts once.
+ * WHAT CHANGED, TWICE, because this suite has asserted both previous answers. Bullets
+ * were first written as CONFIRMED claims — a writer declaring its own output approved,
+ * unattended, at boot, on free text nobody reviewed. They then became PENDING
+ * CANDIDATES, which refused that correctly and with the wrong instrument: it put a
+ * person's own long-standing facts behind a queue before the assistant could use any of
+ * them. §11.8 removes the queue, so they are live claims again — at `agent_inferred`,
+ * which is a `memory_search` channel and never the always-on manifest. The class carries
+ * what the queue was standing in for.
  *
  * EVERY call passes `docIds`. Without it `migrateMemoryDocs()` by construction takes
  * EVERY unmigrated document in the database — and this database is shared, holding
  * a developer's real memory: the suite would migrate it and leave behind a space,
- * candidates and a set `migrated_at` that no prefix-scoped DELETE cleans up.
+ * claims and a set `migrated_at` that no prefix-scoped DELETE cleans up.
  * The assertions are scoped too (`space_id = $1`, prefixed ids) — the worker lives
  * next door.
  */
@@ -35,23 +39,23 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
  *  a variable we control, while "the third bullet of THIS document" is. */
 const hook = vi.hoisted(() => ({ failOn: null as string | null }));
 
-vi.mock("../candidates", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../candidates")>();
+vi.mock("../claims", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../claims")>();
   return {
     ...actual,
-    proposeCandidate: (...args: Parameters<typeof actual.proposeCandidate>) => {
+    createClaim: (...args: Parameters<typeof actual.createClaim>) => {
       if (hook.failOn && args[0].statement === hook.failOn) {
         // Shaped like what the installed Drizzle actually throws: the failing
         // statement's PARAMETERS are embedded in the message, and the driver's own
         // error hangs off `cause`. That is the whole hazard behind the log assertion
         // below — the secret is genuinely inside this object.
         const e = new Error(
-          `Failed query: insert into "memory_candidates" ... params: ${hook.failOn}`,
+          `Failed query: insert into "vault_claims" ... params: ${hook.failOn}`,
         ) as Error & { cause: unknown };
-        e.cause = { code: "23503", constraint: "mcand_space_fk" };
+        e.cause = { code: "23503", constraint: "vault_claims_space_id_fk" };
         throw e;
       }
-      return actual.proposeCandidate(...args);
+      return actual.createClaim(...args);
     },
   };
 });
@@ -117,25 +121,23 @@ const spaceOf = async (type: "user" | "project", refId: string): Promise<string 
   return rows[0]?.id ?? null;
 };
 
-/** What a migration produces now: rows in the review queue. Unresolved only — a
- *  resolved one is a decision somebody already took. */
-const waiting = async (spaceId: string): Promise<string[]> => {
-  const { rows } = await pool.query<{ statement: string }>(
-    `SELECT statement FROM memory_candidates
-      WHERE space_id = $1 AND resolved_at IS NULL AND policy_state = 'pending'`,
-    [spaceId],
-  );
-  return rows.map((r) => r.statement);
-};
-
-/** Live claim heads in a space. Used to assert that a migration creates NONE, which is
- *  the whole change: this pass proposes, it does not write memory. */
+/** What a migration produces now: live claim heads in the space. */
 const statements = async (spaceId: string): Promise<string[]> => {
   const { rows } = await pool.query<{ statement: string }>(
     `SELECT statement FROM vault_claims WHERE space_id = $1 AND superseded_at IS NULL`,
     [spaceId],
   );
   return rows.map((r) => r.statement);
+};
+
+/** One head's trust tier and origin — the two things this pass is now judged on. */
+const savedAs = async (spaceId: string): Promise<{ source_class: string; kind: string; doc: string }[]> => {
+  const { rows } = await pool.query<{ source_class: string; kind: string; doc: string }>(
+    `SELECT source_class, origin->>'kind' AS kind, origin->>'docId' AS doc
+       FROM vault_claims WHERE space_id = $1 AND superseded_at IS NULL ORDER BY statement`,
+    [spaceId],
+  );
+  return rows;
 };
 
 const migratedAt = async (docId: string): Promise<Date | null> => {
@@ -191,7 +193,7 @@ run("vault: memory_docs migration", () => {
     await cleanup();
   });
 
-  it("a credential in a LEGACY document reaches the review queue, flagged — and never the prompt", async () => {
+  it("a credential in a LEGACY document is saved FLAGGED — and never reaches the prompt", async () => {
     // The case that made this Critical rather than theoretical. The old memory system
     // screened nothing, so an existing deployment's documents may already hold a pasted
     // key — and this migration runs unattended, at boot, on exactly that data. It used
@@ -203,14 +205,16 @@ run("vault: memory_docs migration", () => {
     expect(await migrate(`${P}dsec`)).toEqual({ migrated: 1 });
     const spaceId = (await spaceOf("user", OWNER))!;
 
-    // NOTHING entered memory. Not the credential, and not the harmless bullet beside
-    // it: the pass has no authority to approve either.
-    expect(await statements(spaceId)).toEqual([]);
+    // Both bullets ARE in memory now — the pass has authority to record, not to
+    // approve, and `agent_inferred` is what that difference is made of.
+    expect(new Set(await statements(spaceId))).toEqual(
+      new Set([`my openai key is ${secret}`, "likes tea"]),
+    );
 
-    // Both are waiting for the person, and the credential is FLAGGED for them — the
-    // screen is advisory now, and this is the surface the advice is for.
+    // The credential is FLAGGED, which is what keeps it off every model channel:
+    // `sensitive` generates `prompt_access = 'owner_only'`.
     const { rows } = await pool.query<{ statement: string; sensitive: boolean }>(
-      `SELECT statement, sensitive FROM memory_candidates WHERE space_id = $1`,
+      `SELECT statement, sensitive FROM vault_claims WHERE space_id = $1`,
       [spaceId],
     );
     const key = rows.find((r) => r.statement.includes(secret));
@@ -226,7 +230,7 @@ run("vault: memory_docs migration", () => {
     expect(manifest).not.toContain("likes tea");
   });
 
-  it("a document's bullets become PENDING candidates — no claim, and an attesting event", async () => {
+  it("a document's bullets become LIVE CLAIMS at agent_inferred, with an attesting event", async () => {
     const content = "- likes tea\n\n* deadline on Friday\n  - works from Lviv\n";
     await mkDoc(`${P}d1`, content);
 
@@ -234,19 +238,25 @@ run("vault: memory_docs migration", () => {
 
     const spaceId = await spaceOf("user", OWNER);
     expect(spaceId).not.toBeNull();
-    // The whole change, in one assertion: the document is carried, and memory is empty.
-    expect(await statements(spaceId!)).toEqual([]);
-    expect(new Set(await waiting(spaceId!))).toEqual(
+    // The whole change, in one assertion: the document is carried INTO memory, and
+    // nothing waits in a queue for it.
+    expect(new Set(await statements(spaceId!))).toEqual(
       new Set(["likes tea", "deadline on Friday", "works from Lviv"]),
     );
-    // The origin is what the memory page turns into "this came from your old notes".
-    expect(
-      await count(
-        "memory_candidates",
-        "space_id = $1 AND policy_state = 'pending' AND provenance->>'kind' = 'legacy_memory_doc'",
-        [spaceId],
-      ),
-    ).toBe(3);
+    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(0);
+    // The class and the origin, per §11.11 — `agent_inferred`, not `legacy_confirmed`
+    // and not `owner_authored`: nothing in that document was ever reviewed. The origin
+    // is what the memory page turns into "carried over from your earlier notes", and it
+    // names the DOCUMENT rather than restating a trust tier.
+    expect(await savedAs(spaceId!)).toEqual([
+      { source_class: "agent_inferred", kind: "legacy_document", doc: `${P}d1` },
+      { source_class: "agent_inferred", kind: "legacy_document", doc: `${P}d1` },
+      { source_class: "agent_inferred", kind: "legacy_document", doc: `${P}d1` },
+    ]);
+    // And it reaches no always-on tier. `prompt_access` is GENERATED from the class, so
+    // this is the database's own answer rather than a second expression for it.
+    expect(await count("vault_claims", "space_id = $1 AND prompt_access = 'manifest'", [spaceId])).toBe(0);
+    expect(await count("vault_claims", "space_id = $1 AND prompt_access = 'memory_search'", [spaceId])).toBe(3);
 
     // The event ATTESTS to the move; it does not keep a second copy of the text, nor
     // anything derived from it. A full snapshot outlived the user's own deletion of the
@@ -277,7 +287,7 @@ run("vault: memory_docs migration", () => {
 
     expect(await migrate(`${P}d2`)).toEqual({ migrated: 0 });
 
-    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(2);
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
     expect(await snapshots(spaceId)).toHaveLength(1);
     expect(await migratedAt(`${P}d2`)).toEqual(stamp);
   });
@@ -308,21 +318,21 @@ run("vault: memory_docs migration", () => {
     expect(await migrate(`${P}d9`)).toEqual({ migrated: 1 });
     // COUNT, not a Set: a Set discards duplicates, so wrapping the projection in one
     // silently swallows the very doubling this assertion exists to catch — remove
-    // `migrateOne`'s dedup and the Set version stays green.
-    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(2);
-    expect((await waiting(spaceId)).sort()).toEqual(["added after the stamp", "first fact"]);
+    // `migrateOne`'s `findExactDuplicate` and the Set version stays green.
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
+    expect((await statements(spaceId)).sort()).toEqual(["added after the stamp", "first fact"]);
     expect(await migratedAt(`${P}d9`)).not.toEqual(stamp);
     // Converges by construction: the fresh stamp is now past `updated_at`, and after
     // the cutover nothing moves `updated_at` again.
     expect(await migrate(`${P}d9`)).toEqual({ migrated: 0 });
   });
 
-  it("a bullet longer than the statement cap is keyed by its clamped text, so it is not re-proposed", async () => {
-    // The idempotency key is built from the statement AS STORED (`fitStatement` first),
-    // and the row it has to match was written the same way. Keyed on the raw line
-    // instead, a bullet over 500 characters would not match its own candidate and a
-    // second pass would ask the person about it twice. Reachable only through the
-    // append-after-stamp window above, which is why the fixture opens one.
+  it("a bullet longer than the statement cap dedups on its clamped text, so it is not saved twice", async () => {
+    // `normalized_hash` is computed over the statement AS STORED (`fitStatement` first)
+    // by both the writer and `findExactDuplicate`. Hashed from the raw line instead, a
+    // bullet over 500 characters would not match its own claim and a second pass would
+    // store it again. Reachable only through the append-after-stamp window above, which
+    // is why the fixture opens one.
     //
     // Deliberately NOT a long unbroken run of characters: that is secret-shaped, and a
     // sensitive claim would make this test about the screen instead.
@@ -331,7 +341,7 @@ run("vault: memory_docs migration", () => {
     await mkDoc(`${P}d10`, `- ${long}`);
     expect(await migrate(`${P}d10`)).toEqual({ migrated: 1 });
     const spaceId = (await spaceOf("user", OWNER))!;
-    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(1);
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
 
     await q(
       `UPDATE memory_docs
@@ -342,10 +352,10 @@ run("vault: memory_docs migration", () => {
       [`${P}d10`, `- ${long}\n- a short fact added later`],
     );
     expect(await migrate(`${P}d10`)).toEqual({ migrated: 1 });
-    // Two rows, not three: the long bullet keyed to the candidate it already had, and
+    // Two rows, not three: the long bullet hashed to the claim it already had, and
     // only the appended one is new.
-    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(2);
-    expect((await waiting(spaceId)).length).toBe(2);
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
+    expect((await statements(spaceId)).length).toBe(2);
   });
 
   it("a race between two migrations duplicates no row (CAS on the document row)", async () => {
@@ -356,7 +366,7 @@ run("vault: memory_docs migration", () => {
     // Exactly one of the two claimed the document — the other saw zero rows on the CAS.
     expect(a.migrated + b.migrated).toBe(1);
     const spaceId = (await spaceOf("user", OWNER))!;
-    expect(await waiting(spaceId)).toHaveLength(2);
+    expect(await statements(spaceId)).toHaveLength(2);
     expect(await snapshots(spaceId)).toHaveLength(1);
   });
 
@@ -375,7 +385,7 @@ run("vault: memory_docs migration", () => {
     await migrate(`${P}d4`);
 
     const spaceId = (await spaceOf("user", OWNER))!;
-    expect(new Set(await waiting(spaceId))).toEqual(new Set(["one", "two", "three", "four"]));
+    expect(new Set(await statements(spaceId))).toEqual(new Set(["one", "two", "three", "four"]));
     expect(await migratedAt(`${P}d4`)).not.toBeNull();
   });
 
@@ -390,7 +400,7 @@ run("vault: memory_docs migration", () => {
     await expect(migrate(`${P}d8bad`, `${P}d8ok`)).rejects.toThrow(`did not migrate: ${P}d8bad`);
 
     expect(await migratedAt(`${P}d8ok`)).not.toBeNull();
-    expect(await waiting((await spaceOf("project", PROJ))!)).toEqual(["a neighbouring fact"]);
+    expect(await statements((await spaceOf("project", PROJ))!)).toEqual(["a neighbouring fact"]);
 
     expect(await migratedAt(`${P}d8bad`)).toBeNull();
     expect(await spaceOf("user", OWNER)).toBeNull();
@@ -403,7 +413,7 @@ run("vault: memory_docs migration", () => {
 
     expect(await migratedAt(`${P}d5`)).not.toBeNull();
     const spaceId = (await spaceOf("user", OWNER))!;
-    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(0);
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(0);
     const events = await snapshots(spaceId);
     expect(events).toHaveLength(1);
     expect(events[0].payload.bullets).toBe(0);
@@ -411,10 +421,9 @@ run("vault: memory_docs migration", () => {
     expect(events[0].payload.sha256).toBeUndefined();
   });
 
-  it("a bullet the person has already confirmed is not proposed again", async () => {
-    // Dedup, and it now lives in ONE place — `proposeCandidate`, reading the same
-    // model-facing projection the manifest reads. A legacy bullet the person has
-    // already kept must not come back as a question.
+  it("a bullet the space already holds is not saved a second time", async () => {
+    // Dedup is §4.5 step 4 now — `findExactDuplicate` on `normalized_hash`, the same key
+    // both claim writers compute. A legacy bullet already in memory must not double.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedConfirmedClaim(
       { spaceId, statement: "Likes   tea", origin: { kind: "legacy_memory_doc" }, sourceClass: testServerClass("agent_inferred") },
@@ -424,48 +433,47 @@ run("vault: memory_docs migration", () => {
 
     await migrate(`${P}d6`);
 
-    // The same normalization as in the ledger: case and repeated spaces do not turn one
-    // fact into two, so only the genuinely new bullet is asked about.
-    expect(await waiting(spaceId)).toEqual(["something new"]);
-    // And nothing was written to the confirmed fact either — no evidence, no second
-    // version. A dedup that "tops up" the fact it matched is a durable write on the
-    // strength of unreviewed text, which is the whole class this round closes.
-    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
+    // The hash's own normalization: case and repeated spaces do not turn one fact into
+    // two, so only the genuinely new bullet is written.
+    expect((await statements(spaceId)).sort()).toEqual(["Likes   tea", "something new"]);
+    // And NOTHING was written to the matched fact — no evidence, no second version, no
+    // change of class. A dedup that "tops up" the row it matched is a durable write on
+    // the strength of unreviewed text, which is the whole class this file is about.
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
+    expect(await count("claim_evidence", "claim_id IN (SELECT id FROM vault_claims WHERE space_id = $1)", [spaceId])).toBe(0);
   });
 
-  it("a bullet matching an UNVERIFIED head writes nothing — matching one does not approve it", async () => {
-    // The old behaviour, and it was quarantine escalation with a friendly face: a bullet
-    // whose words matched an unverified head called `confirmClaim` on it, so text nobody
-    // had reviewed promoted text nobody had reviewed. That is what this test is about and
-    // it still holds — no branch of the dedup can reach `confirmClaim`.
+  it("a bullet matching a legacy row with NO hash is saved beside it, never promoted", async () => {
+    // `normalized_hash` is FORWARD-ONLY (§11.1): existing rows are not backfilled, so a
+    // pre-cutover head simply never matches as a duplicate and the bullet lands as a
+    // second row for the person to resolve. That is the same behaviour as before the
+    // column existed, and it is stated here because the tempting "fix" — matching on the
+    // text instead — would be a second normalization to keep frozen forever.
     //
-    // The bullet is no longer QUEUED, though, and that is the channel cutover rather than
-    // a regression: `review_status` reaches no model channel, so an `agent_inferred` head
-    // is `memory_search`-class whatever its review state and the fact is already recorded.
-    // `known` writes nothing at all — strictly less than the candidate row `pending` used
-    // to create — and it does not put a decision in front of the person for something the
-    // space already holds.
+    // What must NOT happen is the old behaviour this test was written for: a bullet whose
+    // words matched an unverified head used to call `confirmClaim` on it, so text nobody
+    // reviewed promoted text nobody reviewed. No branch here can reach `confirmClaim`.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedNode(`${P}unverified`, spaceId, "claim");
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive, source_class)
-       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', false, 'agent_inferred')`,
+       VALUES ($1, $2, 'likes tea', '{"kind":"derived"}'::jsonb, 'unverified', false, 'agent_inferred')`,
       [`${P}unverified`, spaceId],
     );
     await mkDoc(`${P}d9b`, "- likes tea");
 
     await migrate(`${P}d9b`);
 
+    // Two rows with the same words, and the pre-existing one untouched: same id, same
+    // review status, no approval record invented for it.
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
     expect(await count("vault_claims", "space_id = $1 AND review_status = 'confirmed'", [spaceId])).toBe(0);
     expect(await count("vault_claims", "id = $1 AND review_status = 'unverified'", [`${P}unverified`])).toBe(1);
-    // Nothing queued, and — the assertion that carries the concern — nothing written to the
-    // head either: no second version, no evidence, no promotion.
-    expect(await waiting(spaceId)).toEqual([]);
-    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
+    expect(await count("vault_claims", "id = $1 AND approved_at IS NULL", [`${P}unverified`])).toBe(1);
   });
 
-  it("the candidates land in the document's TRANSACTION, so a failure takes them with it", async () => {
-    // A candidate written through the module-level `db` instead of the document's `tx`
+  it("the claims land in the document's TRANSACTION, so a failure takes them with it", async () => {
+    // A claim written through the module-level `db` instead of the document's `tx`
     // would commit on its own and survive the rollback — atomicity lost in a way no
     // after-the-fact assertion can see, because every other check here reads the
     // database once the transaction is already gone. The bullet order matters: the
@@ -488,7 +496,7 @@ run("vault: memory_docs migration", () => {
     const spaceId = await spaceOf("project", PROJ);
     expect(spaceId).not.toBeNull();
     expect(await count("spaces", "id = $1 AND owner_user_id = $2", [spaceId, OWNER])).toBe(1);
-    expect(await waiting(spaceId!)).toEqual(["a project fact"]);
+    expect(await statements(spaceId!)).toEqual(["a project fact"]);
   });
 
   it("a document whose project was deleted first cannot CREATE a live space to land in", async () => {
@@ -513,8 +521,8 @@ run("vault: memory_docs migration", () => {
 
     const spaceId = (await spaceOf("project", gone))!;
     expect(await count("spaces", "id = $1 AND retired_at IS NOT NULL", [spaceId])).toBe(1);
-    expect(await waiting(spaceId)).toEqual([]);
     expect(await statements(spaceId)).toEqual([]);
+    expect(await count("memory_candidates", "space_id = $1", [spaceId])).toBe(0);
     expect(await count("vault_notes", "space_id = $1", [spaceId])).toBe(0);
     // Stamped rather than retried: a deleted project's document is nothing to carry,
     // not a failure to re-drive on every boot.
@@ -527,6 +535,7 @@ run("vault: memory_docs migration", () => {
     // every attached collector — defeating the screen that kept it out of the prompt.
     // The mocked `createClaim` throws with the statement genuinely inside `message`,
     // so this fails if the module ever logs the error object again.
+    //
     const secret = "sk-live-abc123SECRETVALUE";
     await mkDoc(`${P}d11`, `- ${secret}`);
     hook.failOn = secret;
@@ -540,7 +549,7 @@ run("vault: memory_docs migration", () => {
       docId: `${P}d11`,
       attempts: 1,
       code: "23503",
-      constraint: "mcand_space_fk",
+      constraint: "vault_claims_space_id_fk",
     });
     // And what must never travel: the value, or any raw message that carries it.
     expect(JSON.stringify(logged.errors)).not.toContain(secret);
@@ -569,7 +578,10 @@ run("vault: memory_docs migration", () => {
     expect(printed).not.toContain(secret);
     expect(printed).not.toContain("Failed query");
     // Still discriminated enough for an operator to act on — the fault, not the data.
-    expect((err as { cause?: unknown }).cause).toMatchObject({ code: "23503", constraint: "mcand_space_fk" });
+    expect((err as { cause?: unknown }).cause).toMatchObject({
+      code: "23503",
+      constraint: "vault_claims_space_id_fk",
+    });
   });
 
   it("a deterministically failing document is retried a bounded number of times, then left alone", async () => {

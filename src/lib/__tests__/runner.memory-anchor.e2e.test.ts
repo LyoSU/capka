@@ -51,7 +51,7 @@ vi.mock("@/lib/sandbox/tools", () => ({
 }));
 // Memory is stubbed at the same seams the sibling e2e suites stub, for the same
 // reason: this runs against the shared database and the real vault would leave a
-// space, a topic and claims behind for a fixture user. `extractCandidates` is the
+// space, a topic and claims behind for a fixture user. `extractFacts` is the
 // one that carries the assertion, so it records its arguments instead of running.
 vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
@@ -61,7 +61,7 @@ vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }))
 vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
 const extracted: { userText: string }[] = [];
 vi.mock("@/lib/vault/extract", () => ({
-  extractCandidates: async (args: { userText: string }) => { extracted.push(args); },
+  extractFacts: async (args: { userText: string }) => { extracted.push(args); },
 }));
 
 import { pool } from "../db";

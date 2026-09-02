@@ -3,12 +3,19 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { log } from "@/lib/log";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
-import { proposeCandidate } from "./candidates";
-import { fitStatement } from "./claims";
+import { createClaim, findExactDuplicate, fitStatement } from "./claims";
+import { migrationInferred } from "./grounding";
 import { getOrCreateSpace, spaceAcceptsWrites } from "./spaces";
 
 /**
  * FROZEN — do not import `text.ts`'s `norm` here, and do not edit this body.
+ *
+ * IT HAS NO PRODUCER FROM THIS RELEASE. §11.8 stops the candidate ledger, so this pass
+ * writes claims and dedups on `vault_claims.normalized_hash` instead of on an
+ * `idempotency_key`; nothing computes this string any more. It is kept rather than
+ * deleted because the 38 unresolved rows it keyed are still on screen as the "Earlier
+ * suggestions" archive, and it goes with them — in the release that drops
+ * `memory_candidates` thirty days after slice 2 (§2.12).
  *
  * Its output is embedded in `memory_candidates.idempotency_key` under the unique index
  * `uniq_mcand_idem` (`schema.ts`), so a legacy bullet already carried across is recognised
@@ -78,16 +85,26 @@ function pgFault(e: unknown): { code: string; constraint: string; errorName: str
 }
 
 /**
- * Moves legacy memory documents into the review queue: line → bullet → PENDING
- * candidate with origin `legacy_memory_doc`.
+ * Moves legacy memory documents into memory: line → bullet → live claim at
+ * `agent_inferred`, with origin `{ kind: "legacy_document", docId }`.
  *
- * It used to write confirmed claims, on the reasoning that what was already in the
- * user's memory is not a proposal and asking them to re-confirm long-standing facts
- * would be a regression. That reasoning is now refused, and the refusal is the point of
- * this round: a legacy document is unreviewed free text that both the user and the agent
- * wrote into, and the whole guarantee being made is that nothing reaches the model
- * without a person keeping it. "It was already there" is exactly the argument that would
- * have let it through. The person keeps their own facts, once, from the review queue.
+ * WHAT IT ONCE DID AND WHY BOTH ANSWERS WERE WRONG. It first wrote `confirmed` claims,
+ * on the reasoning that what was already in the user's memory is not a proposal. That is
+ * a writer declaring its own output approved — unattended, at boot, on text nobody ever
+ * reviewed — and it was refused. The replacement put every bullet in the review queue
+ * instead, which was the right refusal aimed at the wrong instrument: it made a person
+ * re-confirm long-standing facts one at a time before the assistant could use any of
+ * them, and §11.8 has now taken that queue away entirely.
+ *
+ * THE ANSWER IS THE CLASS, NOT THE LEDGER, and that is the correction. `agent_inferred`
+ * reaches `memory_search` and never the always-on manifest, so the bullet is findable and
+ * asserts nothing on the person's behalf — which is exactly the property the queue was
+ * standing in for. `legacy_confirmed` and `owner_authored` are both refused for the same
+ * reason the `confirmed` write was: nothing in that document was reviewed, it is the file
+ * the agent appended to after every turn, and giving it manifest authority unattended at
+ * boot is precisely what `manifest.ts`'s deleted `legacyDoc` fallback was deleted for.
+ * The owner promotes any line by editing it on their own page, which re-classes it
+ * `owner_authored` — one act, by the person, on a fact they can already see.
  *
  * THE SELECTOR is "not stamped, OR appended to since the stamp"
  * (`migrated_at IS NULL OR migrated_at < updated_at`), and the second half is what
@@ -228,43 +245,46 @@ async function migrateOne(docId: string): Promise<boolean> {
       log.info("vault: skipping a memory doc whose space was retired", { docId, spaceId });
       return false;
     }
-    // Every bullet becomes a PENDING CANDIDATE, not a confirmed claim, and that is the
-    // authority cutover reaching the oldest data in the system. This used to call
-    // `createClaim(reviewStatus: "confirmed")` directly — a writer declaring its own
-    // output approved, unattended, at boot, on text that predates every protection here.
-    // The document is a file the user could edit by hand and the agent appended to after
-    // every turn; nothing in it was ever reviewed, and a credential pasted into it years
-    // ago went straight into the prompt.
+    // EVERY BULLET BECOMES A LIVE CLAIM AT `agent_inferred`, and the refusal this
+    // replaces is still in force — see the function docstring. A writer must not declare
+    // its own output approved, unattended, at boot, on text that predates every
+    // protection here; what answers that requirement is the CLASS the row carries, not a
+    // queue in front of it. `migrationInferred()` is the one sanctioned mint for this
+    // pass, and it lives in `grounding.ts` because that module is the only producer of a
+    // `source_class` — so a future caller cannot state a stronger one here without
+    // failing `tsc`.
     //
-    // The cost is real and is the honest one: memory carried over from the old system
-    // waits in the review queue until the person keeps it. Nothing is lost — the
-    // document itself still serves the settings page and the export for as long as it
-    // exists — and nothing is asserted on their behalf.
-    //
-    // Dedup lives in `proposeCandidate`, which answers `known` for a fact already in
-    // memory and writes nothing at all. There is deliberately no second copy of that
-    // rule here: the copy that used to live in this loop was the reason the migration
-    // needed `confirmClaim` and `attachToTopic` of its own, and both of those were
-    // writes this pass had no authority to make.
+    // Dedup is §4.5 step 4 — `findExactDuplicate` on `normalized_hash`, which both claim
+    // writers compute the same way. That is what the ledger's `idempotency_key` used to
+    // buy, and it is bought here by the same expression the rest of the system uses
+    // rather than by a second one: a document appended to since its last pass is
+    // re-selected (see the selector above), so every bullet already carried has to hash
+    // to what is already stored and write nothing. A bullet the person has since EDITED
+    // hashes differently and lands as a second fact beside the first, which is the cost
+    // this file has always accepted — a duplicate the owner can see and delete is
+    // strictly better than a fact that vanishes.
     let bullets = 0;
     for (const line of doc.content.split("\n")) {
       const statement = fitStatement(line.trim().replace(/^[-*]\s*/, "").trim());
       if (!statement) continue;
       bullets++;
-      await proposeCandidate(
+      if (await findExactDuplicate(spaceId, statement, undefined, tx)) continue;
+      await createClaim(
         {
-          // Keyed by the TEXT, not by the line's position. A document appended to since
-          // its last pass is re-selected (see the selector above), and a positional key
-          // would make an edited line collide with whatever used to be at that index and
-          // be silently dropped — while a text key re-proposes the edit and no-ops every
-          // bullet already carried. The statement sits in this row's own `statement`
-          // column anyway, so the key discloses nothing the row does not, and candidate
-          // rows are deleted with their space rather than outliving it.
-          idempotencyKey: `legacy:${docId}:${legacyIdemKeyNorm(statement)}`,
           spaceId,
           statement,
-          provenance: { kind: "legacy_memory_doc" },
+          // The MEDIUM, and it names the document rather than a trust tier: the tier is
+          // `source_class`'s column and reusing one of its values here is the LOW-6
+          // mistake. `docId` is what lets the owner's page say a fact came from their old
+          // notes, and it is addressing rather than content — the text of the bullet is
+          // in the claim's own `statement` column.
+          origin: { kind: "legacy_document", docId },
+          sourceClass: migrationInferred(),
         },
+        // `system`, not `agent`: no turn ran, and no model composed this sentence. It is
+        // a line a person or an earlier build of the assistant put in a file, moved by a
+        // boot pass, and the audit log should say so rather than blaming a chat.
+        { kind: "system" },
         tx,
       );
     }

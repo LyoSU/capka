@@ -272,9 +272,18 @@ class Retry extends Error {}
  * arrive as separate calls (`confirmCandidate`/`rejectCandidate`) with their own actor,
  * and that difference is exactly what the audit log shows.
  *
- * Takes an `ex` so the boot migration can carry a legacy document's bullets in ONE
- * transaction with the stamp that says it carried them — the same reason
- * `rejectAllCandidates` takes one.
+ * Takes an `ex` so a caller can write inside its own transaction — the same reason
+ * `rejectAllCandidates` takes one. The boot migration was that caller and is not any
+ * more; see below.
+ *
+ * IT HAS NO PRODUCER FROM THIS RELEASE (§11.8). Post-turn extraction and
+ * `migrateMemoryDocs` were the last two callers and both write claims directly now, so
+ * no row is ever added to `memory_candidates` again. It is kept, rather than deleted with
+ * its callers, because `confirmCandidate` still has to resolve the unresolved rows the
+ * ledger already holds — the "Earlier suggestions" archive on the memory page (§9.1) —
+ * and this function is where the shape of those rows is documented. It goes in the
+ * release that DROPS `memory_candidates`, thirty days after slice 2, when the archive
+ * expires with it (§2.12).
  */
 export async function proposeCandidate(input: {
   idempotencyKey: string;

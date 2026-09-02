@@ -63,7 +63,7 @@ vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
 }));
 vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }));
 vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
-vi.mock("@/lib/vault/extract", () => ({ extractCandidates: async () => {} }));
+vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";

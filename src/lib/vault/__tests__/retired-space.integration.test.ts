@@ -18,7 +18,7 @@ import { db, pool } from "@/lib/db";
 import { vaultClaims } from "@/lib/db/schema";
 import { createClaim, updateClaim, type Actor } from "../claims";
 import { confirmCandidate, proposeCandidate } from "../candidates";
-import { extractCandidates } from "../extract";
+import { extractFacts } from "../extract";
 import { getOrCreateSpace, retireProjectSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 import { testServerClass } from "./fixtures";
@@ -124,13 +124,14 @@ run("vault: writes into a retired space", () => {
 
     // The real product path: the turn has answered, the aux model is still generating,
     // and the user deletes the project in that window.
-    const extraction = extractCandidates({
+    const extraction = extractFacts({
       userSpaceId,
       projectSpaceId,
       messageId: MSG,
       taskId: TASK,
       userText: "we pay our suppliers in euros",
       assistantText: "noted",
+      untrustedIngressSeen: false,
       generate: async () => {
         await generating.promise;
         return {
@@ -443,13 +444,14 @@ run("vault: writes into a retired space", () => {
     const { userSpaceId, projectSpaceId } = await spaces();
     await retireProjectSpace(PROJ);
     const generating = deferred();
-    const extraction = extractCandidates({
+    const extraction = extractFacts({
       userSpaceId,
       projectSpaceId,
       messageId: MSG,
       taskId: TASK,
       userText: "I work in procurement and we pay our suppliers in euros",
       assistantText: "noted",
+      untrustedIngressSeen: false,
       generate: async () => {
         await generating.promise;
         return {
@@ -464,10 +466,11 @@ run("vault: writes into a retired space", () => {
     generating.resolve();
     await extraction;
 
-    // The user-scoped fact was recorded — as a candidate, which is what extraction
-    // produces now — while the retired project space took nothing at all.
-    expect(await count("memory_candidates", "space_id = $1", [userSpaceId])).toBe(1);
-    expect(await count("vault_claims", "space_id = $1", [userSpaceId])).toBe(0);
+    // The user-scoped fact was SAVED — a live claim, which is what extraction writes
+    // since §11.8 — while the retired project space took nothing at all. The candidate
+    // count is asserted too, and at zero: it is the pin that says nothing produces one.
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [userSpaceId])).toBe(1);
+    expect(await count("memory_candidates", "space_id = $1", [userSpaceId])).toBe(0);
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
 
