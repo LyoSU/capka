@@ -1,9 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { TurnTaint } from "@/lib/tasks/turn-taint";
 import { db } from "@/lib/db";
-import { vaultEdges } from "@/lib/db/schema";
+import { vaultEdges, vaultNodes, vaultNotes } from "@/lib/db/schema";
 import type { VaultBudget } from "./budget";
 import {
+  attachToTopic,
   createClaim,
   findCurrentHead,
   findExactDuplicate,
@@ -1029,4 +1030,146 @@ async function liveReferenceEdge(from: string, to: string, spaceId: string, ex: 
     )
     .limit(1);
   return row?.id ?? null;
+}
+
+/* ------------------------------------------------------------------------------------------
+ * FILING — `memory_file` (§4.7)
+ * ---------------------------------------------------------------------------------------- */
+
+export type MemoryFileStatus =
+  | "filed"
+  | "not_found"
+  | "revision_mismatch"
+  | "wrong_scope"
+  | "wrong_kind"
+  | "retired";
+
+/**
+ * §4.7's four explicit errors, and the `wrong_kind` sentence NAMES THE RIGHT TOOL.
+ *
+ * `contains` runs topic -> note | claim (§2.4), so an `f` handle is not a thing that can be
+ * filed: a document is LINKED to a note. Answering it with an out-of-domain edge would put a
+ * row in `vault_edges` that `linkNodes`' own pair check exists to refuse, and answering it
+ * with a bare "no" would leave the model to guess which of five tools it wanted.
+ */
+export const FILE_SAID: Record<MemoryFileStatus, string> = {
+  filed: "Filed.",
+  not_found: "That address is not from this conversation's search results, or the item is no longer there. Run memory_search and use a handle it returned.",
+  revision_mismatch: "That item has moved on. Run memory_search and re-issue against what is there.",
+  wrong_scope: "A topic and the item filed under it have to be in the same memory - personal or this project, not one of each.",
+  wrong_kind: "A document is linked to a note, not filed under a topic - use memory_link.",
+  retired: "This project's memory was deleted. Nothing was saved.",
+};
+
+/** The `wrong_kind` arm for a handle that is not a NODE at all. `e` and `g` are the two
+ *  letters with no row a `contains` edge could name, and they get a different sentence for
+ *  the same reason `f` gets its own: a refusal that does not say what the thing IS teaches
+ *  the model to retry with the same handle. */
+const FILE_NOT_A_NODE = "A fragment and a link are not items that can be filed - file the note or the fact they belong to.";
+
+/** The topic arm's own `wrong_kind`: a live note that is not a topic container. Separate
+ *  from the `f` sentence because the bad handle is the OTHER argument, and a refusal naming
+ *  the wrong parameter is worse than a vague one. */
+const FILE_NOT_A_TOPIC = "That handle is a note, not a topic. Name a topic by its subject in memory_fact_write, or file this under one memory_search returned as a topic.";
+
+export type MemoryFileResult =
+  | { status: "filed"; edgeHandle: string; said: string }
+  | { status: "revision_mismatch"; revision: number; said: string }
+  | { status: "not_found" | "wrong_scope" | "wrong_kind" | "retired"; said: string };
+
+/**
+ * `memory_file` (§4.7): one `contains` edge, from a topic to a fact or a note.
+ *
+ * `expected_item_revision` is REQUIRED and is checked (M17): an optional CAS parameter is an
+ * optional CAS. It is not a CAS in the `updateClaim` sense — nothing about the item's content
+ * changes — but the model asked to file THE THING IT READ, and a fact superseded since then
+ * is a different sentence under the same address.
+ *
+ * NO CLASS FENCE, and its absence is a decision. Filing writes no text and changes no
+ * authority: `listManifestTopics`' count is `prompt_access = 'manifest'` claims only, so
+ * filing an untrusted fact under a topic adds nothing to the always-on tier, and an untrusted
+ * row cannot be in a user space in the first place (§4.5 step 3). What the edge does is make
+ * the item visible in a grouping the person curates, which is additive and undoable.
+ *
+ * CROSS-SPACE FILING IS IMPOSSIBLE AT THE FOREIGN KEY — `vault_edges`' two composite FKs to
+ * `(space_id, id)` — so the check below is a nicer error message and not the boundary.
+ */
+export async function memoryFile(a: {
+  itemHandle: string;
+  topicHandle: string;
+  expectedItemRevision: number;
+  ctx: WriteCtx;
+}): Promise<MemoryFileResult> {
+  const { ctx } = a;
+  const allowedSpaceIds = ctx.projectSpaceId ? [ctx.userSpaceId, ctx.projectSpaceId] : [ctx.userSpaceId];
+  const item = ctx.handles.resolve(a.itemHandle);
+  if (!item || !allowedSpaceIds.includes(item.spaceId)) return { status: "not_found", said: FILE_SAID.not_found };
+  // `m` and `n` ONLY (§4.7). The two refusals are different sentences because the two
+  // circumstances are: a document has a tool that DOES link it, and a fragment or an edge has
+  // no row a `contains` edge could point at.
+  if (item.kind === "f") return { status: "wrong_kind", said: FILE_SAID.wrong_kind };
+  if (item.kind !== "m" && item.kind !== "n") return { status: "wrong_kind", said: FILE_NOT_A_NODE };
+
+  const topic = ctx.handles.resolve(a.topicHandle);
+  if (!topic || !allowedSpaceIds.includes(topic.spaceId)) return { status: "not_found", said: FILE_SAID.not_found };
+  if (topic.kind !== "n") {
+    return { status: "wrong_kind", said: topic.kind === "f" ? FILE_SAID.wrong_kind : FILE_NOT_A_NODE };
+  }
+  if (topic.spaceId !== item.spaceId) return { status: "wrong_scope", said: FILE_SAID.wrong_scope };
+  if (topic.nodeId === item.nodeId) {
+    // `ck_vault_edges_not_self` would refuse this at the statement, mid-transaction.
+    return { status: "wrong_kind", said: FILE_NOT_A_TOPIC };
+  }
+  const spaceId = item.spaceId;
+
+  return db.transaction(async (tx): Promise<MemoryFileResult> => {
+    if (!(await spaceAcceptsWrites(spaceId, tx))) return { status: "retired", said: FILE_SAID.retired };
+
+    const revision =
+      item.kind === "m"
+        ? (await findCurrentHead(item.nodeId, [spaceId], tx))?.revision
+        : (await noteHead(item.nodeId, [spaceId], tx))?.revision;
+    if (revision === undefined) return { status: "not_found", said: FILE_SAID.not_found };
+    if (revision !== a.expectedItemRevision) {
+      return { status: "revision_mismatch", revision, said: FILE_SAID.revision_mismatch };
+    }
+
+    // A LIVE TOPIC CONTAINER, read rather than assumed: `resolveTopic`'s handle arm asks the
+    // same question of the same three columns, and for the same reason — a handle says the
+    // LETTER of its target and nothing about the row's kind.
+    const [container] = await tx
+      .select({ id: vaultNotes.id, title: vaultNotes.title, kind: vaultNotes.kind })
+      .from(vaultNotes)
+      .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+      .where(and(eq(vaultNotes.id, topic.nodeId), eq(vaultNotes.spaceId, spaceId), isNull(vaultNodes.deletedAt)))
+      .limit(1);
+    if (!container) return { status: "not_found", said: FILE_SAID.not_found };
+    if (container.kind !== "memory_topic") return { status: "wrong_kind", said: FILE_NOT_A_TOPIC };
+
+    // A CLAIM goes through `attachToTopic`, never through `linkNodes` here: `note_claims` is
+    // `claims.ts`'s table and §11.5's dual-write is its business, so a second writer of the
+    // pair would be exactly the divergence `containsParity` exists to detect. A NOTE has no
+    // membership row to mirror — `note_claims` cannot represent a topic containing a note —
+    // so the edge is the whole act and `linkNodes` is the writer of it.
+    const edgeId =
+      item.kind === "m"
+        ? (await attachToTopic(item.nodeId, container.id, tx, ctx.actor)).edgeId
+        : (
+            await linkNodes(
+              { spaceId, from: container.id, to: item.nodeId, relation: "contains", createdBy: ctx.actor, originMessageId: ctx.messageId },
+              tx,
+            )
+          ).id;
+
+    return {
+      status: "filed",
+      edgeHandle: ctx.handles.mint({ kind: "g", spaceId, nodeId: edgeId }),
+      // §4.7's sentence is "Filed «…» under «…»", and the FIRST slot is not filled: the
+      // item's own words would be text this module composed out of a row it read, which is
+      // the one thing its docstring says its returns never carry. The model addressed the
+      // item by handle a line ago and knows what it filed; the topic's title comes back
+      // because that is the half it did NOT choose by name.
+      said: `Filed under «${container.title}».`,
+    };
+  });
 }

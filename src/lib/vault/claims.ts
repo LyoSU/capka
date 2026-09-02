@@ -970,9 +970,22 @@ export async function confirmClaim(
  *
  *  A TRANSACTION now, for the same reason the other three moves are one: since §11.5 it
  *  writes two rows, and without a transaction that is not a move but two autocommits, with
- *  the membership row able to survive a failed edge. */
-export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db): Promise<void> {
-  if (ex === db) return db.transaction((tx) => attachToTopic(claimId, noteId, tx));
+ *  the membership row able to survive a failed edge.
+ *
+ *  IT RETURNS THE EDGE ID, and it takes an ACTOR. Both arrived with `memory_file` (§4.7),
+ *  which is the caller this docstring said would come: it knows who asked for the attach, so
+ *  the edge is signed by them rather than by `system`, and it has to hand the model a `g`
+ *  handle for the edge it just made — which it cannot mint out of a value this function used
+ *  to keep. The default stays `system` for the confirm path, which genuinely has no actor to
+ *  name here. There is still no audit event: that is `claimId`'s own `claim.*` trail, and an
+ *  attach is not a change to the claim. */
+export async function attachToTopic(
+  claimId: string,
+  noteId: string,
+  ex: Ex = db,
+  actor: Actor = { kind: "system" },
+): Promise<{ edgeId: string }> {
+  if (ex === db) return db.transaction((tx) => attachToTopic(claimId, noteId, tx, actor));
   // The claim's space has to be read: unlike the other two sites, this signature
   // carries only the two ids, and the invariant is about the pair.
   const [claim] = await ex
@@ -983,15 +996,12 @@ export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db
   if (!claim) throw new Error(`claim ${claimId} does not exist`);
   await assertTopicInSpace(noteId, claim.spaceId, ex);
   await ex.insert(noteClaims).values({ noteId, claimId }).onConflictDoNothing();
-  // `system`, and not because the actor is unknown: this signature takes none, and it takes
-  // none because it writes no audit event either — the two arrive together the day a caller
-  // that knows who asked for the attach appears. Inventing a user here would put a name on
-  // the edge that the audit log could not corroborate.
-  await linkNodes(
-    { spaceId: claim.spaceId, from: noteId, to: claimId, relation: "contains", createdBy: { kind: "system" } },
+  const edge = await linkNodes(
+    { spaceId: claim.spaceId, from: noteId, to: claimId, relation: "contains", createdBy: actor },
     ex,
   );
   await assertContainsParity(claim.spaceId, ex);
+  return { edgeId: edge.id };
 }
 
 export async function attachEvidence(claimId: string, ev: EvidenceInput, ex: Ex = db): Promise<void> {

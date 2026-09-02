@@ -190,7 +190,7 @@ beforeEach(() => {
 });
 
 describe("makeVaultMemoryTools — the factory", () => {
-  it("hands back exactly seven tools", async () => {
+  it("hands back exactly eight tools", async () => {
     // The new writers join the set one commit at a time and the two legacy ones have not
     // left it yet: `memory_propose` and `memory_update` are retired in their own commit
     // (plan Task 13), so for this window a turn holds both the write tools and the two
@@ -198,6 +198,7 @@ describe("makeVaultMemoryTools — the factory", () => {
     // addition nor the retirement can land silently.
     expect(Object.keys(await make()).sort()).toEqual([
       "memory_fact_write",
+      "memory_file",
       "memory_forget",
       "memory_link",
       "memory_note_write",

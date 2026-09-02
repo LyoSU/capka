@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 
 - The assistant can write and update project notes, and link them to each other; links are stored as ids, so renaming a note updates every reference.
+- The assistant can file a saved fact or note under a topic.
 - The assistant now saves facts to memory immediately, with no confirmation step; everything it saves appears on the memory page with one-click undo.
 - Vault tool results are capped per call and per turn (50,000 bytes across all memory and document tools), so prompt cost stays flat as the vault grows.
 - Topic membership is now written to `vault_edges` alongside `note_claims`; existing memberships are back-filled at boot, a parity check runs on every write outside production, and `POST /api/admin/vault/reindex` reports it as `containsParity`.

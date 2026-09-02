@@ -10,7 +10,7 @@ import { NOTE_BLOCKS_MAX, NOTE_BLOCK_MAX_CHARS, NOTE_TITLE_MAX_CHARS } from "./n
 import { verifyDirectProvenance } from "./quote-match";
 import { getOrCreateSpace } from "./spaces";
 import { TOPIC_TITLE_MAX_CHARS } from "./topics";
-import { factWrite, memoryLink, noteWrite, type WriteCtx } from "./write-tools";
+import { factWrite, memoryFile, memoryLink, noteWrite, type WriteCtx } from "./write-tools";
 
 /**
  * WHAT ONE SEARCH HANDS BACK, and why it is JSON with handles in it rather than the
@@ -480,6 +480,30 @@ export async function makeVaultMemoryTools(ctx: {
               ),
               grounding,
               topic,
+              ctx: writeCtx,
+            }),
+          ),
+        ),
+    }),
+
+    /** FILING, which is the one write that stores no text: a `contains` edge from a topic to
+     *  a fact or a note. `topic` on the two write tools names a topic for something being
+     *  written; this attaches something that already exists. */
+    memory_file: tool({
+      description:
+        "File a saved fact or note under a topic, so the user finds it grouped with the rest of that subject. Both handles come from memory_search, they have to be in the same memory (personal or this project), and you need the revision you were given for the item. A document is not filed under a topic — link it to a note with memory_link instead.",
+      inputSchema: z.object({
+        item_handle: z.string().describe("The m-handle of a fact or the n-handle of a note"),
+        topic_handle: z.string().describe("The n-handle of a topic, from memory_search"),
+        expected_item_revision: z.number().int().min(1),
+      }),
+      execute: async ({ item_handle, topic_handle, expected_item_revision }) =>
+        writeCtx.budget.emit(
+          JSON.stringify(
+            await memoryFile({
+              itemHandle: item_handle,
+              topicHandle: topic_handle,
+              expectedItemRevision: expected_item_revision,
               ctx: writeCtx,
             }),
           ),
