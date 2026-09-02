@@ -69,17 +69,22 @@ export function migrationInferred(): ServerClass {
  * and the three casts are the only widenings. Here it is not. This signature is a TOTAL,
  * UNCONDITIONAL widening from the unbranded union to the brand, so `carriedClass("owner_
  * authored")` compiles, and nothing about a call site proves the argument came off a row.
- * The property — promotion impossible to EXPRESS, not merely discouraged — is therefore
- * carried by two assertions in `model-view.test.ts` and by nothing else: a file roster over
- * a walk of `src/`, and, because a roster cannot see a SECOND call inside a file already on
- * it, an emptiness assertion on `carriedClass(` followed by a quote. Read the class off the
- * row you are restoring and from nowhere else; a literal here is a mint wearing this name.
+ *
+ * WHAT ACTUALLY STANDS HERE, said no larger than it is. Two assertions in
+ * `model-view.test.ts`: a file roster over a walk of `src/`, and — because a roster cannot
+ * see a SECOND call inside a file already on it — an emptiness assertion on `carriedClass(`
+ * followed immediately by a quote. That second one fences a QUOTED LITERAL ARGUMENT and
+ * nothing more. It does not catch `carriedClass(("owner_authored"))`, nor a literal bound
+ * to a `const` first, nor a call from a test. Those are left to review, deliberately: a
+ * regex that chased them would grow past what a reader can check, and the shape it does
+ * catch is the one an implementer in a hurry actually writes. Read the class off the row
+ * you are restoring and from nowhere else; a literal here is a mint wearing this name.
  *
  * The `tsc`-level cure was weighed and is not this round's: branding the STORED value would
  * have to start at `vault_note_versions.source_class`'s `$type` in `schema.ts` — a file
  * three sessions share — and every writer of that column passes a `ServerClass`, so the two
  * brands would have to become a hierarchy. That is a larger change than the hole, and it
- * costs this module its one import.
+ * would put a schema import in a module whose two imports are a leaf and a type.
  */
 export function carriedClass(stored: SourceClass): ServerClass {
   return mint(stored);
