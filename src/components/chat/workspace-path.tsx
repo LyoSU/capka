@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, type ComponentPropsWithoutRef } from "react";
+import { ChatImage } from "./chat-image";
 import { useTranslations } from "next-intl";
 import { visit, SKIP } from "unist-util-visit";
 import type { Root, RootContent } from "mdast";
@@ -132,6 +133,11 @@ function WorkspacePathChip({ rel, chatId }: { rel: string; chatId: string }) {
 export function makeWorkspaceComponents(chatId?: string, sources?: NumberedSource[]) {
   const byN = sources?.length ? new Map(sources.map((s) => [s.n, s])) : null;
   return {
+    // Every image gets a reserved box and a fade-in (see ChatImage); Streamdown's
+    // own renderer lets an unsized picture shove the transcript when it decodes.
+    img({ src, alt }: ComponentPropsWithoutRef<"img">) {
+      return <ChatImage src={typeof src === "string" ? src : undefined} alt={alt} />;
+    },
     // The `node` prop react-markdown also passes is destructured away so it
     // never lands on the DOM element.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to keep react-markdown's AST handle off the DOM element

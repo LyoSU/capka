@@ -575,6 +575,7 @@
       "edit": "Edit",
       "reasoning": "Reasoning",
       "compacted": "Context compressed",
+      "imageUnavailable": "Image unavailable",
       "reasonedFor": "Reasoned for {duration}",
       "workedFor": "Worked for {duration}",
       "activity": "Activity",

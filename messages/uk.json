@@ -575,6 +575,7 @@
       "edit": "Редагувати",
       "reasoning": "Міркування",
       "compacted": "Контекст стиснуто",
+      "imageUnavailable": "Зображення недоступне",
       "reasonedFor": "Міркував {duration}",
       "workedFor": "Працював {duration}",
       "activity": "Дії",

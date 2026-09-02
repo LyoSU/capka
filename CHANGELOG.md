@@ -34,6 +34,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Opening an existing chat shows a quiet transcript skeleton until its history arrives, instead of an empty pane.
+- Images in replies load into a reserved box and fade in; a broken image shows a labelled chip instead of disappearing.
 - Markdown tables in replies drop the grey header band, take their content width, use tabular digits, and show their copy/download controls on hover.
 - In a wide markdown table the first column stays pinned while the rest scrolls sideways, with a seam that appears only once scrolled.
 - The reasoning spoiler's label fades when it changes from the live stopwatch to the final duration instead of snapping.
