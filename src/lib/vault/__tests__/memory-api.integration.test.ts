@@ -23,6 +23,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
 import { pool } from "@/lib/db";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { readMemoryPage, type ScopeView } from "../memory-page";
+import { createNote, reviseNote } from "../notes";
 import { getOrCreateSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
 
@@ -469,5 +470,101 @@ run("vault: POST /api/memory/candidates/[candidateId]", () => {
     expect(again.status).toBe(404);
     expect(await count("vault_claims", "space_id = $1 AND statement = $2", [spaceId, "Prefers meetings before noon"]))
       .toBe(1);
+  });
+});
+
+/**
+ * `PATCH /api/memory/notes/<id>` — the notice's Undo for a turn that EDITED a file.
+ *
+ * The third verb on that directory, and the one whose absence was the defect: the notice
+ * answered an edited file's Undo with DELETE, so undoing "the assistant updated Acme
+ * payment terms" removed the file and every revision of it.
+ */
+run("vault: PATCH /api/memory/notes/[noteId]", () => {
+  let spaceId = "";
+  let noteId = "";
+
+  const patch = async (id: string, body: unknown) => {
+    const { PATCH } = await import("@/app/api/memory/notes/[noteId]/route");
+    return PATCH(
+      new Request("http://t", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ noteId: id }) },
+    );
+  };
+
+  const headOf = async (id: string) => {
+    const { rows } = await q(
+      `SELECT n.current_revision AS revision, v.body_markdown AS body
+         FROM vault_notes n JOIN vault_note_versions v
+           ON v.note_id = n.id AND v.revision = n.current_revision
+        WHERE n.id = $1`,
+      [id],
+    );
+    return rows[0] as { revision: number; body: string } | undefined;
+  };
+
+  beforeAll(async () => {
+    await mkUser(OWNER);
+    await mkUser(STRANGER);
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    await q(`DELETE FROM "user" WHERE id IN ($1, $2)`, [OWNER, STRANGER]);
+  });
+
+  beforeEach(async () => {
+    await cleanup();
+    requireWriter.mockResolvedValue({ userId: OWNER, role: "user", status: "active" });
+    spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const note = await createNote({
+      spaceId,
+      title: "Acme payment terms",
+      bodyMarkdown: "Net 30 from the invoice date.",
+      sourceClass: testServerClass("agent_inferred"),
+      provenance: { kind: "agent_inference" },
+      actor: { kind: "agent" },
+    });
+    noteId = note.id;
+    const upd = await reviseNote({
+      noteId,
+      spaceId,
+      expectedRevision: 1,
+      title: "Acme payment terms",
+      bodyMarkdown: "Net 45 from October.",
+      sourceClass: testServerClass("agent_inferred"),
+      provenance: { kind: "agent_inference" },
+      actor: { kind: "agent" },
+    });
+    if (!upd.ok) throw new Error("fixture: the edit lost its CAS");
+  });
+
+  it("puts the previous words back as a new revision, keeping the file", async () => {
+    const res = await patch(noteId, { revertTo: 1 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, revision: 3 });
+    expect(await headOf(noteId)).toMatchObject({ revision: 3, body: "Net 30 from the invoice date." });
+  });
+
+  it("refuses somebody else's file as if it did not exist", async () => {
+    requireWriter.mockResolvedValue({ userId: STRANGER, role: "user", status: "active" });
+    const res = await patch(noteId, { revertTo: 1 });
+    expect(res.status).toBe(404);
+    // A 404 that still wrote a revision would pass an assertion on the status alone.
+    expect(await headOf(noteId)).toMatchObject({ revision: 2 });
+  });
+
+  it("answers a body that is not a revision as a client fault, not as its own failure", async () => {
+    for (const body of ["{oops", {}, { revertTo: "1" }, { revertTo: 0 }, { revertTo: 1.5 }]) {
+      expect((await patch(noteId, body)).status).toBe(400);
+    }
+    // And a revision that is not BELOW the head is a 404 rather than a silent no-op that
+    // reports success — the page would otherwise show an undo that did nothing.
+    expect((await patch(noteId, { revertTo: 2 })).status).toBe(404);
+    expect(await headOf(noteId)).toMatchObject({ revision: 2 });
   });
 });

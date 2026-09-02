@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  */
 import { pool } from "@/lib/db";
 import { createClaim, forgetClaim } from "../claims";
-import { createNote, forgetNote } from "../notes";
+import { createNote, forgetNote, noteHead, revertNote, reviseNote } from "../notes";
 import { getOrCreateSpace } from "../spaces";
 import { readTurnWrites } from "../turn-writes";
 import { testServerClass } from "./fixtures";
@@ -72,6 +72,18 @@ const seedFact = async (statement: string, opts: { messageId?: string; owner?: s
     { kind: "agent" },
   );
 };
+
+/** A note whose revision 1 was written by a stated turn — the file an later turn EDITS. */
+const seedNoteFrom = (spaceId: string, messageId: string, bodyMarkdown: string) =>
+  createNote({
+    spaceId,
+    title: "Acme onboarding",
+    bodyMarkdown,
+    sourceClass: testServerClass("agent_inferred"),
+    provenance: { kind: "agent_inference", messageId, taskId: TASK },
+    createdTaskId: TASK,
+    actor: { kind: "agent" },
+  });
 
 const cleanup = async () => {
   await q(`DELETE FROM spaces WHERE owner_user_id = ANY($1)`, [[OWNER, STRANGER]]);
@@ -228,6 +240,104 @@ run("vault: what a turn wrote to memory", () => {
     );
     expect(await forgetNote({ noteId: note.id, spaceId, expectedRevision: 2, actor: { kind: "user", id: OWNER } }))
       .toMatchObject({ ok: false, reason: "revision_mismatch" });
+  });
+
+  it("an EDIT names the revision it wrote, so the notice can tell it from a save", async () => {
+    // The notice offers Undo on everything a turn wrote, and a turn that merely EDITED an
+    // existing file must not be undone by deleting the file. The number is what separates
+    // the two, and it comes off the AUDIT EVENT rather than off the row: the row's
+    // `current_revision` moves again the moment anything else touches the note.
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, OTHER_MSG, "The old steps.");
+    const upd = await reviseNote({
+      noteId: note.id,
+      spaceId,
+      expectedRevision: 1,
+      title: "Acme onboarding",
+      bodyMarkdown: "The new steps.",
+      sourceClass: testServerClass("agent_inferred"),
+      provenance: { kind: "agent_inference", messageId: MSG, taskId: TASK },
+      actor: { kind: "agent" },
+    });
+    expect(upd).toMatchObject({ ok: true, revision: 2 });
+
+    expect((await readTurnWrites([MSG], OWNER))[MSG]).toMatchObject([
+      { id: note.id, kind: "note", revision: 2 },
+    ]);
+    // The CONTROL: a file a turn CREATED reports revision 1, which is the arm whose undo
+    // stays a delete. On a SECOND file, because the projection is head-based — the file
+    // above has been edited since, so the turn that created it no longer names it at all,
+    // which is the same property that makes an undone item leave the notice.
+    const untouched = await seedNoteFrom(spaceId, OTHER_MSG, "Never edited.");
+    expect((await readTurnWrites([OTHER_MSG], OWNER))[OTHER_MSG]).toMatchObject([
+      { id: untouched.id, revision: 1 },
+    ]);
+  });
+
+  it("undo of an EDIT puts the old words back and keeps the file, its id and its history", async () => {
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, OTHER_MSG, "The old steps.");
+    await reviseNote({
+      noteId: note.id,
+      spaceId,
+      expectedRevision: 1,
+      title: "Acme onboarding",
+      bodyMarkdown: "The new steps.",
+      sourceClass: testServerClass("agent_inferred"),
+      provenance: { kind: "agent_inference", messageId: MSG, taskId: TASK },
+      actor: { kind: "agent" },
+    });
+
+    const reverted = await revertNote({
+      noteId: note.id,
+      spaceId,
+      toRevision: 1,
+      actor: { kind: "user", id: OWNER },
+    });
+    // A NEW revision, not a rollback: history is append-only, so the edit and the undo are
+    // both in the record and a person can undo the undo.
+    expect(reverted).toEqual({ ok: true, revision: 3 });
+    expect(await noteHead(note.id, [spaceId])).toMatchObject({
+      revision: 3,
+      bodyMarkdown: "The old steps.",
+      // The class is CARRIED, never re-decided: an undo must not promote the agent's own
+      // words to the tier a person's statement gets.
+      sourceClass: "agent_inferred",
+    });
+    const versions = await q(`SELECT count(*) AS n FROM vault_note_versions WHERE note_id = $1`, [note.id]);
+    expect(Number((versions.rows[0] as { n: string }).n)).toBe(3);
+    // The file is still on every list — this is the whole difference from the delete the
+    // notice used to perform.
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM vault_nodes WHERE id = $1 AND deleted_at IS NULL`,
+      [note.id],
+    );
+    expect(Number(rows[0].n)).toBe(1);
+    // And the notice stops naming it, because the head this turn wrote is no longer the
+    // head: the revert's provenance carries no `messageId`, so there is no second copy of
+    // the list to disagree.
+    expect(await readTurnWrites([MSG], OWNER)).toEqual({});
+  });
+
+  it("refuses a revert that is not to an EARLIER revision", async () => {
+    // Reverting to the head is a no-op dressed as a write, and reverting forward is not a
+    // thing an undo can mean. Both are refused rather than silently doing nothing, so a
+    // caller that computed the wrong target hears about it.
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, MSG, "Only one revision.");
+    const actor = { kind: "user", id: OWNER } as const;
+    expect(await revertNote({ noteId: note.id, spaceId, toRevision: 1, actor })).toEqual({
+      ok: false,
+      reason: "not_revertable",
+    });
+    expect(await revertNote({ noteId: note.id, spaceId, toRevision: 2, actor })).toEqual({
+      ok: false,
+      reason: "not_revertable",
+    });
+    expect(await revertNote({ noteId: `${P}nope`, spaceId, toRevision: 1, actor })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
   });
 
   it("a topic container created while filing a fact is never announced", async () => {

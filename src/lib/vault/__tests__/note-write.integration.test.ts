@@ -16,7 +16,7 @@ import { makeVaultBudget } from "../budget";
 import { createClaim, type SourceClass } from "../claims";
 import { makeHandleMap, type HandleMap } from "../handles";
 import { UNRESOLVED_LINK, edgeIdsIn, edgeToken, renderBody } from "../links";
-import { createNote, reviseNote, noteHead } from "../notes";
+import { createNote, noteHead, revertNote, reviseNote } from "../notes";
 import { memoryLink, noteWrite, type WriteCtx } from "../write-tools";
 import { testServerClass } from "./fixtures";
 
@@ -564,6 +564,38 @@ run("memory_link", () => {
     // The handle it hands back addresses the EDGE, and it is not the edge's id.
     expect(r.edgeHandle).toMatch(/^g[1-9][0-9]{0,3}$/);
     expect(JSON.stringify(r)).not.toContain(ids[0]);
+  });
+
+  it("the OWNER's undo of a link drops the block and closes the edge with it", async () => {
+    // The other half of §4.8, from the undo side: reverting to the revision before the link
+    // restores a body that does not mention the edge, so an edge left live would render a
+    // link the file does not make. `revertNote` closes exactly the `references` edges the
+    // restored body no longer names.
+    const from = await seedNote(PS, "Deadlines", "agent_inferred");
+    const to = await seedClaim(PS, "Reporting is due on the fifteenth", "agent_inferred");
+    const r = await memoryLink({
+      fromNoteHandle: from.handle,
+      targetHandle: to.handle,
+      expectedNoteRevision: 1,
+      ctx: clean(),
+    });
+    if (r.status !== "linked") throw new Error("narrowing");
+    expect(await edgeCount(PS, "references")).toBe(1);
+
+    const reverted = await revertNote({
+      noteId: from.id,
+      spaceId: PS,
+      toRevision: 1,
+      actor: { kind: "user", id: `${P}u` },
+    });
+    expect(reverted).toEqual({ ok: true, revision: 3 });
+    const body = await bodyOf(from.handle);
+    expect(body).toBe("seeded");
+    expect(edgeIdsIn(body)).toEqual([]);
+    expect(await edgeCount(PS, "references")).toBe(0);
+    // Rendering it proves the pair rather than either half: no token, and therefore no
+    // removed-link text standing in for one.
+    expect(await renderBody(body, PS)).toBe("seeded");
   });
 
   it("a lost CAS writes nothing and reports the current revision", async () => {

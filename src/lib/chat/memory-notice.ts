@@ -1,5 +1,10 @@
+// TYPE-ONLY, so this module stays import-free at runtime: the client bundle takes it, and
+// `turn-writes.ts` opens a database connection at import.
+import type { TurnWrite } from "@/lib/vault/turn-writes";
+
 /**
- * WHICH "saved to memory" NOTICES THIS BROWSER HAS BEEN DISMISSED, as two pure functions.
+ * THE "saved to memory" NOTICE'S OWN LOGIC, as pure functions: which notices this browser
+ * has dismissed, what the notice SAYS, and what each item's Undo DOES.
  *
  * They live outside the component for the reason `formatSource` does: this repo's vitest
  * runs with `environment: "node"` and has no React renderer, so logic inside a component
@@ -39,4 +44,48 @@ export function parseDismissed(raw: string | null): string[] {
  *  fifty distinct notices rather than fifty writes. */
 export function nextDismissed(current: string[], messageId: string): string[] {
   return [messageId, ...current.filter((id) => id !== messageId)].slice(0, DISMISSED_MAX);
+}
+
+/** A file the turn did not create — the one arm whose undo is not a delete. It is a
+ *  function rather than a comparison written twice because the sentence and the button have
+ *  to agree about it: a notice reading "saved" over a control that reverts, or the reverse,
+ *  is the shape the whole split exists to end. */
+const edited = (w: Pick<TurnWrite, "kind" | "revision">) => w.kind === "note" && w.revision > 1;
+
+/**
+ * WHAT THE NOTICE'S UNDO ACTUALLY DOES, per item — and it is two different acts.
+ *
+ * A fact, or a file the turn CREATED, is undone by DELETING it: the turn added it, so
+ * removing it leaves the state the person had before. A file the turn only EDITED is undone
+ * by REVERTING to the revision before that edit, because deleting there destroys a file —
+ * and all of its history — that the person asked only to leave alone. That was the defect:
+ * one notice, one verb, and the wrong one on the common path once the manifest started
+ * steering the agent to update an existing file rather than add a second.
+ *
+ * OUT HERE RATHER THAN IN THE COMPONENT, exactly like the dismissal store above and for the
+ * same reason: this repo's vitest has no React renderer, so a branch inside `MemoryNotice`
+ * cannot be asserted at all — and this one is a decision about destroying a person's data.
+ *
+ * The id is ENCODED here, not at the call site: it is part of what "which row" means, and a
+ * path built by interpolation somewhere else is the copy that forgets.
+ */
+export function undoRequest(item: TurnWrite): {
+  path: string;
+  method: "DELETE" | "PATCH";
+  /** The PATCH body, or `null` for a delete — never an empty object, so a caller cannot
+   *  send a bodyless PATCH by accident. */
+  body: { revertTo: number } | null;
+} {
+  const path = `/api/memory/${item.kind === "note" ? "notes" : "claims"}/${encodeURIComponent(item.id)}`;
+  return edited(item)
+    ? { path, method: "PATCH", body: { revertTo: item.revision - 1 } }
+    : { path, method: "DELETE", body: null };
+}
+
+/** The two numbers the notice's sentence is made of. A turn that rewrote an existing file
+ *  SAVED nothing, and one sentence over the total is what made the wrong undo read as the
+ *  right one — so the counts are split at the same predicate the button is. */
+export function noticeCounts(writes: TurnWrite[]): { saved: number; updated: number } {
+  const updated = writes.filter(edited).length;
+  return { saved: writes.length - updated, updated };
 }

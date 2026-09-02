@@ -589,6 +589,7 @@
     },
     "memory": {
       "saved": "The assistant saved {count, plural, one {# thing} other {# things}} to memory.",
+      "updated": "The assistant updated {count, plural, one {# file} other {# files}} in memory.",
       "savedSensitive": "something marked sensitive",
       "undo": "Undo",
       "undoFailed": "Could not undo that. Please try again.",

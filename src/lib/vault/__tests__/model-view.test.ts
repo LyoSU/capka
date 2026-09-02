@@ -200,6 +200,16 @@ describe("the three channels", () => {
     expect(code(read(OWNER))).not.toMatch(/function\s+widen|toManifestText|asManifest\b/);
   });
 
+  it("re-admits a STORED class in one place and for one caller", () => {
+    // `carriedClass` is the identity on a class the database already holds, which is what
+    // `revertNote` needs: an undo must change a note's words and nothing about its
+    // authority. It is not a producer — its output equals its input — but its argument is a
+    // plain `SourceClass`, so a caller passing a LITERAL would be minting after all. That
+    // is the hole this roster closes, and it is a roster rather than a comment because the
+    // one legitimate caller reads the value off the row it is restoring.
+    expect(hits(/\bcarriedClass\b/)).toEqual(["src/lib/vault/grounding.ts", "src/lib/vault/notes.ts"]);
+  });
+
   it("keeps the liveness arms side by side in the owner module and nowhere else", () => {
     // The invariant is not "one function"; it is "one module owns liveness". A fourth node
     // kind has to add a fourth arm HERE, beside the others, which is what makes the

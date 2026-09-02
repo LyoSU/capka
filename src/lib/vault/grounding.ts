@@ -48,6 +48,31 @@ export function migrationInferred(): ServerClass {
   return mint("agent_inferred");
 }
 
+/**
+ * THE CLASS A STORED VERSION ALREADY CARRIES, onto a new revision of that same row.
+ *
+ * NOT A FOURTH PRODUCER, and the difference is the whole reason this is allowed to exist: a
+ * producer DECIDES a class from evidence, while this is the IDENTITY on a value some
+ * producer already decided and the database already stores. Its output equals its input, so
+ * it can open no channel `prompt_access` did not already grant.
+ *
+ * IT EXISTS FOR `revertNote`, and both alternatives there are wrong in a way this is not.
+ * Minting `ownerAuthored()` would promote an agent's words — or a document's — to the
+ * always-on manifest tier on one Undo click, which is §10.1's fence crossed by a person who
+ * only asked to put a file back. Re-running `classify()` would decide a class from evidence
+ * the restored revision no longer carries, and would raise `untrusted_derived` out of its
+ * fence in the process. Carrying the stored value changes nothing at all, which is exactly
+ * what an undo should change about authority.
+ *
+ * ONE CALLER, and it has to stay that way, because the argument is a plain `SourceClass`: a
+ * caller passing a LITERAL would be minting after all, which is the hole the brand closes.
+ * Read it off the row you are restoring and from nowhere else. `model-view.test.ts` asserts
+ * the roster.
+ */
+export function carriedClass(stored: SourceClass): ServerClass {
+  return mint(stored);
+}
+
 export type Grounding =
   | { kind: "current_user_quote"; quote: string }
   /** The RESOLVED classes of 1..8 handles. Handles are resolved by the caller, which owns

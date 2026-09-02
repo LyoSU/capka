@@ -2,7 +2,18 @@ import { and, eq, isNull } from "drizzle-orm";
 import { apiHandler, requireWriter } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { spaces, vaultNodes, vaultNotes } from "@/lib/db/schema";
-import { forgetNote, noteHead, restoreNote } from "@/lib/vault/notes";
+import { forgetNote, noteHead, restoreNote, revertNote } from "@/lib/vault/notes";
+
+/** The spaces this person owns and has not retired — which is what "yours" means on every
+ *  verb here. One helper rather than the same three-line select twice: two copies is how one
+ *  of them loses the `retired_at` clause. */
+async function ownedSpaceIds(userId: string): Promise<string[]> {
+  const mine = await db
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.ownerUserId, userId), isNull(spaces.retiredAt)));
+  return mine.map((s) => s.id);
+}
 
 /**
  * The person's delete for a NOTE — the sibling of the claim route next door, and the
@@ -28,13 +39,7 @@ export const DELETE = apiHandler(async (_req: Request, ctx: { params: Promise<{ 
   const { userId } = await requireWriter();
   const { noteId } = await ctx.params;
 
-  const mine = await db
-    .select({ id: spaces.id })
-    .from(spaces)
-    .where(and(eq(spaces.ownerUserId, userId), isNull(spaces.retiredAt)));
-  const allowedSpaceIds = mine.map((s) => s.id);
-
-  const head = await noteHead(noteId, allowedSpaceIds);
+  const head = await noteHead(noteId, await ownedSpaceIds(userId));
   // One answer for "no such note" and "not yours", deliberately: telling them apart would
   // make another user's note ids probeable one at a time.
   if (!head) return Response.json({ error: "not_found" }, { status: 404 });
@@ -97,4 +102,51 @@ export const POST = apiHandler(async (_req: Request, ctx: { params: Promise<{ no
     actor: { kind: "user", id: userId },
   });
   return res.ok ? Response.json({ ok: true }) : Response.json({ error: "not_found" }, { status: 404 });
+});
+
+/**
+ * UNDO AN EDIT — the chat notice's Undo for a turn that changed a file it did not create.
+ *
+ * A THIRD VERB ON THE SAME DIRECTORY, because the three are three things one can do to one
+ * note and a new route directory is not picked up by the dev watcher over this repo's bind
+ * mount. DELETE removes the file, POST puts a removed one back, PATCH puts its earlier WORDS
+ * back — and the last one exists because the notice used to answer an edited file's Undo
+ * with DELETE, taking a file and all its history that the person only asked to leave alone.
+ *
+ * THE REVISION COMES FROM THE CLIENT here, unlike the delete's, and that is not a relaxation
+ * of the same rule: the delete reads the head because there is nothing for a person to
+ * choose, while a revert is a choice OF a revision — the notice sends the one before the
+ * turn it is undoing. `revertNote` refuses anything that is not strictly below the current
+ * head, so a stale page cannot revert forward or turn a revert into a no-op that reports
+ * success.
+ *
+ * One 400 for a body that is not a revision, and one 404 for everything else — no such
+ * note, not yours, deleted since, nothing earlier to go back to, or the head moved under
+ * the request. See `revertNote`: telling them apart would make another user's note ids
+ * probeable one at a time.
+ */
+export const PATCH = apiHandler(async (req: Request, ctx: { params: Promise<{ noteId: string }> }) => {
+  const { userId } = await requireWriter();
+  const { noteId } = await ctx.params;
+
+  const body = await req.json().catch(() => null);
+  const revertTo = (body as { revertTo?: unknown } | null)?.revertTo;
+  if (typeof revertTo !== "number" || !Number.isInteger(revertTo) || revertTo < 1) {
+    return Response.json({ error: "bad_request" }, { status: 400 });
+  }
+
+  const head = await noteHead(noteId, await ownedSpaceIds(userId));
+  if (!head) return Response.json({ error: "not_found" }, { status: 404 });
+
+  const res = await revertNote({
+    noteId: head.id,
+    spaceId: head.spaceId,
+    toRevision: revertTo,
+    // `user`, never `agent`: a model that could undo its own edit on the person's behalf
+    // would make the notice's Undo a thing the agent can press.
+    actor: { kind: "user", id: userId },
+  });
+  return res.ok
+    ? Response.json({ ok: true, revision: res.revision })
+    : Response.json({ error: "not_found" }, { status: 404 });
 });

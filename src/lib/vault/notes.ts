@@ -3,7 +3,9 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, noteVersionEvidence, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
 import { looksLikeSecret, type Actor, type PromptAccess, type SourceClass } from "./claims";
-import { horizonFor, type ServerClass } from "./grounding";
+import { unlinkReferencesFrom } from "./edges";
+import { carriedClass, horizonFor, type ServerClass } from "./grounding";
+import { edgeTargets } from "./links";
 import type { TopicSection } from "./memory-sections";
 import { deleteNode, insertNode, restoreNode } from "./nodes";
 import { projectNoteDoc } from "./search-documents";
@@ -400,6 +402,93 @@ export async function reviseNote(
   );
   await projectNoteDoc(a.noteId, ex);
   return { ok: true, revision, versionId: v.versionId };
+}
+
+/**
+ * THE OWNER'S UNDO OF AN EDIT — the note's own earlier words as a NEW revision.
+ *
+ * IT IS NOT A DELETE, and that distinction is the whole reason it exists. The chat's notice
+ * offers Undo on everything a turn wrote to memory, and a turn that merely EDITED an
+ * existing file was answered with `forgetNote`: the file went, with all its revisions, off
+ * every list — for a person who asked only to leave the file as it was. "Saved N things"
+ * with an Undo beside each is a promise about the turn's writes, not a licence to remove
+ * what the turn found already there.
+ *
+ * IT IS NOT A ROLLBACK EITHER. History is append-only here (§4.6), so putting revision N−1
+ * back means writing revision N+1 with those words, through `reviseNote`'s CAS like every
+ * other write — the edit stays in the record, and so does the undo. A person can therefore
+ * revert a revert, and the memory page's version history explains what happened rather than
+ * quietly missing a step.
+ *
+ * THE CLASS IS CARRIED, NEVER RE-DECIDED — see `carriedClass` for why both alternatives are
+ * worse. Same for `sensitive`: the words are the old words, so their flag is the old flag,
+ * and `insertNoteVersion`'s screen still runs over them on the way in.
+ *
+ * THE LINKS THE OLD BODY DOES NOT MENTION ARE CLOSED, in the same transaction, because §4.8
+ * is symmetric: an edge that outlives its token renders a link the body does not make. That
+ * is the `memory_link` case and the common one — the link block goes and its `references`
+ * edge closes with it. A token in the restored body whose edge some LATER revision closed
+ * stays closed and renders as removed-link text: reopening it would be this function
+ * deciding to restore a relationship a different write removed.
+ *
+ * `not_revertable` when `toRevision` is not strictly below the head: reverting to the head
+ * is a no-op dressed as a write, and reverting FORWARD is not a thing an undo can mean.
+ */
+export async function revertNote(
+  a: { noteId: string; spaceId: string; toRevision: number; actor: Actor },
+  ex?: Ex,
+): Promise<
+  { ok: true; revision: number } | { ok: false; reason: "not_found" | "not_revertable" | "revision_moved" }
+> {
+  if (!ex || ex === db) return db.transaction((tx) => revertNote(a, tx));
+
+  const head = await noteHead(a.noteId, [a.spaceId], ex);
+  // One answer for "no such note", "not in this space" and "deleted since": `noteHead`
+  // joins the node's tombstone, so a forgotten note is absent here rather than revertable.
+  if (!head) return { ok: false, reason: "not_found" };
+  if (a.toRevision < 1 || a.toRevision >= head.revision) return { ok: false, reason: "not_revertable" };
+
+  const [target] = await ex
+    .select({
+      title: vaultNoteVersions.title,
+      bodyMarkdown: vaultNoteVersions.bodyMarkdown,
+      sourceClass: vaultNoteVersions.sourceClass,
+      sensitive: vaultNoteVersions.sensitive,
+    })
+    .from(vaultNoteVersions)
+    .where(and(eq(vaultNoteVersions.noteId, a.noteId), eq(vaultNoteVersions.revision, a.toRevision)))
+    .limit(1);
+  if (!target) return { ok: false, reason: "not_found" };
+
+  const upd = await reviseNote(
+    {
+      noteId: a.noteId,
+      spaceId: a.spaceId,
+      expectedRevision: head.revision,
+      title: target.title,
+      // AFTER the CAS, which is what the callback shape buys: a lost race must close no
+      // edges. `edgeTargets` reads the LIVE edges the restored body names, and everything
+      // else this note references is a link the restored body does not make.
+      bodyMarkdown: async (noteId) => {
+        const keep = await edgeTargets(target.bodyMarkdown, a.spaceId, ex);
+        await unlinkReferencesFrom(noteId, a.spaceId, [...keep.values()].map((t) => t.nodeId), ex);
+        return target.bodyMarkdown;
+      },
+      sourceClass: carriedClass(target.sourceClass),
+      sensitive: target.sensitive,
+      // WHERE THIS REVISION CAME FROM, in the shape every other provenance takes: no
+      // `messageId` and no `taskId`, because no turn wrote it — which is also what keeps
+      // `readTurnWrites` from naming an undo as something the turn saved.
+      provenance: { kind: "revert", of: head.revision, to: a.toRevision },
+      actor: a.actor,
+    },
+    ex,
+  );
+  // The head moved between the read and the CAS — another tab, or the agent mid-turn. The
+  // person can look and ask again; silently reverting whatever is there now would undo an
+  // edit they have not seen.
+  if (!upd.ok) return { ok: false, reason: "revision_moved" };
+  return { ok: true, revision: upd.revision };
 }
 
 /**

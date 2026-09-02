@@ -36,7 +36,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { hostOf, CitedSourcesFooter } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
-import { DISMISSED_KEY, nextDismissed, parseDismissed } from "@/lib/chat/memory-notice";
+import { DISMISSED_KEY, nextDismissed, noticeCounts, parseDismissed, undoRequest } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -1400,11 +1400,19 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
  * turn that made it, not on a settings page the person may never open. This is the visible
  * half; the memory page is the durable one.
  *
- * UNDO IS THE OWNER'S DELETE, not `memory_forget`. That tool is bounded to the task that
+ * UNDO IS THE OWNER'S ACT, not `memory_forget`. That tool is bounded to the task that
  * wrote the row, because a model holding a handle has not shown that the person asked. Here
  * the person IS asking, from their own session, and the request carries no words at all —
  * so the bound does not apply and the row goes whoever wrote it. The audit event records
  * `user`, which is the difference the log exists to show.
+ *
+ * AND WHAT IT UNDOES DEPENDS ON WHAT THE TURN DID, which is what `revision` is here for. A
+ * fact, or a file this turn CREATED (revision 1), is undone by deleting it — the turn added
+ * it, so removing it leaves the state the person had. A file the turn only EDITED (revision
+ * 2 or more) is undone by REVERTING to the revision before it: deleting there would destroy
+ * a file, and all its history, that the person asked only to leave alone. The notice's own
+ * sentence says which of the two happened, because "saved 2 things" over an edited file is
+ * the promise that made the wrong undo look right.
  *
  * DISMISSAL IS PER-VIEWER AND BOUNDED. It lives in `localStorage` rather than on the
  * message row: it is a reading preference about one person's own screen, not a property of
@@ -1444,12 +1452,20 @@ function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWr
   };
 
   const undo = async (item: TurnWrite) => {
-    const path = item.kind === "note" ? "notes" : "claims";
+    // WHICH ACT this is — a delete or a revert — is decided in `memory-notice.ts`, where it
+    // can be tested: this repo has no React renderer, and the decision is about destroying
+    // a person's data. The same predicate feeds the sentence below.
+    const { path, method, body } = undoRequest(item);
     try {
-      const res = await fetch(`/api/memory/${path}/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      const res = await fetch(path, {
+        method,
+        ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
+      });
       // 404 is "already gone" — undone in another tab, or deleted from the memory page.
       // The row is not there either way, so the item leaves the notice: a button that
-      // reports failure for a state the person wanted is a button that looks broken.
+      // reports failure for a state the person wanted is a button that looks broken. A
+      // revert answers 404 for a head that has moved on too, and the same reasoning holds:
+      // what the person wanted undone is no longer what is stored.
       if (!res.ok && res.status !== 404) throw new Error();
       setGone((g) => [...g, item.id]);
     } catch {
@@ -1458,6 +1474,9 @@ function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWr
   };
 
   const shown = writes.filter((w) => !gone.includes(w.id));
+  // TWO SENTENCES, and only the ones with a count: a turn that edited an existing file
+  // saved nothing, and "saved 1 thing" is what made the wrong undo look like the right one.
+  const counts = noticeCounts(shown);
   // NOTHING AT ALL when there is nothing to say — including after the last item is undone.
   // An empty frame reading "remembered 0 things" is the shape this rule exists to refuse.
   if (dismissed || !shown.length) return null;
@@ -1465,7 +1484,14 @@ function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWr
   return (
     <div className="animate-fade-up [--i:2] mt-3 rounded-xl bg-field px-3.5 py-2.5">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{t("saved", { count: shown.length })}</p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          {[
+            counts.saved ? t("saved", { count: counts.saved }) : "",
+            counts.updated ? t("updated", { count: counts.updated }) : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        </p>
         <button
           type="button"
           onClick={dismiss}

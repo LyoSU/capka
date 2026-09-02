@@ -232,7 +232,10 @@ describe("toUIMessages", () => {
   });
 
   describe("what a turn saved to memory", () => {
-    const write = { id: "c1", kind: "fact" as const, text: "Acme is paid monthly", sensitive: false, scope: "user" as const };
+    const write = {
+      id: "c1", kind: "fact" as const, text: "Acme is paid monthly", sensitive: false,
+      scope: "user" as const, revision: 1,
+    };
 
     it("names the items a turn wrote, with a handle-free id the page can act on", () => {
       const [msg] = toUIMessages([row({ content: "done", metadata: { status: "completed" } })], { m1: [write] });
