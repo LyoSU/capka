@@ -48,11 +48,16 @@ describe("markdown tables", () => {
     expect(cells).toMatch(/font-size:\s*0\.9375rem/);
   });
 
-  it("the first column stays put while a wide table scrolls sideways", () => {
-    // On a phone a ten-column table is a strip of numbers with no row labels the
-    // moment it scrolls; the label column is pinned so every number keeps its
-    // name. Opaque, so scrolled content passes under it rather than through it.
-    const pinned = rule(css, '[data-streamdown="table-header-cell"]:first-child,\n[data-streamdown="table-cell"]:first-child {');
+  it("the first column stays put while a wide table scrolls sideways — on wide screens only", () => {
+    // With a trackpad the labels stay while the columns move. On a phone the pin
+    // was tried and rejected: the label column took half the screen. So the pin
+    // lives inside a min-width media query, and the bare first-cell rule carries
+    // no position of its own.
+    const bare = rule(css, '[data-streamdown="table-header-cell"]:first-child,\n[data-streamdown="table-cell"]:first-child {');
+    expect(bare).not.toMatch(/position:/);
+    const wide = css.slice(css.indexOf("@media (min-width: 768px) {\n  [data-streamdown=\"table-header-cell\"]:first-child"));
+    expect(wide.length).toBeGreaterThan(0);
+    const pinned = wide.slice(wide.indexOf("{", wide.indexOf("first-child {")), wide.indexOf("}"));
     expect(pinned).toMatch(/position:\s*sticky/);
     expect(pinned).toMatch(/left:\s*0/);
     expect(pinned).toMatch(/background:\s*var\(--background\)/);
