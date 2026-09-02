@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- A dismissible "saved to memory" notice after any turn that wrote memory, with one-click undo on each item.
 - When a fact the assistant saved contradicts one already stored, the memory page shows both side by side and one click keeps either or both.
 - The assistant can write and update project notes, and link them to each other; links are stored as ids, so renaming a note updates every reference.
 - The assistant can file a saved fact or note under a topic.

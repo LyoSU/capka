@@ -67,6 +67,14 @@ export type TaskEvent =
   // shows the divider and the context meter re-derives (it hides until the next
   // turn reports the post-compaction size).
   | { type: "chat:compacted"; chatId: string; messageId: string }
+  // Post-turn extraction saved something to memory. It exists because that pass runs
+  // AFTER `task:finish` — it is a fire-and-forget aux model call, deliberately, so the
+  // reply is not held behind it — and the client reloads on finish. Without this event the
+  // "saved to memory" notice would be correct and simply invisible until the next reload,
+  // which is the shipped-but-inert failure this repo has already paid for twice. The
+  // notice's data is a projection, so the event carries no payload beyond the message:
+  // there is nothing to keep in step, only a read to redo.
+  | { type: "chat:memory_saved"; chatId: string; messageId: string }
   | { type: "new_message"; chatId: string };
 
 /** The per-user realtime channel name. Centralized so it never drifts. */

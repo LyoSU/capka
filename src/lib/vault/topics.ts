@@ -312,7 +312,10 @@ export async function resolveTopic(
   // `ownerAuthored()`, so the horizon `createNote` would have armed is null here anyway: a
   // topic the person's own filing created is not agent content and does not expire.
   await insertNoteVersion(
-    { noteId: id, revision: 1, title: raw, bodyMarkdown: "", sourceClass: ownerAuthored(),
+    { noteId: id, spaceId, revision: 1, title: raw, bodyMarkdown: "", sourceClass: ownerAuthored(),
+      // No `messageId` in the provenance, deliberately: no turn wrote this container, and
+      // the chat notice's predicate is exactly that key — so a topic auto-created while
+      // filing a fact never announces itself as something the assistant remembered.
       provenance: { kind: "topic_created" } },
     ex,
   );

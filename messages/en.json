@@ -586,6 +586,13 @@
       "nextVersion": "Next version",
       "versions": "{count, plural, one {# version} other {# versions}}"
     },
+    "memory": {
+      "saved": "Capka saved {count, plural, one {# thing} other {# things}} to memory.",
+      "savedSensitive": "something marked sensitive",
+      "undo": "Undo",
+      "undoFailed": "Could not undo that. Please try again.",
+      "dismiss": "Hide this notice"
+    },
     "forkFailed": "Could not fork the chat",
     "archived": {
       "title": "Archived chats",

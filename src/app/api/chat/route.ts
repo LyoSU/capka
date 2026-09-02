@@ -12,6 +12,7 @@ import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { readTurnWrites } from "@/lib/vault/turn-writes";
 import { loadActivePath, switchSibling } from "@/lib/chat/tree";
 import { chatRequestSchema } from "@/lib/chat/contracts";
 import { take } from "@/lib/rate-limit";
@@ -230,7 +231,12 @@ export const GET = apiHandler(async (req: Request) => {
   const path = await loadActivePath(chatId, (chat.activeLeafId as string | null) ?? null);
   const rows = path.map((p) => ({ ...p.node, siblingIndex: p.siblingIndex, siblingCount: p.siblingCount }));
 
-  return Response.json(toUIMessages(rows));
+  // What each turn saved to memory, for the "saved to memory" notice. One extra read for
+  // the whole visible branch rather than one per message, and it is passed to the
+  // presenter rather than merged into `rows`: this is the ONLY caller that renders the
+  // notice, and the share page must never be given the shape by accident.
+  const memoryWrites = await readTurnWrites(rows.map((r) => r.id), userId);
+  return Response.json(toUIMessages(rows, memoryWrites));
 });
 
 // PATCH /api/chat — flip the visible branch to the prev/next version of a

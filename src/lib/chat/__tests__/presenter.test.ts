@@ -230,4 +230,39 @@ describe("toUIMessages", () => {
     expect(m.usage).toBeUndefined();
     expect(m.costUsd).toBeUndefined();
   });
+
+  describe("what a turn saved to memory", () => {
+    const write = { id: "c1", kind: "fact" as const, text: "Acme is paid monthly", sensitive: false, scope: "user" as const };
+
+    it("names the items a turn wrote, with a handle-free id the page can act on", () => {
+      const [msg] = toUIMessages([row({ content: "done", metadata: { status: "completed" } })], { m1: [write] });
+      const m = msg.metadata as { memoryWrites?: typeof write[] };
+      expect(m.memoryWrites).toEqual([write]);
+      // A PERSISTENT id, not a run-local `m1` handle: a handle is minted for a model and
+      // expires with the turn, and this is the person's own browser calling a route that
+      // takes the row's own id.
+      expect(m.memoryWrites?.[0].id).toBe("c1");
+    });
+
+    it("says nothing at all when a turn wrote nothing", () => {
+      // `undefined`, not `[]`. An empty array is a value a renderer can treat as "draw
+      // the frame with no rows in it", which is the "remembered 0 things" notice this
+      // rule exists to refuse.
+      const [none] = toUIMessages([row({ content: "done", metadata: { status: "completed" } })]);
+      expect((none.metadata as { memoryWrites?: unknown }).memoryWrites).toBeUndefined();
+      const [empty] = toUIMessages([row({ content: "done", metadata: { status: "completed" } })], { m1: [] });
+      expect((empty.metadata as { memoryWrites?: unknown }).memoryWrites).toBeUndefined();
+    });
+
+    it("gives a turn only its OWN writes", () => {
+      // The map is keyed by message id, so a chat where one turn saved something and the
+      // next did not must not put the notice on both.
+      const [a, b] = toUIMessages(
+        [row({ id: "m1", content: "one" }), row({ id: "m2", content: "two" })],
+        { m1: [write] },
+      );
+      expect((a.metadata as { memoryWrites?: unknown }).memoryWrites).toBeDefined();
+      expect((b.metadata as { memoryWrites?: unknown }).memoryWrites).toBeUndefined();
+    });
+  });
 });

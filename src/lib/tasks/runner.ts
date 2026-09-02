@@ -2121,7 +2121,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           if (billable) recordAuxUsage(billable);
           return { text, finishReason };
         },
-      }).catch((e) => tlog.error("memory extraction failed", { err: String(e) })));
+      })
+        // The notice is a PROJECTION, so nothing here has a list to hand the client — only
+        // the news that there is something new to read. Fired after the pass resolves,
+        // unconditionally: this call writes nothing when the turn had nothing worth
+        // saving, and a reload that finds no writes renders no notice, which is cheaper
+        // than a second query here to decide whether to publish.
+        .then(() => publishTaskEvent(userId, { type: "chat:memory_saved", chatId, messageId: msgId }))
+        .catch((e) => tlog.error("memory extraction failed", { err: String(e) })));
     }
 
     // Auto-title the chat on its FIRST completed turn. "First turn" = no prior

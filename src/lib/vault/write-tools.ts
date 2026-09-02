@@ -827,6 +827,7 @@ export async function noteWrite(a: {
           sourceClass: verdict.sourceClass,
           provenance,
           createdTaskId: ctx.taskId,
+          actor: ctx.actor,
         },
         tx,
       );
@@ -846,6 +847,7 @@ export async function noteWrite(a: {
           sourceClass: verdict.sourceClass,
           provenance,
           createdTaskId: ctx.taskId,
+          actor: ctx.actor,
         },
         tx,
       );

@@ -4,6 +4,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, GitBranch, X, Info,
   MoreHorizontal, ArrowRight, Clock,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Hint } from "@/components/ui/tooltip";
@@ -33,6 +34,8 @@ import { isBareUrl, type StepField } from "@/lib/chat/steps";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
 import { hostOf, CitedSourcesFooter } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
+import type { TurnWrite } from "@/lib/vault/turn-writes";
+import { DISMISSED_KEY, nextDismissed, parseDismissed } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -1341,6 +1344,115 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
 
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
+/**
+ * "Capka remembered N things" — the notice after a turn that wrote memory, with Undo on
+ * each item.
+ *
+ * WHY IT EXISTS AT ALL. The confirmation gate is gone: the assistant saves what it learns
+ * without asking. What makes that safe is not a smaller model or a stricter predicate, it
+ * is that the write is ADDITIVE, VISIBLE and UNDOABLE — and "visible" has to mean in the
+ * turn that made it, not on a settings page the person may never open. This is the visible
+ * half; the memory page is the durable one.
+ *
+ * UNDO IS THE OWNER'S DELETE, not `memory_forget`. That tool is bounded to the task that
+ * wrote the row, because a model holding a handle has not shown that the person asked. Here
+ * the person IS asking, from their own session, and the request carries no words at all —
+ * so the bound does not apply and the row goes whoever wrote it. The audit event records
+ * `user`, which is the difference the log exists to show.
+ *
+ * DISMISSAL IS PER-VIEWER AND BOUNDED. It lives in `localStorage` rather than on the
+ * message row: it is a reading preference about one person's own screen, not a property of
+ * the turn, and a column for it would be a second thing every writer has to keep correct.
+ * The list is capped and trimmed on write, because "whatever populates a store states its
+ * own bound" — an uncapped set of message ids would grow for the life of the browser
+ * profile. Every read and write is wrapped: a private window, cleared site data or a
+ * browser set to block storage all throw here, and the correct answer to that is to show
+ * the notice rather than to break the message.
+ */
+function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWrite[] }) {
+  const t = useTranslations("chat.memory");
+  // Read in an effect, not in the initial state: `localStorage` does not exist during the
+  // server render, and reading it in a `useState` initializer is the hydration mismatch
+  // that makes a dismissed notice flash back on every navigation.
+  const [dismissed, setDismissed] = useState(false);
+  const [gone, setGone] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      setDismissed(parseDismissed(localStorage.getItem(DISMISSED_KEY)).includes(messageId));
+    } catch {
+      // Accessing storage can THROW rather than return null (thumbnail capture, a browser
+      // blocking site data). The notice shows, which is the safe direction.
+    }
+  }, [messageId]);
+
+  const dismiss = () => {
+    setDismissed(true);
+    try {
+      const current = parseDismissed(localStorage.getItem(DISMISSED_KEY));
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(nextDismissed(current, messageId)));
+    } catch {
+      // A private window, cleared site data, or a browser set to block storage. The
+      // dismissal still holds for this view; it simply will not survive a reload, which
+      // is the right way for a reading preference to fail.
+    }
+  };
+
+  const undo = async (item: TurnWrite) => {
+    const path = item.kind === "note" ? "notes" : "claims";
+    try {
+      const res = await fetch(`/api/memory/${path}/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      // 404 is "already gone" — undone in another tab, or deleted from the memory page.
+      // The row is not there either way, so the item leaves the notice: a button that
+      // reports failure for a state the person wanted is a button that looks broken.
+      if (!res.ok && res.status !== 404) throw new Error();
+      setGone((g) => [...g, item.id]);
+    } catch {
+      toast.error(t("undoFailed"));
+    }
+  };
+
+  const shown = writes.filter((w) => !gone.includes(w.id));
+  // NOTHING AT ALL when there is nothing to say — including after the last item is undone.
+  // An empty frame reading "remembered 0 things" is the shape this rule exists to refuse.
+  if (dismissed || !shown.length) return null;
+
+  return (
+    <div className="animate-message-in mt-3 rounded-xl bg-field px-3.5 py-2.5 [animation-delay:var(--settle)]">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t("saved", { count: shown.length })}</p>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label={t("dismiss")}
+          className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+        >
+          <X aria-hidden className="size-3.5" />
+        </button>
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {shown.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px] leading-relaxed">
+            {/* A sensitive statement is not printed here. The memory page has a reveal
+                control and the shoulder-surfing argument that justifies one; a chat
+                transcript scrolls past on its own and has neither, so the notice names
+                the CATEGORY and the row is read where it can be read deliberately. */}
+            <span className={item.sensitive ? "text-muted-foreground" : undefined}>
+              {item.sensitive ? t("savedSensitive") : item.text}
+            </span>
+            <button
+              type="button"
+              onClick={() => undo(item)}
+              className="shrink-0 rounded-md text-[12px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+            >
+              {t("undo")}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void | Promise<boolean | void> }) {
   const t = useTranslations("chat.tool");
   const anchorDisclosure = useDisclosureAnchor();
@@ -2101,7 +2213,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2307,6 +2419,14 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             onContinue={onContinue}
           />
         )}
+        {/* AFTER the answer and BEFORE the action row: it is a consequence of the turn,
+            not part of it, and putting it above the reply would make every saved fact
+            interrupt the thing the person actually asked for. Rendered only for a finished
+            turn — a notice that appeared mid-stream would name rows the turn may still
+            supersede. */}
+        {!isStreaming && metadata?.memoryWrites?.length ? (
+          <MemoryNotice messageId={message.id} writes={metadata.memoryWrites} />
+        ) : null}
         {!isStreaming && (() => {
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (

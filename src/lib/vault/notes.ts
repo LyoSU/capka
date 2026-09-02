@@ -142,10 +142,25 @@ export type NoteHead = {
  * The caller CLAMPS the title (`fitNoteTitle`, or `fitTopicTitle` for a topic). This
  * function must not re-clamp: the version title has to equal `vault_notes.title` byte for
  * byte, because `projectNoteDoc` indexes one and `topicRows` renders the other.
+ *
+ * §2.11's `note.revise` IS WRITTEN HERE, at the one implementation, for the reason the
+ * paragraph above gives about revision 1: three callers, one implementation, one grep. It
+ * is what the chat's "saved to memory" notice projects over, and putting it in the two
+ * note WRITERS instead would leave a fourth writer silently unannounced.
+ *
+ * A topic container reaches this function too and is deliberately NOT excluded here: the
+ * event says a version was written, which is true of a topic's revision 1 as well, and
+ * the notice's own predicate is `provenance->>'messageId'` — which `resolveTopic` does not
+ * set, because no turn "wrote" the General topic. A `kind` check in this function would be
+ * a second answer to a question the provenance already answers.
  */
 export async function insertNoteVersion(
   a: {
     noteId: string;
+    /** The note's space. It is a parameter rather than a read because both writers already
+     *  hold it and `audit_events.space_id` is NOT NULL — and because a read here would be
+     *  a fourth statement in a move whose whole point is being three. */
+    spaceId: string;
     revision: number;
     title: string;
     bodyMarkdown: string;
@@ -153,6 +168,9 @@ export async function insertNoteVersion(
     sensitive?: boolean;
     provenance: Record<string, unknown>;
     createdTaskId?: string;
+    /** Who wrote this revision. `system` is the honest default for a topic container that
+     *  no turn asked for; the note writers pass the turn's own actor. */
+    actor?: Actor;
   },
   ex: Ex,
 ): Promise<{ versionId: string; sensitive: boolean }> {
@@ -168,6 +186,19 @@ export async function insertNoteVersion(
     sensitive,
     provenance: a.provenance,
     createdTaskId: a.createdTaskId ?? null,
+  });
+  await ex.insert(auditEvents).values({
+    id: nanoid(),
+    spaceId: a.spaceId,
+    actor: a.actor ?? { kind: "system" },
+    action: "note.revise",
+    subjectType: "note",
+    subjectId: a.noteId,
+    // No title and no body: the audit log is read more widely than the space itself, and
+    // `retireProjectSpace` keeps these events after deleting the notes — so whatever rides
+    // here outlives the user's own deletion of the project. The revision addresses which
+    // version, and the row itself holds the words for as long as it exists.
+    payload: { revision: a.revision, versionId },
   });
   await ex
     .update(vaultNotes)
@@ -204,6 +235,9 @@ export async function createNote(
     sensitive?: boolean;
     provenance: Record<string, unknown>;
     createdTaskId?: string;
+    /** Who is writing. It reaches `audit_events` and nothing else — the note's own trust
+     *  is `source_class`, and an actor cannot raise it. */
+    actor?: Actor;
   },
   ex?: Ex,
 ): Promise<{ id: string; revision: number; versionId: string; sensitive: boolean }> {
@@ -235,6 +269,7 @@ export async function createNote(
   const v = await insertNoteVersion(
     {
       noteId: id,
+      spaceId: a.spaceId,
       revision: 1,
       title,
       bodyMarkdown,
@@ -242,6 +277,7 @@ export async function createNote(
       sensitive: a.sensitive,
       provenance: a.provenance,
       createdTaskId: a.createdTaskId,
+      actor: a.actor,
     },
     ex,
   );
@@ -284,6 +320,8 @@ export async function reviseNote(
     sensitive?: boolean;
     provenance: Record<string, unknown>;
     createdTaskId?: string;
+    /** Who is writing — see `createNote`. */
+    actor?: Actor;
   },
   ex?: Ex,
 ): Promise<
@@ -327,6 +365,7 @@ export async function reviseNote(
   const v = await insertNoteVersion(
     {
       noteId: a.noteId,
+      spaceId: a.spaceId,
       revision,
       title,
       bodyMarkdown,
@@ -334,6 +373,7 @@ export async function reviseNote(
       sensitive: a.sensitive,
       provenance: a.provenance,
       createdTaskId: a.createdTaskId,
+      actor: a.actor,
     },
     ex,
   );
@@ -419,7 +459,8 @@ export async function attachNoteEvidence(
 }
 
 /**
- * A NOTE'S SOFT DELETE, bounded to the task that wrote its head version (§4.9).
+ * A NOTE'S SOFT DELETE — bounded to the task that wrote its head version for the AGENT
+ * (§4.9), and unbounded for the OWNER.
  *
  * THE BOUND IS A COLUMN COMPARISON INSIDE THE WRITE, exactly as it is for a claim — and for a
  * note that column is on the HEAD VERSION rather than on the identity: `vault_notes` carries
@@ -427,6 +468,14 @@ export async function attachNoteEvidence(
  * a revision. So the condition is an `EXISTS` over `vault_note_versions` at
  * `revision = current_revision`, handed to `deleteNode` as the extra clause on ITS statement.
  * Reachability is not authority, and a rule enforced at one entrance grows a second.
+ *
+ * `createdTaskId` IS OPTIONAL, and its absence is the owner's undo — the same shape
+ * `forgetClaim.requireCreatedTaskId` already has, for the same reason. The same-task bound
+ * is the AGENT's limit: it exists because a model holding a handle has not thereby shown
+ * that the person asked. A request from the person's own session has shown exactly that, by
+ * the session, and it carries no words at all — so there is nothing for a fetched page to
+ * have supplied. Widening the bound would be wrong; having no bound on the owner's path is
+ * what the bound was always narrower than.
  *
  * IT GOES THROUGH `deleteNode`, not around it: the node's tombstone and the cascade of its
  * live edges are one act, and this module does not own that pair. What this function owns is
@@ -437,20 +486,32 @@ export async function attachNoteEvidence(
  * would tell a person their own note is un-deletable when they simply held a stale revision.
  */
 export async function forgetNote(
-  a: { noteId: string; spaceId: string; expectedRevision: number; createdTaskId: string; actor: Actor },
+  a: {
+    noteId: string;
+    spaceId: string;
+    expectedRevision: number;
+    /** Present for the AGENT's `memory_forget`; absent for the owner's own delete. */
+    createdTaskId?: string;
+    actor: Actor;
+  },
   ex?: Ex,
 ): Promise<
   { ok: true } | { ok: false; reason: "not_found" | "revision_mismatch" | "not_this_task"; revision: number | null }
 > {
   if (!ex || ex === db) return db.transaction((tx) => forgetNote(a, tx));
 
+  // The head-ness half of the clause is UNCONDITIONAL and the task half is not. Folding
+  // both away for the owner would drop the `revision = current_revision` check with the
+  // bound, so an owner's stale page could delete a note by naming a revision that is no
+  // longer the head — which is a different rule, and one nobody meant to relax.
+  const createdTaskId = a.createdTaskId;
   const deleted = await deleteNode(a.noteId, a.spaceId, ex, {
     onlyIf: sql`exists (
       select 1 from ${vaultNoteVersions} v
        where v.note_id = ${a.noteId}
          and v.revision = ${a.expectedRevision}
          and v.revision = (select n.current_revision from ${vaultNotes} n where n.id = ${a.noteId})
-         and v.created_task_id = ${a.createdTaskId})`,
+         ${createdTaskId ? sql`and v.created_task_id = ${createdTaskId}` : sql``})`,
   });
   if (!deleted) {
     // WHY it matched nothing, read back after the fact. The order is the order the model can
@@ -473,7 +534,7 @@ export async function forgetNote(
     action: "node.delete",
     subjectType: "note",
     subjectId: a.noteId,
-    payload: { revision: a.expectedRevision, createdTaskId: a.createdTaskId },
+    payload: { revision: a.expectedRevision, createdTaskId: a.createdTaskId ?? null },
   });
   return { ok: true };
 }

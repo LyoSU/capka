@@ -1,7 +1,19 @@
 import type { StoredPart, MessageMeta } from "./contracts";
+import type { TurnWrite } from "@/lib/vault/turn-writes";
 import { INTERRUPTED_TOOL_RESULT } from "./tool-results";
 
-/** Convert DB message rows to UI message format */
+/**
+ * Convert DB message rows to UI message format.
+ *
+ * `memoryWrites` is what a turn saved to memory, keyed by message id — a PROJECTION the
+ * caller reads (see `readTurnWrites`), not a field on the row. It is a second parameter
+ * rather than a column on the row shape because most callers of this function are not the
+ * web chat: the runner builds the model's own view through it, `share/[token]` renders
+ * somebody else's conversation, and Telegram has no notice to render. A row shape carrying
+ * the field would make every one of them either supply it or explain why not, and the
+ * share page supplying it would be a real leak rather than an omission. Omitted, no
+ * message carries the metadata and nothing is rendered.
+ */
 export function toUIMessages(rows: {
   id: string;
   role: string;
@@ -13,7 +25,7 @@ export function toUIMessages(rows: {
   /** Position among siblings (0-based) — drives the "‹ i/N ›" version switcher. */
   siblingIndex?: number;
   siblingCount?: number;
-}[]) {
+}[], memoryWrites: Record<string, TurnWrite[]> = {}) {
   return rows.map((m) => {
     const meta = m.metadata as MessageMeta | null;
     const parts: unknown[] = [];
@@ -173,6 +185,11 @@ export function toUIMessages(rows: {
         hasGeneration: meta?.generationId ? true : undefined,
         contextWindow: meta?.contextWindow,
         contextTokens: meta?.contextTokens,
+        // What this turn saved to memory, if anything. `undefined` and not `[]` when it
+        // saved nothing: the notice's own rule is that it says nothing at all, and an
+        // empty array is a value a renderer can accidentally treat as "render the frame
+        // with no rows in it".
+        memoryWrites: memoryWrites[m.id]?.length ? memoryWrites[m.id] : undefined,
       },
     };
   });

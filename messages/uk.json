@@ -586,6 +586,13 @@
       "nextVersion": "Наступна версія",
       "versions": "{count, plural, one {# версія} few {# версії} many {# версій} other {# версії}}"
     },
+    "memory": {
+      "saved": "Capka зберегла в пам'ять {count, plural, one {# річ} few {# речі} many {# речей} other {# речей}}.",
+      "savedSensitive": "щось позначене як чутливе",
+      "undo": "Скасувати",
+      "undoFailed": "Не вдалося скасувати. Спробуйте ще раз.",
+      "dismiss": "Сховати це повідомлення"
+    },
     "forkFailed": "Не вдалося відгалузити чат",
     "archived": {
       "title": "Архівовані чати",

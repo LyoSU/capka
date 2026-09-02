@@ -482,6 +482,15 @@ export function useBackgroundChat({
           loadHistory();
           break;
         }
+
+        case "chat:memory_saved": {
+          // The post-turn extraction finished and saved something. It runs after
+          // task:finish, so the reload that finish triggered ran too early to see it —
+          // this is the second read, and the notice appears in the turn it belongs to
+          // instead of on the next visit.
+          loadHistory();
+          break;
+        }
       }
       return true;
     };
