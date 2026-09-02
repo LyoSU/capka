@@ -285,8 +285,12 @@ export function Statement({
         >
           {value.text}
         </Text>
-        {/* Outside the hidden element, or the one line explaining the blur is hidden too. */}
-        {!shown && <span className="sr-only">{t("sensitiveBlurred")}</span>}
+        {/* Outside the hidden element, or the one line explaining the blur is hidden too.
+            A DIFFERENT SENTENCE from the one the control-bearing branch shows: that one ends
+            "until you show it", and there is nothing here to show it with. A reader who
+            cannot see the blur would be told to press a button that does not exist, so this
+            one points at the place the reveal actually lives. */}
+        {!shown && <span className="sr-only">{t("sensitiveHidden")}</span>}
         {shown && children}
       </>
     );

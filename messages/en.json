@@ -1049,6 +1049,7 @@
       "reveal": "Show",
       "hide": "Hide",
       "sensitiveBlurred": "Marked sensitive, so it is hidden here until you show it, and the assistant never reads it.",
+      "sensitiveHidden": "Marked sensitive, so it is hidden here; open the file to show it.",
       "sensitiveRow": "{reason} Under {section}, updated {date}.",
       "replacedOn": "It replaced this, saved {date}:",
       "conflictReplacesOn": "Keeping this replaces the fact saved {date}:",
