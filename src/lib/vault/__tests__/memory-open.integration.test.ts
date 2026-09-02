@@ -237,6 +237,8 @@ run("memory_open", () => {
     const first = await memoryOpen({ handle: note.handle, ctx: ctx() });
     if (first.status !== "opened" || first.kind !== "note") throw new Error("narrowing");
     expect(first.cursor).not.toBeNull();
+    // Same line, so the continuation carries a byte offset beside the line number.
+    expect(first.cursor).toMatch(/^l1\.[0-9]+$/);
     expect(first.said).toMatch(/cursor/);
     expect(Buffer.byteLength(first.body, "utf8")).toBeLessThanOrEqual(MEMORY_OPEN_MAX_BYTES);
     // NOT SPLIT MID-CHARACTER: a replacement character is what a byte-offset cut produces.
@@ -275,7 +277,7 @@ run("memory_open", () => {
     if (first.status !== "opened" || first.kind !== "note") throw new Error("narrowing");
     // Two whole lines fit in twenty bytes (7 + 5 + 1 + 7 + 4 = 24 is too many, so one does).
     expect(first.body).toBe("     1\talpha");
-    expect(first.cursor).toBe("1");
+    expect(first.cursor).toBe("l2");
     expect(first.said).toContain("lines 1-1 of 3");
 
     const second = await memoryOpen({ handle: note.handle, cursor: first.cursor!, maxBytes: 20, ctx: ctx() });
@@ -287,17 +289,23 @@ run("memory_open", () => {
   it("a fabricated cursor is refused rather than repaired", async () => {
     const body = MULTIBYTE.repeat(10);
     const note = await seedNote(PS, "Long note", body);
-    // One line, so a line cursor past 0 addresses a line the note does not have.
+    // A BARE NUMBER IS NOT A CURSOR, and that is the point of the prefix: without it a
+    // fabricated cursor that happens to be a valid line index cannot be told from one this
+    // tool handed out, and the reader silently answers from wherever the model chose.
     expect((await memoryOpen({ handle: note.handle, cursor: "1", ctx: ctx() })).status).toBe("bad_cursor");
-    expect((await memoryOpen({ handle: note.handle, cursor: "999999", ctx: ctx() })).status).toBe("bad_cursor");
+    // One line, so a cursor naming a second one addresses a line the note does not have —
+    // and `l0` names a line no display ever shows.
+    expect((await memoryOpen({ handle: note.handle, cursor: "l2", ctx: ctx() })).status).toBe("bad_cursor");
+    expect((await memoryOpen({ handle: note.handle, cursor: "l0", ctx: ctx() })).status).toBe("bad_cursor");
+    expect((await memoryOpen({ handle: note.handle, cursor: "l999999", ctx: ctx() })).status).toBe("bad_cursor");
     expect((await memoryOpen({ handle: note.handle, cursor: "nope", ctx: ctx() })).status).toBe("bad_cursor");
-    // Mid-sequence: byte 1 of the leading two-byte character of line 0. A reader that
+    // Mid-sequence: byte 1 of the leading two-byte character of line 1. A reader that
     // snapped it forward would hand back a page starting one character late.
-    expect((await memoryOpen({ handle: note.handle, cursor: "0.1", ctx: ctx() })).status).toBe("bad_cursor");
-    // The control: byte 2 IS a boundary and line 0 exists, so the refusals above are about
+    expect((await memoryOpen({ handle: note.handle, cursor: "l1.1", ctx: ctx() })).status).toBe("bad_cursor");
+    // The control: byte 2 IS a boundary and line 1 exists, so the refusals above are about
     // these cursors and not about cursors in general.
-    expect((await memoryOpen({ handle: note.handle, cursor: "0.2", ctx: ctx() })).status).toBe("opened");
-    expect((await memoryOpen({ handle: note.handle, cursor: "0", ctx: ctx() })).status).toBe("opened");
+    expect((await memoryOpen({ handle: note.handle, cursor: "l1.2", ctx: ctx() })).status).toBe("opened");
+    expect((await memoryOpen({ handle: note.handle, cursor: "l1", ctx: ctx() })).status).toBe("opened");
   });
 
   it("stamps last_used_at INSIDE the mint, not from here (M1)", async () => {

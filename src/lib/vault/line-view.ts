@@ -27,10 +27,16 @@ export const numberLine = (n: number, text: string): string => `${String(n).padS
 export type LinePage = {
   /** The numbered page, lines joined by newlines. */
   text: string;
-  /** Where the next page starts, or `null` when this one is the last. `"<line>"` at a line
-   *  boundary and `"<line>.<byte>"` when a single line was too long for one page — opaque
-   *  to the model either way, and refused rather than repaired when it is not one this
-   *  function handed out. */
+  /** Where the next page starts, or `null` when this one is the last. `"l<line>"` at a line
+   *  boundary and `"l<line>.<byte>"` when a single line was too long for one page — the line
+   *  is the 1-based number the page will DISPLAY, and the `l` is what keeps the value from
+   *  being mistaken for one.
+   *
+   *  THE PREFIX IS THE POINT. Without it a cursor is an integer that looks exactly like a
+   *  line number the model can see on screen, and a fabricated one that happens to be a valid
+   *  index cannot be refused — the reader silently returns a page starting somewhere the
+   *  model chose rather than somewhere this function offered. With it, anything the model
+   *  composes itself is a `bad_cursor`, which is what the docstring below already promises. */
   next: string | null;
   /** The 1-based line numbers this page covers, and the file's total. `0`/`0`/`0` for an
    *  empty body: a file with no lines has no first line to name. */
@@ -39,7 +45,11 @@ export type LinePage = {
   total: number;
 };
 
-const CURSOR_RE = /^([0-9]{1,10})(?:\.([0-9]{1,10}))?$/;
+/** The wire form of a position: the 1-based line the next page opens on, prefixed so it can
+ *  never be read as a bare line number, plus the byte offset when a page stopped mid-line. */
+const cursorAt = (line: number, byte: number) => (byte === 0 ? `l${line + 1}` : `l${line + 1}.${byte}`);
+
+const CURSOR_RE = /^l([0-9]{1,10})(?:\.([0-9]{1,10}))?$/;
 
 /** Whether a byte offset lands inside a UTF-8 sequence rather than on a character. */
 const midSequence = (buf: Buffer, at: number) => at < buf.length && (buf[at] & 0xc0) === 0x80;
@@ -77,9 +87,12 @@ export function pageLines(body: string, cursor: string | undefined, maxBytes: nu
   if (cursor !== undefined) {
     const m = CURSOR_RE.exec(cursor);
     if (!m) return null;
-    line = Number(m[1]);
+    // 1-BASED ON THE WIRE, 0-based inside: the number in a cursor is the number the next
+    // page's first line will be printed with, so a person reading a transcript can line the
+    // two up. Line 0 is not a line, and neither is a cursor naming it.
+    line = Number(m[1]) - 1;
     byte = m[2] === undefined ? 0 : Number(m[2]);
-    if (line >= lines.length) return null;
+    if (line < 0 || line >= lines.length) return null;
     const buf = Buffer.from(lines[line], "utf8");
     // Past the line's end, or exactly at it with a resume offset: both are addresses this
     // function never emits, because a page that consumed a whole line moves to the next one.
@@ -114,7 +127,7 @@ export function pageLines(body: string, cursor: string | undefined, maxBytes: nu
     // bytes were left would scatter one sentence across pages for no gain, and the model
     // would have to reassemble it before it could match anything against it.
     if (parts.length) {
-      next = byte === 0 ? String(line) : `${line}.${byte}`;
+      next = cursorAt(line, byte);
       break;
     }
     let end = Math.max(room, 0);
@@ -127,15 +140,15 @@ export function pageLines(body: string, cursor: string | undefined, maxBytes: nu
       while (end < rest.length && midSequence(rest, end)) end += 1;
     }
     if (end === 0) {
-      next = byte === 0 ? String(line) : `${line}.${byte}`;
+      next = cursorAt(line, byte);
       break;
     }
     parts.push(prefix + rest.subarray(0, end).toString("utf8"));
     to = line + 1;
-    next = `${line}.${byte + end}`;
+    next = cursorAt(line, byte + end);
     break;
   }
-  if (next === null && line < lines.length) next = byte === 0 ? String(line) : `${line}.${byte}`;
+  if (next === null && line < lines.length) next = cursorAt(line, byte);
 
   return { text: parts.join("\n"), next, from, to, total: lines.length };
 }
