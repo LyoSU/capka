@@ -34,7 +34,11 @@ export function Segmented<K extends string>({
    *  with a `readout` can honestly be in. */
   value: K | null;
   onChange: (key: K) => void;
-  options: { key: K; label: string; icon?: React.ComponentType<{ className?: string }> }[];
+  /** `tone` colours the option ONLY while it is the selection — a governance
+   *  effect encodes risk in colour, and a knob painted allow-green or deny-red
+   *  says which way the switch is thrown from across the room. Unselected
+   *  options stay grey so the track never reads as three lit buttons. */
+  options: { key: K; label: string; icon?: React.ComponentType<{ className?: string }>; tone?: string }[];
   /** `tablist` switches views (the default); `radiogroup` picks a value. */
   as?: "tablist" | "radiogroup";
   /** Accessible name. A radiogroup needs one — its options are values, and
@@ -66,7 +70,7 @@ export function Segmented<K extends string>({
             className={cn(
               "flex items-center gap-1.5 transition-micro",
               cell,
-              on ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
+              on ? cn("bg-card font-medium shadow-btn", option.tone) : "text-muted-foreground hover:text-foreground",
             )}
           >
             {option.icon && <option.icon className="h-4 w-4" />}

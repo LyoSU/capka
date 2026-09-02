@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { ShieldCheck, Sparkles, Plug, X, ChevronRight, Search } from "lucide-react";
 import { toast } from "sonner";
-import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -19,6 +18,7 @@ import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
 import { EffectBadge } from "@/components/shared/effect-badge";
+import { Segmented } from "@/components/settings/segmented";
 
 type Effect = "allow" | "deny" | "ask";
 type CapabilityType = "skill" | "connector";
@@ -36,28 +36,24 @@ interface AuditEntry { id: string; action: string; targetType: string | null; ta
 type T = ReturnType<typeof useTranslations>;
 
 /** Three-way segmented control: Allow / Ask each time / Deny. "Ask" suspends every
- *  call of the capability for the user's own approval (the in-chat card). */
-function EffectControl({ value, onChange, t, size = "default" }: { value: Effect; onChange: (e: Effect) => void; t: T; size?: "sm" | "default" }) {
-  const opts: Effect[] = ["allow", "ask", "deny"];
-  const color: Record<Effect, string> = {
-    allow: "bg-success/15 text-success",
-    ask: "bg-warning-text/15 text-warning-text",
-    deny: "bg-destructive/15 text-destructive",
-  };
+ *  call of the capability for the user's own approval (the in-chat card).
+ *
+ *  The app's one segmented control, with the effect's colour on the knob. This
+ *  was a hand-rolled bordered strip that sat block-level in its section, so the
+ *  border ran the full width of the dialog with three words huddled at its left
+ *  end — an empty box the eye kept trying to read. Same text tones as
+ *  `EffectBadge`, so a rule reads the same whether you are setting it or seeing it. */
+function EffectControl({ value, onChange, t, label, size = "default" }: { value: Effect; onChange: (e: Effect) => void; t: T; label: string; size?: "sm" | "default" }) {
+  const tone: Record<Effect, string> = { allow: "text-success", ask: "text-warning-text", deny: "text-destructive-text" };
   return (
-    <div className="flex overflow-hidden rounded-md border text-xs">
-      {opts.map((e) => (
-        <button
-          key={e}
-          type="button"
-          onClick={() => onChange(e)}
-          aria-pressed={value === e}
-          className={cn(size === "sm" ? "px-2 py-0.5" : "px-2.5 py-1", "transition-colors", value === e ? color[e] : "text-muted-foreground hover:bg-hover")}
-        >
-          {t(`effect.${e}`)}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      as="radiogroup"
+      label={label}
+      size={size}
+      value={value}
+      onChange={onChange}
+      options={(["allow", "ask", "deny"] as Effect[]).map((e) => ({ key: e, label: t(`effect.${e}`), tone: tone[e] }))}
+    />
   );
 }
 
@@ -338,20 +334,23 @@ function CapabilityDrawer({
       {/* Header pinned, body scrolled — same split as the person card, so the
           capability's name and the close button stay reachable down a long
           exception list. */}
-      <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+      <DialogHeader className="gap-1 border-b px-6 py-4 pr-14">
         <DialogTitle className="truncate">{item.capabilityKey}</DialogTitle>
         <DialogDescription>{t(item.capabilityType === "skill" ? "typeSkill" : "typeConnector")}</DialogDescription>
       </DialogHeader>
 
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
+      {/* Sections separated by the divider ITSELF, not by a rule plus a stack gap
+          on each side — that pairing opened a hand's width of nothing between
+          five short sections and made the dialog scroll for no reason. */}
+      <div className="min-h-0 flex-1 divide-y overflow-y-auto overscroll-contain px-6 [scrollbar-gutter:stable]">
         {/* Global rule */}
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">{t("globalRule")}</h3>
-          <p className="text-xs text-muted-foreground">{t("globalRuleHint")}</p>
-          <EffectControl value={globalEffect} onChange={onSetGlobal} t={t} />
+        <section className="space-y-3 py-5">
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold tracking-tight">{t("globalRule")}</h3>
+            <p className="text-[13px] text-muted-foreground">{t("globalRuleHint")}</p>
+          </div>
+          <EffectControl value={globalEffect} onChange={onSetGlobal} t={t} label={t("globalRule")} />
         </section>
-
-        <Separator />
 
         {/* Per-person exceptions */}
         <ExceptionSection
@@ -369,25 +368,23 @@ function CapabilityDrawer({
           onAdd={(id, e) => onAddException("project", id, e)} onRemove={onRemoveException}
         />
 
-        <Separator />
-
         {/* Check access */}
         <CheckAccess item={item} t={t} members={members} projects={projects} policiesForCap={policiesForCap} memberLabel={memberLabel} />
 
-        <Separator />
-
         {/* Change history */}
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">{t("history")}</h3>
+        <section className="space-y-3 py-5">
+          <h3 className="text-sm font-semibold tracking-tight">{t("history")}</h3>
           {history.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("noHistory")}</p>
+            <p className="text-[13px] text-muted-foreground">{t("noHistory")}</p>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="divide-y">
               {history.map((h) => (
-                <li key={h.id} className="text-xs text-muted-foreground">
-                  <span className="text-foreground">{t(h.action === "policy.set" ? "histSet" : "histClear", { effect: t(`effect.${(h.detail.effect as Effect) ?? "allow"}`), scope: t(`scope.${(h.detail.scope as PolicyScope) ?? "system"}`) })}</span>
-                  {h.createdAt && <span className="ml-1">· {new Date(h.createdAt).toLocaleDateString()}</span>}
-                  {(h.actorName || h.actorEmail) && <span className="ml-1">· {h.actorName || h.actorEmail}</span>}
+                <li key={h.id} className="flex items-baseline justify-between gap-3 py-2 text-[13px]">
+                  <span className="min-w-0 truncate">
+                    {t(h.action === "policy.set" ? "histSet" : "histClear", { effect: t(`effect.${(h.detail.effect as Effect) ?? "allow"}`), scope: t(`scope.${(h.detail.scope as PolicyScope) ?? "system"}`) })}
+                    {(h.actorName || h.actorEmail) && <span className="text-muted-foreground"> · {h.actorName || h.actorEmail}</span>}
+                  </span>
+                  {h.createdAt && <span className="shrink-0 tabular-nums text-muted-foreground">{new Date(h.createdAt).toLocaleDateString()}</span>}
                 </li>
               ))}
             </ul>
@@ -412,13 +409,13 @@ function ExceptionSection({
   const items = useMemo(() => Object.fromEntries(pickerItems.map((p) => [p.id, p.label])), [pickerItems]);
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {rows.length === 0 && <p className="text-xs text-muted-foreground">{t("noExceptions")}</p>}
+    <section className="space-y-3 py-5">
+      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+      {rows.length === 0 && <p className="text-[13px] text-muted-foreground">{t("noExceptions")}</p>}
       {rows.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className="divide-y border-y">
           {rows.map((r) => (
-            <li key={r.id} className="flex items-center gap-2 rounded-md border p-2">
+            <li key={r.id} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
               <EffectBadge effect={r.effect} label={t(`effect.${r.effect}`)} />
               {/* Dropping an exception widens or narrows who may use the capability,
@@ -447,7 +444,7 @@ function ExceptionSection({
         </ul>
       )}
       {pickerItems.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={subject} onValueChange={(v) => setSubject(v as string)} items={items}>
             <SelectTrigger size="sm" className="min-w-40 flex-1">
               <SelectValue placeholder={t(scope === "user" ? "pickMember" : "pickProject")} />
@@ -458,7 +455,7 @@ function ExceptionSection({
               ))}
             </SelectContent>
           </Select>
-          <EffectControl value={effect} onChange={setEffect} t={t} size="sm" />
+          <EffectControl value={effect} onChange={setEffect} t={t} label={title} size="sm" />
           <Button
             variant="outline" size="sm"
             disabled={!subject}
@@ -506,12 +503,14 @@ function CheckAccess({
   };
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">{t("checkAccess")}</h3>
-      <p className="text-xs text-muted-foreground">{t("checkAccessHint")}</p>
+    <section className="space-y-3 py-5">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold tracking-tight">{t("checkAccess")}</h3>
+        <p className="text-[13px] text-muted-foreground">{t("checkAccessHint")}</p>
+      </div>
       <div className="flex flex-wrap gap-2">
         <Select value={userId} onValueChange={(v) => { setUserId(v as string); setProjectId(null); }} items={memberItems}>
-          <SelectTrigger size="sm" className="min-w-40 flex-1">
+          <SelectTrigger size="sm" className="min-w-40 flex-1 sm:max-w-xs">
             <SelectValue placeholder={t("pickMember")} />
           </SelectTrigger>
           <SelectContent>
@@ -520,7 +519,7 @@ function CheckAccess({
         </Select>
         {userId && userProjects.length > 0 && (
           <Select value={projectId} onValueChange={(v) => setProjectId(v as string)} items={projectItems}>
-            <SelectTrigger size="sm" className="min-w-40 flex-1">
+            <SelectTrigger size="sm" className="min-w-40 flex-1 sm:max-w-xs">
               <SelectValue placeholder={t("pickProjectOptional")} />
             </SelectTrigger>
             <SelectContent>

@@ -4,13 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Loader2, ChevronRight, Trash2 } from "lucide-react";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyInfo, CapabilityType } from "@/lib/governance/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -175,24 +174,27 @@ export function UserDialog({
           single column two screens tall, so the tier control and the spend it
           governs could never be read together. */}
       <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-3xl">
-        <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+        <DialogHeader className="gap-1 border-b px-6 py-4 pr-14">
           <DialogTitle className="truncate">{shown.name || shown.email}</DialogTitle>
           <DialogDescription className="truncate">{shown.email}</DialogDescription>
-          <p className="truncate text-xs text-muted-foreground">{meta}</p>
+          <p className="truncate text-[13px] text-muted-foreground">{meta}</p>
         </DialogHeader>
 
         {/* scrollbar-gutter keeps the reserved track out of the numbers on the
             right edge instead of overlapping them once the card overflows. */}
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 py-5 [scrollbar-gutter:stable]">
           {/* Two columns, one question each: what an admin CHANGES about this
               person, and what they came to READ. Both are the same plain
               label-on-the-left row, with nothing boxed inside a card that is
               already a card — a frame around three rows inside a dialog was one
               border too many, and every extra frame is another level of hierarchy
               the eye has to resolve before finding the tier control. */}
-          <div className="grid gap-6 md:grid-cols-2">
-          <section className="space-y-1">
+          <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
+          <section className="space-y-2">
             <GroupTitle>{t("accessTitle")}</GroupTitle>
+            {/* Rows split by hairlines, the same grammar as the settings pages
+                behind this dialog — unframed rows floated apart inside a card. */}
+            <div className="divide-y">
             <Field label={t("drawerStatus")}>
               <StatusBadge status={shown.status} t={t} />
             </Field>
@@ -203,7 +205,7 @@ export function UserDialog({
                 disabled={busy}
                 items={{ admin: t("roles.admin"), user: t("roles.user"), viewer: t("roles.viewer") }}
               >
-                <SelectTrigger className="h-8 w-40 text-xs" aria-label={t("changeRole")}>
+                <SelectTrigger className="h-8 w-44 text-sm" aria-label={t("changeRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -233,7 +235,7 @@ export function UserDialog({
                   disabled={busy}
                   items={Object.fromEntries([[DEFAULT_TIER, defaultTierLabel], ...tiers.map((x) => [x.id, tierItemLabel(x)])])}
                 >
-                  <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("tierLabel")}>
+                  <SelectTrigger className="h-8 w-44 text-sm" aria-label={t("tierLabel")}>
                     <SelectValue className="truncate" />
                   </SelectTrigger>
                   <SelectContent>
@@ -253,16 +255,17 @@ export function UserDialog({
                 </span>
               </Field>
             )}
+            </div>
 
             {exceptions.length === 0 ? (
-              <p className="pt-3 text-xs text-muted-foreground">{t("noExceptions")}</p>
+              <p className="pt-2 text-[13px] text-muted-foreground">{t("noExceptions")}</p>
             ) : (
-              <ul className="space-y-1.5">
+              <ul className="divide-y border-t">
                 {exceptions.map((ex) => {
                   const win = explainPolicy(visibleRows, ex.capabilityType as CapabilityType, ex.capabilityKey);
                   const effect = win?.effect ?? ex.effect;
                   return (
-                    <li key={ex.id} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
+                    <li key={ex.id} className="flex items-center justify-between gap-2 py-2.5 text-sm">
                       <span className="min-w-0 truncate">
                         <span className="text-muted-foreground">{t(`capType.${ex.capabilityType}`)} · </span>
                         {ex.capabilityKey}
@@ -282,21 +285,24 @@ export function UserDialog({
               rather than as a settings panel beside a dashboard. The turn counts
               were a pair of bordered tiles; as rows they line up with the spend
               above them and lose two more frames. */}
-          <section className="space-y-1">
+          <section className="space-y-2">
             <GroupTitle>{t("usageTitle")}</GroupTitle>
             {loading && !detail ? (
               <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
             ) : detail ? (
-              <>
+              <div className="divide-y">
                 {detail.windows.map((w) => (
                   <div key={w.window}>
                     <Field label={windowLabel[w.window]}>
-                      <span className="text-sm tabular-nums">
+                      {/* Nothing spent is the common case and not news: a column of
+                          three black zeros pulled the eye off the one row that had a
+                          figure in it. */}
+                      <span className={cn("text-sm tabular-nums", w.used === 0 && "text-muted-foreground")}>
                         {money(locale, w.used)}
                         {w.limit != null && <span className="text-muted-foreground"> / {money(locale, w.limit)}</span>}
                       </span>
                     </Field>
-                    {w.limit != null && <Bar pct={w.pct} />}
+                    {w.limit != null && <div className="pb-2.5"><Bar pct={w.pct} /></div>}
                   </div>
                 ))}
                 <Sparkline series={detail.series} days={30} locale={locale} t={t} />
@@ -315,20 +321,20 @@ export function UserDialog({
                     <span className="text-sm tabular-nums text-muted-foreground">{money(locale, m.cost)}</span>
                   </Field>
                 ))}
-                <Link
-                  href={`/settings/usage?userId=${encodeURIComponent(shown.id)}`}
-                  className="inline-block pt-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  {t("openUsage")}
-                </Link>
-              </>
+                <div className="py-2.5">
+                  <Link
+                    href={`/settings/usage?userId=${encodeURIComponent(shown.id)}`}
+                    className="text-sm text-link underline underline-offset-4"
+                  >
+                    {t("openUsage")}
+                  </Link>
+                </div>
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">{t("detailUnavailable")}</p>
             )}
           </section>
           </div>
-
-          <Separator />
 
           {/* Security & history — collapsed, and spanning both columns rather than
               hanging off the bottom of one: as the tail of the right-hand column it
@@ -336,28 +342,28 @@ export function UserDialog({
               of the spend above it. Who signed in from which browser, and who
               changed what when, is what an admin opens during an incident — not on
               the visit where they change somebody's tier. */}
-          <section className="space-y-2">
+          <section className="space-y-2 border-t pt-4">
             <button
               type="button"
               onClick={() => setSecurityOpen((v) => !v)}
               aria-expanded={securityOpen}
-              className="flex w-full items-center gap-1.5 text-left text-sm font-medium"
+              className="flex w-full items-center gap-1.5 rounded-md text-left text-sm font-semibold tracking-tight"
             >
-              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${securityOpen ? "rotate-90" : ""}`} />
+              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform motion-reduce:transition-none ${securityOpen ? "rotate-90" : ""}`} />
               {t("securityTitle")}
             </button>
             {securityOpen && (
               <div className="space-y-3 pt-1">
                 {detail && detail.sessions.length > 0 ? (
                   <>
-                    <ul className="space-y-1.5">
+                    <ul className="divide-y">
                       {detail.sessions.map((s) => (
-                        <li key={s.id} className="rounded-lg border px-3 py-2 text-xs">
+                        <li key={s.id} className="py-2.5 text-[13px]">
                           <div className="flex justify-between gap-2">
                             <span className="text-muted-foreground">{t("sessionSeen", { when: relTime(locale, s.updatedAt) })}</span>
                             <span className="tabular-nums text-muted-foreground">{shortDate(locale, s.createdAt)}</span>
                           </div>
-                          <p className="mt-0.5 truncate text-muted-foreground/80">{[s.ipAddress, uaSummary(s.userAgent)].filter(Boolean).join(" · ") || t("sessionUnknown")}</p>
+                          <p className="mt-0.5 truncate text-muted-foreground">{[s.ipAddress, uaSummary(s.userAgent)].filter(Boolean).join(" · ") || t("sessionUnknown")}</p>
                         </li>
                       ))}
                     </ul>
@@ -369,10 +375,10 @@ export function UserDialog({
 
                 {audit.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">{t("historyTitle")}</p>
-                    <ul className="space-y-1">
+                    <p className="text-[13px] font-medium text-muted-foreground">{t("historyTitle")}</p>
+                    <ul className="divide-y">
                       {audit.slice(0, 8).map((e) => (
-                        <li key={e.id} className="flex justify-between gap-2 text-xs">
+                        <li key={e.id} className="flex justify-between gap-3 py-2 text-[13px]">
                           <span className="min-w-0 truncate">{historyLabel(e.action, e.detail, t)}{e.actorName ? ` — ${e.actorName}` : ""}</span>
                           <span className="shrink-0 tabular-nums text-muted-foreground">{shortDate(locale, e.createdAt)}</span>
                         </li>
@@ -387,7 +393,7 @@ export function UserDialog({
 
         {/* Acting on the person, pinned where actions live — not at the bottom of
             a scroll that has to be travelled first. */}
-        <div className="flex shrink-0 flex-wrap gap-2 border-t px-4 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t px-6 py-4">
               {shown.status === "suspended" ? (
                 <Button variant="outline" size="sm" onClick={() => mutate({ status: "active" }, { status: "active" }, t("reactivated"))} disabled={busy}>
                   {t("reactivate")}
@@ -433,15 +439,15 @@ export function UserDialog({
 // rendering bug, a shortened label doesn't.
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-8 items-center justify-between gap-3">
+    <div className="flex min-h-11 items-center justify-between gap-4 py-1">
       <span className="min-w-0 truncate text-sm text-muted-foreground">{label}</span>
-      <div className="flex shrink-0 items-center">{children}</div>
+      <div className="flex shrink-0 items-center text-sm">{children}</div>
     </div>
   );
 }
 
 function GroupTitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-sm font-medium">{children}</h3>;
+  return <h3 className="text-sm font-semibold tracking-tight">{children}</h3>;
 }
 
 /**
@@ -530,10 +536,18 @@ function Bar({ pct }: { pct: number }) {
   );
 }
 
+// A dot and a word, not a pill: status is a VALUE in a column of values, and the
+// one row wearing a border read as the one control in it. The dot carries the
+// colour so the word can stay ink like its neighbours.
 function StatusBadge({ status, t }: { status: string; t: ReturnType<typeof useTranslations> }) {
   const known = status === "active" || status === "pending" || status === "suspended" || status === "rejected";
-  const variant = status === "active" ? "outline" : status === "suspended" ? "destructive" : "secondary";
-  return <Badge variant={variant} className="text-[11px]">{known ? t(`statuses.${status}`) : status}</Badge>;
+  const dot = status === "active" ? "bg-success" : status === "suspended" ? "bg-destructive-text" : status === "pending" ? "bg-warning-text" : "bg-muted-foreground";
+  return (
+    <span className="flex items-center gap-2 text-sm">
+      <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
+      {known ? t(`statuses.${status}`) : status}
+    </span>
+  );
 }
 
 // A calm, localized one-liner for an audit row, derived from the action + detail.

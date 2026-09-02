@@ -31,6 +31,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Facts found by post-turn extraction are saved directly instead of waiting in a review queue; legacy memory documents migrate as assistant conclusions, not as confirmed facts.
+- The person card and the capability rule dialog use hairline rows instead of boxed items; the Allow / Ask / Deny switch is the shared segmented control and no longer stretches across the dialog.
 - Text fields carry the same edge weight as buttons, and every grey well in Settings (segmented switches, code and command boxes, category chips) is recessed again instead of rendering as a white pill on the page.
 - Settings: every page is built from one set of blocks (page title, section with its one action on the title line, rows divided by hairlines straight on the page instead of cards, radio choice, note), with three type sizes for page, section and row; the tab/filter switcher is the same control on every page.
 - Settings: the sidebar search field is gone; the app sidebar's search button (⌘K) already finds every setting. The people, analytics and activity switchers, the key-mode picker and the sign-in page now use the shared controls.
