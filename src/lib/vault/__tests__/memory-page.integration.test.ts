@@ -12,10 +12,12 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *  a fact reaches the reader wherever it is filed, one filed under nothing has its own list
  *  rather than none, a topic's row says what its file opens with, and deleting a file does
  *  not take the facts filed under it. */
-import { pool } from "@/lib/db";
+import { db, pool } from "@/lib/db";
 import { attachEvidence, confirmClaim, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { proposeCandidate } from "../candidates";
+import { linkNodes } from "../edges";
+import { UNRESOLVED_LINK, edgeToken } from "../links";
 import { createNote, forgetNote, restoreNote } from "../notes";
 import { getOrCreateSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
@@ -82,6 +84,36 @@ const seedSupersede = async (
   }
   return upd;
 };
+
+/** A file whose body LINKS a fact, in the shape `memory_link` writes one: the edge and the
+ *  token that mentions it inside one transaction, the edge created between the note row that
+ *  makes it legal and the version that names it (§4.8). A test cannot type a token — only
+ *  the server mints one — so the fixture goes through `linkNodes` rather than a literal. */
+const seedNoteLinking = (spaceId: string, title: string, claimId: string) =>
+  db.transaction((tx) =>
+    createNote(
+      {
+        spaceId,
+        title,
+        bodyMarkdown: async (noteId) => {
+          const edge = await linkNodes(
+            {
+              spaceId,
+              from: noteId,
+              to: claimId,
+              relation: "references",
+              createdBy: { kind: "user", id: OWNER },
+            },
+            tx,
+          );
+          return `See ${edgeToken(edge.id)} for the detail.`;
+        },
+        sourceClass: testServerClass("owner_authored"),
+        provenance: { kind: "test" },
+      },
+      tx,
+    ),
+  );
 
 /**
  * EVERY FACT THE PAGE PUTS IN FRONT OF THE READER, wherever it is filed.
@@ -626,6 +658,32 @@ run("vault: memory page projection", () => {
     // The BODY is untouched — the preview is a projection for the row, not a rewrite of
     // the file, and the detail view renders the markdown it was given.
     expect(topic.body.text).toContain("## Summary");
+  });
+
+  it("a file linking a SENSITIVE fact prints none of that fact's words", async () => {
+    // The page's promise about a sensitive statement is a reveal control over it, and a note
+    // body is markdown with no control anywhere inside it. So the words cannot appear here at
+    // all: the detail view gates the body on the NOTE's flag, which says nothing about a
+    // claim the body links. The reader still reaches the fact — it has its own row, with its
+    // own reveal.
+    const { spaceId, claim } = await seedFact("The door code is 4417", { sensitive: true });
+    await seedNoteLinking(spaceId, "Office", claim.id);
+    const topic = topicNamed((await readMemoryPage(OWNER)).scopes[0], "Office");
+    expect(topic.body.text).not.toContain("4417");
+    expect(topic.body.text).not.toContain("door code");
+    expect(topic.body.text).toContain(UNRESOLVED_LINK);
+  });
+
+  it("a link to a fact that has since been REPLACED renders the removed-link text, not the old wording", async () => {
+    // A supersede does not tombstone the node, so the tombstone filter alone leaves the
+    // predecessor's wording resolvable forever — the page would quote a sentence it no longer
+    // holds as a fact, in a file the reader takes to be current.
+    const { spaceId, claim } = await seedFact("Reports go out on Fridays");
+    await seedNoteLinking(spaceId, "Reporting", claim.id);
+    await seedSupersede(claim.id, spaceId, { statement: "Reports go out on Mondays" });
+    const topic = topicNamed((await readMemoryPage(OWNER)).scopes[0], "Reporting");
+    expect(topic.body.text).not.toContain("Fridays");
+    expect(topic.body.text).toContain(UNRESOLVED_LINK);
   });
 
   it("has no preview at all for a file nothing has written into", async () => {

@@ -147,10 +147,24 @@ export async function edgeTargets(
  * function from this one.
  *
  * A CLAIM target has no title, so its statement stands in, clamped by `fitStatement` — the
- * same one line every other surface shows it as. A SOURCE target resolves to nothing in this
- * slice and renders as `UNRESOLVED_LINK`: `references` may legally point at one (§2.4), and
- * nothing can create the row until slice 3's ingest, so the arm arrives with the writer that
- * makes it reachable rather than as a lookup against an empty table.
+ * same one line every other surface shows it as, but only while the claim is the LIVE head
+ * and is NOT sensitive. Neither clause is a channel clause, and neither is optional here:
+ *
+ *   - `superseded_at IS NULL`, because a supersede does not tombstone the node. Without it a
+ *     token keeps rendering the wording the space has since replaced, inside a file the
+ *     reader takes to be current.
+ *   - `sensitive = false`, because the owner's page promises a reveal CONTROL over exactly
+ *     those words and a body is markdown, with no control anywhere inside it. The detail view
+ *     gates the whole body on the NOTE's flag, which says nothing about a claim the body
+ *     links; a sensitive fact reaches the reader through its own row, which has the control.
+ *
+ * An excluded target therefore renders as `UNRESOLVED_LINK` — the same text a closed edge
+ * gets, and the honest one: the file no longer shows a link there.
+ *
+ * A SOURCE target resolves to nothing in this slice and renders as `UNRESOLVED_LINK` too:
+ * `references` may legally point at one (§2.4), and nothing can create the row until slice
+ * 3's ingest, so the arm arrives with the writer that makes it reachable rather than as a
+ * lookup against an empty table.
  */
 export async function renderBody(bodyMarkdown: string, spaceId: string, ex: Ex = db): Promise<string> {
   const targets = await edgeTargets(bodyMarkdown, spaceId, ex);
@@ -173,7 +187,15 @@ export async function renderBody(bodyMarkdown: string, spaceId: string, ex: Ex =
   const claims = await ex
     .select({ id: vaultClaims.id, statement: vaultClaims.statement })
     .from(vaultClaims)
-    .where(and(eq(vaultClaims.spaceId, spaceId), inArray(vaultClaims.id, nodeIds)));
+    .where(
+      and(
+        eq(vaultClaims.spaceId, spaceId),
+        inArray(vaultClaims.id, nodeIds),
+        // The two clauses the mint carries, for the two reasons written above the function.
+        isNull(vaultClaims.supersededAt),
+        eq(vaultClaims.sensitive, false),
+      ),
+    );
   for (const c of claims) titles.set(c.id, fitStatement(c.statement));
 
   return substituteTokens(bodyMarkdown, (edgeId) => {
