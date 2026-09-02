@@ -1059,7 +1059,7 @@
         "agentInferred": "Capka зробила висновок",
         "untrustedDoc": "З документа «{name}»",
         "untrustedWeb": "З вебсторінки",
-        "sensitive": "Чутливе — лише для вас"
+        "sensitive": "Чутливе — лише для Вас"
       },
       "savedOn": "Збережено {date}",
       "revealFirst": "Спершу покажіть факт, щоб бачити, щодо чого Ви вирішуєте.",
