@@ -1243,6 +1243,25 @@
   border-bottom-color: var(--border-strong);
 }
 
+/* Fullscreen. Streamdown portals the same rows into a fixed pane over the page
+   with classes of its own: a bordered box (`border border-border`) and a sticky
+   header with no ground of its own. The pane gets the transcript's treatment —
+   the header rule and row hairlines carry the structure, not a box — and the
+   header an opaque ground, so rows do not show through it while the pane scrolls.
+   Widths: content width with the pane as the minimum, the same rule as in the
+   transcript with `--table-wide` at zero. A little more room around the table
+   than Streamdown's 1rem, since the pane is the whole window. */
+[data-streamdown="table-fullscreen"] [data-streamdown="table"] {
+  border: none;
+  min-width: 100%;
+}
+[data-streamdown="table-fullscreen"] [data-streamdown="table-header"] {
+  background: var(--background);
+}
+[data-streamdown="table-fullscreen"] > div > div:last-child {
+  padding: 0 2rem 2rem;
+}
+
 /* Markdown reading polish for assistant answers. Streamdown ships utility
    classes on each element; these unlayered rules refine them for sustained
    reading: vertical rhythm, calm headings, hanging list indents, and a quote

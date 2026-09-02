@@ -38,6 +38,7 @@ All notable changes to Capka are documented here. Format follows
 - Markdown tables in replies drop the grey header band, take their content width, use tabular digits, and show their copy/download controls on hover.
 - On wide screens the first column of a wide markdown table stays pinned while the rest scrolls sideways, with a seam that appears only once scrolled; phones pan the whole table.
 - On wide screens a markdown table fills the text column, and one wider than the column grows into both margins before it has to scroll.
+- A markdown table's fullscreen view uses the same styling as the transcript instead of a boxed default, with an opaque sticky header.
 - The reasoning spoiler's label fades when it changes from the live stopwatch to the final duration instead of snapping.
 - The memory page is a list of topic files grouped by section, each opening to its text, its trust tag and the facts filed under it; a file can be deleted with one click and put back from the toast.
 - Streamed replies fade in word by word and no longer re-render the whole message when the turn ends; the caret blinks only while the model pauses.

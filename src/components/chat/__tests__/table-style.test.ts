@@ -94,6 +94,17 @@ describe("markdown tables", () => {
     expect(panel).not.toMatch(/--table-wide:max\(0px,min\(/);
   });
 
+  it("the fullscreen view is the same table, not Streamdown's boxed default", () => {
+    // Streamdown portals the same rows into a fixed pane with its own classes: a
+    // bordered box and a sticky header with no ground of its own. The pane gets
+    // the transcript's treatment — no box — and the sticky header an opaque ground
+    // so rows do not show through it while scrolling.
+    const table = rule(css, '[data-streamdown="table-fullscreen"] [data-streamdown="table"] {');
+    expect(table).toMatch(/border:\s*none/);
+    const head = rule(css, '[data-streamdown="table-fullscreen"] [data-streamdown="table-header"] {');
+    expect(head).toMatch(/background:\s*var\(--background\)/);
+  });
+
   it("the controls are out of the way at rest on a pointer device and reachable on touch", () => {
     // Faint at rest was still three icons hanging in the air above every table.
     // With a real hover available they appear on hover only; a touch screen, which
