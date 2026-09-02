@@ -18,6 +18,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
 }
 
 import { AlertCircle, FolderOpen, RefreshCw, Send, Square } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ChatMessage, QueuedBubble, QueuedCaption } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -75,6 +76,34 @@ interface ChatPanelProps {
    *  the operator sets CAPKA_SHARE_IMPORT; resolved server-side and threaded here
    *  so the client never reads env. */
   shareImportEnabled?: boolean;
+}
+
+/**
+ * What an existing chat shows before its history arrives: the shape of a
+ * conversation — questions on the right, answers' lines on the left — read top to
+ * bottom from the reading line, the way the real transcript reads. It was first
+ * pushed to the foot of the pane (where the real transcript lands) and read as a
+ * fragment hanging at the bottom; a page loads from the top. Three exchanges
+ * rather than one, so it reads as a transcript and not a single lost pair.
+ * Decorative, so hidden from assistive tech; the log is marked busy for the same
+ * interval.
+ */
+function TranscriptSkeleton() {
+  const widths = [["92%", "78%", "61%"], ["88%", "70%"], ["95%", "83%", "72%", "44%"]];
+  return (
+    <div aria-hidden className="flex flex-col gap-8 px-4 py-4 md:px-6">
+      {widths.map((lines, i) => (
+        <div key={i} className="space-y-5">
+          <div className="flex justify-end">
+            <Skeleton className={`h-11 rounded-2xl ${i % 2 ? "w-36" : "w-52"}`} />
+          </div>
+          <div className="space-y-2.5">
+            {lines.map((w) => <Skeleton key={w} className="h-4" style={{ width: w }} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** How long the transcript must stay unchanged before older messages are folded
@@ -177,6 +206,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // A non-empty queue also ends it: the greeting has no transcript, so a ghost
   // bubble would have nowhere to render and the message would look swallowed.
   const showGreeting = !initialHasHistory && messages.length === 0 && queued.length === 0;
+  // The mirror case: the server says this chat HAS history and the client has not
+  // received it yet. That used to be an empty transcript for as long as the fetch
+  // took, then everything at once; now it is a skeleton of a conversation's end,
+  // where the reader is about to land.
+  const showSkeleton = initialHasHistory && !historyLoaded && messages.length === 0;
 
   // The message that starts the latest turn. A change here means a new turn
   // exists — the scroll engine decides what that means (our send pins it; a turn
@@ -840,7 +874,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             // would read a reply out a token at a time; `aria-busy` lets the whole turn
             // land as one unit. Verified behaviour differs between readers, so this is
             // the conservative choice, not a guess at a nicety.
-            aria-busy={isLoading || undefined}
+            aria-busy={isLoading || showSkeleton || undefined}
             style={{
               // Bottom room is the composer's live height plus the footer gradient's
               // own air, both measured — so the tail of a reply always clears the
@@ -864,6 +898,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   </span>
                 </div>
               )}
+              {showSkeleton && <TranscriptSkeleton />}
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
