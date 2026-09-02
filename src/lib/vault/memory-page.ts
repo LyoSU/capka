@@ -407,7 +407,8 @@ export function trustTagOf(sourceClass: SourceClass, origin: unknown): TrustTag 
  *   - a HEADING (`# …`, and a `Summary` / `Details` line the reference writes INSIDE the
  *     file's own content). A preview reading "Summary" tells the reader nothing they did
  *     not already get from the title, and every file the agent is being steered to write
- *     opens with one.
+ *     opens with one. A hash RUN FOLLOWED BY A SPACE, per CommonMark — a leading `#` alone
+ *     is a hashtag or "#1 priority", which is prose.
  *   - a FENCE (```): its first line is a language tag or nothing.
  *   - a block that is NOTHING BUT A LINK — a canonical edge token already resolved to
  *     `[[Some title]]`, or `[[link removed]]` when its target is gone. Neither is prose,
@@ -425,7 +426,10 @@ export function firstParagraph(bodyMarkdown: string): string {
   for (const raw of bodyMarkdown.split(/\n\s*\n/)) {
     const block = raw.trim();
     if (!block) continue;
-    if (block.startsWith("#") || block.startsWith("```")) continue;
+    // A HASH RUN FOLLOWED BY A SPACE, per CommonMark — not merely a leading `#`. "#1
+    // priority is the invoice" is a sentence, and skipping it showed the reader whatever
+    // came next as if the file opened with a heading it does not have.
+    if (/^#{1,6}\s/.test(block) || block.startsWith("```")) continue;
     // A block that is NOTHING BUT link tokens is skipped whole, which has to happen before
     // the strip below turns one into its own label — otherwise a file opening with a link
     // block previews as the linked note's title, or as "link removed" when the target is

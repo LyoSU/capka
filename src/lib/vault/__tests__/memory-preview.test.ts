@@ -17,6 +17,17 @@ describe("firstParagraph", () => {
     expect(firstParagraph("# Beans\n# Beans again\n\nThe dog.")).toBe("The dog.");
   });
 
+  it("keeps a paragraph that merely BEGINS with a hash", () => {
+    // A heading is a hash RUN followed by a space, per CommonMark. Skipping any block whose
+    // first character is `#` also skips a sentence about a priority, a hashtag or an issue
+    // number — and the row then shows the paragraph under it, or nothing, as if the file
+    // opened with a heading it does not have.
+    expect(firstParagraph("#1 priority is the invoice.")).toBe("#1 priority is the invoice.");
+    expect(firstParagraph("#procurement is where she works.")).toBe("#procurement is where she works.");
+    // The control, so the case above cannot pass by the skip having been dropped entirely.
+    expect(firstParagraph("###### Deep heading\n\nThe prose.")).toBe("The prose.");
+  });
+
   it("strips inline markdown without losing the words", () => {
     expect(firstParagraph("Sent **before** noon, see [the calendar](https://x.test).")).toBe(
       "Sent before noon, see the calendar.",
