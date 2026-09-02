@@ -1185,6 +1185,14 @@ export async function memoryFile(a: {
     // A LIVE TOPIC CONTAINER, read rather than assumed: `resolveTopic`'s handle arm asks the
     // same question of the same three columns, and for the same reason — a handle says the
     // LETTER of its target and nothing about the row's kind.
+    //
+    // THE TITLE READ HERE IS INTERPOLATED INTO A MODEL-FACING SENTENCE BELOW, outside
+    // `model-view.ts`, and two facts are what make that legal rather than an exception:
+    // `resolveTopic` SECRET-SCREENS a topic title before a container can be created with
+    // one, so no stored `memory_topic` title is secret-shaped; and nothing in this slice
+    // revises a `memory_topic` version, so the title cannot become one afterwards. The day
+    // either changes — a topic rename, or any writer of a topic BODY — this read has to go
+    // through a mint, and so do `resolveTopic`'s two row-read arms.
     const [container] = await tx
       .select({ id: vaultNotes.id, title: vaultNotes.title, kind: vaultNotes.kind })
       .from(vaultNotes)
