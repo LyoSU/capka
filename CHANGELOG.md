@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- `scripts/release-gate.sh` checks a tree before `npm run release` (migrations generated, journal timestamps increasing, locale parity, typecheck, lint); run it by hand, it is not wired into the release script.
+- The worker reports any `note_claims` / `vault_edges` divergence every six hours as a `vault contains parity diverged` warning per space; it never repairs.
 - The assistant edits a memory file in place (replace a passage, insert a paragraph, rename it) instead of rewriting the whole file.
 - Topic sections (You / Topics / Areas / People); the assistant records what it learns as short topic files during the chat.
 - A dismissible "saved to memory" notice after any turn that wrote memory, with one-click undo on each item.
@@ -34,6 +36,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The assistant saves to memory immediately as short topic files; everything it saves is on the memory page to open, undo or delete. Similar topics are not merged automatically yet.
 - Opening an existing chat shows a quiet transcript skeleton until its history arrives, instead of an empty pane.
 - Images in replies load into a reserved box and fade in; a broken image shows a labelled chip instead of disappearing.
 - Markdown tables in replies drop the grey header band, take their content width, use tabular digits, and show their copy/download controls on hover.
