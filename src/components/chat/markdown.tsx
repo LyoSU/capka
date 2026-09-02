@@ -33,20 +33,24 @@ const STREAMDOWN_CONTROLS = {
 // How a streamed answer becomes live text rather than text arriving in slabs. The
 // runner flushes every ~100ms and the client coalesces deltas into ~250ms batches,
 // so a paragraph would otherwise grow in jumps of twenty-odd tokens four times a
-// second. Streamdown animates only the words the latest batch mounted, staggered
-// so a typical batch (eight to twelve words) unrolls across roughly the interval to
-// the next one — the eye reads a flow, not a beat. Opacity only: blur or motion on
-// every word of every reply is exactly the per-token treatment the step rail
-// refuses. `--ease-out` is the app's one entrance curve, so its literal value goes
-// here rather than a second opinion. When `isAnimating` goes false the plugin
-// leaves the pipeline, so a finished message carries no extra spans. Module-level
-// because the memo compares it by reference.
+// second. Streamdown animates only the words the latest batch mounted, so the new
+// text of each batch fades in as one soft tail while everything before it stands
+// still. NO stagger, deliberately: Streamdown runs its animate plugin per BLOCK,
+// so a cascade restarts from zero in every paragraph, and a batch that closes one
+// paragraph and opens the next showed two tails unrolling side by side instead of
+// one write head. With every new word on the same clock the tail is shared across
+// block boundaries. Opacity only: blur or motion on every word of every reply is
+// exactly the per-token treatment the step rail refuses. `--ease-out` is the app's
+// one entrance curve, so its literal value goes here rather than a second opinion.
+// When `isAnimating` goes false the plugin leaves the pipeline, so a finished
+// message carries no extra spans. Module-level because the memo compares it by
+// reference.
 const ANIMATED = {
   animation: "fadeIn",
   duration: 220,
   easing: "cubic-bezier(0.16, 1, 0.3, 1)",
   sep: "word",
-  stagger: 24,
+  stagger: 0,
 } as const;
 
 // Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy —
