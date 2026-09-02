@@ -4,8 +4,12 @@ import { describe, it, expect, afterEach } from "vitest";
  * Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run <this file>
  */
 import { db, pool } from "@/lib/db";
+import { createClaim } from "../claims";
+import { containsParity } from "../edges";
 import { deleteNode } from "../nodes";
+import { forgetNote } from "../notes";
 import { resolveTopic, getOrCreateTopicNote, topicTitleNorm, DEFAULT_TOPIC_KEY } from "../topics";
+import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "toptest-";
@@ -37,6 +41,37 @@ run("resolveTopic", () => {
     expect(b.id).toBe(a.id);
     expect(b.state).toBe("revived");
     expect((await q(`SELECT deleted_at FROM vault_nodes WHERE id=$1`, [a.id])).rows[0].deleted_at).toBeNull();
+  });
+
+  it("a REVIVED topic gets back exactly the contains edges its delete closed", async () => {
+    // The owner can now delete a topic file from the memory page, so this is the pair of
+    // paths a person walks: delete the file, then say something that files a fact under the
+    // same words again. The revive used to clear the tombstone alone, and the `contains`
+    // edges the delete had closed stayed closed while `note_claims` kept its rows — so the
+    // parity control read every fact filed there as "only in note_claims", and the next
+    // `contains` write threw outside production. `restoreNote` was already the shape of the
+    // answer; the revive arm goes through the same one inverse.
+    const s = await seed();
+    const topic = await resolveTopic(s, "Suppliers", db);
+    await createClaim(
+      { spaceId: s, statement: "Acme ships on Tuesdays", origin: { kind: "user_direct" }, topicNoteId: topic.id, sourceClass: testServerClass("owner_authored") },
+      { kind: "user", id: `${P}u` },
+    );
+    expect(await containsParity(s)).toMatchObject({ ok: true });
+
+    // The OWNER's own delete: no `createdTaskId`, so nothing about a task bounds it.
+    const forgotten = await forgetNote({
+      noteId: topic.id,
+      spaceId: s,
+      expectedRevision: 1,
+      actor: { kind: "user", id: `${P}u` },
+    });
+    expect(forgotten.ok).toBe(true);
+
+    const again = await resolveTopic(s, "suppliers", db);
+    expect(again.id).toBe(topic.id);
+    expect(again.state).toBe("revived");
+    expect(await containsParity(s)).toEqual({ ok: true, onlyInNoteClaims: [], onlyInEdges: [] });
   });
 
   it("sends a secret-shaped title to the default topic and says so", async () => {

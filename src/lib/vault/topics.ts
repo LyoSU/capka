@@ -5,7 +5,7 @@ import { vaultNodes, vaultNotes } from "@/lib/db/schema";
 import { looksLikeSecret } from "./claims";
 import { ownerAuthored } from "./grounding";
 import { HANDLE_RE, type HandleTarget } from "./handles";
-import { insertNode } from "./nodes";
+import { insertNode, restoreNode } from "./nodes";
 import { insertNoteVersion } from "./notes";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
@@ -244,11 +244,20 @@ export async function resolveTopic(
     ))
     .limit(1);
   if (hit && !hit.deletedAt) return { id: hit.id as TopicId, title: hit.title, state: "existing" };
-  if (hit) {
-    // (4) revive: clear the node's tombstone. Its edges stay soft-deleted - a revived
-    // topic gets its identity back, not a resurrection of relationships the person
-    // removed. `contains` edges are re-created by whatever files into it next.
-    await ex.update(vaultNodes).set({ deletedAt: null }).where(eq(vaultNodes.id, hit.id));
+  if (hit && hit.deletedAt) {
+    // (4) revive, through the ONE inverse of a node delete (`restoreNode`), and not a bare
+    // update here. What comes back with the identity is EXACTLY the edges the delete closed:
+    // `restoreNode` reopens the rows stamped with this tombstone's own `deleted_at` and
+    // nothing else, so an edge somebody cut before the delete stays cut.
+    //
+    // Leaving them closed was the older shape and it was wrong for a reason nothing on this
+    // path can see: `deleteNode` closes a topic's `contains` edges and leaves its
+    // `note_claims` rows alone, so a revived topic with its filings intact and its edges
+    // closed is precisely the divergence `containsParity` exists to report — and the next
+    // `contains` write into it then throws outside production. The owner's own undo
+    // (`restoreNote`) already reopened them; two revive paths disagreeing about that is what
+    // the fix rounds calls a one-sided cure.
+    await restoreNode(hit.id, spaceId, hit.deletedAt, ex);
     await projectNoteDoc(hit.id, ex);
     return { id: hit.id as TopicId, title: hit.title, state: "revived" };
   }
