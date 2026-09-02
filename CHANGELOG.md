@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Topic sections (You / Topics / Areas / People); the assistant records what it learns as short topic files during the chat.
 - A dismissible "saved to memory" notice after any turn that wrote memory, with one-click undo on each item.
 - When a fact the assistant saved contradicts one already stored, the memory page shows both side by side and one click keeps either or both.
 - The assistant can write and update project notes, and link them to each other; links are stored as ids, so renaming a note updates every reference.
@@ -32,6 +33,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The memory page is a list of topic files grouped by section, each opening to its text, its trust tag and the facts filed under it; a file can be deleted with one click and put back from the toast.
 - Streamed replies fade in word by word and no longer re-render the whole message when the turn ends; the caret blinks only while the model pauses.
 - Chats longer than twenty messages fold the older ones out of layout once the transcript settles; scrolling back renders them in place at their measured size.
 - The chat navigator highlights the hovered or active turn with one pill that glides between rows, and a single-choice question marks the chosen option the same way.
@@ -76,6 +78,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A fact the assistant saves with `memory_fact_write` now names the conversation it came from on the memory page, instead of reading "the conversation is no longer available".
 - Keeping a correction on the memory page now actually replaces the fact it names, instead of leaving both facts live and asserting each to the assistant; if that fact was already replaced by something else in the meantime, the correction is saved beside it and nothing is superseded.
 - Keeping a correction whose wording the memory already holds no longer records that wording a second time: the fact it contests is removed and the existing one is kept.
 - Memory topics are identified by a stable key instead of their displayed title, so renaming one no longer forks it into two the assistant counts twice.
