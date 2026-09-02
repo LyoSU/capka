@@ -268,6 +268,11 @@ export type ScopeView = {
    *  it, "every fact the agent writes stays visible" would be a property of which writer
    *  happened to run rather than of this page. */
   unfiled: FactView[];
+  /** How many facts hang off no live topic at all, before the cap — the same disclosure
+   *  `TopicView.factsTotal` carries, for the list that can grow without anybody filing
+   *  anything. `unfiled.length` cannot stand in for it: that length IS the cap, so the
+   *  "showing some of many" sentence could never fire for this list. */
+  unfiledTotal: number;
   /** How many facts the scope holds at all. Its one reader is the "forget everything"
    *  dialog, which promises to forget everything and so cannot state a number narrowed by
    *  anything — including by which topic a fact is filed under. */
@@ -560,7 +565,7 @@ async function hydrateFacts(spaceId: string, userId: string, heads: HeadRow[]): 
 async function topicsOf(
   spaceId: string,
   userId: string,
-): Promise<{ topics: TopicView[]; unfiled: FactView[]; factsTotal: number }> {
+): Promise<{ topics: TopicView[]; unfiled: FactView[]; unfiledTotal: number; factsTotal: number }> {
   const heads = await headRows(spaceId);
   const noteRows = await db
     .select({
@@ -607,7 +612,8 @@ async function topicsOf(
 
   // The cap, per list, BEFORE anything is hydrated — see `FACT_LIMIT`.
   const slices = new Map([...filedUnder].map(([id, rows]) => [id, rows.slice(0, FACT_LIMIT)]));
-  const unfiledRows = heads.filter((h) => !anyTopic.has(h.id)).slice(0, FACT_LIMIT);
+  const looseRows = heads.filter((h) => !anyTopic.has(h.id));
+  const unfiledRows = looseRows.slice(0, FACT_LIMIT);
   const union = [...new Set([...slices.values()].flat().concat(unfiledRows))];
   const hydrated = await hydrateFacts(spaceId, userId, union);
   const viewsOf = (rows: HeadRow[]) => rows.map((r) => hydrated.get(r.id)).filter((v): v is FactView => !!v);
@@ -631,7 +637,12 @@ async function topicsOf(
   const order = (s: TopicSection) => TOPIC_SECTIONS.indexOf(s);
   topics.sort((a, b) => order(a.section) - order(b.section) || a.title.text.localeCompare(b.title.text));
 
-  return { topics, unfiled: viewsOf(unfiledRows), factsTotal: heads.length };
+  return {
+    topics,
+    unfiled: viewsOf(unfiledRows),
+    unfiledTotal: looseRows.length,
+    factsTotal: heads.length,
+  };
 }
 
 /**
@@ -843,11 +854,12 @@ export async function readMemoryPage(
   const userSpace = spaceRows.find((s) => s.type === "user" && s.refId === userId);
   const own = userSpace
     ? await topicsOf(userSpace.id, userId)
-    : { topics: [], unfiled: [], factsTotal: 0 };
+    : { topics: [], unfiled: [], unfiledTotal: 0, factsTotal: 0 };
   scopes.push({
     scope: "user",
     topics: own.topics,
     unfiled: own.unfiled,
+    unfiledTotal: own.unfiledTotal,
     factsTotal: own.factsTotal,
     conflicts: userSpace ? await readConflicts(userSpace.id) : [],
     archive: userSpace ? await archiveOf(userSpace.id, userId) : [],
@@ -867,7 +879,8 @@ export async function readMemoryPage(
     if (!found.topics.length && !found.factsTotal && !archive.length) continue;
     scopes.push({
       scope: "project", projectId: p.id, projectName: p.name,
-      topics: found.topics, unfiled: found.unfiled, factsTotal: found.factsTotal, conflicts, archive,
+      topics: found.topics, unfiled: found.unfiled, unfiledTotal: found.unfiledTotal,
+      factsTotal: found.factsTotal, conflicts, archive,
     });
   }
   // ON THE RESPONSE rather than in the component, because the component is a client

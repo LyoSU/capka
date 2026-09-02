@@ -82,7 +82,7 @@ function OwnMemory({ scope, archiveExpiresAt, onOpen, onChanged }: {
     <div className="space-y-10">
       <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
       <MemoryTopicList topics={scope.topics} onOpen={onOpen} />
-      <MemoryUnfiled facts={scope.unfiled} total={scope.unfiled.length} onChanged={onChanged} />
+      <MemoryUnfiled facts={scope.unfiled} total={scope.unfiledTotal} onChanged={onChanged} />
       <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
     </div>
   );
@@ -120,7 +120,7 @@ function ProjectMemory({ scopes, archiveExpiresAt, onOpen, onChanged }: {
             <h4 className="text-[13px] font-medium text-muted-foreground">{scope.projectName}</h4>
             <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
             <TopicRows topics={scope.topics} onOpen={onOpen} />
-            <MemoryUnfiled facts={scope.unfiled} total={scope.unfiled.length} onChanged={onChanged} />
+            <MemoryUnfiled facts={scope.unfiled} total={scope.unfiledTotal} onChanged={onChanged} />
             <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
           </div>
         ))}

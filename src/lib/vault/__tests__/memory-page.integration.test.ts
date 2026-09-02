@@ -591,6 +591,34 @@ run("vault: memory page projection", () => {
     expect(scope.topics.flatMap((t) => t.facts)).toEqual([]);
   });
 
+  it("caps the UNFILED list and reports its count independently of the cap", async () => {
+    // The same disclosure a topic's list gets, for the list that can grow without anybody
+    // filing anything: two unattended extractions, or one topic file the owner deleted, and
+    // the page shows 200 of them with no sentence saying so. `unfiled.length` cannot be the
+    // total — it IS the cap — so the count has to be counted before the slice.
+    //
+    // Written straight into the tables for the reason the per-topic cap test gives: this is
+    // the projection's arithmetic at scale, and 201 round trips would be testing the ledger.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const over = FACT_LIMIT + 1;
+    await q(
+      `INSERT INTO vault_nodes (id, space_id, kind)
+       SELECT $1 || i, $2, 'claim' FROM generate_series(1, $3) AS i`,
+      [`${P}loose-`, spaceId, over],
+    );
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at, source_class)
+       SELECT $1 || i, $2, 'Loose fact ' || i, '{"kind":"user_direct"}'::jsonb, 'confirmed',
+              now() - (i || ' seconds')::interval, 'legacy_confirmed'
+         FROM generate_series(1, $3) AS i`,
+      [`${P}loose-`, spaceId, over],
+    );
+
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.unfiled).toHaveLength(FACT_LIMIT);
+    expect(scope.unfiledTotal).toBe(over);
+  });
+
   it("groups the topic files by section, in the page's own order", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     // One file per section, deliberately named so that ALPHABETICAL order and SECTION
