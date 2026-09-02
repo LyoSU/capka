@@ -102,6 +102,12 @@ const seedNoteFrom = (spaceId: string, messageId: string, bodyMarkdown: string) 
  * `vault_notes` lock would satisfy a text match. Asking whether the holder's pid appears
  * among a backend's blockers is exact and needs neither.
  *
+ * IT NEEDS A THIRD POOL CONNECTION for up to ten seconds — `other` holds one, the blocked
+ * `write()` holds another, and the poll takes a third from the same pool — which is fine at
+ * the default size and worth saying because the failure mode would not look like itself: pool
+ * starvation here surfaces as this helper timing out, which reads exactly like a lock that
+ * never formed.
+ *
  * `racing` is awaited in the `finally` and its result discarded, so a failed expectation
  * cannot leave the write running against the live database during cleanup, nor leave a
  * floating promise behind.
