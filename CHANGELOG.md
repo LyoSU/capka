@@ -33,6 +33,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Streamed replies fade in word by word and no longer re-render the whole message when the turn ends; the caret blinks only while the model pauses.
+- Chats longer than twenty messages fold the older ones out of layout once the transcript settles; scrolling back renders them in place at their measured size.
 - Activity-rail rows and the controls under a finished reply rise in with a short cascade, and the line between steps is drawn in rather than present from the start.
 - The memory page lists everything the assistant saved, each row tagged with where it came from; the old review queue becomes a read-only "Earlier suggestions" archive that expires 30 days after this release.
 - Facts found by post-turn extraction are saved directly instead of waiting in a review queue; legacy memory documents migrate as assistant conclusions, not as confirmed facts.

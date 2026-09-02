@@ -46,6 +46,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
 import { useChatScroll, ChatScrollProvider } from "@/components/chat/use-chat-scroll";
+import { foldableCount, placeholderPx } from "@/lib/chat/fold";
 import { JumpPill } from "@/components/chat/jump-pill";
 import { ClawMark } from "@/components/brand/claw-mark";
 import { pickGreeting } from "@/lib/chat/greeting";
@@ -75,6 +76,12 @@ interface ChatPanelProps {
    *  so the client never reads env. */
   shareImportEnabled?: boolean;
 }
+
+/** How long the transcript must stay unchanged before older messages are folded
+ *  (see the effect inside the panel). Longer than the lazy plugin chunk usually
+ *  takes to land and re-lay-out old code blocks, so a folded row's remembered size
+ *  is its final one. */
+const FOLD_QUIET_MS = 1500;
 
 export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
@@ -189,6 +196,38 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // `memo(ChatMessage)` can close over these without a ref to keep them from
   // changing identity on every keystroke.
   const scrollActions = scroll.actions;
+
+  // Fold older messages out of layout and paint. Every message in a long chat is a
+  // full markdown tree with its highlighted code, formulas and diagrams; the
+  // browser laying out and painting all of it on each frame is what makes a
+  // hundred-message chat drag on a phone. `content-visibility: auto` lets it skip
+  // the ones off screen — but ONLY once they have been rendered and measured, so
+  // the placeholder is the row's own height and nothing moves under a reader
+  // scrolling up (a guessed height jumped whole screens in a harness; the measured
+  // content box jumped nothing). Hence imperative, after a quiet spell rather than
+  // on render, and never during a turn: the shiki/mermaid chunk lands late and
+  // re-lays-out old code blocks, and a row folded before that keeps the stale size
+  // until it is scrolled into view. The browser remembers a folded row's last
+  // rendered size on its own from then on. The recent tail stays rendered: it is
+  // what the reader is looking at and what the scroll engine measures against.
+  useEffect(() => {
+    if (isLoading) return;
+    const el = scroll.scrollRef.current;
+    if (!el) return;
+    const t = setTimeout(() => {
+      const rows = el.querySelectorAll<HTMLElement>("[data-msg-id]");
+      const n = foldableCount(rows.length);
+      for (let i = 0; i < n; i++) {
+        const row = rows[i];
+        if (row.style.contentVisibility) continue;
+        const cs = getComputedStyle(row);
+        const px = placeholderPx({ clientHeight: row.clientHeight, paddingTop: parseFloat(cs.paddingTop) || 0, paddingBottom: parseFloat(cs.paddingBottom) || 0 });
+        row.style.containIntrinsicSize = `auto ${px}px`;
+        row.style.contentVisibility = "auto";
+      }
+    }, FOLD_QUIET_MS);
+    return () => clearTimeout(t);
+  }, [messages.length, isLoading, scroll.scrollRef]);
   // Composer attachments upload eagerly on attach (so send is instant and a
   // retry never re-uploads) and persist their refs per chat — they survive a
   // reload just like the text draft.
