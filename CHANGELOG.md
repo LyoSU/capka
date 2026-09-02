@@ -33,6 +33,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The reasoning spoiler's label fades when it changes from the live stopwatch to the final duration instead of snapping.
 - The memory page is a list of topic files grouped by section, each opening to its text, its trust tag and the facts filed under it; a file can be deleted with one click and put back from the toast.
 - Streamed replies fade in word by word and no longer re-render the whole message when the turn ends; the caret blinks only while the model pauses.
 - Chats longer than twenty messages fold the older ones out of layout once the transcript settles; scrolling back renders them in place at their measured size.

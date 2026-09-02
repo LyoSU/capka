@@ -1344,6 +1344,12 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
   // that there is nothing to enumerate. A count earns its place from two up.
   const toolCount = items.reduce((n, it) => (it.kind === "tool" ? n + 1 : n), 0);
   const countLabel = !streaming && toolCount > 1 ? t("stepCount", { count: toolCount }) : null;
+  // The label changes KIND once per turn — the live stopwatch or "Thinking…"
+  // becomes "Reasoned for 58s" — and that swap fades in, the way the status row's
+  // label already does, instead of snapping. Keyed on the phase and never on the
+  // text: the live label also changes every second as the stopwatch ticks, and a
+  // fade on each tick would flicker under the reader's eye.
+  const labelPhase = `${streaming}:${timed}:${hasReasoning}`;
 
   return (
     <Collapsible
@@ -1367,9 +1373,9 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
           same fact stated a second time. `tabular-nums` keeps the ticking duration
           from reflowing the row a digit at a time. */}
       <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-[15px] text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-180">
-        <span className="min-w-0 truncate tabular-nums">{label}</span>
+        <span key={labelPhase} className="animate-in fade-in duration-200 min-w-0 truncate tabular-nums">{label}</span>
         {countLabel && (
-          <span className="shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
+          <span className="animate-in fade-in duration-200 shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
         )}
         <ChevronDown className="chevron h-4 w-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
       </CollapsibleTrigger>
