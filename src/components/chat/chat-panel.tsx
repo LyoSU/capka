@@ -866,7 +866,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               state machine measures against. */}
           <div
             ref={scroll.scrollRef}
-            className="flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]"
+            // `container-type: inline-size` lets the column below measure THIS
+            // element's width in container units, which is how a wide table learns
+            // how much right margin it may run into (see `--table-wide`).
+            className="flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable_both-edges] [container-type:inline-size]"
             role="log"
             aria-label={t("panel.conversation")}
             // A series of streamed deltas is not a series of announcements. `role="log"`
@@ -889,7 +892,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               scrollPaddingBlockEnd: `calc(${scroll.bottomReserve}px + var(--kb, 0px))`,
             }}
           >
-            <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
+            {/* `--table-wide`: how far a wide table may run past the column into
+                the right margin — half the room left beside the column (48rem at
+                md, 56rem at lg) minus a gutter, never negative, capped at 14rem so
+                an ultra-wide window does not send a table to the far edge. Zero
+                on a phone, where `--table-bleed` does the equivalent job. */}
+            <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4 md:[--table-wide:max(0px,min(14rem,calc((100cqw_-_48rem)_/_2_-_1.5rem)))] lg:[--table-wide:max(0px,min(14rem,calc((100cqw_-_56rem)_/_2_-_1.5rem)))]">
               {importedFrom && (
                 <div className="flex justify-center pb-2 pt-1">
                   <span className="inline-flex items-center gap-1.5 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">

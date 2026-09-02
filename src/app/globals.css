@@ -1106,7 +1106,15 @@
      stays put because the inset moves onto the edge CELLS below — which also
      runs the row rules edge to edge, and, unlike a padding-inline-end on a
      horizontal scroller, reliably survives into the scrollable overflow. */
-  margin-inline: calc(-1 * var(--table-bleed, 0px));
+  margin-inline-start: calc(-1 * var(--table-bleed, 0px));
+  /* On a wide screen the text column sits in a window often twice its width, and
+     a wide table had to scroll inside it with empty page on both sides. The
+     scroller may run into the RIGHT margin by `--table-wide` — the panel sets it
+     from the transcript's own width and caps it — so a table wider than the
+     column gets that room before it has to scroll. Right only: the table's left
+     edge stays on the answer's text edge, and a table narrower than the column
+     is untouched because it takes its content width. */
+  margin-inline-end: calc(-1 * (var(--table-bleed, 0px) + var(--table-wide, 0px)));
   /* Streamdown's rounded border, dropped: at full bleed it would butt into the
      screen edge mid-radius, and a framed box inside the already-flattened
      wrapper is the card-in-a-card this file removes from code blocks too. The

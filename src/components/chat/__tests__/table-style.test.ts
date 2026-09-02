@@ -72,6 +72,19 @@ describe("markdown tables", () => {
     expect(pinnedShadow(css)).toMatch(/animation-timeline:\s*scroll\(nearest inline\)/);
   });
 
+  it("on a wide screen a table wider than the text column runs into the right margin", () => {
+    // The column is 48–56rem in a window that is often twice that; a wide table
+    // had to scroll inside the column with empty page on both sides. The scroller
+    // may now extend to the right by `--table-wide`, which the panel sets from the
+    // transcript's own width (container units) and caps; a table narrower than
+    // the column is unaffected because it takes its content width.
+    const scroller = rule(css, '[data-streamdown="table-wrapper"] > :last-child {');
+    expect(scroller).toMatch(/margin-inline-end:\s*calc\(-1 \* \(var\(--table-bleed, 0px\) \+ var\(--table-wide, 0px\)\)\)/);
+    const panel = readFileSync("src/components/chat/chat-panel.tsx", "utf8");
+    expect(panel).toMatch(/\[container-type:inline-size\]/);
+    expect(panel).toMatch(/lg:\[--table-wide:/);
+  });
+
   it("the controls are out of the way at rest on a pointer device and reachable on touch", () => {
     // Faint at rest was still three icons hanging in the air above every table.
     // With a real hover available they appear on hover only; a touch screen, which
