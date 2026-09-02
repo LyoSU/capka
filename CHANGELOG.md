@@ -83,6 +83,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- The "jump to end" pill no longer flickers while a reply streams.
 - The greeting's composer and starter hints stagger in as designed; the delay never applied before.
 - A fact the assistant saves with `memory_fact_write` now names the conversation it came from on the memory page, instead of reading "the conversation is no longer available".
 - Keeping a correction on the memory page now actually replaces the fact it names, instead of leaving both facts live and asserting each to the assistant; if that fact was already replaced by something else in the meantime, the correction is saved beside it and nothing is superseded.

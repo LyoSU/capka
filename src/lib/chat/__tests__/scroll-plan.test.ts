@@ -175,6 +175,25 @@ describe("tail", () => {
     expect(p.owner).toBe("tail");
   });
 
+  it("a tall batch landing under `tail` never reports the end as out of view", () => {
+    // The jump pill flickered while a reply streamed: a batch taller than the exit
+    // hysteresis (a whole paragraph) pushed the content end past the boundary in
+    // the geometry read BEFORE the correction, the pill showed, the same pass then
+    // scrolled to the end and the next pass hid it. Following the write head means
+    // the end WILL be on screen once this pass writes — report that.
+    const p = planScroll(snap({ owner: "tail", streaming: true, wasEndVisible: true, contentEndBottom: 624 + 120 }));
+    expect(p.target).not.toBeNull();
+    expect(p.endVisible).toBe(true);
+  });
+
+  it("…but a reader driving under `tail` still sees the honest geometry", () => {
+    // Nothing is written while a finger is on the glass, so nothing will bring the
+    // end back on screen this pass; the pill must tell the truth then.
+    const p = planScroll(snap({ owner: "tail", streaming: true, readerActive: true, wasEndVisible: true, contentEndBottom: 624 + 120 }));
+    expect(p.target).toBeNull();
+    expect(p.endVisible).toBe(false);
+  });
+
   it("does NOT resume merely because the end is visible", () => {
     // The end of a short pinned reply is on screen but far from the rest line.
     const p = planScroll(snap({ owner: "reader", streaming: true, contentEndBottom: 200, anchorNow: 50, anchorWas: 50 }));

@@ -208,7 +208,6 @@ export function planScroll(s: ScrollSnapshot): ScrollPlan {
   const nextSpacer = spacerHeight(s);
   const spacerH = nextSpacer != null && nextSpacer !== s.spacerH ? nextSpacer : null;
   const rest = atRest(s);
-  const visible = endVisible(s);
 
   let owner = s.owner;
   let target: number | null = null;
@@ -254,6 +253,16 @@ export function planScroll(s: ScrollSnapshot): ScrollPlan {
   // rather than fighting it (the caller redirects `animTo`).
   if (s.animating && owner !== "tail" && owner !== "pin") target = null;
   if (target != null && Math.abs(target - s.scrollTop) < MIN_CORRECTION_PX) target = null;
+
+  // Whether the end is on screen is answered for the state AFTER this pass writes,
+  // not before. Following the write head with a target means the end will be at
+  // rest once the correction lands, and the geometry read a moment ago — in which
+  // a whole paragraph has just been appended below the boundary — is the one
+  // frame that never gets painted. Judging the pill by it made it flicker with
+  // every tall batch of a streaming reply: shown by this pass, hidden by the next.
+  // With no target (the reader is driving, or we are already at rest) nothing
+  // brings the end back this pass, and the honest geometry stands.
+  const visible = owner === "tail" && target != null ? true : endVisible(s);
 
   return { spacerH, owner, target, motion: target == null ? "none" : motion, endVisible: visible, atRest: rest };
 }
