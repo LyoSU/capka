@@ -296,6 +296,15 @@ export type ScopeView = {
  * eleven different dates for one event. It is the one date in this module a reader has to
  * keep true by hand, which is why it is a named constant beside the type it belongs to
  * rather than an expression inside a query.
+ *
+ * THE RELEASE CHECKLIST RE-STAMPS IT, and that is the whole of how it stays true. This is
+ * the day the code was written, not the day it ships; if the tag slips, the page states a
+ * deadline nearer than the thirty days it promises — and past 2026-10-02 it states one in
+ * the past while the drop migration is still ahead. So the release gate asserts this
+ * constant is within seven days of the tag date, and a slipped release moves the constant
+ * rather than shortening the promise. Deriving it from the build date was the other option
+ * and is worse: the reader is promised a date, and a date that moves every time an image is
+ * rebuilt is not a promise.
  */
 const ARCHIVE_RELEASED_ON = "2026-09-02";
 export const ARCHIVE_DAYS = 30;
