@@ -11,6 +11,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
+import { staggerIndex } from "@/lib/chat/motion";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
 import { Fragment, useState, useMemo, useEffect, useLayoutEffect, useRef, memo } from "react";
@@ -1033,12 +1034,15 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
  *  Streamdown types an `h1` at `text-3xl`, which would set a thought bigger than
  *  the answer it precedes. No `chatId`: /workspace chips belong to the answer,
  *  where a file mention is something to act on, not to a thought about one. */
-function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreaming?: boolean; stagger?: number }) {
+  // Kept from the mount, not re-read: the rail's `mountedBefore` moves under every
+  // later render, and a running animation whose delay changes snaps its progress.
+  const [i] = useState(stagger ?? 0);
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
-    <div className="animate-step-in py-1.5">
+    <div className="animate-fade-up py-1.5" style={{ "--i": i } as React.CSSProperties}>
       {/* A thought reads as prose in the answer's own column — same size, same ink
           — because that is what it is: the assistant talking through the task.
           Boxing it or greying it out made it look like machine output the reader
@@ -1079,7 +1083,9 @@ function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error"
  *  are joined by a hairline under the glyph (`connect`), so a burst of actions
  *  reads as one sequence and a thought between them breaks it. The whole row
  *  expands to the payload beneath; the chevron only shows under the cursor. */
-function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; connect?: boolean }) {
+function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: string; connect?: boolean; stagger?: number }) {
+  // See ReasoningRow: the cascade step is fixed at mount.
+  const [i] = useState(stagger ?? 0);
   const tSteps = useTranslations("steps");
   const anchorDisclosure = useDisclosureAnchor();
   const t = useTranslations("chat.tool");
@@ -1125,9 +1131,10 @@ function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; c
 
   const row = (
     <div
-      className={`animate-step-in group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
+      className={`animate-fade-up group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
         isError ? "text-destructive" : "text-muted-foreground has-[button:hover]:text-foreground"
       }`}
+      style={{ "--i": i } as React.CSSProperties}
     >
       {/* The disclosure trigger lies UNDER the row's content rather than wrapping
           it. Wrapping was fine while the row held only text, but the file chip is
@@ -1154,7 +1161,7 @@ function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; c
             height is exactly the gap between two glyph boxes (row min-h-8, py-1),
             so it is dropped while the row is open: the payload panel sits in that
             gap then, and a stub of line pointing into a panel read as a cut. */}
-        {connect && !open && <span aria-hidden className="absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
+        {connect && !open && <span aria-hidden className="animate-rail-grow absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
       </span>
       <span className="pointer-events-none relative z-10 min-w-0 truncate text-[15px] leading-snug">
         {label}
@@ -1216,10 +1223,21 @@ type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: 
  *  the frame. */
 function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
+  // How many rows were on screen at the previous commit. Rows above that count are
+  // new in THIS commit and cascade from zero; rows at or below it are not new and
+  // get no delay. Opening a finished spoiler mounts everything at once (a
+  // cascade); a live turn adds one row every few seconds (never a wait). Read
+  // during render, written after commit, so every row in one commit sees the same
+  // baseline.
+  const mountedBefore = useRef(0);
+  const base = mountedBefore.current;
+  useIsomorphicLayoutEffect(() => {
+    mountedBefore.current = items.length;
+  });
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
-      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool"} />,
+      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} stagger={staggerIndex(i, base)} />
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool"} stagger={staggerIndex(i, base)} />,
   );
   // Why the longest pause in the product gets a footnote and not a node: the
   // container is built FOR the step above — the first tool call that needs it —
@@ -1439,7 +1457,7 @@ function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWr
   if (dismissed || !shown.length) return null;
 
   return (
-    <div className="animate-message-in mt-3 rounded-xl bg-field px-3.5 py-2.5 [animation-delay:var(--settle)]">
+    <div className="animate-fade-up [--i:2] mt-3 rounded-xl bg-field px-3.5 py-2.5">
       <div className="flex items-start justify-between gap-2">
         <p className="text-[13px] leading-relaxed text-muted-foreground">{t("saved", { count: shown.length })}</p>
         <button
@@ -2456,7 +2474,10 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             // mounts in the same frame as the reasoning spoiler collapsing and the
             // produced-file tiles landing, and appearing mid-collapse is what made
             // the end of a turn read as a pile-up. Geometry first, trim after.
-            <div className="animate-message-in mt-1 flex items-center gap-1 [animation-delay:var(--settle)]">
+            // `--i:2` is that settle expressed as two cascade steps (120ms); the
+            // old `[animation-delay:var(--settle)]` utility never applied — an
+            // unlayered `animation` shorthand out-ranks it (see globals.css).
+            <div className="animate-fade-up [--i:2] mt-1 flex items-center gap-1">
               {onSwitchBranch && (
                 <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
               )}

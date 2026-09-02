@@ -459,20 +459,48 @@
 }
 .animate-chat-row-in { animation: chat-row-in 0.45s var(--ease-out) both; }
 
-/* Step rail: each thought/action row resolves in as it streams. A streaming
-   turn emits these DOZENS of times, so per the frequency rule this is opacity
-   only — no blur, translate, or scale. Movement/scale/blur repeated that often
-   reads as noise and does per-frame compositing work on the hottest screen in
-   the app; a plain short fade keeps the timeline calm and cheap. Both the row
-   and its node share the one fade. */
+/* Step glyph state swaps (running → done → failed), the sandbox footnote, and
+   anything else that changes MANY times inside one row while a turn runs. Opacity
+   only: a glyph that slid or scaled every time a tool returned would read as noise
+   on the hottest surface in the app. Rows themselves use `fade-up` below — they
+   arrive once each, seconds apart. */
 @keyframes step-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-/* One class, not two. `.animate-step-badge-in` was a byte-identical second name for
-   this — the badge and its row deliberately share the single fade, so a separate
-   name only invited them to drift apart. */
 .animate-step-in { animation: step-in 0.18s var(--ease-out) both; }
+
+/* The rail's one entrance: a rail row, the controls under a finished answer, the
+   memory notice — each rises 8px on the micro-interaction curve. `--i` is the
+   row's step in a cascade: rows that mount TOGETHER (a spoiler opening, a chat
+   with history) unfold 60ms apart, capped at six so a long history finishes
+   promptly; a row streamed alone onto a rail already on screen sets 0 and does
+   not wait (see `staggerIndex`). The delay lives in the shorthand, driven by the
+   custom property, on purpose: these classes are unlayered, so they out-rank every
+   Tailwind utility including `[animation-delay:…]` — a delay utility next to an
+   unlayered `animation` shorthand is silently dead, while a `[--i:2]` utility sets
+   a separate property the shorthand cannot reset. The reduced-motion block zeroes
+   both the duration and the delay. */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-fade-up {
+  animation: fade-up 0.3s var(--ease-strong) calc(min(var(--i, 0), 6) * 60ms) both;
+}
+
+/* The hairline between two steps is drawn downward from the glyph above it, a beat
+   after that row lands, so the rail reads as one line being drawn rather than a
+   list with lines already between its items. Inherits the row's `--i`, so a
+   cascade draws its lines in the same order as its rows. */
+@keyframes rail-grow {
+  from { transform: scaleY(0); }
+  to   { transform: none; }
+}
+.animate-rail-grow {
+  transform-origin: top;
+  animation: rail-grow 0.3s var(--ease-strong) calc(min(var(--i, 0), 6) * 60ms + 120ms) both;
+}
 
 /* Every spoiler in the app opens instead of appearing. This is the one motion in
    here that is not decoration: a panel that snaps into existence makes the reader
