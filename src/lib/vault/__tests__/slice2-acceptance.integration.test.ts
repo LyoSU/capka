@@ -15,12 +15,19 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
  * the write that consults it: the fold could be right while `factWrite` forgot to ask, and
  * step 5's two conditions are a hand-written `&&`.
  *
- * So EVERY ARM HERE assembles its prompt through the real `buildModelContext`, folds the
- * rows it actually returns, and drives the real `factWrite` with that value. No arm builds
- * an assembled set by hand and no arm seeds `true` as a literal: a hand-built set gives the
- * same reading whether the lowering carries `untrusted_ingress` or drops it, and would have
- * passed green over the dropped-mark bug this repo actually had in `build.ts`'s
- * synthetic-summary branch.
+ * So each arm reaches `factWrite` through the path its own scenario really uses, and the
+ * two paths differ on purpose. ARMs 1 and 3 (and the control) assemble the prompt through
+ * the real `buildModelContext`, fold the rows it actually returns, and drive the real
+ * `factWrite` with that value. ARM 2 assembles nothing at all, because half 2 of an `ask`
+ * assembles nothing: it is a SECOND task, and its taint is SEEDED from
+ * `messages.untrusted_ingress` through `readResumeRow`, the same reader `prepareRun` calls.
+ * Making ARM 2 assemble a prompt would test a mechanism the resumed half does not use.
+ *
+ * What no arm does is build an assembled set by hand or write `seeded: true` as a literal.
+ * A hand-built set gives the same reading whether the lowering carries `untrusted_ingress`
+ * or drops it, and would have passed green over the dropped-mark bug this repo actually had
+ * in `build.ts`'s synthetic-summary branch; a literal seed would test the hand rather than
+ * the column ARM 2 exists to prove is read.
  *
  * WHY IT CARRIES MORE WEIGHT THAN AN ORDINARY TEST (§2.3, round 5): the column is
  * `NOT NULL DEFAULT false`, so an unmarked row is CLEAN and the fold is not a second
@@ -52,7 +59,13 @@ const US = `${P}space-user`;
 const PS = `${P}space-project`;
 /** The chat whose turn 1 read a connector result, plus the compaction checkpoint over it. */
 const C = `${P}chat`;
-/** The same shape with nothing marked anywhere — ARM 1 CONTROL's chat. */
+/** ARM 1 CONTROL's chat, and it is NOT the same shape as `C`: the tainted chat carries an
+ *  assistant row between its two user rows, the turn that read the connector result, and
+ *  this one has no such row at all. That difference IS the scenario rather than a
+ *  divergence to correct: the control asks what happens when there is nothing to mark, and
+ *  a chat with nothing to mark is one where the untrusted turn never happened. What has to
+ *  be identical is the WRITE (same statement, same quote, same target class, same expected
+ *  revision) and the user message the quote is located in, and both are. */
 const CLEAN = `${P}chat-clean`;
 
 const ids = {
@@ -67,7 +80,10 @@ const ids = {
   /** The suspended half of an `ask` — already flipped by half 1, read back by half 2. */
   resume: `${P}resume`,
   cleanUser1: `${P}cu1`,
-  cleanAsst1: `${P}ca1`,
+  /** The clean chat's CURRENT user message: `role: "user"`, carrying `USER_TURN`, and the
+   *  leaf the control assembles at. It was named `cleanAsst1` for one round while being a
+   *  user row throughout. */
+  cleanUserTurn: `${P}cu2`,
   cleanTurn: `${P}clean-turn`,
 };
 
@@ -169,8 +185,8 @@ run("slice 2 acceptance - the taint-domain control", () => {
 
     // The same shape with nothing marked anywhere.
     await insert({ id: ids.cleanUser1, chatId: CLEAN, parentId: null, role: "user", metadata: textParts("plan my week"), untrusted: false });
-    await insert({ id: ids.cleanAsst1, chatId: CLEAN, parentId: ids.cleanUser1, role: "user", metadata: textParts(USER_TURN), untrusted: false });
-    await insert({ id: ids.cleanTurn, chatId: CLEAN, parentId: ids.cleanAsst1, role: "assistant", metadata: textParts(""), untrusted: false });
+    await insert({ id: ids.cleanUserTurn, chatId: CLEAN, parentId: ids.cleanUser1, role: "user", metadata: textParts(USER_TURN), untrusted: false });
+    await insert({ id: ids.cleanTurn, chatId: CLEAN, parentId: ids.cleanUserTurn, role: "assistant", metadata: textParts(""), untrusted: false });
   });
 
   afterAll(async () => {
@@ -230,8 +246,8 @@ run("slice 2 acceptance - the taint-domain control", () => {
     // the feature could be entirely broken with a green suite. Ask of any control what
     // reading it gives when the answer is the opposite; this is that reading.
     const target = await seedManifestHead("Acme invoices are paid monthly");
-    const { assembled, taint } = await assembledTaint(CLEAN, ids.cleanAsst1, ids.cleanTurn);
-    expect(assembled.map((r) => r.id)).toEqual([ids.cleanUser1, ids.cleanAsst1]);
+    const { assembled, taint } = await assembledTaint(CLEAN, ids.cleanUserTurn, ids.cleanTurn);
+    expect(assembled.map((r) => r.id)).toEqual([ids.cleanUser1, ids.cleanUserTurn]);
     expect(taint.seen()).toBe(false);
 
     const r = await factWrite({
@@ -249,10 +265,16 @@ run("slice 2 acceptance - the taint-domain control", () => {
   });
 
   it("ARM 2 - nor ACROSS AN `ask`: the persisted flip survives into the second task", async () => {
+    // THE COLUMN IS THE SUBJECT OF THIS ARM, not the assembly, so there is deliberately no
+    // `buildModelContext` call here and its absence is the point rather than an omission.
     // Half 2 of an approval/`ask` continuation is a SECOND task with its own `prepareRun`
-    // and its own tool factory. It recomputes nothing: its taint is SEEDED from the column
-    // half 1 flipped, through the reader `prepareRun` really calls. The seed is READ here,
-    // never written as a literal — a hand-seeded `true` would test the hand.
+    // and its own tool factory, and none of the construction sites that call `mark` runs
+    // for a rehydrated input. A recomputed flag would therefore read false in half 2 while
+    // half 1's retrieved text sits verbatim in the context half 2 is reading. What carries
+    // the property across the split is the persisted `messages.untrusted_ingress` row, read
+    // back by `readResumeRow`, the same function `prepareRun` calls. The seed is READ from
+    // that reader here, never written as a literal: a hand-seeded `true` would test the
+    // hand, and a correct column this reader ignored would still be a hole.
     const target = await seedManifestHead("Acme invoices are paid monthly");
     const { untrustedIngressSeeded } = await readResumeRow(ids.resume);
     expect(untrustedIngressSeeded).toBe(true);
