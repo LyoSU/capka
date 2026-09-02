@@ -370,9 +370,9 @@ export function applyStrReplace(a: {
  * THE INSERTED TEXT IS NEVER MAPPED, and `str_replace` now holds the same rule from the other
  * side: a rendered title becomes a token only when the text being replaced already carried
  * that token. An insert replaces nothing, so it carries nothing, so `[[Title]]` in it is
- * always plain text — the two arms answer the same input the same way. Mapping it would mint
- * a token for an edge the model merely NAMED, which is §7's "typed into existence" case and
- * the thing the tool description promises does not happen.
+ * always plain text. Mapping it would mint a token for an edge the model merely NAMED, which
+ * is §7's "typed into existence" case and the thing the tool description promises does not
+ * happen.
  */
 export function applyInsert(a: { storedBody: string; insertLine: number; insertText: string }): EditResult {
   const lines = a.storedBody === "" ? [] : a.storedBody.split("\n");
