@@ -137,7 +137,7 @@ export async function buildMemoryManifest(args: {
   // the DEFAULT: a file per subject for anything worth reading, updated rather than
   // duplicated, and a bare fact where a bare fact is genuinely all there is.
   blocks.push(
-    "Use memory_search before assuming facts about the user or project. When you learn something worth keeping, write it with memory_note_write as a short topic file — one file per subject, and update the existing file rather than adding a second about the same thing; use memory_fact_write only for a single standalone fact.",
+    "Use memory_search before assuming facts about the user or project. When you learn something worth keeping, write it with memory_note_write as a short topic file — one file per subject, and edit the existing file rather than adding a second about the same thing; use memory_fact_write only for a single standalone fact.",
   );
 
   return blocks.join("\n\n");

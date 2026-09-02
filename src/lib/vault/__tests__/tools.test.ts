@@ -658,5 +658,13 @@ describe("the schemas the provider actually sees", () => {
     expect(description).toContain("topic file");
     expect(description).toContain("UPDATE it rather than writing a second");
     expect(description).toContain("section");
+    // And WHICH writer to reach for once the file exists. The edit arms are worth nothing if
+    // the model keeps re-sending whole bodies, and this sentence plus the manifest's are the
+    // only two places that decide it — the same reason the sentence above is pinned.
+    expect(description).toContain("str_replace");
+    expect(description).toContain("insert");
+    expect(description).toContain("use update only when most of the file changes");
+    // The reference tool's own housekeeping line: files that stay current and few.
+    expect(description).toContain("up to date, coherent and organized");
   });
 });
