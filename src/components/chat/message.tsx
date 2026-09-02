@@ -1121,8 +1121,10 @@ function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; c
         <StepGlyph d={d} state={state} />
         {/* The hairline to the next step, hung from this glyph so it exists only
             between two actions and never trails off after the last one. Its
-            height is exactly the gap between two glyph boxes (row min-h-8, py-1). */}
-        {connect && <span aria-hidden className="absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
+            height is exactly the gap between two glyph boxes (row min-h-8, py-1),
+            so it is dropped while the row is open: the payload panel sits in that
+            gap then, and a stub of line pointing into a panel read as a cut. */}
+        {connect && !open && <span aria-hidden className="absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
       </span>
       <span className="pointer-events-none relative z-10 min-w-0 truncate text-[15px] leading-snug">
         {label}
