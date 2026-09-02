@@ -2076,7 +2076,9 @@
       "navigation": "Navigation",
       "preferences": "Preferences",
       "shortcuts": "Keyboard shortcuts",
-      "settings": "Find a setting"
+      "settings": "Find a setting",
+      "chats": "Chats",
+      "recentChats": "Recent chats"
     },
     "hints": {
       "navigate": "navigate",

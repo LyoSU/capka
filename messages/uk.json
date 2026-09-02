@@ -2076,7 +2076,9 @@
       "navigation": "Навігація",
       "preferences": "Параметри",
       "shortcuts": "Гарячі клавіші",
-      "settings": "Знайти налаштування"
+      "settings": "Знайти налаштування",
+      "chats": "Чати",
+      "recentChats": "Нещодавні чати"
     },
     "hints": {
       "navigate": "перейти",

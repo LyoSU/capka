@@ -52,7 +52,6 @@ import { ClawMark } from "@/components/brand/claw-mark";
 import { useTheme } from "@/components/providers";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { ProjectsNav } from "@/components/projects/projects-nav";
-import { ChatSearch } from "@/components/chat/chat-search";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
 import { useLongPress } from "@/hooks/use-long-press";
@@ -409,24 +408,14 @@ export function AppSidebar() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   // Telegram chats can pile up; show the most recent and tuck the rest behind a
   // toggle so the section stays compact at the top of the list.
   const [showAllTelegram, setShowAllTelegram] = useState(false);
   const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
 
-  // Debounce search by 300ms
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  const baseParams = useCallback(() => {
-    const params = new URLSearchParams();
-    if (debouncedSearch) params.set("search", debouncedSearch);
-    return params;
-  }, [debouncedSearch]);
+  // Search left this list for the ⌘K palette, which asks the same endpoint; the
+  // sidebar always shows the unfiltered list.
+  const baseParams = useCallback(() => new URLSearchParams(), []);
 
   // Chats whose mark-read POST is still in flight. A refresh that races the POST
   // would report them unread again and flash the dot the instant you navigate
@@ -632,7 +621,6 @@ export function AppSidebar() {
     const onCreated = (e: Event) => {
       const d = (e as CustomEvent<{ id: string; title: string; projectId: string | null }>).detail;
       if (!d?.id) return;
-      if (debouncedSearch) return;
       setChats((prev) => {
         if (prev.some((c) => c.id === d.id)) return prev;
         const optimistic: ChatItem = {
@@ -652,7 +640,7 @@ export function AppSidebar() {
     };
     window.addEventListener("chat:created", onCreated);
     return () => window.removeEventListener("chat:created", onCreated);
-  }, [debouncedSearch]);
+  }, []);
 
   // Enter animation bookkeeping: any chat id that wasn't in the previous render
   // is "new" and animates in once. The FIRST loaded batch is the baseline — it's
@@ -718,7 +706,23 @@ export function AppSidebar() {
             </Hint>
             <span className="text-base font-medium group-data-[collapsible=icon]:hidden">Capka</span>
           </div>
-          <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
+          {/* Search is an icon here, where ChatGPT and Grok keep it, and it opens
+              the ⌘K palette: one search, one place. The bordered field this
+              replaced was the loudest thing in the panel, louder than the active
+              chat, for a control most people reach by keyboard. */}
+          <div className="flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+            <Hint label={`${t("search")} · ${shortcut("K")}`}>
+              <button
+                type="button"
+                aria-label={t("search")}
+                onClick={() => window.dispatchEvent(new Event("open-command-palette"))}
+                className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground hover:text-foreground")}
+              >
+                <Search className="size-4" />
+              </button>
+            </Hint>
+            <SidebarTrigger />
+          </div>
         </div>
         <Hint label={t("newChat")} side="right">
           <Link
@@ -748,11 +752,6 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-
-        {/* Search before Projects: finding an existing chat is the most frequent
-            thing anyone does here, and the field used to sit below Projects, in the
-            middle of the panel, where it read as belonging to neither. */}
-        <ChatSearch value={search} onChange={setSearch} />
 
         <ProjectsNav />
 
@@ -848,7 +847,7 @@ export function AppSidebar() {
           <div className="animate-blur-rise flex flex-col items-center px-4 py-10 text-center">
             <ClawMark className="mb-3 h-9 w-9 text-foreground opacity-15" />
             <p className="text-xs text-muted-foreground">
-              {debouncedSearch ? t("noChatsFound") : t("startNewChat")}
+              {t("startNewChat")}
             </p>
           </div>
         )}

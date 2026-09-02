@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import {
+  MessageSquare,
   MessageSquarePlus,
   Settings,
   PanelLeft,
@@ -73,6 +74,11 @@ export function CommandPalette() {
   // page is not a place a member should be sent.
   const { billing } = useBilling();
   const [open, setOpen] = useState(false);
+  // The palette is also the chat search: what you type filters the static rows
+  // AND asks the server for matching chats. Recent chats fill the group while the
+  // field is empty, so opening the palette is a chat switcher before a keystroke.
+  const [query, setQuery] = useState("");
+  const [chats, setChats] = useState<{ id: string; title: string | null }[]>([]);
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
   const { theme, setTheme } = useTheme();
@@ -86,6 +92,11 @@ export function CommandPalette() {
       if (e.key === "k") {
         e.preventDefault();
         setOpen((prev) => !prev);
+      } else if (e.shiftKey && e.code === "KeyF") {
+        // The chat-search shortcut the sidebar used to own; the palette is the
+        // search now. `code`, not `key`: with Shift held the key IS "F".
+        e.preventDefault();
+        setOpen(true);
       } else if (e.key === "n") {
         e.preventDefault();
         router.push(`/chat/${nanoid()}`);
@@ -106,6 +117,32 @@ export function CommandPalette() {
     };
   }, [router]);
 
+  // Same endpoint and same title match (`ilike`) the sidebar list uses, so a chat
+  // found here is the chat the sidebar would have shown. Debounced only while
+  // typing; the recents fetch on open is immediate. The AbortController drops a
+  // stale response that lands after the next keystroke.
+  useEffect(() => {
+    if (!open) return;
+    const ctrl = new AbortController();
+    const q = query.trim();
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams();
+        if (q) params.set("search", q);
+        const res = await fetch(`/api/chats?${params}`, { signal: ctrl.signal });
+        if (!res.ok) return;
+        const rows = (await res.json()) as { id: string; title: string | null }[];
+        setChats(rows.slice(0, 8));
+      } catch {
+        /* aborted or offline — the group simply keeps its last rows */
+      }
+    }, q ? 150 : 0);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [open, query]);
+
   function run(fn: () => void) {
     setOpen(false);
     fn();
@@ -118,10 +155,34 @@ export function CommandPalette() {
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder={t("search")} />
+    <CommandDialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setQuery("");
+      }}
+    >
+      <CommandInput placeholder={t("search")} value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandEmpty>{t("noResults")}</CommandEmpty>
+
+        {chats.length > 0 && (
+          <CommandGroup heading={query.trim() ? t("groups.chats") : t("groups.recentChats")}>
+            {chats.map((c) => (
+              <CommandItem
+                key={c.id}
+                // cmdk matches on `value`; the title is what the server matched on
+                // too, so a server hit is never filtered back out. The id keeps two
+                // same-titled chats distinct.
+                value={`${c.title ?? ""} ${c.id}`}
+                onSelect={() => run(() => router.push(`/chat/${c.id}`))}
+              >
+                <MessageSquare />
+                <span className="truncate">{c.title || tRoot("nav.newChat")}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading={t("groups.chat")}>
           <CommandItem onSelect={() => run(() => router.push(`/chat/${nanoid()}`))}>
