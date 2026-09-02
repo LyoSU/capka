@@ -153,25 +153,27 @@ export const chats = pgTable("chats", {
   // (you reply from Telegram, or fork it into a fresh web chat to take over).
   source: text("source").default("web"),
   /**
-   * WHAT KIND OF CONVERSATION THIS IS, and the reason it is not `archived`.
+   * WHAT KIND OF CONVERSATION THIS IS — and NOTHING READS IT TODAY.
    *
-   * "chat" is every conversation a person opened; "memory" is the single hidden chat behind
-   * the memory page's composer, where the owner tells the assistant what to change or forget
-   * and the turn runs through the ordinary queue with only the `memory_*` tools. That turn has
-   * to be a real chat row — the queue, the runner, the message tree and the effect ledger are
-   * all keyed on one — and it must never be something a person can navigate to: it holds one
-   * instruction and a one-sentence reply, and the settings page is its whole interface.
+   * It was added for the memory page's composer: one hidden chat per person, so that "tell the
+   * assistant what to change" could run through the ordinary queue with only the `memory_*`
+   * tools. The turn needed a real `chats` row (the queue, the runner, the message tree and the
+   * effect ledger are every one of them keyed on one) and that row had to appear in no list,
+   * which `archived` cannot express — archiving is a place a person PUT a chat and can take it
+   * back out of, and `?archived=all` shows both buckets.
    *
-   * `archived` cannot express that and must not be borrowed for it. Archiving is a place a
-   * person PUT a chat and can take it back out of; the archive screen lists them, the sidebar
-   * offers the bucket, and `?archived=all` shows both. A flag whose whole job is "no list ever
-   * offers this" is a different question, so it is a different column — and one enumerated
-   * value rather than a boolean, because the next non-chat producer (an automation's own turn,
-   * say) is a third kind and not a second `hidden` bit.
+   * The composer was then removed on the maintainer's call: changing memory in words already
+   * works in an ordinary chat, where the same tools live. The column and
+   * `uniq_chats_memory` survive because migration `0069` is applied, so dropping them is a
+   * second migration and a decision about live data rather than a revert. Every row is
+   * `'chat'` except any left over from trying the composer, and NOTHING FILTERS ON IT — so a
+   * leftover `'memory'` row is listed by the sidebar like any other chat, which is the honest
+   * state and not a hole: it is the person's own conversation.
    *
-   * ONE ENTRANCE READS IT: `chatIsListable` in `src/lib/chat/live.ts`. A predicate copied into
-   * each of the sidebar, the palette and the project hub is the shape this repo has already
-   * paid for twice — see that module.
+   * A LATER READER MUST NOT ASSUME THE FILTER EXISTS. The predicate that used to hide these
+   * rows (`chatIsListable`) was deleted with the composer; a future non-chat producer needs to
+   * add it back, at one entrance, rather than copy a `where` clause into the sidebar, the
+   * palette and the project hub.
    */
   kind: text("kind", { enum: ["chat", "memory"] }).notNull().default("chat"),
   pinned: boolean("pinned").default(false),
