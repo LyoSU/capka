@@ -809,6 +809,20 @@ export type OpenedNote = {
   /** Claims this note contains, as node ids for the caller to mint handles from. Capped:
    *  a topic with three hundred facts is a legitimate row and not an answer. */
   containedClaimIds: string[];
+  /**
+   * WHAT EACH TOKEN IN THE BODY RENDERED AS ON THIS CHANNEL — the substitution above, taken
+   * apart again, and `null` where it produced `UNRESOLVED_LINK`.
+   *
+   * It exists for the in-place editors (`note-edit.ts`): the model sends back text it read
+   * off `body`, so an edit has to be mapped from titles to tokens before it can be matched
+   * against what is stored. That mapping needs the SAME title source `body` used, and the
+   * decision about which titles a channel admits is this module's alone — so the pairs are
+   * handed out here rather than looked up a second time by the writer.
+   *
+   * It carries no text that is not already inside `body`, which is what makes it free of a
+   * new channel decision: every title here was substituted into the string above.
+   */
+  tokenTitles: { edgeId: string; title: MemoryToolText | null }[];
   /** Where this note's live `references` edges point, each with its node KIND so the caller
    *  can mint the right handle letter. Ids only — a handle carries no text,
    *  which is why these are not channel-filtered: the model learns that a link exists and
@@ -1016,6 +1030,12 @@ export async function openNoteForModel(
       revision: row.revision,
       title: mintMemoryTool(fitNoteTitle(row.title)),
       body: mintMemoryTool(body),
+      // The same lookup the substitution just used, kept rather than recomputed: a second
+      // read would be a second chance to disagree with the body the model was shown.
+      tokenTitles: [...targets].map(([edgeId, target]) => {
+        const title = titles.get(target.nodeId);
+        return { edgeId, title: title === undefined ? null : mintMemoryTool(title) };
+      }),
       sourceClass: row.sourceClass,
       staleSince: row.staleSince,
       containedClaimIds: contained.map((c) => c.id),

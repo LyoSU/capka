@@ -16,11 +16,22 @@ import {
   type PromptAccess,
   type SourceClass,
 } from "./claims";
-import { linkNodes, unlinkReferencesFrom } from "./edges";
+import { linkNodes, unlinkEdge, unlinkReferencesFrom } from "./edges";
 import { classify, type Grounding } from "./grounding";
 import type { HandleMap } from "./handles";
+import { numberLine } from "./line-view";
 import { appendLinkBlock, serializeBlocks, type NoteBlock } from "./links";
-import { createNote, forgetNote, noteHead, reviseNote, type NoteSection } from "./notes";
+import { openNoteForModel } from "./model-view";
+import { applyInsert, applyStrReplace, type EditResult } from "./note-edit";
+import {
+  NOTE_BLOCKS_MAX,
+  NOTE_BLOCK_MAX_CHARS,
+  createNote,
+  forgetNote,
+  noteHead,
+  reviseNote,
+  type NoteSection,
+} from "./notes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 import { resolveTopic } from "./topics";
 
@@ -935,6 +946,325 @@ export async function noteWrite(a: {
       sourceClass: verdict.sourceClass,
       promptAccess: written.promptAccess,
       said: `${NOTE_SAID[status]}${filed ? ` ${filed}` : ""}${notice}`,
+    };
+  });
+}
+
+/**
+ * EDITING A MEMORY FILE IN PLACE — `str_replace`, `insert`, `rename`, modelled on Claude's
+ * own memory tool, which is the surface the model already knows.
+ *
+ * WHY IT IS NOT `update`. `noteWrite`'s update arm replaces the whole file: to change one
+ * sentence the model has to re-send every other sentence, which costs a whole body of
+ * output tokens and is how a paragraph silently disappears — the model drops it while
+ * retyping and nothing in the write can tell that from an intentional deletion. An edit
+ * names only what changes, so what it did not name cannot be lost.
+ *
+ * THE MODEL EDITS WHAT IT SAW. `memory_open` renders canonical edge tokens as their
+ * targets' current titles, so `old_str` arrives in RENDERED form and is mapped back before
+ * it is matched (`note-edit.ts`). The titles it is mapped through come from
+ * `openNoteForModel` — the same mint that produced the text the model read — because which
+ * titles a channel admits is `model-view.ts`'s decision and must not be answered twice.
+ *
+ * THE FENCE IS §4.5'S, NOT A SOFTER ONE. A new revision IS a supersede: it replaces the head
+ * the manifest and every search read, and §10.1 bound 4 does not care that the edit was
+ * small. So step 3 refuses `untrusted_derived` into the user space, and step 5 refuses both
+ * a weaker class and any edit in a turn that read a document. The revision that lands
+ * carries the verdict's class FOR THE WHOLE FILE — one file, one class per revision. There
+ * is no way to mark a paragraph as weaker than the file it sits in, and inventing one here
+ * would make `prompt_access` a property of a span rather than of a row; a weaker write is
+ * therefore refused rather than blended in.
+ *
+ * `sensitive` and the secret screen are `insertNoteVersion`'s, over the whole new body, so
+ * an edit that pastes a credential into a clean file marks the file exactly as a rewrite
+ * would.
+ */
+export type NoteEditOp =
+  | { kind: "str_replace"; noteHandle: string; expectedRevision: number; oldStr: string; newStr: string }
+  | { kind: "insert"; noteHandle: string; expectedRevision: number; insertLine: number; insertText: string }
+  | { kind: "rename"; noteHandle: string; expectedRevision: number; title: string };
+
+export type NoteEditStatus =
+  | "edited"
+  | "renamed"
+  | "no_match"
+  | "ambiguous_match"
+  | "bad_line"
+  | "ambiguous_link"
+  | "bad_link"
+  | "too_long"
+  | "title_taken"
+  | "not_readable"
+  /** Shared with `noteWrite`, and answered with ITS sentence: the circumstance is the same
+   *  one and a second wording for it would teach the model that an edit and a rewrite fail
+   *  for different reasons. */
+  | "revision_mismatch"
+  | "refused_scope"
+  | "refused_no_project"
+  | "refused_weaker_class"
+  | "refused_untrusted_turn"
+  | "retired"
+  | "bad_handle";
+
+/**
+ * THE EDIT-ONLY SENTENCES, beside `NOTE_SAID` rather than inside it.
+ *
+ * Three of these have to name a NUMBER the model does not otherwise have — the revision the
+ * match failed against, the lines a duplicate sits on, the legal range for `insert_line` —
+ * and a `Record<Status, string>` cannot carry one. Keeping those three as templates next to
+ * the static ones is the alternative to storing each sentence twice, once with the number
+ * and once without, which is a drift waiting to happen.
+ *
+ * The wording follows Anthropic's own text-editor tool where there is an equivalent, on
+ * purpose: the model has seen these sentences before and knows what to do about them.
+ */
+export const NOTE_EDIT_SAID = {
+  edited: "The memory file has been edited.",
+  renamed: "The file has been renamed. Its text is unchanged.",
+  bad_link:
+    "Links are not typed into a file. Add one with a node_link block in memory_note_write, or with memory_link.",
+  too_long: "That would make the file longer than a memory file may be. Start a second file on the subject instead.",
+  title_taken: "A file with that title already exists; open it and edit it instead.",
+  not_readable:
+    "That file is not readable as memory, so its text cannot be edited here. Tell the user it is on their memory page.",
+} satisfies Record<string, string>;
+
+const saidNoMatch = (revision: number) =>
+  `No replacement was performed, old_str did not appear verbatim in the current version (revision ${revision}). Open the note again with memory_open and copy the text exactly.`;
+
+const saidAmbiguousMatch = (lines: number[]) =>
+  `No replacement was performed. Multiple occurrences of old_str in lines: ${lines.join(", ")}. Include more context so it matches once.`;
+
+const saidBadLine = (given: number, lines: number) =>
+  `Invalid \`insert_line\` parameter: ${given}. It should be within the range of lines of the file: [0, ${lines}]`;
+
+const saidAmbiguousLink = (title: string) =>
+  `Two links in this file both show as «${title}», so that text could mean either one. Edit around it, or rewrite the file with memory_note_write.`;
+
+export type NoteEditResult =
+  | {
+      status: "edited" | "renamed";
+      handle: string;
+      revision: number;
+      sourceClass: SourceClass;
+      /** How many `references` edges this edit closed, because the text stopped mentioning
+       *  them. Present on an edit and absent on a rename, which touches no body. */
+      linksRemoved?: number;
+      said: string;
+    }
+  | { status: "revision_mismatch"; revision: number; said: string }
+  | {
+      status: Exclude<NoteEditStatus, "edited" | "renamed" | "revision_mismatch">;
+      said: string;
+    };
+
+const badEditHandle = (handle: string): NoteEditResult => ({
+  status: "bad_handle",
+  said: `${NOTE_SAID.bad_handle} Unusable: ${handle}.`,
+});
+
+/** How many lines of the file to show on either side of the change, so the model can see
+ *  that the edit landed where it meant it to without spending a second `memory_open`. */
+const SNIPPET_CONTEXT = 4;
+
+/**
+ * WHAT THE FILE LOOKS LIKE AROUND THE CHANGE, numbered exactly as `memory_open` numbers it.
+ *
+ * It goes through `openNoteForModel` — a second call, after the write, inside the same
+ * transaction — rather than being composed from the body this module just computed. The
+ * body is a stored string full of edge tokens; turning it into something a model may read
+ * is a mint, and §3.4's NEW-3 is that there is one of those per channel and it lives in
+ * `model-view.ts`. The second call also answers a question the writer cannot: whether the
+ * new text tripped the secret screen, in which case there is no snippet to show and the
+ * reply says only that the edit landed.
+ */
+async function editSnippet(
+  spaceId: string,
+  noteId: string,
+  changed: { from: number; to: number },
+  ex: Ex,
+): Promise<string> {
+  const view = await openNoteForModel(spaceId, noteId, ex);
+  if (!view.ok) return "";
+  const lines = view.item.body === "" ? [] : view.item.body.split("\n");
+  const first = Math.max(1, changed.from - SNIPPET_CONTEXT);
+  const last = Math.min(lines.length, changed.to + SNIPPET_CONTEXT);
+  if (last < first) return "";
+  const shown = lines.slice(first - 1, last).map((text, i) => numberLine(first + i, text));
+  return `\n${shown.join("\n")}`;
+}
+
+/** A refusal from the pure editor, in the tool's own vocabulary. Written as one place so a
+ *  new refusal in `note-edit.ts` is a compile error here rather than a silent fall-through
+ *  to some default sentence. */
+function editRefusal(r: Exclude<EditResult, { ok: true }>, revision: number, given: number): NoteEditResult {
+  switch (r.reason) {
+    case "no_match":
+      return { status: "no_match", said: saidNoMatch(revision) };
+    case "ambiguous_match":
+      return { status: "ambiguous_match", said: saidAmbiguousMatch(r.lines) };
+    case "bad_line":
+      return { status: "bad_line", said: saidBadLine(given, r.lines) };
+    case "ambiguous_link":
+      return { status: "ambiguous_link", said: saidAmbiguousLink(r.title) };
+    case "bad_link":
+      return { status: "bad_link", said: NOTE_EDIT_SAID.bad_link };
+  }
+}
+
+export async function noteEdit(a: {
+  op: NoteEditOp;
+  grounding: GroundingInput;
+  /** As `noteWrite`'s: omitted leaves the file on the shelf the person put it on. An edit
+   *  that says nothing about the heading must not move the file. */
+  section?: NoteSection;
+  ctx: WriteCtx;
+}): Promise<NoteEditResult> {
+  const { ctx, op } = a;
+  const allowedSpaceIds = ctx.projectSpaceId ? [ctx.userSpaceId, ctx.projectSpaceId] : [ctx.userSpaceId];
+  const t = ctx.handles.resolve(op.noteHandle);
+  // `n` only. A claim is edited with `memory_fact_write`, which supersedes it rather than
+  // rewriting it — a fact has one sentence and no lines to address.
+  if (!t || t.kind !== "n" || !allowedSpaceIds.includes(t.spaceId)) return badEditHandle(op.noteHandle);
+  const spaceId = t.spaceId;
+
+  return db.transaction(async (tx): Promise<NoteEditResult> => {
+    // STEP 9, first statement, for the lock order every vault writer states.
+    if (!(await spaceAcceptsWrites(spaceId, tx))) return { status: "retired", said: NOTE_SAID.retired };
+
+    const head = await noteHead(t.nodeId, [spaceId], tx);
+    // Forgotten since the handle was minted. Not `revision_mismatch`: that status carries
+    // "it is now at revision N", and there is no N.
+    if (!head) return badEditHandle(op.noteHandle);
+    if (head.revision !== op.expectedRevision) {
+      return { status: "revision_mismatch", revision: head.revision, said: NOTE_SAID.revision_mismatch };
+    }
+
+    // STEP 1 — the class, measured against THE WORDS THIS EDIT ADDS and not against the
+    // file it adds them to. Clause 4 asks whether the statement is made of what the user
+    // said; measuring the whole body would let one quoted sentence carry a file the user
+    // never saw, and measuring nothing at all would make every edit an inference.
+    //
+    // IT RUNS BEFORE THE FILE IS READ, and that ordering is the fence's. Every refusal
+    // below is about AUTHORITY, and one of them — a file this channel may not read at all —
+    // is about visibility; answering the visibility one first would let "I cannot show you
+    // this file" stand in front of "you may not change this file", which is the weaker
+    // answer to the more serious question. The words this edit adds are known without
+    // opening anything, so nothing is lost by deciding the class first.
+    const written = op.kind === "rename" ? op.title : op.kind === "str_replace" ? op.newStr : op.insertText;
+    const resolved = await resolveGrounding(a.grounding, ctx, allowedSpaceIds, tx);
+    if (!resolved.ok) return badEditHandle(resolved.bad.join(", "));
+    const verdict = classify(resolved.grounding, {
+      statement: written,
+      userTurnText: ctx.userTurnText,
+      untrustedIngressSeen: ctx.taint.seen(),
+    });
+
+    // STEP 3 — THE FENCE, above every step below it.
+    if (verdict.sourceClass === "untrusted_derived" && spaceId === ctx.userSpaceId) {
+      return ctx.projectSpaceId
+        ? { status: "refused_scope", said: NOTE_SAID.refused_scope }
+        : { status: "refused_no_project", said: NOTE_SAID.refused_no_project };
+    }
+
+    // STEP 5 — BOTH conditions, as refusals, because an edit supersedes a head exactly as a
+    // rewrite does. See `noteWrite`'s `NOTE_SAID` for why a note has no conflict arm.
+    if (!mayOutrank(verdict.sourceClass, head.sourceClass)) {
+      return { status: "refused_weaker_class", said: NOTE_SAID.refused_weaker_class };
+    }
+    if (ctx.taint.seen()) {
+      return { status: "refused_untrusted_turn", said: NOTE_SAID.refused_untrusted_turn };
+    }
+
+    // AFTER the fence and before anything is read or written: one edit may not carry more
+    // text than a couple of the blocks a whole write is made of.
+    if (written.length > 2 * NOTE_BLOCK_MAX_CHARS) {
+      return { status: "too_long", said: NOTE_EDIT_SAID.too_long };
+    }
+
+    let title = head.title;
+    let body = head.bodyMarkdown;
+    let linksRemoved: string[] = [];
+    let changed: { from: number; to: number } | null = null;
+
+    if (op.kind === "rename") {
+      title = op.title;
+    } else {
+      const view = await openNoteForModel(spaceId, head.id, tx);
+      // The model holds a handle to a file its channel may not read — a note the secret
+      // screen marked, most likely. It cannot have copied text out of it, so there is
+      // nothing here for `old_str` to have come from.
+      if (!view.ok) return { status: "not_readable", said: NOTE_EDIT_SAID.not_readable };
+      const r =
+        op.kind === "str_replace"
+          ? applyStrReplace({
+              storedBody: head.bodyMarkdown,
+              edges: view.item.tokenTitles,
+              oldStr: op.oldStr,
+              newStr: op.newStr,
+            })
+          : applyInsert({ storedBody: head.bodyMarkdown, insertLine: op.insertLine, insertText: op.insertText });
+      if (!r.ok) return editRefusal(r, head.revision, op.kind === "insert" ? op.insertLine : 0);
+      body = r.body;
+      linksRemoved = r.linksRemoved;
+      changed = { from: r.changedFrom, to: r.changedTo };
+    }
+
+    // The other half of the bound: a file may not be grown past what the schema lets a whole
+    // write store, one insert at a time.
+    if (body.length > NOTE_BLOCKS_MAX * NOTE_BLOCK_MAX_CHARS) {
+      return { status: "too_long", said: NOTE_EDIT_SAID.too_long };
+    }
+
+    const upd = await reviseNote(
+      {
+        noteId: head.id,
+        spaceId,
+        expectedRevision: head.revision,
+        title,
+        // AFTER the CAS, which is what the callback shape buys: a lost race must close no
+        // edges. §4.8 is symmetric — a token the new body no longer carries is a link the
+        // file no longer makes, and an edge that outlives its token renders one it does not.
+        bodyMarkdown: async () => {
+          for (const edgeId of linksRemoved) await unlinkEdge(edgeId, spaceId, tx);
+          return body;
+        },
+        section: a.section,
+        sourceClass: verdict.sourceClass,
+        // `edit` is what tells the chat notice's Undo, and anyone reading the audit log,
+        // that this revision changed part of a file rather than replacing it. The rest is
+        // the shape every other note write stores, which is what keeps `readTurnWrites`
+        // naming this note once with the new revision and `revertNote` able to undo it.
+        provenance: { kind: a.grounding.kind, edit: op.kind, messageId: ctx.messageId, taskId: ctx.taskId },
+        createdTaskId: ctx.taskId,
+        actor: ctx.actor,
+      },
+      tx,
+    );
+    // The CAS lost between the pre-check above and the statement. Nothing was written —
+    // including no closed edges, which is why the callback runs after the CAS.
+    if (!upd.ok) {
+      return { status: "revision_mismatch", revision: upd.currentRevision, said: NOTE_SAID.revision_mismatch };
+    }
+
+    const handle = ctx.handles.mint({ kind: "n", spaceId, nodeId: head.id });
+    if (op.kind === "rename") {
+      return {
+        status: "renamed",
+        handle,
+        revision: upd.revision,
+        sourceClass: verdict.sourceClass,
+        said: NOTE_EDIT_SAID.renamed,
+      };
+    }
+    const dropped = linksRemoved.length ? ` ${linksRemoved.length} link${linksRemoved.length > 1 ? "s" : ""} the text no longer mentions ${linksRemoved.length > 1 ? "were" : "was"} removed with it.` : "";
+    return {
+      status: "edited",
+      handle,
+      revision: upd.revision,
+      sourceClass: verdict.sourceClass,
+      linksRemoved: linksRemoved.length,
+      said: `${NOTE_EDIT_SAID.edited}${dropped}${await editSnippet(spaceId, head.id, changed!, tx)}`,
     };
   });
 }

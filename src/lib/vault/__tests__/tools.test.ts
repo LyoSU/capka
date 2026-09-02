@@ -590,9 +590,12 @@ describe("the schemas the provider actually sees", () => {
     // would give the page a fifth group to render and explain.
     const schema = asSchema((await make()).memory_note_write.inputSchema as never);
     const call = (section?: string) => ({
-      op: { kind: "create", scope: "user" },
-      title: "Beans",
-      content: [{ kind: "markdown", text: "The dog's name." }],
+      op: {
+        kind: "create",
+        scope: "user",
+        title: "Beans",
+        content: [{ kind: "markdown", text: "The dog's name." }],
+      },
       grounding: { kind: "agent_inference" },
       ...(section === undefined ? {} : { section }),
     });
@@ -607,6 +610,41 @@ describe("the schemas the provider actually sees", () => {
     expect(await accepts(call())).toBe(true);
     const js = asSchema((await make()).memory_note_write.inputSchema).jsonSchema as { required?: string[] };
     expect(js.required ?? []).not.toContain("section");
+  });
+
+  it("the edit arms take their own fields and refuse the whole-file ones", async () => {
+    // WHY THE FIELDS MOVED INTO THE OP. Five arms write a note and they take different
+    // things; at the top level every one of those fields would have to be optional, and an
+    // optional field is one the model may send on any arm. Inside the discriminated union
+    // the provider corrects a mismatched call before a database is touched — which is the
+    // same bound `section` and `queries` are held to, one tool over.
+    const schema = asSchema((await make()).memory_note_write.inputSchema as never);
+    const accepts = async (v: unknown) => (await schema.validate!(v)).success;
+    const g = { kind: "agent_inference" };
+
+    expect(await accepts({ op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a", new_str: "b" }, grounding: g })).toBe(true);
+    // `new_str` is OPTIONAL — omitting it is a deletion, as in the reference tool.
+    expect(await accepts({ op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a" }, grounding: g })).toBe(true);
+    // ...but `old_str` is not, and neither is the CAS.
+    expect(await accepts({ op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, new_str: "b" }, grounding: g })).toBe(false);
+    expect(await accepts({ op: { kind: "str_replace", note_handle: "n1", old_str: "a" }, grounding: g })).toBe(false);
+    // A whole-file field on an edit arm is REFUSED, not quietly dropped: a model that sends
+    // a body with a str_replace has misunderstood which call it is making, and stripping the
+    // field would let it believe the body landed.
+    expect(
+      await accepts({
+        op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a", new_str: "b", content: [{ kind: "markdown", text: "x" }] },
+        grounding: g,
+      }),
+    ).toBe(false);
+    // And an invented arm is not an arm.
+    expect(await accepts({ op: { kind: "delete", note_handle: "n1", expected_revision: 2 }, grounding: g })).toBe(false);
+
+    expect(await accepts({ op: { kind: "insert", note_handle: "n1", expected_revision: 2, insert_line: 0, insert_text: "x" }, grounding: g })).toBe(true);
+    // 0 is the top of the file and is legal; a negative line is not a line.
+    expect(await accepts({ op: { kind: "insert", note_handle: "n1", expected_revision: 2, insert_line: -1, insert_text: "x" }, grounding: g })).toBe(false);
+    expect(await accepts({ op: { kind: "rename", note_handle: "n1", expected_revision: 2, title: "New title" }, grounding: g })).toBe(true);
+    expect(await accepts({ op: { kind: "rename", note_handle: "n1", expected_revision: 2, title: "" }, grounding: g })).toBe(false);
   });
 
   it("the note description steers a topic FILE per subject, updated rather than duplicated", async () => {
