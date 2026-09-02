@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import {
   MessageSquare,
@@ -78,7 +78,8 @@ export function CommandPalette() {
   // AND asks the server for matching chats. Recent chats fill the group while the
   // field is empty, so opening the palette is a chat switcher before a keystroke.
   const [query, setQuery] = useState("");
-  const [chats, setChats] = useState<{ id: string; title: string | null }[]>([]);
+  const [chats, setChats] = useState<{ id: string; title: string | null; projectName?: string | null; updatedAt: string | null }[]>([]);
+  const locale = useLocale();
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
   const { theme, setTheme } = useTheme();
@@ -131,7 +132,7 @@ export function CommandPalette() {
         if (q) params.set("search", q);
         const res = await fetch(`/api/chats?${params}`, { signal: ctrl.signal });
         if (!res.ok) return;
-        const rows = (await res.json()) as { id: string; title: string | null }[];
+        const rows = (await res.json()) as { id: string; title: string | null; projectName?: string | null; updatedAt: string | null }[];
         setChats(rows.slice(0, 8));
       } catch {
         /* aborted or offline — the group simply keeps its last rows */
@@ -179,6 +180,13 @@ export function CommandPalette() {
               >
                 <MessageSquare />
                 <span className="truncate">{c.title || tRoot("nav.newChat")}</span>
+                {/* What tells two same-titled chats apart: the project it lives in,
+                    or failing that the day it was last touched — the same slot the
+                    settings rows use for their page name. */}
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  {c.projectName ||
+                    (c.updatedAt && new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }).format(new Date(c.updatedAt)))}
+                </span>
               </CommandItem>
             ))}
           </CommandGroup>

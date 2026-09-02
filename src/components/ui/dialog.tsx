@@ -34,8 +34,11 @@ function DialogOverlay({
         // fill-mode-forwards: base-ui keeps the backdrop mounted until the
         // popup's (longer) exit animation ends, so once the backdrop's own
         // fade-out finishes it must hold opacity 0 — without it the backdrop
-        // reverts to bg-black/50 for the gap and visibly flashes back on close.
-        "fixed inset-0 isolate z-50 bg-black/50 duration-150 fill-mode-forwards supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // reverts to the tinted backdrop for the gap and visibly flashes back on close.
+        // 20%, not 50%: a dialog dims the page to FOCUS it, not to hide it — at half
+        // black the page behind the ⌘K palette went mid-grey and the palette read
+        // as an interruption. The blur does the separating; the tint only settles it.
+        "fixed inset-0 isolate z-50 bg-black/20 duration-150 fill-mode-forwards supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
