@@ -853,6 +853,11 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
 }
 
 
+/** How long the text must stop growing before the caret starts to blink. Deltas
+ *  land every ~250ms while the model writes, so anything past twice that is a
+ *  real pause — a tool call, a thought — rather than the gap between two batches. */
+const CARET_PAUSE_MS = 600;
+
 function TextContent({ text, isStreaming, chatId, touched, sources }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[]; sources?: NumberedSource[] }) {
   // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
   // answers stay in the comfortable reading band; code blocks and tables are
@@ -864,8 +869,25 @@ function TextContent({ text, isStreaming, chatId, touched, sources }: { text: st
   // whatever element the markdown parser just produced and can't be wrapped
   // without re-implementing the renderer. A caret is the part that carries
   // information anyway — it marks the write head and blinks when it parks.
+  //
+  // "Parks" is measured, not inferred from the part list: the caret is still while
+  // words arrive (a bar blinking under visibly growing text is a glitch) and starts
+  // to blink only once `text` has not changed for `CARET_PAUSE_MS`. Setting the
+  // same `false` again is a React bail-out, so a batch that lands while unpaused
+  // costs no extra render.
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (!isStreaming) return;
+    setPaused(false);
+    const t = setTimeout(() => setPaused(true), CARET_PAUSE_MS);
+    return () => clearTimeout(t);
+  }, [text, isStreaming]);
   return (
-    <div className="chat-prose text-base leading-relaxed" data-streaming={isStreaming ? "" : undefined}>
+    <div
+      className="chat-prose text-base leading-relaxed"
+      data-streaming={isStreaming ? "" : undefined}
+      data-paused={isStreaming && paused ? "" : undefined}
+    >
       <Markdown isStreaming={isStreaming} chatId={chatId} sources={sources}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} touched={touched} />}
     </div>

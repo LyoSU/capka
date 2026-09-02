@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentPropsWithoutRef } from "react";
+import { createContext, useContext, type ComponentPropsWithoutRef } from "react";
 import { useTranslations } from "next-intl";
 import { visit, SKIP } from "unist-util-visit";
 import type { Root, RootContent } from "mdast";
@@ -60,7 +60,18 @@ export function remarkWorkspacePaths() {
 /** Inline pill for a workspace file the model named: type icon + file name,
  *  opening Quick Look (or downloading non-previewable kinds) on click. A path the
  *  model named but never created is greyed out and inert (see useFileStatus). */
-function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string; live?: boolean }) {
+/**
+ * Whether the reply the chips sit in is still being written. Published as context
+ * rather than closed over by `makeWorkspaceComponents`: Streamdown's memo does not
+ * compare `components`, so a factory re-run on the streaming flag could only reach
+ * the renderer by remounting it — a full re-parse and re-highlight of the whole
+ * message at the very moment the reader's eye is on its last line. A context value
+ * changes without the tree changing.
+ */
+export const LiveContext = createContext(false);
+
+function WorkspacePathChip({ rel, chatId }: { rel: string; chatId: string }) {
+  const live = useContext(LiveContext);
   const { open } = usePreview();
   const tw = useTranslations("chat.workspace");
   const name = rel.split("/").pop() || rel;
@@ -118,7 +129,7 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
  * Streamdown sanitizes the tree with rehype-sanitize's default schema, which
  * strips data-* attributes before components ever see them.
  */
-export function makeWorkspaceComponents(chatId?: string, live?: boolean, sources?: NumberedSource[]) {
+export function makeWorkspaceComponents(chatId?: string, sources?: NumberedSource[]) {
   const byN = sources?.length ? new Map(sources.map((s) => [s.n, s])) : null;
   return {
     // The `node` prop react-markdown also passes is destructured away so it
@@ -126,7 +137,7 @@ export function makeWorkspaceComponents(chatId?: string, live?: boolean, sources
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to keep react-markdown's AST handle off the DOM element
     a({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
       const rel = typeof href === "string" ? workspaceRelFromHref(href) : null;
-      if (rel && chatId) return <WorkspacePathChip rel={rel} chatId={chatId} live={live} />;
+      if (rel && chatId) return <WorkspacePathChip rel={rel} chatId={chatId} />;
       if (byN && typeof children === "string" && /^\d{1,4}$/.test(children)) {
         const source = byN.get(parseInt(children, 10));
         // Both matches exact, so the chip never changes what the model wrote:

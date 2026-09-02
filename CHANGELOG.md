@@ -32,6 +32,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Streamed replies fade in word by word and no longer re-render the whole message when the turn ends; the caret blinks only while the model pauses.
 - The memory page lists everything the assistant saved, each row tagged with where it came from; the old review queue becomes a read-only "Earlier suggestions" archive that expires 30 days after this release.
 - Facts found by post-turn extraction are saved directly instead of waiting in a review queue; legacy memory documents migrate as assistant conclusions, not as confirmed facts.
 - The person card and the capability rule dialog use hairline rows instead of boxed items; the Allow / Ask / Deny switch is the shared segmented control and no longer stretches across the dialog.

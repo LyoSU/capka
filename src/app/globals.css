@@ -630,6 +630,19 @@
   background: var(--foreground);
   opacity: 0.55;
 }
+/* …until the words PAUSE. A tool call, the model thinking, a slow provider: the
+   text has stopped growing and nothing on the line says whether it will resume.
+   That is the one moment a blink carries information ("still here, waiting on the
+   next word"), so it is gated on `data-paused`, which the message sets after a
+   short quiet gap and clears on the next delta. `step-end` because a cursor
+   blinks, it does not fade; the global reduced-motion block freezes it. */
+.chat-prose[data-streaming][data-paused] > p:last-child::after {
+  animation: caret-blink 1s step-end infinite;
+}
+@keyframes caret-blink {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0; }
+}
 
 /* Citation chips are React components (components/chat/sources.tsx), not CSS
    over the markdown anchor: Streamdown sanitizes the hast with rehype-sanitize's

@@ -7,7 +7,7 @@ import "streamdown/styles.css";
 // renders raw, unstyled spans instead of typeset formulas — Streamdown does not
 // bundle it, so import it here where the math plugin is wired in.
 import "katex/dist/katex.min.css";
-import { remarkWorkspacePaths, makeWorkspaceComponents } from "./workspace-path";
+import { remarkWorkspacePaths, makeWorkspaceComponents, LiveContext } from "./workspace-path";
 import { remarkCitations } from "@/lib/chat/citations";
 import type { Pluggable } from "unified";
 import type { NumberedSource } from "@/lib/mcp/search-normalize";
@@ -29,6 +29,25 @@ const STREAMDOWN_CONTROLS = {
   code: { copy: true },
   table: { copy: true, download: true, fullscreen: true },
 };
+
+// How a streamed answer becomes live text rather than text arriving in slabs. The
+// runner flushes every ~100ms and the client coalesces deltas into ~250ms batches,
+// so a paragraph would otherwise grow in jumps of twenty-odd tokens four times a
+// second. Streamdown animates only the words the latest batch mounted, staggered
+// so a typical batch (eight to twelve words) unrolls across roughly the interval to
+// the next one — the eye reads a flow, not a beat. Opacity only: blur or motion on
+// every word of every reply is exactly the per-token treatment the step rail
+// refuses. `--ease-out` is the app's one entrance curve, so its literal value goes
+// here rather than a second opinion. When `isAnimating` goes false the plugin
+// leaves the pipeline, so a finished message carries no extra spans. Module-level
+// because the memo compares it by reference.
+const ANIMATED = {
+  animation: "fadeIn",
+  duration: 220,
+  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+  sep: "word",
+  stagger: 24,
+} as const;
 
 // Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy —
 // load them off the critical path so the chat bundle stays small. Markdown
@@ -65,13 +84,14 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
   const citeKey = sources?.length ? sources.map((s) => `${s.n}${s.url}${s.title}${s.date ?? ""}`).join("\n") : "";
 
   // Clickable /workspace file chips and citation chips, in the chat transcript
-  // (chatId set / sources present). Memoized so Streamdown's memo holds;
-  // `isStreaming` is a dep so file chips switch from optimistic to
-  // existence-verified exactly once, when the reply finalizes.
+  // (chatId set / sources present). Memoized so Streamdown's memo holds. The
+  // streaming flag the file chips need (optimistic while live, existence-verified
+  // once final) reaches them through `LiveContext` below, NOT through this
+  // factory: a new `components` object can only reach Streamdown by remounting it.
   const components = useMemo<Components | undefined>(
-    () => (chatId || citeKey ? makeWorkspaceComponents(chatId, isStreaming, sources) : undefined),
+    () => (chatId || citeKey ? makeWorkspaceComponents(chatId, sources) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sources` is represented by citeKey (content identity, not reference)
-    [chatId, isStreaming, citeKey],
+    [chatId, citeKey],
   );
 
   // Citation links ([N] -> source url; the a-override above upgrades them to
@@ -88,25 +108,33 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
   return (
     // The key is load-bearing: Streamdown's own memo comparator checks
     // `children`, `plugins`, `className`… but NOT `remarkPlugins` or
-    // `components`. A message whose citation sources resolve only at finalize
-    // (cross-turn [N] markers arrive via metadata.citedSources) hands Streamdown
-    // a new citations plugin while the text is already final — the comparator
-    // sees identical children and skips the re-render, so the markers stayed
-    // dead until a full page reload. Remounting is the only way past a memo
-    // that doesn't compare the prop; citeKey covers the full identity the chips
-    // render (number, url, title, date), and isStreaming covers the
-    // workspace-chip components flipping to existence-verified at the same
-    // silent moment.
-    <Streamdown
-      key={`${citeKey}${isStreaming ? ":s" : ""}`}
-      parseIncompleteMarkdown={isStreaming}
-      controls={STREAMDOWN_CONTROLS}
-      plugins={plugins}
-      remarkPlugins={remarkPlugins}
-      components={components}
-      urlTransform={urlTransform}
-    >
-      {children}
-    </Streamdown>
+    // `components` (verified against 2.5.0). A message whose citation sources
+    // resolve only at finalize (cross-turn [N] markers arrive via
+    // metadata.citedSources) hands Streamdown a new citations plugin while the
+    // text is already final — the comparator sees identical children and skips
+    // the re-render, so the markers stayed dead until a full page reload.
+    // Remounting is the only way past a memo that doesn't compare the prop, and
+    // citeKey covers the full identity the chips render (number, url, title,
+    // date). The key deliberately does NOT include the streaming state: that
+    // flipped once per reply, at the end, and remounted the whole tree — a full
+    // re-parse and re-highlight — at the very moment the eye is on the last line.
+    // `isAnimating` reaches Streamdown as a compared prop, and the file chips read
+    // the same flag from `LiveContext`, so the end of a turn is now a re-render of
+    // the blocks that changed, not a teardown.
+    <LiveContext.Provider value={!!isStreaming}>
+      <Streamdown
+        key={citeKey}
+        parseIncompleteMarkdown={isStreaming}
+        isAnimating={isStreaming}
+        animated={ANIMATED}
+        controls={STREAMDOWN_CONTROLS}
+        plugins={plugins}
+        remarkPlugins={remarkPlugins}
+        components={components}
+        urlTransform={urlTransform}
+      >
+        {children}
+      </Streamdown>
+    </LiveContext.Provider>
   );
 }
