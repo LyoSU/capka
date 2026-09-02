@@ -122,6 +122,26 @@ describe("a statement's legibility is decided in one place", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("renders no reveal control inside a list row", () => {
+    // A `TopicRow` is a `<button>`. `Statement`'s reveal is a `<button>` too, so a sensitive
+    // title in a row nested one inside the other — invalid markup, and the inner click
+    // bubbles: "Show" would OPEN the file rather than reveal the words, which is the reveal
+    // control doing the one thing it exists not to do. The row therefore blurs with no
+    // control at all, and the file's own view — one click away — carries the reveal.
+    //
+    // Source-text, like everything else here: `environment: "node"` has no renderer, so
+    // "the row rendered no button" is not observable any other way.
+    const owner = readFileSync(OWNER, "utf8");
+    const row = owner.slice(owner.indexOf("function TopicRow"), owner.indexOf("const SECTION_KEY"));
+    // Whole elements, not lines: one of these calls spans four of them.
+    const statements = codeLines(row).join("\n").match(/<Statement\b[\s\S]*?\/>/g) ?? [];
+    expect(statements.length).toBeGreaterThan(0);
+    for (const el of statements) expect(el).toContain("control={false}");
+    // And no `<p>` anywhere inside that button: a `<button>` takes phrasing content only,
+    // so every text cell in the row is a `<span className="block …">`.
+    expect(row).not.toMatch(/<p[\s>]/);
+  });
+
   it("gives the open file ONE reveal over its title and its body", () => {
     // The detail view holds a `reveal` for the body — a markdown body cannot go through
     // `Statement`, so the gate is explicit there — and the title's own `Statement` was

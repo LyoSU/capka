@@ -221,6 +221,8 @@ export function Statement({
   value,
   reveal,
   className,
+  control = true,
+  as: Text = "p",
   children,
 }: {
   value: StatementView;
@@ -231,6 +233,17 @@ export function Statement({
    *  conflict line. Presentation only: there is deliberately no prop that changes whether
    *  the text is legible, because that is the one decision this component owns. */
   className?: string;
+  /** WHETHER THIS PLACE CAN CARRY THE CONTROL — not whether the words may be read. The
+   *  blur, the `aria-hidden` and the visually-hidden reason are unconditional; `false` only
+   *  drops the BUTTON, for a surface that cannot hold one: a list row is itself a
+   *  `<button>`, so a nested reveal is invalid markup whose click bubbles into opening the
+   *  file. The words stay unreadable there and the reveal lives one click away, in the
+   *  file's own view — never `control={false}` on a surface that is the last one showing
+   *  the statement. */
+  control?: boolean;
+  /** `span` for a statement inside phrasing content — a `<button>` row takes no `<p>`.
+   *  Presentation again: it changes the tag, never the legibility. */
+  as?: "p" | "span";
   children?: React.ReactNode;
 }) {
   const t = useTranslations("settings.memory");
@@ -242,8 +255,30 @@ export function Statement({
   if (!value.sensitive) {
     return (
       <>
-        <p className={scale}>{value.text}</p>
+        <Text className={scale}>{value.text}</Text>
         {children}
+      </>
+    );
+  }
+
+  if (!control) {
+    return (
+      <>
+        {/* The clamp rides the TEXT element, which is this one: there is no flex wrapper
+            here, because there is no control to sit beside the words. */}
+        <Text
+          aria-hidden={!shown}
+          className={cn(
+            "transition-[filter] motion-reduce:transition-none",
+            !shown && "select-none blur-[5px]",
+            scale,
+          )}
+        >
+          {value.text}
+        </Text>
+        {/* Outside the hidden element, or the one line explaining the blur is hidden too. */}
+        {!shown && <span className="sr-only">{t("sensitiveBlurred")}</span>}
+        {shown && children}
       </>
     );
   }
@@ -531,24 +566,31 @@ function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
         className="group/topic -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-center gap-x-4 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] sm:gap-x-6"
       >
         {/* Through `Statement`, like every other stored string on this page: a title is
-            text somebody or something wrote, and `sensitive` has exactly one reader. */}
-        <Statement value={topic.title} className="truncate font-medium" />
+            text somebody or something wrote, and `sensitive` has exactly one reader. As a
+            `span` with NO control — this row is itself a `<button>`, which takes phrasing
+            content only, and a nested reveal button would open the file when clicked. */}
+        <Statement value={topic.title} className="block truncate font-medium" control={false} as="span" />
         {/* THE FALLBACK IS THE PREVIEW, in the preview's own column — not a third line. A
             container the agent has written no prose into yet is honestly described by how
             many facts are filed there, and that is a NUMBER: nothing about it can be
             sensitive, which the first linked fact's statement very much can be. */}
         {topic.preview.text ? (
-          <Statement value={topic.preview} className="truncate text-[13px] text-muted-foreground" />
+          <Statement
+            value={topic.preview}
+            className="block truncate text-[13px] text-muted-foreground"
+            control={false}
+            as="span"
+          />
         ) : topic.factsTotal ? (
-          <p className="truncate text-[13px] text-muted-foreground">
+          <span className="block truncate text-[13px] text-muted-foreground">
             {t("previewFactCount", { count: topic.factsTotal })}
-          </p>
+          </span>
         ) : (
           <span />
         )}
-        <p className="col-start-1 row-start-2 whitespace-nowrap text-[12.5px] text-muted-foreground sm:col-start-3 sm:row-start-1">
+        <span className="col-start-1 row-start-2 block whitespace-nowrap text-[12.5px] text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("updatedOn", { date: formatDay(topic.updatedAt, locale) })}
-        </p>
+        </span>
         <ChevronRight
           aria-hidden
           className="col-start-3 row-span-2 row-start-1 size-4 shrink-0 justify-self-end text-muted-foreground transition-transform motion-reduce:transition-none group-hover/topic:translate-x-0.5 sm:col-start-4 sm:row-span-1"
