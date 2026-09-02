@@ -17,16 +17,12 @@ import { readMemoryPage } from "@/lib/vault/memory-page";
  * admin reading somebody else's memory is not a thing this route can express. A later
  * task adds PATCH (consent) beside this.
  *
- * `?q=` searches the FACTS. It is a parameter on this route rather than a route of its own
- * for two reasons: the answer is the same projection narrowed, so a second route would be a
- * second reader of it; and a new route DIRECTORY is not picked up by the dev watcher over
- * this repo's bind mount, so Next answers 404 before any handler runs — a symptom that
- * reads exactly like a logic bug and has cost this project an afternoon before.
+ * `?q=` IS GONE with the search box it served — see `readMemoryPage` for why a page whose
+ * top level is four headings over a list of topic files has no question for one.
  */
-export const GET = apiHandler(async (req: Request) => {
+export const GET = apiHandler(async () => {
   const { userId } = await requireActive();
-  const query = new URL(req.url).searchParams.get("q") ?? "";
-  return Response.json(await readMemoryPage(userId, query));
+  return Response.json(await readMemoryPage(userId));
 });
 
 /**

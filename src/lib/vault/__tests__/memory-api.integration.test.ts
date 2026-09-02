@@ -173,11 +173,13 @@ run("vault: DELETE /api/memory — forget everything", () => {
    *  the reset, and the screen is fed by this route. */
   const page = async () => {
     const { GET } = await import("@/app/api/memory/route");
-    // A real Request, because the handler now reads `?q=` off the URL. No query on it —
-    // the reset's promise is about everything, so the read that checks the promise must
-    // not be a narrowed one.
-    return (await GET(new Request("http://test.local/api/memory"))).json() as Promise<{ scopes: ScopeView[] }>;
+    return (await GET()).json() as Promise<{ scopes: ScopeView[] }>;
   };
+
+  /** Every fact the page puts in front of the reader, wherever it is filed — the unit on
+   *  the page is a topic FILE now, so a fact arrives inside one topic's disclosure or in
+   *  the `unfiled` list, and "forget everything" has to empty both. */
+  const allFacts = (s: ScopeView) => [...s.topics.flatMap((t) => t.facts), ...s.unfiled];
 
   beforeAll(async () => {
     await mkUser(OWNER);
@@ -221,7 +223,7 @@ run("vault: DELETE /api/memory — forget everything", () => {
     expect(await res.json()).toEqual({ forgotten: 3 });
 
     const body = await page();
-    expect(body.scopes.flatMap((s) => s.facts)).toHaveLength(0);
+    expect(body.scopes.flatMap(allFacts)).toHaveLength(0);
     // The archive goes with it. Leftover suggestions that survived "forget everything"
     // would offer the person, a moment later, the very facts they just erased.
     expect(body.scopes.flatMap((s) => s.archive)).toHaveLength(0);

@@ -3,14 +3,21 @@
 import { useId, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Markdown } from "@/components/chat/markdown";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { FactSource, FactView, StatementView, TrustTag } from "@/lib/vault/memory-page";
+// TYPE-ONLY from the projection module, which opens a database connection at import: a
+// type is erased and a VALUE would drag `pg` into this client bundle. The section tuple is
+// a value, so it comes from the import-free module that owns it.
+import { TOPIC_SECTIONS, type TopicSection } from "@/lib/vault/memory-sections";
+import type { FactSource, FactView, StatementView, TopicView, TrustTag } from "@/lib/vault/memory-page";
+import { SettingsGroup, SettingsSection } from "./shell";
 
 /** One day, in the reader's language. Shared by the provenance line and the history
  *  disclosure so a page full of dates has ONE format on it — call sites each calling
@@ -53,20 +60,6 @@ export function formatSource(
     case "unknown":
       return t("fromUnknown");
   }
-}
-
-/**
- * The surface both lists are drawn on: ONE quiet card, rows separated by hairlines.
- *
- * It is `SettingsGroup`'s grammar because that is what this app already calls a list.
- * The first draft gave every fact its own bordered card and every WAITING fact an amber
- * fill with a dashed edge — eleven of them stacked read as eleven problems rather than
- * one calm list, which is the card-grid register the house rules put off limits, in
- * amber. "Waiting" is said ONCE, by the section heading above; repeating it on every row
- * marks nothing because it marks everything.
- */
-function FactList({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">{children}</div>;
 }
 
 /**
@@ -444,46 +437,20 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
 }
 
 /**
- * ONE list of everything the person has approved in this scope, newest first.
+ * A LIST OF FACTS with their provenance captions — the shape both the topic detail's
+ * `Related facts` and the `unfiled` list are.
  *
- * IT REPLACES A TOPIC RAIL, and the rail is worth a sentence because deleting a working
- * control needs one. It was a real tablist, keyboard-navigable, with a last-updated stamp
- * under each name — and it was a filing system nothing files into. Every live write path
- * passes one topic key; the other four entries were leftovers from a vocabulary that was
- * later narrowed, frozen since August, and rendering in English to a Ukrainian reader
- * because only the one live key had copy. The cost was not that it looked untidy: with one
- * topic selected at a time it put 33 of this account's 51 approved facts on screen and left
- * the other 18 behind buttons nobody had a reason to press. A person's own confirmed fact
- * that they cannot find reads as a fact the assistant lost.
- *
- * So there is no grouping control here, and the copy above the list says grouping does not
- * exist yet rather than implying it does. Subject-based topics — a project, a person, a
- * document, named in the user's own words — are a later design with their own identity
- * model, not this rail with better labels.
- *
- * NO MATCH HIGHLIGHTING, deliberately, and this is the one search convention worth
- * refusing. A `<mark>` inside a sensitive statement would put exactly the matched words on
- * screen in the one state whose whole purpose is that they are not readable — the blur
- * defeated by the feature meant to help read past it. The list is short sentences ordered
- * by date; a person finds their row without a yellow band on it.
+ * NO MATCH HIGHLIGHTING and no search: a `<mark>` inside a sensitive statement would put
+ * exactly the matched words on screen in the one state whose whole purpose is that they are
+ * not readable. The list is short sentences ordered by date, inside a subject the reader
+ * chose to open.
  */
-export function MemoryFacts({
-  facts,
-  matched,
-  onChanged,
-}: {
-  facts: FactView[];
-  /** How many matched before the server's cap — `facts` may be a prefix of them. */
-  matched: number;
-  onChanged: () => void;
-}) {
+function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: number; onChanged: () => void }) {
   const t = useTranslations("settings.memory");
   const sourceText = useSourceText();
-  if (!facts.length) return null;
-
   return (
     <div className="space-y-2">
-      <FactList>
+      <div className="divide-y">
         {groupBySource(facts, (f) => sourceText(f.source)).map((run) => (
           <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
             {/* A run shares one source SENTENCE, so it shares the conversation the
@@ -494,14 +461,338 @@ export function MemoryFacts({
             ))}
           </div>
         ))}
-      </FactList>
-      {/* Said only when it is true, and it points at the search box rather than offering
-          a page 2: a person looking for one fact among thousands reaches for words. */}
-      {matched > facts.length && (
+      </div>
+      {/* Said only when it is true. No page 2 and nothing to narrow it with: a subject with
+          more than two hundred facts under it is a subject that needs splitting, which is
+          the assistant's job and not a paginator's. */}
+      {total > facts.length && (
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-          {t("showingSome", { shown: facts.length, total: matched })}
+          {t("showingSome", { shown: facts.length, total })}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * ONE TOPIC FILE AS A ROW: the title, what the file opens with, and when it last changed.
+ *
+ * A BUTTON and not a link, because there is no URL for a topic. That is deliberate rather
+ * than lazy: an addressable `/settings/memory/<nanoid>` would put a persistent vault id in
+ * the browser's history and in whatever the person pastes into a chat, and the detail view
+ * is one client-side state change away. What a button owes a link is the keyboard, and it
+ * has it for free.
+ *
+ * THE PREVIEW IS CLIPPED IN CSS. `line-clamp-1` lands the ellipsis at the column's real
+ * width in the reader's own font; a JS slice at N characters is either short of the line or
+ * spilling out of it, and it is wrong differently in every locale.
+ *
+ * A FILE WITH NO TEXT STILL GETS A SECOND LINE, and it says how many facts are filed under
+ * it. This is not a placeholder for a missing feature — it is the honest description of the
+ * five topic containers every existing account already has: `resolveTopic` mints them while
+ * filing a fact and writes an EMPTY body, so «Оновлено 30 серпня» was the whole row and five
+ * of them read as five identical blanks. The count is the file's actual content until the
+ * agent writes prose into it, and it is a NUMBER — nothing about it can be sensitive, which
+ * the first linked fact's statement (the other candidate) very much can be.
+ *
+ * THE DATE IS NOT ON ITS OWN COLUMN. A right-aligned stamp needs a width that fits «29
+ * серпня» and "29 August" alike, which on a narrow pane is width taken from the title —
+ * the one thing the reader is scanning. It sits under the preview as a caption instead.
+ *
+ * THE HOVER IS AN INSET ROUNDED SURFACE, not a flush band. `-mx-3 px-3` is what makes both
+ * halves of that true at once: the highlight is wider than the text on both sides, so no
+ * glyph sits on its edge, while the text column still starts exactly where the section
+ * heading above it does. The wrapper's `py-1` is what keeps the highlight off the hairlines
+ * `divide-y` draws — a margin on the button itself would collapse through the wrapper and
+ * change nothing. `bg-muted` rather than `bg-hover`: on the graphite palette `bg-field` is
+ * the page's whitest value and a well is `bg-muted`, and a hovered row is a well.
+ */
+function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
+  const t = useTranslations("settings.memory");
+  const locale = useLocale();
+  return (
+    <div className="py-1">
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group/topic -mx-3 flex items-center gap-3 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+    >
+      <div className="min-w-0 flex-1">
+        {/* Through `Statement`, like every other stored string on this page: a title is
+            text somebody or something wrote, and `sensitive` has exactly one reader. */}
+        <Statement value={topic.title} className="font-medium" />
+        {topic.preview.text ? (
+          <Statement
+            value={topic.preview}
+            className="mt-0.5 line-clamp-1 text-[13px] leading-relaxed text-muted-foreground"
+          />
+        ) : topic.factsTotal ? (
+          <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+            {t("previewFactCount", { count: topic.factsTotal })}
+          </p>
+        ) : null}
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+          {t("updatedOn", { date: formatDay(topic.updatedAt, locale) })}
+        </p>
+      </div>
+      <ChevronRight
+        aria-hidden
+        className="size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none group-hover/topic:translate-x-0.5"
+      />
+    </button>
+    </div>
+  );
+}
+
+/**
+ * THE LIST, grouped under its section headings.
+ *
+ * The ORDER is the server's — `readMemoryPage` returns (section, title) sorted — and this
+ * component only inserts the headings, which is what keeps "what comes first" a single
+ * answer. `TOPIC_SECTIONS` drives the loop rather than the data, so an empty section is
+ * simply absent instead of a heading over nothing.
+ *
+ * The `satisfies` on the label map is the load-bearing part, not decoration: a fifth
+ * section value is a COMPILE ERROR here rather than a heading reading
+ * `settings.memory.section.thing`, which is the link `t(`section.${s}`)` would sever — the
+ * union in one file, the strings in another, and nothing in between.
+ */
+const SECTION_KEY = {
+  you: "section.you",
+  topic: "section.topic",
+  area: "section.area",
+  person: "section.person",
+} satisfies Record<TopicSection, string>;
+
+/** The rows alone, with no headings over them — what a PROJECT's sub-group renders. Four
+ *  section headings inside a project inside a "Projects" heading is three levels of nesting
+ *  for a list that is usually one or two files long, so a project's files are one list and
+ *  the project's own name is the heading that matters. */
+export function TopicRows({ topics, onOpen }: { topics: TopicView[]; onOpen: (id: string) => void }) {
+  if (!topics.length) return null;
+  return (
+    <SettingsGroup>
+      {topics.map((topic) => (
+        <TopicRow key={topic.id} topic={topic} onOpen={() => onOpen(topic.id)} />
+      ))}
+    </SettingsGroup>
+  );
+}
+
+export function MemoryTopicList({ topics, onOpen }: { topics: TopicView[]; onOpen: (id: string) => void }) {
+  const t = useTranslations("settings.memory");
+  return (
+    <>
+      {TOPIC_SECTIONS.map((section) => {
+        const rows = topics.filter((x) => x.section === section);
+        if (!rows.length) return null;
+        return (
+          <SettingsSection key={section} title={t(SECTION_KEY[section])}>
+            <TopicRows topics={rows} onOpen={onOpen} />
+          </SettingsSection>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * DELETE ONE TOPIC FILE — no dialog, and an Undo toast instead.
+ *
+ * THAT TRADE IS THE DECISION. A modal in front of every delete makes the frequent, correct
+ * case tedious in order to defend against the rare mis-click; an undo makes the mis-click
+ * free and costs the correct case nothing. It is only honest because the undo genuinely
+ * restores — `restoreNote` puts the node back, reopens the `contains` edges the delete
+ * closed and re-projects the search document, so the file returns with its facts filed
+ * where they were. A toast offering an undo that half-worked would be worse than the
+ * dialog.
+ *
+ * The per-FACT delete next door keeps its dialog, and the difference is not inconsistency:
+ * `forgetClaim` ends a claim's chain and there is no undo to offer, which is exactly why
+ * that control has to ask first.
+ *
+ * THE TOAST NAMES NOTHING about the file it removed. A sensitive title interpolated into a
+ * toast is the shoulder-surfing case with no reveal control to defend it — the same reason
+ * the per-fact dialog quotes no statement.
+ */
+function DeleteTopic({ topic, onDeleted }: { topic: TopicView; onDeleted: () => void }) {
+  const t = useTranslations("settings.memory");
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/memory/notes/${encodeURIComponent(topic.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      toast.success(t("topicDeleted"), {
+        action: {
+          label: t("undo"),
+          onClick: () => {
+            void fetch(`/api/memory/notes/${encodeURIComponent(topic.id)}`, { method: "POST" })
+              // The list is re-read either way. A restore that failed leaves the file
+              // absent, and a toast is the only thing that can say so — the detail view the
+              // person deleted from is gone by now.
+              .then((r) => {
+                if (!r.ok) toast.error(t("topicRestoreFailed"));
+              })
+              .catch(() => toast.error(t("topicRestoreFailed")))
+              .finally(onDeleted);
+          },
+        },
+      });
+      onDeleted();
+    } catch {
+      toast.error(t("topicDeleteFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button variant="ghost" size="sm" disabled={busy} onClick={remove}>
+      {t("detailDelete")}
+    </Button>
+  );
+}
+
+/**
+ * ONE FILE, OPEN: the way back, the title, where the file came from, Delete, the text, and
+ * the facts filed here.
+ *
+ * THE BODY IS THE FILE'S OWN CONTENT and the page adds no headings to it. The reference
+ * writes `Summary` and `Details` INSIDE the file, which is why this view has no chrome of
+ * its own beyond the header strip: chrome that repeated the file's structure would compete
+ * with it, and chrome that renamed it would lie about what is stored.
+ *
+ * RENDERED WITH THE APP'S OWN MARKDOWN COMPONENT rather than a second renderer for this
+ * one surface. The body is already resolved server-side — `renderBody` turns every
+ * canonical edge token into its target's current title — so what arrives here is ordinary
+ * markdown with no vault vocabulary left in it.
+ *
+ * THE REVEAL IS SHARED with the title, through `Statement`'s own hook. A sensitive file's
+ * body cannot go through `<Statement>` (that component renders a paragraph, and this is
+ * markdown), so the gate is explicit here — and it is the SAME gate, not a second one,
+ * which is the rule `useReveal`'s docstring exists to state.
+ *
+ * `Related facts` IS COLLAPSED, and its being on this screen at all is what keeps §11.9
+ * true now that the page leads with files: every fact the agent writes is still visible,
+ * still tagged with where it came from, and still deletable one at a time.
+ */
+export function MemoryTopicDetail({
+  topic,
+  onBack,
+  onChanged,
+}: {
+  topic: TopicView;
+  onBack: () => void;
+  /** Re-read the page. Fired by a per-fact delete, and by this file's own delete/undo —
+   *  whether the file is still listed is the server's decision after either. */
+  onChanged: () => void;
+}) {
+  const t = useTranslations("settings.memory");
+  const reveal = useReveal(topic.body);
+  const [factsOpen, setFactsOpen] = useState(false);
+  const panelId = useId();
+
+  return (
+    <div className="space-y-6">
+      <button
+        type="button"
+        onClick={onBack}
+        className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronLeft aria-hidden className="size-3.5" />
+        {t("detailBack")}
+      </button>
+
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <Statement value={topic.title} className="text-base font-semibold tracking-tight" />
+          <TrustBadge trust={topic.trust} value={topic.title} />
+        </div>
+        <div className="shrink-0">
+          <DeleteTopic topic={topic} onDeleted={() => { onBack(); onChanged(); }} />
+        </div>
+      </div>
+
+      {topic.body.text ? (
+        reveal.shown ? (
+          <div className="text-[15px] leading-relaxed">
+            <Markdown>{topic.body.text}</Markdown>
+          </div>
+        ) : (
+          // The blurred-title branch already offers a reveal, and this is the same one —
+          // shared state, not a second control over one secret.
+          <button
+            type="button"
+            onClick={reveal.toggle}
+            className="rounded-md text-[13px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t("reveal")}
+            <span className="sr-only"> — {t("sensitiveBlurred")}</span>
+          </button>
+        )
+      ) : null}
+
+      {!!topic.factsTotal && (
+        <div>
+          <button
+            type="button"
+            aria-expanded={factsOpen}
+            aria-controls={panelId}
+            onClick={() => setFactsOpen((v) => !v)}
+            className="-mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              aria-hidden
+              className={cn("size-3.5 transition-transform motion-reduce:transition-none", factsOpen && "rotate-90")}
+            />
+            {t("relatedFacts")}
+            <span className="tabular-nums">{topic.factsTotal}</span>
+          </button>
+          {factsOpen && (
+            <div id={panelId} className="mt-2 space-y-2">
+              {/* Said HERE and nowhere else on the page: it explains the tag on the rows
+                  directly under it, and the reader asks what a tag means at the moment they
+                  first see one. */}
+              <p className="max-w-prose text-[12.5px] leading-relaxed text-muted-foreground">
+                {t("trustExplainer")}
+              </p>
+              <FactLines facts={topic.facts} total={topic.factsTotal} onChanged={onChanged} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * FACTS FILED UNDER NOTHING — the guarantee, rendered.
+ *
+ * It is empty for this account and for every account whose facts were all written through
+ * a tool: `factWrite` always resolves a topic. What produces these rows is the UNATTENDED
+ * path — `runExtraction` and the legacy document migration both call `createClaim` with no
+ * topic — and without a list of their own those facts would be invisible on a page whose
+ * top level is topics, which is §11.9 failing at the filing seam rather than at the read.
+ *
+ * At the very bottom of the list and after every section, because it is the exception: a
+ * person reads the four headings, and this is what did not fit under any of them.
+ */
+export function MemoryUnfiled({
+  facts,
+  total,
+  onChanged,
+}: {
+  facts: FactView[];
+  total: number;
+  onChanged: () => void;
+}) {
+  const t = useTranslations("settings.memory");
+  if (!facts.length) return null;
+  return (
+    <SettingsSection title={t("unfiledTitle")} description={t("unfiledHint")}>
+      <FactLines facts={facts} total={total} onChanged={onChanged} />
+    </SettingsSection>
   );
 }

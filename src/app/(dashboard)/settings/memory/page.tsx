@@ -2,17 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { MemoryArchive, MemoryConflicts } from "@/components/settings/memory-review";
-import { MemoryFacts } from "@/components/settings/memory-topics";
+import { MemoryTopicDetail, MemoryTopicList, MemoryUnfiled, TopicRows } from "@/components/settings/memory-topics";
 import {
   SettingsEmpty,
   SettingsError,
@@ -23,63 +21,110 @@ import {
   SettingsSkeleton,
 } from "@/components/settings/shell";
 import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
-import type { ScopeView } from "@/lib/vault/memory-page";
+import type { ScopeView, TopicView } from "@/lib/vault/memory-page";
 
 /**
- * What the assistant remembers, as facts rather than as a document.
+ * WHAT THE ASSISTANT REMEMBERS, as a list of short topic files.
  *
- * This replaces a disabled monospace textarea holding one markdown string. That shape
- * could not carry the three relations the vault already records — which topic a fact is
- * filed under, which conversation it came from, and what it replaced — so the page threw
- * all three away, and had nowhere at all to put the facts still waiting for the reader's
- * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
+ * THREE SHAPES IN THREE RELEASES, and the last two are worth one paragraph each because
+ * both were deleted deliberately. First a disabled monospace textarea holding one markdown
+ * string, which could carry none of the relations the vault already records. Then a flat
+ * list of every fact in the space, newest first, with a server-side search box over it —
+ * which fixed the real bug it was built for (a topic rail was hiding 18 of this account's
+ * 51 facts) and left a page nobody can navigate: fifty one-line sentences in date order,
+ * findable only by remembering the words they were saved in.
+ *
+ * NOW THE UNIT IS A FILE. One per subject, grouped under four headings, each opening to its
+ * own text — the shape the reference (claude.ai's Memory settings) arrived at, and the shape
+ * a person can actually read. The facts did not go anywhere: they are a collapsed
+ * `Related facts` list inside the file they are filed under, which is what keeps §11.9 true
+ * — every fact the agent writes stays visible, tagged with where it came from, and
+ * deletable one at a time. A fact filed under nothing has its own list at the bottom, so
+ * that guarantee is a property of the page and not of which writer happened to run.
+ *
+ * THE SEARCH BOX WENT WITH THE FLAT LIST. It answered "which of these fifty sentences is
+ * the one", a question four headings over five files does not ask — and the sentence under
+ * it promised that grouping by subject "isn't available yet", which the sections make false
+ * on the same screen.
+ *
+ * THIS PAGE DOES NOT WRITE MEMORY IN WORDS, and it is worth stating because a draft of it
+ * did. A composer here — "tell the assistant what to change or remove", handing the request
+ * to a hidden chat running the seven `memory_*` tools — was built and then removed on the
+ * maintainer's call: changing memory in words already works in an ordinary chat, where the
+ * same tools live and where the person can see what the assistant did and say more, so a
+ * second entrance is a second thing to keep correct for no new capability. What the owner
+ * does HERE is what only they can do: open a file, read it, delete it, delete one fact
+ * under it, or forget everything.
+ *
+ * THERE IS NO CONFIRMATION STEP. Every fact and every file the assistant saves is live from
+ * the moment it is written; what tells a person's own statement apart from the assistant's
+ * guess is the TRUST TAG, not a queue in front of it. Two sections carry what is left of a
+ * decision: `MemoryConflicts`, where two live facts disagree and one tap settles it, and
+ * `MemoryArchive`, the leftovers of the retired review queue, which expires with its table
+ * thirty days after this release.
  *
  * Still absent, and by task rather than by oversight: the sensitive-consent switch (Task 4).
- *
- * THE FACTS ARE ONE LIST, not a topic rail — see `MemoryFacts` for what the rail was
- * hiding. The search box that replaces it is SERVER-SIDE, because the list it filters is
- * capped: filtering in the browser could only ever search the rows the server chose to
- * send, which is the search failing precisely on the memory large enough to need one.
- *
- * THERE IS NO CONFIRMATION STEP ANY MORE, and the page's copy is what had to change with
- * it. Every fact the assistant saves is live from the moment it is written; what tells a
- * person's own statement apart from the assistant's guess is the TRUST TAG on the row, not
- * a queue in front of it. Two sections beside the list carry what is left of a decision:
- * `MemoryConflicts`, where two live facts disagree and one tap settles it, and
- * `MemoryArchive`, the leftovers of the retired review queue, which expires with its
- * table thirty days after this release.
- *
- * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
- * control to state it with. A hand-typed fact has no honest provenance, and provenance
- * is the whole reason the vault exists — so the sentence IS the affordance. The live
- * data is what made this worth a line: of 31 candidates, 30 arrived from the post-turn
- * extraction and exactly one from a person saying "remember that…" out loud. The
- * mechanism works; nothing on either surface said so, and the maintainer read that
- * silence as a broken page.
  */
 
-/** One scope's contents. The user's own memory is unheaded — it is what the page is
- *  about — while a project's is a titled section, because "which project" is the thing
- *  the reader needs to know before reading a single fact under it. */
-function Scope({ scope, archiveExpiresAt, onChanged }: {
+/** THE PERSON'S OWN MEMORY: unheaded, because it is what the page is about, and grouped
+ *  under the four section headings.
+ *
+ *  Conflicts FIRST: they are the only thing here that is waiting on the reader, and both of
+ *  their halves are also filed under a topic below — a question printed under its own
+ *  answers is one nobody reaches. */
+function OwnMemory({ scope, archiveExpiresAt, onOpen, onChanged }: {
   scope: ScopeView;
   archiveExpiresAt: string;
+  onOpen: (topicId: string) => void;
   onChanged: () => void;
 }) {
-  const body = (
-    <>
-      {/* Conflicts FIRST: they are the only thing here that is waiting on the reader, and
-          both of their halves are also in the list below — a question printed under its
-          own answers is one nobody reaches. */}
-      <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
-      <MemoryFacts facts={scope.facts} matched={scope.factsMatched} onChanged={onChanged} />
-      <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
-    </>
-  );
-  if (scope.scope === "user") return <div className="space-y-10">{body}</div>;
   return (
-    <SettingsSection title={scope.projectName ?? ""}>
-      <div className="space-y-10">{body}</div>
+    <div className="space-y-10">
+      <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
+      <MemoryTopicList topics={scope.topics} onOpen={onOpen} />
+      <MemoryUnfiled facts={scope.unfiled} total={scope.unfiled.length} onChanged={onChanged} />
+      <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
+    </div>
+  );
+}
+
+/**
+ * PROJECT MEMORY — under one `Projects` heading, one sub-group per project, and NOT a page
+ * of its own.
+ *
+ * A separate page was the other option and it is the wrong one for this audience: a person
+ * asking "what does it remember about me" is asking one question, and answering it across
+ * two screens means the answer is only ever half visible. What a project needs is a label
+ * saying which project, which is what the sub-group heading is.
+ *
+ * A project's files are ONE list with no section headings — see `TopicRows`. Its conflicts
+ * and its archive travel with it, because both are decisions scoped to that project and a
+ * decision filed under the wrong scope is one a person answers about the wrong data.
+ */
+function ProjectMemory({ scopes, archiveExpiresAt, onOpen, onChanged }: {
+  scopes: ScopeView[];
+  archiveExpiresAt: string;
+  onOpen: (topicId: string) => void;
+  onChanged: () => void;
+}) {
+  const t = useTranslations("settings.memory");
+  if (!scopes.length) return null;
+  return (
+    <SettingsSection title={t("sectionProjects")}>
+      <div className="space-y-8">
+        {scopes.map((scope) => (
+          <div key={scope.projectId} className="space-y-4">
+            {/* One level below a section title, and above rows that share its size: the
+                project's name is a label over a list, not a heading competing with
+                "Projects" above it. */}
+            <h4 className="text-[13px] font-medium text-muted-foreground">{scope.projectName}</h4>
+            <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
+            <TopicRows topics={scope.topics} onOpen={onOpen} />
+            <MemoryUnfiled facts={scope.unfiled} total={scope.unfiled.length} onChanged={onChanged} />
+            <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
+          </div>
+        ))}
+      </div>
     </SettingsSection>
   );
 }
@@ -208,27 +253,14 @@ export default function MemoryPage() {
       });
   };
 
-  // The search, in two pieces: what the box shows, and what has actually been asked for.
-  // The box has to stay responsive to every keystroke while the request is not sent on
-  // every keystroke, and a `query`-shaped `useEffect` dependency is what makes the
-  // debounce a property of the data flow rather than a timer somebody has to remember to
-  // clear. Trailing edge, so the last thing typed is the thing searched for.
-  const [query, setQuery] = useState("");
-  const [asked, setAsked] = useState("");
-  useEffect(() => {
-    const id = setTimeout(() => setAsked(query.trim()), 250);
-    return () => clearTimeout(id);
-  }, [query]);
-
-  // `load` has more than one caller — the debounced search effect below, and every
-  // `onChanged` a child fires after a delete or a confirm — so a sequence token has to
-  // live outside any one of them. The ref holds whichever request is currently allowed to
-  // win: starting a new one aborts whatever it is still holding, so a search fired while an
-  // older one is in flight (or an edit's `onChanged` racing a debounced search) can no
-  // longer have the older response land second and overwrite the newer one. Aborting also
-  // turns a failing STALE request into a no-op instead of a false "load failed" panel that
-  // replaces the whole page, including the search box, after a newer request already
-  // succeeded.
+  // `load` has more than one caller — the mount effect, every `onChanged` a child fires
+  // after a delete or a confirm, and the composer twice per turn — so a sequence token has
+  // to live outside any one of them. The ref holds whichever request is currently allowed
+  // to win: starting a new one aborts whatever it is still holding, so a re-read fired
+  // while an older one is in flight can no longer have the older response land second and
+  // overwrite the newer one. Aborting also turns a failing STALE request into a no-op
+  // instead of a false "load failed" panel that replaces the whole page — including the
+  // composer — after a newer request already succeeded.
   const inFlight = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -237,7 +269,7 @@ export default function MemoryPage() {
     inFlight.current = ac;
     try {
       setError("");
-      const res = await fetch(`/api/memory?q=${encodeURIComponent(asked)}`, { signal: ac.signal });
+      const res = await fetch("/api/memory", { signal: ac.signal });
       if (!res.ok) throw new Error();
       const data: { scopes: ScopeView[]; archiveExpiresAt: string } = await res.json();
       setScopes(data.scopes ?? []);
@@ -251,102 +283,91 @@ export default function MemoryPage() {
     } finally {
       if (inFlight.current === ac) setLoading(false);
     }
-  }, [t, asked]);
+  }, [t]);
 
   useEffect(() => {
     load();
     return () => inFlight.current?.abort();
   }, [load]);
 
+  // WHICH FILE IS OPEN, by note id, and it survives a re-read: the composer's turn edits
+  // the file the person is looking at, so a state keyed on the object rather than the id
+  // would close the detail view every time the list refreshed. A file that was deleted
+  // between two reads resolves to `undefined` and the list comes back, which is the right
+  // answer — the thing being viewed is gone.
+  const [openId, setOpenId] = useState<string | null>(null);
+
   if (loading) return <SettingsSkeleton rows={1} />;
 
-  // "Nothing here" and "nothing matched" are different sentences and must not be shared:
-  // an empty search result that read "Nothing remembered yet" would tell a person their
-  // memory is gone. `factsTotal` is the query-independent count, so it stays true while
-  // the search box has words in it.
-  const empty = !!scopes && scopes.every((s) => !s.factsTotal && !s.archive.length && !s.conflicts.length);
-  const nothingYet = empty && !asked;
-  const noMatches = !!scopes && !!asked && scopes.every((s) => !s.factsMatched);
-  // Shown once there is anything to search — and kept on screen while the box has words in
-  // it, or a search that matched nothing would remove the control needed to undo it.
-  const searchable = !!scopes && (!!query || scopes.some((s) => s.factsTotal));
+  const own = scopes?.find((s) => s.scope === "user");
+  const projects = scopes?.filter((s) => s.scope === "project") ?? [];
+  const allTopics: TopicView[] = scopes?.flatMap((s) => s.topics) ?? [];
+  const open = openId ? allTopics.find((x) => x.id === openId) : undefined;
 
+  // NOTHING SAVED YET, and it is the query-independent counts that decide it: a file, a
+  // fact, a disagreement or a leftover suggestion all count as something to show.
+  const nothingYet =
+    !!scopes &&
+    scopes.every((s) => !s.topics.length && !s.factsTotal && !s.archive.length && !s.conflicts.length);
   return (
-    <SettingsPage title={t("title")} description={`${t("subtitle")} ${t("trustExplainer")}`}>
-      <SettingsGroup>
-        <SettingsRow
-          id="memory-enabled"
-          title={t("enabled")}
-          hint={lockedOff ? t("enabledLocked") : t("enabledHint")}
-          disabled={lockedOff}
-          onLabelClick={() => toggleMemory(!profile?.capabilities.memory)}
-          control={
-            <Switch
-              checked={!!profile?.capabilities.memory && !lockedOff}
-              disabled={lockedOff || profile === null}
-              onCheckedChange={toggleMemory}
-            />
-          }
-        />
-      </SettingsGroup>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
+      {/* THE SWITCH IS HIDDEN WHILE A FILE IS OPEN, along with everything else on the page.
+          The detail view is a place, not a panel: the reference gives it the whole column
+          with one way back, and a settings row left visible above it would read as a
+          setting belonging to the file. */}
+      {!open && (
+        <SettingsGroup>
+          <SettingsRow
+            id="memory-enabled"
+            title={t("enabled")}
+            hint={lockedOff ? t("enabledLocked") : t("enabledHint")}
+            disabled={lockedOff}
+            onLabelClick={() => toggleMemory(!profile?.capabilities.memory)}
+            control={
+              <Switch
+                checked={!!profile?.capabilities.memory && !lockedOff}
+                disabled={lockedOff || profile === null}
+                onCheckedChange={toggleMemory}
+              />
+            }
+          />
+        </SettingsGroup>
+      )}
 
       {error ? (
         <SettingsError message={error} />
+      ) : open ? (
+        <MemoryTopicDetail topic={open} onBack={() => setOpenId(null)} onChanged={load} />
       ) : nothingYet ? (
-        <SettingsEmpty title={t("emptyTitle")} hint={t("emptyHint")} />
+        <SettingsEmpty title={t("emptyTitle")} hint={t("empty")} />
       ) : (
         <>
-          {/* Said once, above everything, rather than per section: it is the answer to
-              "what do I do here", and the reader asks that before they read a fact. */}
-          <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{t("howToSave")}</p>
-
-          {searchable && (
-            <div className="space-y-2">
-              <div className="relative max-w-xs">
-                <Search
-                  aria-hidden
-                  className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                />
-                {/* `type="search"` for the browser's own clear affordance — a person who
-                    typed a word that matched nothing needs the way back to be obvious. */}
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t("searchPlaceholder")}
-                  aria-label={t("searchPlaceholder")}
-                  className="h-9 pl-8"
-                />
-              </div>
-              {/* The honest sentence about what this list is. It sits UNDER the box rather
-                  than at the top of the page because it answers the question the box
-                  prompts — "can I organise these?" — and it promises no date. */}
-              <p className="max-w-prose text-[12.5px] leading-relaxed text-muted-foreground">{t("noGrouping")}</p>
-            </div>
-          )}
-
-          {noMatches && (
-            <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{t("searchEmpty")}</p>
-          )}
-
-          {scopes?.map((scope) => (
-            <Scope
-              key={scope.projectId ?? "user"}
-              scope={scope}
+          {own && (
+            <OwnMemory
+              scope={own}
               archiveExpiresAt={archiveExpiresAt}
+              onOpen={setOpenId}
               onChanged={load}
             />
-          ))}
+          )}
+          <ProjectMemory
+            scopes={projects}
+            archiveExpiresAt={archiveExpiresAt}
+            onOpen={setOpenId}
+            onChanged={load}
+          />
           {/* Last on the page, after everything it would destroy: a reset offered before
-              the reader has seen what they have is a question asked too early.
-              `factsTotal`, never the matched count: the dialog promises "everything", and a
-              number the search box narrowed would understate what the button does. */}
+              the reader has seen what they have is a question asked too early. Its count is
+              of FACTS across every scope, which is what the dialog's own sentence promises
+              against — not the number of files, which a person would read as the size of
+              what goes. */}
           <ForgetEverything
             facts={scopes?.reduce((n, s) => n + s.factsTotal, 0) ?? 0}
             onChanged={load}
           />
         </>
       )}
+
     </SettingsPage>
   );
 }

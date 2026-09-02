@@ -8,16 +8,21 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *  listed whatever its review status, each row carries the trust tag that tells the
  *  person's words from the assistant's, and nothing crosses a user boundary.
  *
- *  Since the topic rail was removed it must also prove the thing that removal was FOR: one
- *  list holds the whole space, whichever topic note a fact hangs off, and the search over
- *  it finds a sensitive fact as readily as an ordinary one. */
+ *  Since the page became a list of TOPIC FILES it must also prove what that shape can lose:
+ *  a fact reaches the reader wherever it is filed, one filed under nothing has its own list
+ *  rather than none, a topic's row says what its file opens with, and deleting a file does
+ *  not take the facts filed under it. */
 import { pool } from "@/lib/db";
 import { attachEvidence, confirmClaim, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { proposeCandidate } from "../candidates";
+import { createNote, forgetNote, restoreNote } from "../notes";
 import { getOrCreateSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
-import { FACT_LIMIT, readConflicts, readMemoryPage, trustTagOf } from "../memory-page";
+import {
+  FACT_LIMIT, readConflicts, readMemoryPage, trustTagOf,
+  type ScopeView, type TopicView,
+} from "../memory-page";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "mempage-";
@@ -78,8 +83,28 @@ const seedSupersede = async (
   return upd;
 };
 
-const factTexts = async (query?: string) =>
-  (await readMemoryPage(OWNER, query)).scopes[0].facts.map((f) => f.statement.text);
+/**
+ * EVERY FACT THE PAGE PUTS IN FRONT OF THE READER, wherever it is filed.
+ *
+ * The unit on the page is a topic FILE now, so a fact reaches a person inside one topic's
+ * disclosure or in the `unfiled` list — and almost every assertion in this file is about a
+ * fact reaching them AT ALL, not about which heading it arrived under. Folding the two
+ * lists here rather than in the module is deliberate: the module keeps them apart because
+ * they are drawn in different places, and a test that only ever looked at `topics` would
+ * pass while `unfiled` silently stopped being sent.
+ */
+const allFacts = (scope: ScopeView) => [...scope.topics.flatMap((t) => t.facts), ...scope.unfiled];
+
+const factTexts = async () =>
+  allFacts((await readMemoryPage(OWNER)).scopes[0]).map((f) => f.statement.text);
+
+/** One topic file by title, which is how every assertion below addresses one: a nanoid is
+ *  not something a test can name, and the title is what the row shows. */
+const topicNamed = (scope: ScopeView, title: string): TopicView => {
+  const found = scope.topics.find((t) => t.title.text === title);
+  if (!found) throw new Error(`no topic «${title}» among [${scope.topics.map((t) => t.title.text).join(", ")}]`);
+  return found;
+};
 
 run("vault: memory page projection", () => {
   beforeAll(async () => {
@@ -101,7 +126,7 @@ run("vault: memory page projection", () => {
     await mkMessage(`${P}msg`, `${P}chat`);
     await attachEvidence(claim.id, { messageId: `${P}msg` });
 
-    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const fact = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     expect(fact.statement.text).toBe("Prefers metric units");
     expect(fact.source).toMatchObject({ kind: "chat", chatTitle: "Q2 report" });
   });
@@ -113,7 +138,7 @@ run("vault: memory page projection", () => {
       { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" }, topicNoteId: noteId, sourceClass: testServerClass("legacy_confirmed") },
       { kind: "system" },
     );
-    expect((await readMemoryPage(OWNER)).scopes[0].facts[0].source).toEqual({ kind: "legacy" });
+    expect(allFacts((await readMemoryPage(OWNER)).scopes[0])[0].source).toEqual({ kind: "legacy" });
   });
 
   it("shows the OWNER a sensitive fact in full, marked", async () => {
@@ -123,7 +148,7 @@ run("vault: memory page projection", () => {
     // a fact they cannot read is one they cannot delete, correct or judge. The mark is
     // what the page blurs on; the withholding is not the server's to do here.
     await seedFact("Attends a support group", { sensitive: true });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const fact = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     expect(fact.statement).toEqual({ text: "Attends a support group", sensitive: true });
   });
 
@@ -133,7 +158,7 @@ run("vault: memory page projection", () => {
     // withholding both would hide the person's own history from them.
     const { spaceId, claim } = await seedFact("Attends a support group on Tuesdays", { sensitive: true });
     await seedSupersede(claim.id, spaceId, { statement: "Attends a support group on Thursdays", sensitive: true });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const fact = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     expect(fact.statement).toEqual({ text: "Attends a support group on Thursdays", sensitive: true });
     // The predecessor carries its OWN flag, not the successor's — `confirmClaim` raises
     // one in place with no supersede, so the two really can differ.
@@ -158,7 +183,7 @@ run("vault: memory page projection", () => {
       statement: "Works from the Kyiv office, desk by the safe",
       sensitive: true,
     });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const fact = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     expect(fact.statement.sensitive).toBe(true);
     expect(fact.previous?.statement).toEqual({ text: "Works from the Kyiv office", sensitive: false });
   });
@@ -166,7 +191,7 @@ run("vault: memory page projection", () => {
   it("carries the version a fact replaced", async () => {
     const { spaceId, claim } = await seedFact("Works from the Kyiv office");
     await seedSupersede(claim.id, spaceId, { statement: "Works from the Lviv office" });
-    const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const fact = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     expect(fact.statement.text).toBe("Works from the Lviv office");
     expect(fact.previous?.statement.text).toBe("Works from the Kyiv office");
   });
@@ -182,7 +207,7 @@ run("vault: memory page projection", () => {
     expect(res.state).toBe("pending");
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
-    expect(scope.facts).toHaveLength(0);
+    expect(allFacts(scope)).toHaveLength(0);
     expect(scope.archive.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
     expect(scope.archive[0].state).toBe("pending");
   });
@@ -220,7 +245,7 @@ run("vault: memory page projection", () => {
       { kind: "agent" },
     );
     const page = await readMemoryPage(OWNER);
-    expect(page.scopes[0].facts.map((f) => f.id)).toContain(agentWritten.id);
+    expect(allFacts(page.scopes[0]).map((f) => f.id)).toContain(agentWritten.id);
   });
 
   it("carries a trust tag on every row, derived from source_class", async () => {
@@ -241,7 +266,7 @@ run("vault: memory page projection", () => {
         { kind: "agent" },
       );
     }
-    const facts = (await readMemoryPage(OWNER)).scopes[0].facts;
+    const facts = allFacts((await readMemoryPage(OWNER)).scopes[0]);
     expect(facts).toHaveLength(4);
     // EVERY row, not most of them: a tag missing from one row is the flattening §9.1
     // forbids, and it is invisible in a screenshot of the other three.
@@ -309,7 +334,7 @@ run("vault: memory page projection", () => {
         origin: { kind: "user_direct" }, topicNoteId: noteId, sourceClass: testServerClass("owner_authored") },
       { kind: "user", id: OWNER },
     );
-    const head = (await readMemoryPage(OWNER)).scopes[0].facts[0];
+    const head = allFacts((await readMemoryPage(OWNER)).scopes[0])[0];
     const res = await proposeCandidate({
       idempotencyKey: `${P}conflict`, spaceId,
       statement: "Works as a lead cloud architect",
@@ -379,7 +404,7 @@ run("vault: memory page projection", () => {
     expect(page.scopes[0].archive[0].state).toBe("conflict");
     expect(page.scopes[0].archive[0].conflictsWith?.statement.text).toBe("Read off a web page");
     // And it IS in the fact list, which is what makes the quote legible at all.
-    expect(page.scopes[0].facts.map((f) => f.id)).toContain(unverified.id);
+    expect(allFacts(page.scopes[0]).map((f) => f.id)).toContain(unverified.id);
   });
 
   it("readConflicts is the ONE reader of the conflict state, and returns BOTH statements", async () => {
@@ -411,7 +436,7 @@ run("vault: memory page projection", () => {
     expect(page.scopes[0].conflicts).toEqual(conflicts);
     // Both halves are ALSO live heads: nothing decides visibility on the owner's page, so
     // the card is a second view of them and not a filter over the list.
-    expect(page.scopes[0].facts.map((f) => f.id).sort()).toEqual([contesting.id, target.id].sort());
+    expect(allFacts(page.scopes[0]).map((f) => f.id).sort()).toEqual([contesting.id, target.id].sort());
   });
 
   it("readConflicts drops a pointer whose target is no longer live", async () => {
@@ -480,51 +505,259 @@ run("vault: memory page projection", () => {
     await seedFact("Nobody else may read this", { owner: STRANGER });
     await seedFact("The owner's own fact");
 
-    const mine = (await readMemoryPage(OWNER)).scopes.flatMap((s) => s.facts);
+    const mine = (await readMemoryPage(OWNER)).scopes.flatMap(allFacts);
     expect(mine.map((f) => f.statement.text)).toEqual(["The owner's own fact"]);
     expect(JSON.stringify(await readMemoryPage(OWNER))).not.toContain("Nobody else may read this");
 
-    const theirs = (await readMemoryPage(STRANGER)).scopes.flatMap((s) => s.facts);
+    const theirs = (await readMemoryPage(STRANGER)).scopes.flatMap(allFacts);
     expect(theirs.map((f) => f.statement.text)).toEqual(["Nobody else may read this"]);
   });
 
-  it("puts facts from DIFFERENT topic notes in one list", async () => {
-    // THE REGRESSION THIS TASK EXISTS FOR. The page used to render a topic rail and show
-    // one topic at a time, so on the live account 33 of 51 approved facts were on screen
-    // and 18 sat behind rail entries no live write path has touched since the topic
-    // vocabulary was narrowed to a single key. A fact a person confirmed and cannot find
-    // reads as a fact the assistant lost.
-    //
-    // Both halves are asserted. That all three come back is the fix; that they come back
-    // in ONE array is what stops the fix being re-implemented as a rail with the tabs
-    // pre-expanded.
+  it("files each fact under the topic it belongs to, and every one reaches the reader", async () => {
+    // THE SHAPE OF THE PAGE, in one assertion, and the regression it must not re-open. A
+    // topic RAIL showing one topic at a time put 33 of this account's 51 facts on screen
+    // and left 18 behind buttons nobody had reason to press. The fix is not "one flat
+    // list" — the page leads with topic files now — so what has to hold is the weaker and
+    // more useful property: every fact is inside exactly one file's disclosure, and the
+    // union of the disclosures is the whole space.
     await seedFact("Sends the reports on Fridays");
     await seedFact("Works from the Lviv office", { topicKey: "work" });
     await seedFact("Prefers metric units", { topicKey: "preferences" });
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
-    expect(scope.facts.map((f) => f.statement.text).sort()).toEqual([
+    expect(allFacts(scope).map((f) => f.statement.text).sort()).toEqual([
       "Prefers metric units",
       "Sends the reports on Fridays",
       "Works from the Lviv office",
     ]);
     expect(scope.factsTotal).toBe(3);
+    // …and under the right heading, which the flat union above cannot see. The titles are
+    // the containers' own: `TOPIC_LABELS` names only `general`, so a container minted for
+    // any other key is titled with the key itself — which is what the live account's
+    // pre-cutover rows look like, and not something this page invents a label for.
+    expect(topicNamed(scope, "General").facts.map((f) => f.statement.text)).toEqual(["Sends the reports on Fridays"]);
+    expect(topicNamed(scope, "work").facts.map((f) => f.statement.text)).toEqual(["Works from the Lviv office"]);
+    expect(topicNamed(scope, "preferences").facts.map((f) => f.statement.text)).toEqual(["Prefers metric units"]);
+    expect(scope.unfiled).toEqual([]);
   });
 
-  it("lists a fact that hangs off no topic note at all", async () => {
-    // The other half of "the space is the scope". `topic_note_id` is optional on
-    // `createClaim`, so a head with no attachment is reachable — and under the old
-    // note join it was not merely mis-filed, it was unreachable from the page by any
-    // click at all.
+  it("lists a fact that hangs off no topic note at all, in its own list", async () => {
+    // §11.9 AT THE FILING SEAM, and it is not a theoretical arm: `runExtraction` and
+    // `migrateMemoryDocs` both call `createClaim` with no `topicNoteId`, so an unattended
+    // extraction produces exactly this row. A page whose top level is topics has to have
+    // somewhere to put it, or "every fact the agent writes stays visible" becomes a
+    // property of which writer happened to run.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedConfirmedClaim(
       { spaceId, statement: "Filed under nothing", origin: { kind: "user_direct" }, sourceClass: testServerClass("owner_authored") },
       { kind: "user", id: OWNER },
     );
-    expect(await factTexts()).toEqual(["Filed under nothing"]);
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.unfiled.map((f) => f.statement.text)).toEqual(["Filed under nothing"]);
+    // The CONTROL: it is not ALSO reported under a topic. A membership read that fell back
+    // to "everything" for a note with no rows would satisfy the assertion above.
+    expect(scope.topics.flatMap((t) => t.facts)).toEqual([]);
   });
 
-  it("orders the list newest first", async () => {
+  it("groups the topic files by section, in the page's own order", async () => {
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    // One file per section, deliberately named so that ALPHABETICAL order and SECTION
+    // order disagree: a projection that only sorted by title would return them as
+    // Alpha/Beta/Delta/Gamma and pass a weaker assertion.
+    for (const [title, section] of [
+      ["Gamma", "you"],
+      ["Delta", "topic"],
+      ["Beta", "area"],
+      ["Alpha", "person"],
+    ] as const) {
+      await createNote(
+        { spaceId, title, bodyMarkdown: "", section, sourceClass: testServerClass("owner_authored"), provenance: { kind: "test" } },
+        undefined,
+      );
+    }
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.topics.map((t) => [t.section, t.title.text])).toEqual([
+      ["you", "Gamma"],
+      ["topic", "Delta"],
+      ["area", "Beta"],
+      ["person", "Alpha"],
+    ]);
+  });
+
+  it("sorts by title INSIDE a section", async () => {
+    // The other half of the ordering, which the section test above cannot see: with one
+    // file per section, any stable order passes it.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    for (const title of ["Zoning rules", "Airport runs", "Monthly close"]) {
+      await createNote(
+        { spaceId, title, bodyMarkdown: "", section: "area", sourceClass: testServerClass("owner_authored"), provenance: { kind: "test" } },
+        undefined,
+      );
+    }
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.topics.map((t) => t.title.text)).toEqual(["Airport runs", "Monthly close", "Zoning rules"]);
+  });
+
+  it("defaults a topic container's section to 'topic', so nothing is unsectioned", async () => {
+    // `resolveTopic` mints a container while filing a fact and passes no section — the
+    // column's NOT NULL default is what keeps the page from needing a fifth heading for
+    // rows nobody chose a shelf for.
+    await seedFact("Sends the reports on Fridays");
+    expect(topicNamed((await readMemoryPage(OWNER)).scopes[0], "General").section).toBe("topic");
+  });
+
+  it("previews the first PARAGRAPH of a file, not its first heading", async () => {
+    // The reference writes `Summary` and `Details` headings INSIDE the file's own content,
+    // so the first line of almost every file the agent is steered to write is a heading. A
+    // row whose second line reads "Summary" tells the reader nothing the title did not.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await createNote(
+      {
+        spaceId,
+        title: "Reporting rhythm",
+        bodyMarkdown: "## Summary\n\nReports go out on Fridays, **before** noon.\n\n## Details\n\n- Sent by Olena",
+        sourceClass: testServerClass("owner_authored"),
+        provenance: { kind: "test" },
+      },
+      undefined,
+    );
+    const topic = topicNamed((await readMemoryPage(OWNER)).scopes[0], "Reporting rhythm");
+    expect(topic.preview.text).toBe("Reports go out on Fridays, before noon.");
+    // The BODY is untouched — the preview is a projection for the row, not a rewrite of
+    // the file, and the detail view renders the markdown it was given.
+    expect(topic.body.text).toContain("## Summary");
+  });
+
+  it("has no preview at all for a file nothing has written into", async () => {
+    // Today's five live topic containers are exactly this: a title, a `topic_key`, and an
+    // empty body. The row then has one line, which is honest — a placeholder sentence
+    // would be the page inventing content for a file that has none.
+    await seedFact("Sends the reports on Fridays");
+    expect(topicNamed((await readMemoryPage(OWNER)).scopes[0], "General").preview.text).toBe("");
+  });
+
+  it("tags a topic file with where its head revision came from", async () => {
+    // The trust tag on a FILE, from the head revision's `source_class` and `provenance` —
+    // the same two columns and the same one function the fact rows use. A file the agent
+    // wrote out of a document must not read as something the person wrote, which is §9.1
+    // one level up from a fact.
+    const spaceId = await getOrCreateSpace({ type: "project", refId: `${P}proj-taint`, ownerUserId: OWNER });
+    await q(`INSERT INTO projects (id, user_id, name) VALUES ($1, $2, 'taint') ON CONFLICT DO NOTHING`, [
+      `${P}proj-taint`,
+      OWNER,
+    ]);
+    // `untrusted_derived` is only reachable in a PROJECT space — §4.5 step 3 refuses it
+    // for personal memory — so the fixture builds the state the product can actually
+    // reach rather than one it cannot.
+    await createNote(
+      {
+        spaceId,
+        title: "Acme payment terms",
+        bodyMarkdown: "Net 30 from the invoice date.",
+        sourceClass: testServerClass("untrusted_derived"),
+        provenance: { kind: "retrieved", documentName: "Acme MSA.pdf" },
+        section: "area",
+      },
+      undefined,
+    );
+    await createNote(
+      {
+        spaceId,
+        title: "Shipping window",
+        bodyMarkdown: "Two weeks, per the supplier's site.",
+        sourceClass: testServerClass("untrusted_derived"),
+        provenance: { kind: "retrieved" },
+      },
+      undefined,
+    );
+
+    const project = (await readMemoryPage(OWNER)).scopes.find((s) => s.projectId === `${P}proj-taint`)!;
+    expect(topicNamed(project, "Acme payment terms").trust).toEqual({
+      kind: "untrusted_document",
+      name: "Acme MSA.pdf",
+    });
+    // The MEDIUM comes off provenance and the CLASS off the column: one class, two arms.
+    expect(topicNamed(project, "Shipping window").trust).toEqual({ kind: "untrusted_web" });
+  });
+
+  it("lists a project's topic files under that project", async () => {
+    await q(`INSERT INTO projects (id, user_id, name) VALUES ($1, $2, 'Q3 launch') ON CONFLICT DO NOTHING`, [
+      `${P}proj-list`,
+      OWNER,
+    ]);
+    const projectSpace = await getOrCreateSpace({ type: "project", refId: `${P}proj-list`, ownerUserId: OWNER });
+    await createNote(
+      { spaceId: projectSpace, title: "Launch checklist", bodyMarkdown: "Freeze the copy on the 12th.", sourceClass: testServerClass("owner_authored"), provenance: { kind: "test" } },
+      undefined,
+    );
+    await seedFact("Sends the reports on Fridays");
+
+    const page = await readMemoryPage(OWNER);
+    expect(page.scopes.map((s) => s.scope)).toEqual(["user", "project"]);
+    const project = page.scopes[1];
+    expect(project).toMatchObject({ projectId: `${P}proj-list`, projectName: "Q3 launch" });
+    expect(project.topics.map((t) => t.title.text)).toEqual(["Launch checklist"]);
+    // The CONTROL: the project's file is not also listed in personal memory, and the
+    // personal topic is not listed under the project.
+    expect(page.scopes[0].topics.map((t) => t.title.text)).toEqual(["General"]);
+  });
+
+  it("a DELETED topic file is gone and its facts are not", async () => {
+    // The owner's delete removes the FILE. `deleteNode` deliberately leaves `note_claims`
+    // alone — "forgetting a fact does not mean rewriting where it came from" — so the
+    // facts that were filed under it are still the person's facts, and they must still be
+    // deletable one by one. Without the `unfiled` list they would simply vanish with the
+    // heading, which is a delete that silently destroys more than it says.
+    const { spaceId, noteId } = await seedFact("Sends the reports on Fridays");
+    const res = await forgetNote({
+      noteId,
+      spaceId,
+      expectedRevision: 1,
+      // NO `createdTaskId` — the owner's own delete, bounded by nobody's task.
+      actor: { kind: "user", id: OWNER },
+    });
+    expect(res).toEqual({ ok: true });
+
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(scope.topics).toEqual([]);
+    expect(scope.unfiled.map((f) => f.statement.text)).toEqual(["Sends the reports on Fridays"]);
+    expect(scope.factsTotal).toBe(1);
+  });
+
+  it("an UNDONE delete puts the file back with its facts filed where they were", async () => {
+    // The undo toast's promise, end to end. It is a real inverse rather than a friendlier
+    // delete: the file is listed again, and the fact is back inside it rather than left in
+    // the `unfiled` list the delete had moved it to.
+    const { spaceId, noteId } = await seedFact("Sends the reports on Fridays");
+    await forgetNote({ noteId, spaceId, expectedRevision: 1, actor: { kind: "user", id: OWNER } });
+    expect(await restoreNote({ noteId, spaceId, actor: { kind: "user", id: OWNER } })).toEqual({ ok: true });
+
+    const scope = (await readMemoryPage(OWNER)).scopes[0];
+    expect(topicNamed(scope, "General").facts.map((f) => f.statement.text)).toEqual(["Sends the reports on Fridays"]);
+    expect(scope.unfiled).toEqual([]);
+    // AND the `contains` edge is open again. Not decoration: `containsParity` compares
+    // `note_claims` against LIVE edges over LIVE nodes, so a restore that left the edges
+    // closed would make the next `contains` write anywhere in this space throw.
+    const { rows } = await q(
+      `SELECT count(*)::int AS n FROM vault_edges
+        WHERE space_id = $1 AND relation = 'contains' AND deleted_at IS NULL`,
+      [spaceId],
+    );
+    expect(rows[0].n).toBe(1);
+  });
+
+  it("restoring a file nobody deleted is not an error", async () => {
+    // An undo clicked twice, or in two tabs: the person wants the file back and it is
+    // back. `not_found` covers it, and the route answers 404 — which is why this asserts
+    // the reason rather than a throw.
+    const { spaceId, noteId } = await seedFact("Sends the reports on Fridays");
+    expect(await restoreNote({ noteId, spaceId, actor: { kind: "user", id: OWNER } })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("orders a topic's facts newest first", async () => {
     // Not alphabetical and not by topic: what changed lately is how a person notices a
     // wrong fact. Seeded oldest-first so a projection that simply preserved insertion
     // order would fail.
@@ -542,64 +775,17 @@ run("vault: memory page projection", () => {
     expect(await factTexts()).toEqual(["Newest", "Middle", "Oldest"]);
   });
 
-  it("searches case- and whitespace-insensitively, on both sides", async () => {
-    // Normalized substring through the SAME `norm` the ledger's dedup uses (`text.ts`).
-    // The stored statement carries the odd spacing, so a search that normalized only the
-    // query would miss it — which is the half a "lowercase the input" implementation gets
-    // right while still failing on real data.
-    await seedFact("Sends   the\tQUARTERLY report on Fridays");
-    await seedFact("Prefers metric units");
-
-    expect(await factTexts("quarterly report")).toEqual(["Sends   the\tQUARTERLY report on Fridays"]);
-    expect(await factTexts("  METRIC   UNITS ")).toEqual(["Prefers metric units"]);
-    expect(await factTexts("")).toHaveLength(2);
-    expect(await factTexts("nothing here matches")).toEqual([]);
-  });
-
-  it("FINDS a sensitive fact, and returns its words", async () => {
-    // `sensitive` withholds from the MODEL and never from the authenticated owner. A
-    // search that skipped these rows would be this feature's sixth instance of the rule
-    // applied at the wrong entrance, and the worst-behaved: the row is not absent from a
-    // screen where a person can see it is absent, it is absent from an ANSWER, which
-    // reads as "you never saved that".
+  it("caps a topic's list and reports the count independently of it", async () => {
+    // The shape has to survive 5000. The cap is PER TOPIC, so `factsTotal` on the topic is
+    // counted off the membership and not off `facts.length` — a disclosure that said
+    // "showing 200 of 200" is the sentence being wrong exactly where it matters.
     //
-    // The control is the ordinary fact seeded beside it: a projection that returned
-    // everything regardless of the query would satisfy the first assertion alone.
-    await seedFact("Attends a support group on Thursdays", { sensitive: true });
-    await seedFact("Prefers metric units");
-
-    const found = (await readMemoryPage(OWNER, "SUPPORT group")).scopes[0].facts;
-    expect(found.map((f) => f.statement)).toEqual([
-      { text: "Attends a support group on Thursdays", sensitive: true },
-    ]);
-  });
-
-  it("leaves the archive alone whatever is searched for", async () => {
-    // The archive is on a deadline, and a row hidden behind a search box is a row that
-    // expires unseen. `query` narrows the facts and nothing else.
+    // Written straight into the tables: this is about the projection's arithmetic at
+    // scale, and two hundred round-trips through the ledger would be testing the ledger.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
-    await seedFact("Prefers metric units");
-    await proposeCandidate({
-      idempotencyKey: `${P}unfiltered`, spaceId,
-      statement: "Uses Linux as their main operating system",
-      provenance: { kind: "derived" },
-    });
-
-    const scope = (await readMemoryPage(OWNER, "metric")).scopes[0];
-    expect(scope.facts).toHaveLength(1);
-    expect(scope.archive.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
-  });
-
-  it("caps the rows and reports the total independently of them", async () => {
-    // The shape has to survive 5000. `factsMatched` is counted off the matched set and
-    // `factsTotal` off the space, so neither can be derived from `facts.length` — a page
-    // that said "showing 200 of 200" is the sentence being wrong exactly where it matters.
-    //
-    // Written straight into the table: this is about the projection's arithmetic at scale,
-    // and two hundred round-trips through the ledger would be testing the ledger.
-    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     const over = FACT_LIMIT + 5;
-    // Set-based, like the insert it feeds: a per-row round trip for FACT_LIMIT + 5 nodes
+    // Set-based, like the inserts it feeds: a per-row round trip for FACT_LIMIT + 5 nodes
     // would be the very thing the comment above says this test avoids.
     await q(
       `INSERT INTO vault_nodes (id, space_id, kind)
@@ -613,20 +799,23 @@ run("vault: memory page projection", () => {
          FROM generate_series(1, $3) AS i`,
       [`${P}bulk-`, spaceId, over],
     );
+    // Filed, so the cap under test is the topic's and not the `unfiled` list's. The
+    // `contains` edge is deliberately NOT written here: `assertContainsParity` fires on
+    // `contains` WRITES, and this test performs none.
+    await q(
+      `INSERT INTO note_claims (note_id, claim_id)
+       SELECT $1, $2 || i FROM generate_series(1, $3) AS i`,
+      [noteId, `${P}bulk-`, over],
+    );
 
-    const scope = (await readMemoryPage(OWNER)).scopes[0];
-    expect(scope.facts).toHaveLength(FACT_LIMIT);
-    expect(scope.factsMatched).toBe(over);
-    expect(scope.factsTotal).toBe(over);
-
-    // And the search narrows what is COUNTED, not only what is sent. The needle is the
-    // highest number seeded, so no other statement has it as a substring — and it is the
-    // one row the cap would have dropped, which is the case a browser-side filter over the
-    // capped rows would silently fail.
-    const narrowed = (await readMemoryPage(OWNER, `bulk fact ${over}`)).scopes[0];
-    expect(narrowed.factsMatched).toBe(1);
-    expect(narrowed.facts.map((f) => f.statement.text)).toEqual([`Bulk fact ${over}`]);
-    // `factsTotal` ignores the query — the "forget everything" dialog promises against it.
-    expect(narrowed.factsTotal).toBe(over);
+    const topic = topicNamed((await readMemoryPage(OWNER)).scopes[0], "General");
+    expect(topic.facts).toHaveLength(FACT_LIMIT);
+    expect(topic.factsTotal).toBe(over);
+    // …and the space's own count, which the "forget everything" dialog promises against,
+    // is neither of those two numbers narrowed by a topic.
+    expect((await readMemoryPage(OWNER)).scopes[0].factsTotal).toBe(over);
+    // NEWEST FIRST inside the cap, which is what makes the dropped rows the old ones: the
+    // fixture stamps `recorded_at` as `now() - i seconds`, so row 1 is the newest.
+    expect(topic.facts[0].statement.text).toBe("Bulk fact 1");
   });
 });

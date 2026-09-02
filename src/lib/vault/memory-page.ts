@@ -2,11 +2,15 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
-  chats, claimEvidence, memoryCandidates, messages, projects, spaces, vaultClaims,
+  chats, claimEvidence, memoryCandidates, messages, noteClaims, projects, spaces, vaultClaims,
+  vaultNodes, vaultNotes, vaultNoteVersions,
 } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
 import type { SourceClass } from "./claims";
-import { norm } from "./text";
+import { renderBody } from "./links";
+// The tuple lives in its own import-free module because the PAGE needs it as a value, and
+// this module opens a database connection at import — see `memory-sections.ts`.
+import { TOPIC_SECTIONS, type TopicSection } from "./memory-sections";
 
 /**
  * Everything the memory page shows, assembled server-side.
@@ -17,9 +21,16 @@ import { norm } from "./text";
  * `vault_claims.supersedes` records what it replaced. Neither is new work; the page simply
  * stopped discarding them.
  *
- * A third, `note_claims`, files a fact under a topic, and this module deliberately does NOT
- * read it any more — see `factsOf`. The rail it fed was a filing system nothing files into,
- * and it kept a third of this account's approved facts off the screen.
+ * A third, `note_claims`, files a fact under a topic, and it is read again — see
+ * `topicsOf`. It was dropped for one release, and the reason it was dropped is worth
+ * keeping: the RAIL it fed was a filing system nothing filed into, so selecting one topic
+ * at a time put 33 of this account's 51 facts on screen and left 18 behind buttons nobody
+ * had a reason to press. What changed is not that the filing got better — it is that the
+ * page no longer leads with facts at all. The unit on the screen is a TOPIC FILE, the facts
+ * are a disclosure inside one, and a fact filed under nothing has its own list
+ * (`unfiled`) rather than no home. That is what keeps §11.9 true — every fact the agent
+ * writes stays visible, editable and deletable here — under a page whose top level is
+ * topics.
  *
  * WHAT `sensitive` MEANS, because this surface is the one place it means something
  * different. The rule, in one sentence:
@@ -198,27 +209,74 @@ export type ArchivedView = {
   conflictsWith: FactHistory | null;
 };
 
+/**
+ * ONE TOPIC FILE, which is what this page is now a list of.
+ *
+ * IT IS A NOTE, of either kind, and that is a decision worth stating because the shape of
+ * the page depends on it. `memory_topic` is the container `resolveTopic` mints while filing
+ * a fact — a title, a `topic_key`, and a body the agent may later write into; `note` is what
+ * `memory_note_write` creates. Both are a title plus a markdown body plus a revision
+ * history, which is the whole of what a "topic file" is, so listing one kind and not the
+ * other would leave the other invisible on the only surface a person can delete it from.
+ * That is the §11.9 failure this page exists to prevent, arrived at from the filing side
+ * rather than the fact side.
+ *
+ * THE TEXTS TRAVEL AS `StatementView`s for the reason that type gives: `sensitive` has one
+ * reader in this codebase and a title dropped straight into JSX is how it grows a second.
+ * All three carry the HEAD REVISION's flag, because that is whose words they are.
+ */
+export type TopicView = {
+  id: string;
+  section: TopicSection;
+  /** The head revision, so the delete route and a later editor can address it. */
+  revision: number;
+  title: StatementView;
+  /** The body's first non-heading, non-empty paragraph, markdown stripped — see
+   *  `firstParagraph`. Empty for a topic container nothing has written into yet, and the
+   *  row then simply has no second line. */
+  preview: StatementView;
+  /** The whole body, with every canonical edge token already resolved to its target's
+   *  current title (`renderBody`). The detail view hands this to the app's markdown
+   *  renderer. */
+  body: StatementView;
+  /** The HEAD REVISION's `created_at` — "Updated <day>". Not `vault_notes.updated_at`,
+   *  which the note CAS also touches for a filing that changed no words. */
+  updatedAt: string;
+  trust: TrustTag;
+  /** The facts filed under this topic (`note_claims`), newest first, capped at
+   *  `FACT_LIMIT`. Read through the membership table and not through `vault_edges`: the
+   *  membership row survives the owner's delete of this topic, which is what makes the
+   *  undo lossless. */
+  facts: FactView[];
+  /** How many are filed here at all, before the cap. */
+  factsTotal: number;
+};
+
 export type ScopeView = {
   scope: "user" | "project";
   projectId?: string;
   projectName?: string;
-  /** Every LIVE HEAD in the space, newest first — whatever its `review_status`, matching
-   *  the search when there is one, and never more than `FACT_LIMIT` of them. */
-  facts: FactView[];
-  /** How many matched the search, BEFORE the cap. Reported separately because the page
-   *  has to be able to say "you are looking at 200 of 5000" — a count derived from
-   *  `facts.length` could only ever say 200, which is the sentence being wrong exactly
-   *  when it matters. */
-  factsMatched: number;
-  /** How many facts the scope holds at all, IGNORING the search. Its one reader is the
-   *  "forget everything" dialog, which promises to forget everything and so cannot state
-   *  a number the search box narrowed — a person who typed a word and then reset would be
-   *  told two facts were going while fifty-one went. */
+  /** Every live topic file in the space, grouped by the page and sorted by title inside
+   *  each group — which is the order this array already carries. */
+  topics: TopicView[];
+  /** LIVE HEADS FILED UNDER NO LIVE TOPIC, newest first, capped like a topic's own list.
+   *
+   *  It is not a theoretical arm: `runExtraction` and `migrateMemoryDocs` both call
+   *  `createClaim` with no `topicNoteId`, so an unattended extraction produces exactly
+   *  these rows. Today the count is zero — every one of this account's 51 live facts is
+   *  filed — and a list that renders nothing is the correct cost of the guarantee: without
+   *  it, "every fact the agent writes stays visible" would be a property of which writer
+   *  happened to run rather than of this page. */
+  unfiled: FactView[];
+  /** How many facts the scope holds at all. Its one reader is the "forget everything"
+   *  dialog, which promises to forget everything and so cannot state a number narrowed by
+   *  anything — including by which topic a fact is filed under. */
   factsTotal: number;
   /** Facts that disagree with each other, from the ONE reader of that state
-   *  (`readConflicts`). Both halves also appear in `facts` — they are live heads, and
-   *  nothing decides visibility on this page — so the card is a second VIEW of them and
-   *  not a filter over the list, which is what keeps a second predicate from existing. */
+   *  (`readConflicts`). Both halves also appear under their topic — they are live heads,
+   *  and nothing decides visibility on this page — so the card is a second VIEW of them
+   *  and not a filter over the lists, which is what keeps a second predicate from
+   *  existing. */
   conflicts: ConflictView[];
   /** The retired review queue's leftovers. Empty for every account that never had one. */
   archive: ArchivedView[];
@@ -242,13 +300,16 @@ export function archiveExpiresAt(): string {
 }
 
 /**
- * How many facts one scope sends to the browser.
+ * How many facts ONE TOPIC'S disclosure sends to the browser.
  *
- * At today's 51 it does nothing, and that is the point: the shape has to survive 5000
- * without anybody rewriting this module, and an unbounded list is the thing that would
- * have to be rewritten. The page says so in one sentence when `factsMatched` exceeds it
- * and points at the search box, rather than paginating — a person looking for one fact
- * reaches for words, not for page 7.
+ * At today's 51 across five topics it does nothing, and that is the point: the shape has to
+ * survive 5000 without anybody rewriting this module, and an unbounded list is the thing
+ * that would have to be rewritten. The cap is PER TOPIC and not per scope, which is the
+ * one detail worth stating: a space-wide cap over facts ordered by date would fill its
+ * window with whatever was saved last week and show a quiet topic's list as empty while its
+ * heading claimed twelve — a count and a list that disagree, in the one place a person goes
+ * to check what is remembered. Per topic they cannot disagree, and the extra cost is zero
+ * (the same two follow-up statements run over the union of the slices).
  */
 export const FACT_LIMIT = 200;
 
@@ -328,36 +389,71 @@ export function trustTagOf(sourceClass: SourceClass, origin: unknown): TrustTag 
 }
 
 /**
- * ONE list of a scope's facts — every LIVE HEAD in the space, newest first.
+ * THE ROW'S SECOND LINE: the body's first paragraph, as plain text.
  *
- * IT USED TO BE A LIST PER TOPIC, and that is what this replaces. The page drew a rail of
- * topic buttons over the result and showed one topic's facts at a time, so of the 51 facts
- * this account had approved it put 33 on screen; the other 18 sat behind four rail entries
- * (`health`, `people`, `preferences`, `work`) that no live write path has touched since the
- * vocabulary was narrowed to one key, and that a person had no reason to click. A fact
- * somebody confirmed and cannot find reads as a fact the system lost.
+ * A pure exported function beside `sourceOf` and `trustTagOf`, for the reason those two
+ * are: this repo's vitest runs with `environment: "node"` and has no React renderer, so a
+ * transformation done inside a component cannot be tested at all — and the skip rules
+ * below are exactly the kind of thing that rots silently.
  *
- * So there is no note join here at all: the space is the scope, and a head belongs to this
- * list whether it hangs off a topic note, off four of them, or off none. The topic rows are
- * untouched in the database and the MODEL still sees topics (the manifest's counters are
- * unchanged) — this is navigation dropping a distinction the data never had, not a
- * migration.
+ * WHAT IT SKIPS, and why each one is a skip rather than a strip:
  *
- * ORDERING is `recorded_at` descending, not alphabetical and not by topic: what changed
- * lately is how a person notices a wrong fact. The `id` tiebreak is not decorative —
- * `recorded_at` is identical across every claim one transaction wrote, and a list that
- * reshuffles between two loads of the same page is one a person cannot re-find a row in.
+ *   - a HEADING (`# …`, and a `Summary` / `Details` line the reference writes INSIDE the
+ *     file's own content). A preview reading "Summary" tells the reader nothing they did
+ *     not already get from the title, and every file the agent is being steered to write
+ *     opens with one.
+ *   - a FENCE (```): its first line is a language tag or nothing.
+ *   - a block that is NOTHING BUT A LINK — a canonical edge token already resolved to
+ *     `[[Some title]]`, or `[[link removed]]` when its target is gone. Neither is prose,
+ *     and the second one as a preview would describe the page's own plumbing.
  *
- * FOUR STATEMENTS, not N+1, and the filter sits between the first and the rest: the heads,
- * then evidence and predecessors for the CAPPED page only. That is what keeps a 5000-fact
- * space from fanning out into two 5000-row joins to render 200 rows.
+ * Everything else is a paragraph, INCLUDING a list: a file whose body is a heading and
+ * five bullets is common, and "no preview" reads as an empty file rather than a full one.
+ * The marker is stripped and the first item stands in.
+ *
+ * IT DOES NOT TRUNCATE. The row does that in CSS, so the clip lands at the column's real
+ * width in the reader's own font — a JS slice at N characters is either short of the line
+ * or spilling out of it, and it is wrong differently in every locale.
  */
-async function factsOf(
-  spaceId: string,
-  userId: string,
-  query: string,
-): Promise<{ facts: FactView[]; matched: number; total: number }> {
-  const heads = await db
+export function firstParagraph(bodyMarkdown: string): string {
+  for (const raw of bodyMarkdown.split(/\n\s*\n/)) {
+    const block = raw.trim();
+    if (!block) continue;
+    if (block.startsWith("#") || block.startsWith("```")) continue;
+    // A block that is NOTHING BUT link tokens is skipped whole, which has to happen before
+    // the strip below turns one into its own label — otherwise a file opening with a link
+    // block previews as the linked note's title, or as "link removed" when the target is
+    // gone, and either reads as this file's own first sentence.
+    if (!block.replace(/\[\[[^\]]*\]\]/g, "").trim()) continue;
+    // Inline markdown out, in the order that keeps a nested construct readable: link and
+    // image targets first (so the label survives), then wiki-style link brackets, then
+    // emphasis and code ticks, then the leading block markers of the first line.
+    const flat = block
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[\[([^\]]*)\]\]/g, "$1")
+      .replace(/[*_~`]/g, "")
+      .replace(/^\s*(?:[-*+]|\d+[.)]|>)\s+/gm, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!flat) continue;
+    return flat;
+  }
+  return "";
+}
+
+/** The live claim heads of one space, newest first — the read every list on this page is a
+ *  slice of.
+ *
+ *  HEAD + SCOPE, and nothing else (§11.9). No `review_status`, no `prompt_access`: the
+ *  first is history and the second withholds from the MODEL, never from the person whose
+ *  space this is.
+ *
+ *  ORDERING is `recorded_at` descending. The `id` tiebreak is not decorative —
+ *  `recorded_at` is identical across every claim one transaction wrote, and a list that
+ *  reshuffles between two loads of the same page is one a person cannot re-find a row in. */
+function headRows(spaceId: string) {
+  return db
     .select({
       id: vaultClaims.id,
       revision: vaultClaims.revision,
@@ -372,42 +468,34 @@ async function factsOf(
       sourceClass: vaultClaims.sourceClass,
     })
     .from(vaultClaims)
-    // HEAD + SCOPE, and nothing else (§11.9). No `review_status`, no `prompt_access`:
-    // the first is history and the second withholds from the MODEL, never from the
-    // person whose space this is.
     .where(and(eq(vaultClaims.spaceId, spaceId), isNull(vaultClaims.supersededAt)))
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
+}
 
-  // The search, and the one thing it must not do: look at `sensitive`.
-  //
-  // `sensitive` withholds from the MODEL and never from the authenticated owner — the rule
-  // this feature has now broken five times by applying it at a human-facing entrance. A
-  // search that silently skipped the owner's own sensitive facts would be the sixth, and
-  // the worst-behaved of them: the row is not missing from a screen where its absence is
-  // visible, it is missing from an answer to a question, which reads as "you never saved
-  // that". So the predicate is over the STATEMENT alone, and the flag is not in scope here
-  // at all. `Statement` still blurs the result; finding it and reading it are separate
-  // questions and only the second one `sensitive` gets to answer.
-  //
-  // Normalized substring on both sides, through the same `norm` the ledger's dedup uses.
-  // Nothing language-specific: plan C swaps this predicate for n-gram and embedding
-  // matching behind the same call site, and a transliteration table added now would be an
-  // enumerated-case hardcode to delete then.
-  const needle = norm(query);
-  const matched = needle ? heads.filter((h) => norm(h.statement).includes(needle)) : heads;
-  const page = matched.slice(0, FACT_LIMIT);
+type HeadRow = Awaited<ReturnType<typeof headRows>>[number];
 
-  const factIds = page.map((f) => f.id);
-  const evidenceRows = factIds.length
-    ? await db
-        .select({ claimId: claimEvidence.claimId, chatId: chats.id, chatTitle: chats.title, at: messages.createdAt })
-        .from(claimEvidence)
-        .leftJoin(messages, eq(messages.id, claimEvidence.messageId))
-        .leftJoin(chats, and(eq(chats.id, messages.chatId), eq(chats.userId, userId)))
-        .where(inArray(claimEvidence.claimId, factIds))
-    : [];
+/**
+ * HEAD ROWS -> `FactView`s: the provenance and the predecessor, in two statements for the
+ * whole set however many lists it is about to be split across.
+ *
+ * It takes the ALREADY-CAPPED union of every list on the page rather than a space's whole
+ * history, which is what keeps a 5000-fact space from fanning out into two 5000-row joins
+ * to render a few hundred rows. Called ONCE per space for that reason: a per-topic call
+ * would be the N+1 the cap exists to avoid, and a fact filed under two topics would be
+ * hydrated twice.
+ */
+async function hydrateFacts(spaceId: string, userId: string, heads: HeadRow[]): Promise<Map<string, FactView>> {
+  const out = new Map<string, FactView>();
+  if (!heads.length) return out;
+  const factIds = heads.map((f) => f.id);
+  const evidenceRows = await db
+    .select({ claimId: claimEvidence.claimId, chatId: chats.id, chatTitle: chats.title, at: messages.createdAt })
+    .from(claimEvidence)
+    .leftJoin(messages, eq(messages.id, claimEvidence.messageId))
+    .leftJoin(chats, and(eq(chats.id, messages.chatId), eq(chats.userId, userId)))
+    .where(inArray(claimEvidence.claimId, factIds));
 
-  const predecessorIds = page.map((f) => f.supersedes).filter((v): v is string => !!v);
+  const predecessorIds = heads.map((f) => f.supersedes).filter((v): v is string => !!v);
   const predecessors = predecessorIds.length
     ? await db
         // `sensitive` is selected, and its own value rather than the successor's. It was
@@ -425,9 +513,9 @@ async function factsOf(
         .where(and(inArray(vaultClaims.id, predecessorIds), eq(vaultClaims.spaceId, spaceId)))
     : [];
 
-  const facts: FactView[] = page.map((f) => {
+  for (const f of heads) {
     const prev = f.supersedes ? predecessors.find((p) => p.id === f.supersedes) : undefined;
-    return {
+    out.set(f.id, {
       id: f.id,
       revision: f.revision,
       // The owner's own fact, in full, paired with the advisory the page blurs on —
@@ -440,11 +528,110 @@ async function factsOf(
       previous: prev
         ? { statement: { text: prev.statement, sensitive: prev.sensitive }, at: prev.recordedAt.toISOString() }
         : null,
-    };
-  });
-  // Both counts off the sets they name, neither off `facts`: the cap is the reason
-  // `matched` is worth sending, and the search is the reason `total` is.
-  return { facts, matched: matched.length, total: heads.length };
+    });
+  }
+  return out;
+}
+
+/**
+ * A SCOPE'S TOPIC FILES, the facts under each, and the facts under none.
+ *
+ * LIVE NOTES, of both kinds, joined to their HEAD VERSION — see `TopicView` for why the
+ * kind is not filtered. Head-ness is `revision = current_revision` and never the
+ * `current_version_id` pointer, for the reason that column's own docstring gives: the
+ * pointer is legitimately NULL for a statement or two inside both note writers, and a
+ * reader that joined on it would answer "no such note" for a note that exists.
+ *
+ * THE TOMBSTONE IS ON THE NODE, so the liveness clause is a join to `vault_nodes` and not
+ * a column on `vault_notes` — the same asymmetry `forgetNote` documents: a note's identity
+ * row is never deleted, its NODE is.
+ *
+ * FIVE STATEMENTS plus one small read per topic that actually contains a link, whatever the
+ * space holds: the heads, the notes, the membership, then evidence and predecessors over
+ * the union of the CAPPED slices. `renderBody` costs nothing at all for a body with no
+ * canonical edge token in it, which is every body in this account today.
+ *
+ * ORDERED BY (section, title), which is the order the page renders and therefore the order
+ * this array carries: a component that re-sorted would be a second answer to "what comes
+ * first". `localeCompare` with no locale argument, because the server does not know the
+ * reader's — and a topic list is short enough that the collation difference between
+ * `en` and `uk` moves nothing a person is looking for.
+ */
+async function topicsOf(
+  spaceId: string,
+  userId: string,
+): Promise<{ topics: TopicView[]; unfiled: FactView[]; factsTotal: number }> {
+  const heads = await headRows(spaceId);
+  const noteRows = await db
+    .select({
+      id: vaultNotes.id,
+      section: vaultNotes.section,
+      revision: vaultNotes.currentRevision,
+      title: vaultNoteVersions.title,
+      bodyMarkdown: vaultNoteVersions.bodyMarkdown,
+      sensitive: vaultNoteVersions.sensitive,
+      sourceClass: vaultNoteVersions.sourceClass,
+      provenance: vaultNoteVersions.provenance,
+      createdAt: vaultNoteVersions.createdAt,
+    })
+    .from(vaultNotes)
+    .innerJoin(
+      vaultNoteVersions,
+      and(eq(vaultNoteVersions.noteId, vaultNotes.id), eq(vaultNoteVersions.revision, vaultNotes.currentRevision)),
+    )
+    .innerJoin(vaultNodes, and(eq(vaultNodes.id, vaultNotes.id), eq(vaultNodes.spaceId, vaultNotes.spaceId)))
+    .where(and(eq(vaultNotes.spaceId, spaceId), isNull(vaultNodes.deletedAt)));
+
+  // WHICH FACT IS FILED WHERE, from the membership table and not from `vault_edges`. The
+  // two are dual-written (§11.5) and agree by construction, so this is a choice and worth
+  // one sentence: `deleteNode` soft-deletes a topic's edges and leaves its `note_claims`
+  // rows alone, so reading the membership is what makes the owner's delete-and-undo of a
+  // topic lossless — the facts come back filed where they were, with no edge to reopen on
+  // a path that would otherwise have to know about them.
+  const noteIds = noteRows.map((n) => n.id);
+  const membership = noteIds.length
+    ? await db
+        .select({ noteId: noteClaims.noteId, claimId: noteClaims.claimId })
+        .from(noteClaims)
+        .where(inArray(noteClaims.noteId, noteIds))
+    : [];
+  const filedUnder = new Map<string, HeadRow[]>(noteIds.map((id) => [id, []]));
+  const anyTopic = new Set<string>();
+  const byId = new Map(heads.map((h) => [h.id, h]));
+  for (const m of membership) {
+    const head = byId.get(m.claimId);
+    if (!head) continue; // superseded or forgotten: `note_claims` keeps the row on purpose
+    filedUnder.get(m.noteId)?.push(head);
+    anyTopic.add(head.id);
+  }
+
+  // The cap, per list, BEFORE anything is hydrated — see `FACT_LIMIT`.
+  const slices = new Map([...filedUnder].map(([id, rows]) => [id, rows.slice(0, FACT_LIMIT)]));
+  const unfiledRows = heads.filter((h) => !anyTopic.has(h.id)).slice(0, FACT_LIMIT);
+  const union = [...new Set([...slices.values()].flat().concat(unfiledRows))];
+  const hydrated = await hydrateFacts(spaceId, userId, union);
+  const viewsOf = (rows: HeadRow[]) => rows.map((r) => hydrated.get(r.id)).filter((v): v is FactView => !!v);
+
+  const topics: TopicView[] = [];
+  for (const n of noteRows) {
+    const body = await renderBody(n.bodyMarkdown, spaceId);
+    topics.push({
+      id: n.id,
+      section: n.section,
+      revision: n.revision,
+      title: { text: n.title, sensitive: n.sensitive },
+      preview: { text: firstParagraph(body), sensitive: n.sensitive },
+      body: { text: body, sensitive: n.sensitive },
+      updatedAt: n.createdAt.toISOString(),
+      trust: trustTagOf(n.sourceClass, n.provenance),
+      facts: viewsOf(slices.get(n.id) ?? []),
+      factsTotal: filedUnder.get(n.id)?.length ?? 0,
+    });
+  }
+  const order = (s: TopicSection) => TOPIC_SECTIONS.indexOf(s);
+  topics.sort((a, b) => order(a.section) - order(b.section) || a.title.text.localeCompare(b.title.text));
+
+  return { topics, unfiled: viewsOf(unfiledRows), factsTotal: heads.length };
 }
 
 /**
@@ -617,16 +804,18 @@ async function archiveOf(spaceId: string, userId: string): Promise<ArchivedView[
 }
 
 /**
- * The whole page for one person, optionally narrowed to a search.
+ * The whole page for one person.
  *
- * `query` narrows the FACTS and nothing else. The conflicts are decisions a person still
- * has to take and the archive is on a deadline; both are short by construction, and
- * hiding a row out of either behind a search box would be a way to lose it — so they come
- * back whole whatever is typed.
+ * IT TAKES NO SEARCH, and the search it used to take is deleted rather than hidden. That
+ * box filtered a flat list of every fact in the space, which was the only navigation the
+ * page had; the page's top level is now a short list of topic FILES, one per subject, and
+ * a person finds a subject by reading four headings. A search box over a list of five rows
+ * is a control that answers a question nobody has, and — the reason it could not simply
+ * stay — the copy under it said grouping by subject "isn't available yet", which the
+ * sections now make false on the same screen.
  */
 export async function readMemoryPage(
   userId: string,
-  query = "",
 ): Promise<{ scopes: ScopeView[]; archiveExpiresAt: string }> {
   const projectRows = await db
     .select({ id: projects.id, name: projects.name })
@@ -652,12 +841,14 @@ export async function readMemoryPage(
 
   const scopes: ScopeView[] = [];
   const userSpace = spaceRows.find((s) => s.type === "user" && s.refId === userId);
-  const own = userSpace ? await factsOf(userSpace.id, userId, query) : { facts: [], matched: 0, total: 0 };
+  const own = userSpace
+    ? await topicsOf(userSpace.id, userId)
+    : { topics: [], unfiled: [], factsTotal: 0 };
   scopes.push({
     scope: "user",
-    facts: own.facts,
-    factsMatched: own.matched,
-    factsTotal: own.total,
+    topics: own.topics,
+    unfiled: own.unfiled,
+    factsTotal: own.factsTotal,
     conflicts: userSpace ? await readConflicts(userSpace.id) : [],
     archive: userSpace ? await archiveOf(userSpace.id, userId) : [],
   });
@@ -665,18 +856,18 @@ export async function readMemoryPage(
     const space = spaceRows.find((s) => s.type === "project" && s.refId === p.id);
     if (!space) continue;
     const [found, conflicts, archive] = await Promise.all([
-      factsOf(space.id, userId, query),
+      topicsOf(space.id, userId),
       readConflicts(space.id),
       archiveOf(space.id, userId),
     ]);
-    // Dropped on the UNFILTERED total, not on the match count: a project section is a
-    // heading, and a heading over nothing is noise — but a search that matched nothing in
-    // this project has not emptied the project, and making its whole section vanish while
-    // the reader types is how a person concludes a project's memory was lost.
-    if (!found.total && !archive.length) continue;
+    // A project sub-group is a heading, and a heading over nothing is noise. It appears the
+    // moment the project's memory holds anything at all — a topic file, a fact filed under
+    // none, or a leftover suggestion — because each of those is something a person may
+    // want to delete, and a scope that renders nothing is a scope they cannot reach.
+    if (!found.topics.length && !found.factsTotal && !archive.length) continue;
     scopes.push({
       scope: "project", projectId: p.id, projectName: p.name,
-      facts: found.facts, factsMatched: found.matched, factsTotal: found.total, conflicts, archive,
+      topics: found.topics, unfiled: found.unfiled, factsTotal: found.factsTotal, conflicts, archive,
     });
   }
   // ON THE RESPONSE rather than in the component, because the component is a client
