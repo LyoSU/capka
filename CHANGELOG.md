@@ -27,7 +27,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
-- Chat UI: one accent colour (ink-blue) for the send button, focus ring, unread dot and selected chips; hover/active surfaces and hairlines are a full step stronger, so the current chat and the hovered row are visible at a glance.
+- Chat UI: one accent colour (ink-blue) for the focus ring and the unread dot only; hover/active surfaces and hairlines are a full step stronger, so the current chat and the hovered row are visible at a glance.
 - The model and thinking controls now live in the composer footer on every screen; the floating pill under the greeting and the copy in the chat header are gone.
 - The new-chat screen drops the "Recent" list (it duplicated the sidebar) and the drag-a-file hint; the greeting and mark are smaller.
 - Tool steps render as a single bordered list — one row per step, details behind the chevron — instead of a timeline with ringed nodes and a "Done" cap.
