@@ -392,6 +392,31 @@ run("vault: the model-facing projection", () => {
     const notesOnly = await listMemoryToolRows([SPACE_A], { queries: ["embargo deadline"], kinds: ["note"] });
     expect(notesOnly.rows.map((r) => r.kind)).toEqual(["note"]);
     expect(notesOnly.omitted).toBe(0);
+
+    // AND AT `limit: 1`, which is what makes the three assertions above evidence of arm
+    // gating rather than of a roomy limit. At the default 20 both readings agree: a
+    // post-filter over the merged list drops the claim and still has room for the note, so
+    // the answer looks identical either way and the case pins nothing. With ONE slot the
+    // two implementations part — the claim outranks the note on this query (it does above,
+    // where the merged order puts it first), so a post-filter would spend the slot on the
+    // claim and hand back an EMPTY list, while gating the arm before the limit leaves the
+    // note as the only candidate and it survives.
+    // The premise of the case below, ASSERTED rather than assumed: on this query the claim
+    // ranks ABOVE the note in the merged list, so the single slot is contested. If ranking
+    // ever put the note first this assertion fails loudly instead of leaving `limit: 1`
+    // quietly pinning nothing.
+    expect(both.rows.map((r) => r.kind)).toEqual(["claim", "note"]);
+
+    const oneNote = await listMemoryToolRows([SPACE_A], {
+      queries: ["embargo deadline"],
+      kinds: ["note"],
+      limit: 1,
+    });
+    expect(oneNote.rows.map((r) => r.kind)).toEqual(["note"]);
+    expect(oneNote.rows[0].id).toBe(noteId);
+    // Still nothing left out: the excluded kind was never an answer, and the one note that
+    // was an answer is in the response.
+    expect(oneNote.omitted).toBe(0);
   });
 
   it("carries the trust tier and the space off the authoritative row, for both kinds", async () => {
