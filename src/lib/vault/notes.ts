@@ -523,6 +523,13 @@ export async function revertNote(
   // at no cost — while `head.revision` is, on the guarded path, exactly the number the
   // caller sent as `expectedRevision`. Reporting that would answer "the file moved" and
   // then name the revision the client already believes is current, which is not an answer.
+  //
+  // A ZERO IS NOT A REVISION. `reviseNote` reports `0` when its post-CAS re-read finds no
+  // row at all, which here means the note was deleted while this transaction was running —
+  // a concurrent wipe of the space's memory is the only way in. Passing that on would send
+  // the chat notice `409 { revision: 0 }`, a number the person can neither see nor retry
+  // with, so it becomes the answer the caller already knows how to handle: the file is gone.
+  if (!upd.ok && upd.currentRevision < 1) return { ok: false, reason: "not_found" };
   if (!upd.ok) return { ok: false, reason: "revision_moved", revision: upd.currentRevision };
   return { ok: true, revision: upd.revision };
 }

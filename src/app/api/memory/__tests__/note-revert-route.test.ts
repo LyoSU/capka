@@ -72,6 +72,18 @@ describe("PATCH /api/memory/notes/[noteId]", () => {
     }
   });
 
+  it("a note that vanished under the revert is a 404, never a 409 naming revision zero", async () => {
+    // The narrow arm behind LOW-10(r2): `reviseNote` reports revision 0 when its post-CAS
+    // re-read finds no row, which here means a concurrent wipe of the space's memory. The
+    // guarantee is made in `revertNote` — it answers `not_found` rather than passing the zero
+    // on — and this is the route's half of it: that outcome is a 404 the notice already knows
+    // how to handle, and the body carries no revision for the client to retry with.
+    revertNote.mockResolvedValue({ ok: false, reason: "not_found" });
+    const res = await PATCH(req({ revertTo: 1, expectedRevision: 2 }), params);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
   it("a note that is not yours is the same 404, and the writer is never called", async () => {
     noteHead.mockResolvedValue(null);
     const res = await PATCH(req({ revertTo: 1, expectedRevision: 2 }), params);

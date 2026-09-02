@@ -85,6 +85,57 @@ const seedNoteFrom = (spaceId: string, messageId: string, bodyMarkdown: string) 
     actor: { kind: "agent" },
   });
 
+/**
+ * RUN `write` AGAINST THE NOTE ROW while a second connection holds its write lock, then let
+ * the lock go — a deterministic lost CAS rather than a race.
+ *
+ * `hold` runs inside an open transaction on its own pooled connection, so it takes the row's
+ * write lock and stays invisible to every other reader until it commits. `write` then reads
+ * the pre-lock state under READ COMMITTED, gets as far as its own UPDATE, and BLOCKS. The
+ * commit releases it, PostgreSQL re-evaluates the blocked statement against the new row
+ * version, and the CAS finds nothing to match.
+ *
+ * THE CONTROL IS `pg_blocking_pids`, not a match on `pg_stat_activity.query`. The query text
+ * of another backend is readable only to the same role or to `pg_read_all_stats`, so a role
+ * split between app and tests would make a text control silently never fire; and this
+ * database is shared with a running platform worker, so any OTHER backend blocked on a
+ * `vault_notes` lock would satisfy a text match. Asking whether the holder's pid appears
+ * among a backend's blockers is exact and needs neither.
+ *
+ * `racing` is awaited in the `finally` and its result discarded, so a failed expectation
+ * cannot leave the write running against the live database during cleanup, nor leave a
+ * floating promise behind.
+ */
+async function whileHoldingTheRow<T>(hold: string, noteId: string, write: () => Promise<T>): Promise<T> {
+  const other = await pool.connect();
+  let racing: Promise<T> | null = null;
+  try {
+    await other.query("BEGIN");
+    const holder = Number((await other.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid);
+    await other.query(hold, [noteId]);
+
+    racing = write();
+    let blocked = false;
+    // 10s, because the suite's own timeout is 20s: a loaded machine must not turn this into
+    // a red test with an unrelated cause, which is the kind that teaches people to re-run.
+    for (let i = 0; i < 200 && !blocked; i += 1) {
+      const { rows } = await q(`SELECT pg_blocking_pids(pid) AS blockers FROM pg_stat_activity`);
+      blocked = rows.some((r) => (r.blockers as number[]).includes(holder));
+      if (!blocked) await new Promise((r) => setTimeout(r, 50));
+    }
+    // Without this the commit could land before the write had read anything, and the case
+    // would be exercising the ordinary guarded path under another name.
+    expect(blocked).toBe(true);
+
+    await other.query("COMMIT");
+    return await racing;
+  } finally {
+    await other.query("ROLLBACK").catch(() => {});
+    other.release();
+    await racing?.catch(() => {});
+  }
+}
+
 const cleanup = async () => {
   await q(`DELETE FROM spaces WHERE owner_user_id = ANY($1)`, [[OWNER, STRANGER]]);
   await q(`DELETE FROM audit_events WHERE subject_id LIKE $1`, [`${P}%`]);
@@ -383,39 +434,42 @@ run("vault: what a turn wrote to memory", () => {
       });
     }
 
-    // A SECOND CONNECTION, held open: the UPDATE takes the row's write lock and stays
-    // invisible to every other reader until it commits. That is what makes this a real lost
-    // CAS rather than a stale parameter, and it is deterministic rather than a race — the
-    // poll below asserts that the revert is actually blocked before the lock is released.
-    const other = await pool.connect();
-    try {
-      await other.query("BEGIN");
-      await other.query(`UPDATE vault_notes SET current_revision = 2 WHERE id = $1`, [note.id]);
-
-      const racing = revertNote({ noteId: note.id, spaceId, toRevision: 1, actor });
-      let blocked = false;
-      for (let i = 0; i < 60 && !blocked; i += 1) {
-        const { rows } = await q(
-          `SELECT count(*) AS n FROM pg_stat_activity
-            WHERE wait_event_type = 'Lock' AND query ILIKE '%vault_notes%'`,
-        );
-        blocked = Number((rows[0] as { n: string }).n) > 0;
-        if (!blocked) await new Promise((r) => setTimeout(r, 50));
-      }
-      // THE CONTROL. Without it the commit could land before the revert had read anything,
-      // and the case would be testing the guarded arm again under another name.
-      expect(blocked).toBe(true);
-
-      await other.query("COMMIT");
-      expect(await racing).toEqual({ ok: false, reason: "revision_moved", revision: 2 });
-    } finally {
-      await other.query("ROLLBACK").catch(() => {});
-      other.release();
-    }
+    expect(
+      await whileHoldingTheRow(`UPDATE vault_notes SET current_revision = 2 WHERE id = $1`, note.id, () =>
+        revertNote({ noteId: note.id, spaceId, toRevision: 1, actor }),
+      ),
+    ).toEqual({ ok: false, reason: "revision_moved", revision: 2 });
 
     // NOTHING was written by the loser, and the head is what the winner left.
     const versions = await q(`SELECT count(*) AS n FROM vault_note_versions WHERE note_id = $1`, [note.id]);
     expect(Number((versions.rows[0] as { n: string }).n)).toBe(3);
+  });
+
+  it("a revert whose note VANISHES under it is not found, rather than a revision of zero", async () => {
+    // The narrow arm `reviseNote`'s `cur?.revision ?? 0` produces: the CAS loses AND the
+    // re-read finds no row, which only a concurrent delete of the space's memory can cause.
+    // Zero is not a revision, and the chat notice would receive `409 { revision: 0 }` — a
+    // number the person can neither see nor retry with. `not_found` is what the route turns
+    // into a 404, which is what the notice already handles.
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, OTHER_MSG, "The first steps.");
+    const actor = { kind: "user", id: OWNER } as const;
+    await reviseNote({
+      noteId: note.id,
+      spaceId,
+      expectedRevision: 1,
+      title: "Acme onboarding",
+      bodyMarkdown: "The second steps.",
+      sourceClass: testServerClass("agent_inferred"),
+      provenance: { kind: "agent_inference", messageId: MSG, taskId: TASK },
+      actor: { kind: "agent" },
+    });
+
+    expect(
+      await whileHoldingTheRow(`DELETE FROM vault_notes WHERE id = $1`, note.id, () =>
+        revertNote({ noteId: note.id, spaceId, toRevision: 1, actor }),
+      ),
+    ).toEqual({ ok: false, reason: "not_found" });
   });
 
   it("refuses a revert that is not to an EARLIER revision", async () => {
