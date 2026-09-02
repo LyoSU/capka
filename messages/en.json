@@ -593,6 +593,7 @@
       "savedSensitive": "something marked sensitive",
       "undo": "Undo",
       "undoFailed": "Could not undo that. Please try again.",
+      "undoMoved": "That file changed after this notice appeared, so it was left as it is. Open Memory to see it.",
       "dismiss": "Hide this notice"
     },
     "forkFailed": "Could not fork the chat",

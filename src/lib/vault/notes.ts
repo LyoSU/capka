@@ -432,12 +432,34 @@ export async function reviseNote(
  *
  * `not_revertable` when `toRevision` is not strictly below the head: reverting to the head
  * is a no-op dressed as a write, and reverting FORWARD is not a thing an undo can mean.
+ *
+ * `revision_moved` when the caller named an `expectedRevision` that is not the head, or
+ * when the CAS below loses to a concurrent write. Those two are ONE answer on purpose:
+ * both mean the file is not what the caller was looking at, and the only useful next step
+ * is the same one — say so and let the person look again.
  */
 export async function revertNote(
-  a: { noteId: string; spaceId: string; toRevision: number; actor: Actor },
+  a: {
+    noteId: string;
+    spaceId: string;
+    toRevision: number;
+    /** THE HEAD THE CALLER WAS LOOKING AT, when the caller was looking at one. The chat
+     *  notice computes `toRevision` from a revision it rendered, and between that render
+     *  and the click a later turn may have edited the same file: without this, the revert
+     *  succeeds and silently drops that later edit out of the head, for a person who has no
+     *  version-history surface to notice it with. Optional because a caller that read the
+     *  head itself a statement ago has nothing stale to guard against. */
+    expectedRevision?: number;
+    actor: Actor;
+  },
   ex?: Ex,
 ): Promise<
-  { ok: true; revision: number } | { ok: false; reason: "not_found" | "not_revertable" | "revision_moved" }
+  | { ok: true; revision: number }
+  | { ok: false; reason: "not_found" | "not_revertable" }
+  /** The observed head travels with the refusal: the caller's next move is to tell somebody
+   *  what it is now, and re-reading it from outside this transaction would be a third read
+   *  of a value this one already holds. */
+  | { ok: false; reason: "revision_moved"; revision: number }
 > {
   if (!ex || ex === db) return db.transaction((tx) => revertNote(a, tx));
 
@@ -445,6 +467,12 @@ export async function revertNote(
   // One answer for "no such note", "not in this space" and "deleted since": `noteHead`
   // joins the node's tombstone, so a forgotten note is absent here rather than revertable.
   if (!head) return { ok: false, reason: "not_found" };
+  // BEFORE the revertability check, and before anything is read or written: a stale caller
+  // asking about a head that has moved is answered with what the head IS, not with a verdict
+  // computed against a revision it does not know about.
+  if (a.expectedRevision !== undefined && a.expectedRevision !== head.revision) {
+    return { ok: false, reason: "revision_moved", revision: head.revision };
+  }
   if (a.toRevision < 1 || a.toRevision >= head.revision) return { ok: false, reason: "not_revertable" };
 
   const [target] = await ex
@@ -485,8 +513,10 @@ export async function revertNote(
   );
   // The head moved between the read and the CAS — another tab, or the agent mid-turn. The
   // person can look and ask again; silently reverting whatever is there now would undo an
-  // edit they have not seen.
-  if (!upd.ok) return { ok: false, reason: "revision_moved" };
+  // edit they have not seen. The revision reported is the one this transaction read: it is
+  // the newest value this function can honestly name, and it is enough for the caller to
+  // say the file changed.
+  if (!upd.ok) return { ok: false, reason: "revision_moved", revision: head.revision };
   return { ok: true, revision: upd.revision };
 }
 

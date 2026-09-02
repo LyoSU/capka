@@ -84,10 +84,22 @@ describe("what the memory notice says and what its Undo does", () => {
     expect(undoRequest(write({ revision: 2 }))).toEqual({
       path: "/api/memory/notes/n1",
       method: "PATCH",
-      body: { revertTo: 1 },
+      body: { revertTo: 1, expectedRevision: 2 },
     });
     // The target is the revision BEFORE the one the turn wrote, whatever that number is.
     expect(undoRequest(write({ revision: 7 }))).toMatchObject({ body: { revertTo: 6 } });
+  });
+
+  it("sends the revision it DISPLAYED, so a file edited since is refused rather than rolled back", () => {
+    // `revertTo` is computed from client state. If a later turn edited the same file
+    // between the render and the click, the target is still strictly below the new head, so
+    // an unguarded revert succeeds and drops that later edit out of the head — for a person
+    // who never saw it and has no version history to find it in. The head the notice was
+    // looking at travels with the request and the server compares it.
+    expect(undoRequest(write({ revision: 7 }))).toMatchObject({ body: { expectedRevision: 7 } });
+    // Never on a delete: there is nothing to be stale about — the wish is that the row not
+    // be there, and a row somebody else already removed satisfies it.
+    expect(undoRequest(write({ revision: 1 })).body).toBeNull();
   });
 
   it("addresses the row by an encoded id, never by raw interpolation", () => {

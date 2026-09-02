@@ -319,6 +319,47 @@ run("vault: what a turn wrote to memory", () => {
     expect(await readTurnWrites([MSG], OWNER)).toEqual({});
   });
 
+  it("refuses a revert whose expected head has moved, and writes nothing", async () => {
+    // The notice computes `revertTo` from the revision it DISPLAYED, so if a later turn
+    // edited the same file in between, an unguarded revert succeeds and drops that later
+    // edit out of the head — for a person who was looking at a stale page and has no
+    // version-history surface to notice with. The window is narrow by design and it is
+    // still a window, so the expected head travels with the request.
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, OTHER_MSG, "The first steps.");
+    const actor = { kind: "user", id: OWNER } as const;
+    for (const [rev, body] of [[1, "The second steps."], [2, "The third steps."]] as const) {
+      await reviseNote({
+        noteId: note.id,
+        spaceId,
+        expectedRevision: rev,
+        title: "Acme onboarding",
+        bodyMarkdown: body,
+        sourceClass: testServerClass("agent_inferred"),
+        provenance: { kind: "agent_inference", messageId: MSG, taskId: TASK },
+        actor: { kind: "agent" },
+      });
+    }
+
+    // The page still shows revision 2, so it asks to go back to 1 believing 2 is the head.
+    expect(await revertNote({ noteId: note.id, spaceId, toRevision: 1, expectedRevision: 2, actor })).toEqual({
+      ok: false,
+      reason: "revision_moved",
+      revision: 3,
+    });
+    // NOTHING was written: no fourth version, and the third revision's words still stand.
+    const versions = await q(`SELECT count(*) AS n FROM vault_note_versions WHERE note_id = $1`, [note.id]);
+    expect(Number((versions.rows[0] as { n: string }).n)).toBe(3);
+    expect(await noteHead(note.id, [spaceId])).toMatchObject({ revision: 3, bodyMarkdown: "The third steps." });
+
+    // And the same request with the head it actually has goes through, so the guard is a
+    // guard and not a wall.
+    expect(await revertNote({ noteId: note.id, spaceId, toRevision: 1, expectedRevision: 3, actor })).toEqual({
+      ok: true,
+      revision: 4,
+    });
+  });
+
   it("refuses a revert that is not to an EARLIER revision", async () => {
     // Reverting to the head is a no-op dressed as a write, and reverting forward is not a
     // thing an undo can mean. Both are refused rather than silently doing nothing, so a

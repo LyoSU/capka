@@ -120,18 +120,36 @@ export const POST = apiHandler(async (_req: Request, ctx: { params: Promise<{ no
  * head, so a stale page cannot revert forward or turn a revert into a no-op that reports
  * success.
  *
- * One 400 for a body that is not a revision, and one 404 for everything else — no such
- * note, not yours, deleted since, nothing earlier to go back to, or the head moved under
- * the request. See `revertNote`: telling them apart would make another user's note ids
- * probeable one at a time.
+ * IT ALSO TAKES THE HEAD THE CLIENT SAW, and that is the case the two clauses above do NOT
+ * cover: a later turn edits the same file between the notice's render and the click, the
+ * requested target is still strictly below the new head, and an unguarded revert therefore
+ * succeeds — dropping an edit the person never saw, with no version-history surface to
+ * notice it in. `expectedRevision` is optional (a caller that has just read the head is not
+ * stale) and the notice always sends it.
+ *
+ * A LOST CAS IS A 409, NOT A 404, and the difference is what the client can do next. A 404
+ * means the row is gone, which for a DELETE satisfies the wish — the notice drops the item
+ * and says nothing. For a revert the edit is still there, so collapsing `revision_moved`
+ * into 404 removed the one control that could retry and reported success for a file it had
+ * not changed. The 409 carries the head it found, and the notice surfaces it as a failure.
+ *
+ * One 400 for a body that is not a revision, one 409 for a head that moved, and one 404 for
+ * everything else — no such note, not yours, deleted since, or nothing earlier to go back
+ * to. See `revertNote`: telling THOSE apart would make another user's note ids probeable
+ * one at a time, which a 409 does not, since it is only reachable for a note the ownership
+ * read above already admitted.
  */
 export const PATCH = apiHandler(async (req: Request, ctx: { params: Promise<{ noteId: string }> }) => {
   const { userId } = await requireWriter();
   const { noteId } = await ctx.params;
 
   const body = await req.json().catch(() => null);
-  const revertTo = (body as { revertTo?: unknown } | null)?.revertTo;
-  if (typeof revertTo !== "number" || !Number.isInteger(revertTo) || revertTo < 1) {
+  const { revertTo, expectedRevision } = (body ?? {}) as { revertTo?: unknown; expectedRevision?: unknown };
+  const isRevision = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 1;
+  // `expectedRevision` is optional, so `undefined` passes and anything else that is not a
+  // revision does not: a client sending a malformed guard must not have it silently dropped
+  // and get the unguarded write it was trying to avoid.
+  if (!isRevision(revertTo) || (expectedRevision !== undefined && !isRevision(expectedRevision))) {
     return Response.json({ error: "bad_request" }, { status: 400 });
   }
 
@@ -142,11 +160,13 @@ export const PATCH = apiHandler(async (req: Request, ctx: { params: Promise<{ no
     noteId: head.id,
     spaceId: head.spaceId,
     toRevision: revertTo,
+    expectedRevision,
     // `user`, never `agent`: a model that could undo its own edit on the person's behalf
     // would make the notice's Undo a thing the agent can press.
     actor: { kind: "user", id: userId },
   });
-  return res.ok
-    ? Response.json({ ok: true, revision: res.revision })
+  if (res.ok) return Response.json({ ok: true, revision: res.revision });
+  return res.reason === "revision_moved"
+    ? Response.json({ error: "revision_moved", revision: res.revision }, { status: 409 })
     : Response.json({ error: "not_found" }, { status: 404 });
 });

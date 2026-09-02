@@ -66,6 +66,18 @@ const edited = (w: Pick<TurnWrite, "kind" | "revision">) => w.kind === "note" &&
  * same reason: this repo's vitest has no React renderer, so a branch inside `MemoryNotice`
  * cannot be asserted at all — and this one is a decision about destroying a person's data.
  *
+ * THE REVERT CARRIES THE HEAD THE NOTICE DISPLAYED, and that is not belt-and-braces. Both
+ * numbers are computed from client state: if a later turn edits the same file between this
+ * notice's render and the click, `revertTo` is still strictly below the new head, so the
+ * server's own "not forward, not a no-op" check passes and an unguarded revert drops that
+ * later edit out of the head — for a person who never saw it, and who has no version
+ * history to find it in. `expectedRevision` is what turns that into a refusal (409) instead.
+ *
+ * A DELETE SENDS NO SUCH THING, because there is nothing to be stale about: the wish is
+ * that the row not be there, and a row somebody else already removed satisfies it. That
+ * asymmetry is the same one that makes 404 a success for a delete and a failure for a
+ * revert.
+ *
  * The id is ENCODED here, not at the call site: it is part of what "which row" means, and a
  * path built by interpolation somewhere else is the copy that forgets.
  */
@@ -74,11 +86,11 @@ export function undoRequest(item: TurnWrite): {
   method: "DELETE" | "PATCH";
   /** The PATCH body, or `null` for a delete — never an empty object, so a caller cannot
    *  send a bodyless PATCH by accident. */
-  body: { revertTo: number } | null;
+  body: { revertTo: number; expectedRevision: number } | null;
 } {
   const path = `/api/memory/${item.kind === "note" ? "notes" : "claims"}/${encodeURIComponent(item.id)}`;
   return edited(item)
-    ? { path, method: "PATCH", body: { revertTo: item.revision - 1 } }
+    ? { path, method: "PATCH", body: { revertTo: item.revision - 1, expectedRevision: item.revision } }
     : { path, method: "DELETE", body: null };
 }
 

@@ -1463,9 +1463,18 @@ function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWr
       });
       // 404 is "already gone" — undone in another tab, or deleted from the memory page.
       // The row is not there either way, so the item leaves the notice: a button that
-      // reports failure for a state the person wanted is a button that looks broken. A
-      // revert answers 404 for a head that has moved on too, and the same reasoning holds:
-      // what the person wanted undone is no longer what is stored.
+      // reports failure for a state the person wanted is a button that looks broken.
+      //
+      // 409 IS THE OPPOSITE CASE AND MUST NOT BE SWALLOWED WITH IT. A revert answers 409
+      // when the file has been edited since this notice rendered, and then the edit is
+      // still there: removing the item would report success for a change that did not
+      // happen, and take away the only control that could ask again. It says so in its own
+      // words, because "please try again" is false advice here — the request would carry
+      // the same stale revision and fail the same way.
+      if (res.status === 409) {
+        toast.error(t("undoMoved"));
+        return;
+      }
       if (!res.ok && res.status !== 404) throw new Error();
       setGone((g) => [...g, item.id]);
     } catch {
