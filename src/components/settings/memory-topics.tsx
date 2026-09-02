@@ -721,7 +721,10 @@ export function MemoryTopicDetail({
 
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-1">
-          <Statement value={topic.title} className="text-base font-semibold tracking-tight" />
+          {/* THE SAME reveal the body is gated on, handed in rather than grown here: the
+              title and the body carry one head revision's flag, so two controls over them
+              would be two controls over one secret. */}
+          <Statement value={topic.title} reveal={reveal} className="text-base font-semibold tracking-tight" />
           <TrustBadge trust={topic.trust} value={topic.title} />
         </div>
         <div className="shrink-0">

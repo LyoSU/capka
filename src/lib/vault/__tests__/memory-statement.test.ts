@@ -122,6 +122,20 @@ describe("a statement's legibility is decided in one place", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("gives the open file ONE reveal over its title and its body", () => {
+    // The detail view holds a `reveal` for the body — a markdown body cannot go through
+    // `Statement`, so the gate is explicit there — and the title's own `Statement` was
+    // taking its own. Two controls over one secret is how half of it stays on screen: the
+    // title and the body carry the SAME head revision's flag, so revealing one and not the
+    // other is not a state anybody asked for. The module's own docstring already said the
+    // reveal is shared; this is the assertion that makes it true.
+    const owner = readFileSync(OWNER, "utf8");
+    const detail = owner.slice(owner.indexOf("export function MemoryTopicDetail"));
+    const titleLine = codeLines(detail).find((l) => l.includes("<Statement value={topic.title}"));
+    expect(titleLine).toBeDefined();
+    expect(titleLine).toContain("reveal={reveal}");
+  });
+
   it("gates a decision about a hidden statement on the reveal, not on a flag of its own", () => {
     // A source-text assertion, and deliberately so: this repo's vitest runs
     // `environment: "node"` with no renderer, so "the button is disabled" is not
