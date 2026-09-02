@@ -214,7 +214,7 @@ function ChatStatusDot({
     return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label={labels.working} />;
   }
   if (unread) {
-    return <span className="size-2 shrink-0 rounded-full bg-primary" role="status" aria-label={labels.unread} />;
+    return <span className="size-2 shrink-0 rounded-full bg-brand" role="status" aria-label={labels.unread} />;
   }
   return null;
 }
