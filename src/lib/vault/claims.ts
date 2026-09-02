@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
@@ -831,6 +831,100 @@ export async function forgetClaim(
     subjectType: "claim",
     subjectId: claimId,
     payload: { revision: prev.revision },
+  });
+  return { ok: true };
+}
+
+/**
+ * THE OWNER'S DECISION ON A DISAGREEMENT — §4.5 step 5's other end.
+ *
+ * That step stores a correction it may not apply as a live row pointing at the fact it
+ * contests, and the design's answer to "I cannot tell whether this correction is the
+ * user's" is a card the person taps. This is the write behind that tap, and it lives in
+ * this module for the reason every other one does: `vault_claims` is written only by
+ * whoever owns it, and `conflicts_with` is one of its columns.
+ *
+ * THE FLAG IS CLEARED IN ALL THREE OUTCOMES, and that is the whole shape. "Keep both"
+ * clears it and stops there — the two facts are both the person's, they simply disagree,
+ * and a card that came back next week would be asking a question already answered.
+ * "Keep this one" or "keep the other" clears it and forgets the loser through
+ * `forgetClaim`, so the deletion is the same terminal state and the same audit trail a
+ * person deleting a fact by hand produces. Nothing here supersedes: a supersede rewrites
+ * a chain, and these are two independent facts, one of which is being dropped.
+ *
+ * It takes `allowedSpaceIds` like every other move in this module, and it refuses a row
+ * that carries no conflict — a card the person tapped twice, or a stale page — with the
+ * same undifferentiated `false` the CAS paths use, because telling "not yours" from
+ * "already resolved" apart would make another user's claim ids probeable.
+ */
+export async function resolveConflict(
+  args: {
+    /** The CONTESTING row: the one carrying `conflicts_with`. The card is rendered from
+     *  it, so the id the browser sends back is this one whichever side is being kept. */
+    claimId: string;
+    keep: "both" | "this" | "other";
+    allowedSpaceIds: string[];
+    actor: Actor;
+  },
+  ex?: Ex,
+): Promise<{ ok: boolean }> {
+  if (!ex || ex === db) return db.transaction((tx) => resolveConflict(args, tx));
+  const { claimId, keep, allowedSpaceIds, actor } = args;
+
+  // THE POINTER IS READ UNDER ITS OWN ROW LOCK, and read BEFORE it is cleared: `RETURNING`
+  // on an UPDATE hands back the row after the SET, so clearing first and reading the
+  // result would hand back the NULL this move just wrote. `FOR UPDATE` is what closes the
+  // window instead — a second tap, or a delete racing this one, queues on this statement
+  // and finds no conflict left when it gets through.
+  const [contesting] = await ex
+    .select({
+      spaceId: vaultClaims.spaceId,
+      revision: vaultClaims.revision,
+      contested: vaultClaims.conflictsWith,
+    })
+    .from(vaultClaims)
+    .where(
+      and(
+        eq(vaultClaims.id, claimId),
+        isNull(vaultClaims.supersededAt),
+        isNotNull(vaultClaims.conflictsWith),
+        inArray(vaultClaims.spaceId, allowedSpaceIds),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  if (!contesting?.contested) return { ok: false };
+
+  await ex.update(vaultClaims).set({ conflictsWith: null }).where(eq(vaultClaims.id, claimId));
+
+  if (keep !== "both") {
+    // WHICH ROW LOSES is derived from the stored pointer, never from a second id the
+    // browser sends: one decision has one address, and the pointer is the evidence that
+    // the conflict was recorded at all.
+    const loser = keep === "this" ? contesting.contested : claimId;
+    const head = await findCurrentHead(loser, allowedSpaceIds, ex);
+    if (!head) return { ok: false };
+    // Through `forgetClaim`, never a bare update: the node's tombstone, the edge cascade
+    // and the `claim.forget` event with the OWNER as actor all live with it, so keeping
+    // one of two facts leaves exactly the trail deleting a fact by hand leaves.
+    const forgotten = await forgetClaim(
+      { claimId: head.id, expectedRevision: head.revision, allowedSpaceIds, actor },
+      ex,
+    );
+    if (!forgotten.ok) return { ok: false };
+  }
+
+  await ex.insert(auditEvents).values({
+    id: nanoid(),
+    spaceId: contesting.spaceId,
+    actor,
+    action: "claim.conflict",
+    subjectType: "claim",
+    subjectId: claimId,
+    // No text — the audit log is read more widely than the space itself, and this event
+    // outlives the space by design. `keep` is the decision, `revision` addresses which
+    // version it was taken on.
+    payload: { keep, revision: contesting.revision },
   });
   return { ok: true };
 }

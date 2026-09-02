@@ -1,9 +1,11 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
   chats, claimEvidence, memoryCandidates, messages, projects, spaces, vaultClaims,
 } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
+import type { SourceClass } from "./claims";
 import { norm } from "./text";
 
 /**
@@ -53,9 +55,24 @@ import { norm } from "./text";
  * separate want, and it needs a column of its own. Giving `sensitive` a third meaning
  * here is exactly the mistake this comment exists to undo.
  *
- * `review_status` is filtered to `confirmed` for the FACTS. An unverified claim is
- * quarantined material and belongs in the waiting list below, not in the list of what
- * the assistant is using — the same rule the model-facing readers hold.
+ * NOTHING DECIDES VISIBILITY ON THE OWNER'S OWN PAGE, and that is a change worth the
+ * paragraph it replaces.
+ *
+ * This module used to filter both head selects on `review_status = 'confirmed'`, on the
+ * reasoning that an unverified claim was quarantined material and belonged in the waiting
+ * list rather than in the list of what the assistant is using — the same rule the
+ * model-facing readers held. That reasoning was sound while a person's confirmation was
+ * the ONLY thing that could put a fact in front of the model. Slice 2 removes that gate
+ * (§11.9, H12): the agent writes live facts, so with the filter left in place every one
+ * of them would be invisible on the only surface where a person can see, edit, undo or
+ * delete it — and this release's own shipping copy would be false.
+ *
+ * WHAT REPLACED IT is `source_class`, and it answers a different question. The filter
+ * answered "may this be shown"; the class answers "where did this come from", which is
+ * what a person actually needs in order to judge a row. The channel a row may reach a
+ * MODEL through is still decided — by the generated `prompt_access` column, read only by
+ * `model-view.ts` — and that decision is unchanged and is not this module's. `review_status`
+ * is kept as history and is read by no path here (§2.12).
  */
 
 export type FactSource =
@@ -92,12 +109,41 @@ export type StatementView = {
 
 export type FactHistory = { statement: StatementView; at: string };
 
+/**
+ * WHERE A ROW CAME FROM, as one label the page renders without opening anything.
+ *
+ * CLASS = TRUST, PROVENANCE = MEDIUM (§2.3), and this union is that sentence in a type.
+ * The first three arms come from `source_class` alone, because a trust tier is all those
+ * classes assert. The last two are ONE class — `untrusted_derived` — split by the medium
+ * recorded in `origin`, which is the only thing that can say whether the bytes came out
+ * of a document or off a web page. Deriving the medium from the class instead is the
+ * round-1 H2 mistake (`file_derived` named a medium and let a fetched page fall outside
+ * every poisoning bound), and deriving the class from the medium is the same error
+ * mirrored.
+ *
+ * A flattened `tag: string` was the other option and it is the one §9.1 forbids: "Director:
+ * Olena" from a 2019 contract reading as a confirmed personal fact is exactly what one
+ * generic card produces. The document arm carries its `name` as a VALUE so the translator
+ * interpolates it — Ukrainian declines the words around a quoted title.
+ */
+export type TrustTag =
+  | { kind: "user_direct" }
+  | { kind: "owner_authored" }
+  | { kind: "agent_inferred" }
+  | { kind: "untrusted_document"; name: string }
+  | { kind: "untrusted_web" };
+
 export type FactView = {
   id: string;
   revision: number;
   statement: StatementView;
   recordedAt: string;
   source: FactSource;
+  /** The trust tag, from `source_class` and `origin` — never from `prompt_access`. This
+   *  page is the OWNER's surface and deliberately does not go through `model-view.ts`,
+   *  which withholds from the model and never from the person, so no channel value
+   *  travels on this wire at all. */
+  trust: TrustTag;
   /** The immediately previous version. Carries its OWN sensitivity, which is not
    *  derivable from the successor's: `confirmClaim` raises a head's flag in place with no
    *  supersede, so a non-sensitive fact really can hold a predecessor that has since
@@ -105,16 +151,50 @@ export type FactView = {
   previous: FactHistory | null;
 };
 
-export type PendingView = {
+/**
+ * ONE HALF OF A DISAGREEMENT — a live head, with what it needs to be judged against the
+ * other half. Both halves have the same shape because neither is privileged: §4.5 step 5
+ * stores the correction live at its own class beside the fact it contests, and the person
+ * decides which stands.
+ */
+export type ConflictSide = {
+  id: string;
+  revision: number;
+  statement: StatementView;
+  trust: TrustTag;
+  at: string;
+};
+
+export type ConflictView = {
+  /** The CONTESTING row — the newer statement, carrying `conflicts_with`. */
+  claim: ConflictSide;
+  /** The row it contests. Present by construction: `conflicts_with` is a composite FK to
+   *  `vault_nodes`, so a dangling or cross-space pointer is unrepresentable rather than
+   *  something this reader has to notice (round-2 N11). A pointer whose target has since
+   *  been superseded or forgotten is not a live conflict and is not returned at all. */
+  contested: ConflictSide;
+};
+
+/**
+ * A row from the RETIRED review queue — read-only, and on its way out.
+ *
+ * `memory_candidates` stopped being written when the new write tools shipped (§11.8).
+ * Its unresolved rows are not deleted with their producer, because a person may have
+ * meant to keep one: they become the "Earlier suggestions" archive, which expires thirty
+ * days after this release and takes the table with it (§2.12). Nothing is ever
+ * auto-promoted out of it — a keep writes a real claim at `owner_authored`, which is a
+ * person's act.
+ */
+export type ArchivedView = {
   id: string;
   statement: StatementView;
   createdAt: string;
   state: "pending" | "conflict";
   source: FactSource;
-  /** For a row in `conflict`: the head it is contested against. Keeping this one
+  /** For a row in `conflict`: the head it was recorded against. Keeping this one
    *  supersedes that one, and a person cannot make that choice against a fact they
-   *  cannot see. `null` on a plain pending row, and also on the conflict the ledger
-   *  records with no head to point at (the slot was contested and then vacated). */
+   *  cannot see. `null` on a plain row, and also on the conflict the ledger recorded
+   *  with no head to point at (the slot was contested and then vacated). */
   conflictsWith: FactHistory | null;
 };
 
@@ -122,8 +202,8 @@ export type ScopeView = {
   scope: "user" | "project";
   projectId?: string;
   projectName?: string;
-  /** Every confirmed live head in the space, newest first — matching the search when
-   *  there is one, and never more than `FACT_LIMIT` of them. */
+  /** Every LIVE HEAD in the space, newest first — whatever its `review_status`, matching
+   *  the search when there is one, and never more than `FACT_LIMIT` of them. */
   facts: FactView[];
   /** How many matched the search, BEFORE the cap. Reported separately because the page
    *  has to be able to say "you are looking at 200 of 5000" — a count derived from
@@ -135,8 +215,31 @@ export type ScopeView = {
    *  a number the search box narrowed — a person who typed a word and then reset would be
    *  told two facts were going while fifty-one went. */
   factsTotal: number;
-  pending: PendingView[];
+  /** Facts that disagree with each other, from the ONE reader of that state
+   *  (`readConflicts`). Both halves also appear in `facts` — they are live heads, and
+   *  nothing decides visibility on this page — so the card is a second VIEW of them and
+   *  not a filter over the list, which is what keeps a second predicate from existing. */
+  conflicts: ConflictView[];
+  /** The retired review queue's leftovers. Empty for every account that never had one. */
+  archive: ArchivedView[];
 };
+
+/**
+ * WHEN THE ARCHIVE GOES, stated from the day it appears so the deadline is never a
+ * surprise (§11.8).
+ *
+ * A literal release date rather than a per-row `created_at + 30 days`: the promise is
+ * about the TABLE, which is dropped in one release, and a per-row horizon would show
+ * eleven different dates for one event. It is the one date in this module a reader has to
+ * keep true by hand, which is why it is a named constant beside the type it belongs to
+ * rather than an expression inside a query.
+ */
+const ARCHIVE_RELEASED_ON = "2026-09-02";
+export const ARCHIVE_DAYS = 30;
+
+export function archiveExpiresAt(): string {
+  return new Date(Date.parse(ARCHIVE_RELEASED_ON) + ARCHIVE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
 
 /**
  * How many facts one scope sends to the browser.
@@ -188,7 +291,44 @@ function sourceOf(
 }
 
 /**
- * ONE list of a scope's facts — every confirmed live head in the space, newest first.
+ * THE TRUST TAG, from the stored class and the stored medium, and from nothing else.
+ *
+ * A pure function beside `sourceOf` for the same two reasons that one is: this repo's
+ * vitest runs with `environment: "node"` and has no React renderer, so a mapping inside a
+ * component cannot be tested at all — and the `untrusted_derived` split is exactly the
+ * kind of branch that rots silently.
+ *
+ * `legacy_confirmed` shares the `user_direct` arm because it means the same thing to the
+ * person reading it: a pre-cutover claim they confirmed on this page IS something they
+ * told Capka. That is a display equivalence, not a class equivalence — the two are still
+ * different values in `source_class`, and `CLASS_RANK` in `write-tools.ts` is where their
+ * shared authority is expressed for the supersede decision.
+ *
+ * The medium comes off `origin`, and the WEB arm is the fallback rather than the document
+ * one. That is a fact about this release, not a preference: file ingestion is project-only
+ * and lands in slice 3 (§5.0), so the only untrusted ingress reachable today is a fetched
+ * page or a connector's output. When a source version starts naming a document, the name
+ * arrives here as `origin.documentName` and the other arm lights up with no change to
+ * this switch.
+ */
+export function trustTagOf(sourceClass: SourceClass, origin: unknown): TrustTag {
+  switch (sourceClass) {
+    case "user_direct":
+    case "legacy_confirmed":
+      return { kind: "user_direct" };
+    case "owner_authored":
+      return { kind: "owner_authored" };
+    case "agent_inferred":
+      return { kind: "agent_inferred" };
+    case "untrusted_derived": {
+      const name = (origin as { documentName?: unknown } | null)?.documentName;
+      return typeof name === "string" && name.trim() ? { kind: "untrusted_document", name } : { kind: "untrusted_web" };
+    }
+  }
+}
+
+/**
+ * ONE list of a scope's facts — every LIVE HEAD in the space, newest first.
  *
  * IT USED TO BE A LIST PER TOPIC, and that is what this replaces. The page drew a rail of
  * topic buttons over the result and showed one topic's facts at a time, so of the 51 facts
@@ -226,15 +366,16 @@ async function factsOf(
       recordedAt: vaultClaims.recordedAt,
       supersedes: vaultClaims.supersedes,
       origin: vaultClaims.origin,
+      // The STORED tier, which is what the tag is made of. `prompt_access` is
+      // deliberately not selected: it is the model's channel, and this page is the
+      // owner's surface.
+      sourceClass: vaultClaims.sourceClass,
     })
     .from(vaultClaims)
-    .where(
-      and(
-        eq(vaultClaims.spaceId, spaceId),
-        isNull(vaultClaims.supersededAt),
-        eq(vaultClaims.reviewStatus, "confirmed"),
-      ),
-    )
+    // HEAD + SCOPE, and nothing else (§11.9). No `review_status`, no `prompt_access`:
+    // the first is history and the second withholds from the MODEL, never from the
+    // person whose space this is.
+    .where(and(eq(vaultClaims.spaceId, spaceId), isNull(vaultClaims.supersededAt)))
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
 
   // The search, and the one thing it must not do: look at `sensitive`.
@@ -295,6 +436,7 @@ async function factsOf(
       statement: { text: f.statement, sensitive: f.sensitive },
       recordedAt: f.recordedAt.toISOString(),
       source: sourceOf(evidenceRows.filter((e) => e.claimId === f.id), f.origin),
+      trust: trustTagOf(f.sourceClass, f.origin),
       previous: prev
         ? { statement: { text: prev.statement, sensitive: prev.sensitive }, at: prev.recordedAt.toISOString() }
         : null,
@@ -305,13 +447,105 @@ async function factsOf(
   return { facts, matched: matched.length, total: heads.length };
 }
 
-/** What is waiting for the person: everything they still have to decide, oldest first
- *  (they work through it from the start).
+/**
+ * THE ONE READER OF CONFLICT STATE, and it returns BOTH statements (§9.1).
+ *
+ * `conflicts_with` is written by §4.5 step 5 — a correction that may not supersede is
+ * stored live at its own class pointing at the fact it contests, and the target row is
+ * untouched. Two readers with different predicates was already a recorded near-miss in
+ * this feature (the confirm path read `policy_state` while the page read the evidence
+ * column, so a person authorised a replacement and got a second head contradicting the
+ * first, in every later prompt, forever). So there is one function, it serves the card
+ * and the fact list alike, and the fact list makes no conflict decision of its own —
+ * which is what leaves nothing for a second predicate to disagree with.
+ *
+ * BOTH statements, not a flag. A person cannot choose between two facts against one they
+ * cannot see, and both sides carry their own `sensitive` and their own trust tag because
+ * both are their own row: `confirmClaim` raises a flag in place, and the contesting row
+ * is by definition at a different class from the one it contests.
+ *
+ * FOUR conditions, and each one is a rule this surface already holds:
+ *   - the space, so a pointer can only ever be read inside the space that owns it;
+ *   - `conflicts_with IS NOT NULL`, which is the state itself;
+ *   - both rows LIVE (`superseded_at IS NULL`) — quoting a dead predecessor as the thing
+ *     this would replace misdescribes the choice being asked for;
+ *   - no `review_status` clause, for the reason the module docstring gives.
+ */
+export async function readConflicts(spaceId: string): Promise<ConflictView[]> {
+  const contesting = db.$with("contesting").as(
+    db
+      .select({
+        id: vaultClaims.id,
+        revision: vaultClaims.revision,
+        statement: vaultClaims.statement,
+        sensitive: vaultClaims.sensitive,
+        sourceClass: vaultClaims.sourceClass,
+        origin: vaultClaims.origin,
+        recordedAt: vaultClaims.recordedAt,
+        conflictsWith: vaultClaims.conflictsWith,
+      })
+      .from(vaultClaims)
+      .where(
+        and(
+          eq(vaultClaims.spaceId, spaceId),
+          isNull(vaultClaims.supersededAt),
+          isNotNull(vaultClaims.conflictsWith),
+        ),
+      ),
+  );
+  // A self-join rather than two round trips: the pair is the unit, and a second query
+  // would be a second chance for the two halves to be read under different predicates.
+  const target = alias(vaultClaims, "target");
+  const rows = await db
+    .with(contesting)
+    .select({
+      id: contesting.id,
+      revision: contesting.revision,
+      statement: contesting.statement,
+      sensitive: contesting.sensitive,
+      sourceClass: contesting.sourceClass,
+      origin: contesting.origin,
+      recordedAt: contesting.recordedAt,
+      otherId: target.id,
+      otherRevision: target.revision,
+      otherStatement: target.statement,
+      otherSensitive: target.sensitive,
+      otherSourceClass: target.sourceClass,
+      otherOrigin: target.origin,
+      otherRecordedAt: target.recordedAt,
+    })
+    .from(contesting)
+    .innerJoin(
+      target,
+      and(eq(target.id, contesting.conflictsWith), eq(target.spaceId, spaceId), isNull(target.supersededAt)),
+    )
+    .orderBy(desc(contesting.recordedAt), asc(contesting.id));
+
+  return rows.map((r) => ({
+    claim: {
+      id: r.id,
+      revision: r.revision,
+      statement: { text: r.statement, sensitive: r.sensitive },
+      trust: trustTagOf(r.sourceClass, r.origin),
+      at: r.recordedAt.toISOString(),
+    },
+    contested: {
+      id: r.otherId,
+      revision: r.otherRevision,
+      statement: { text: r.otherStatement, sensitive: r.otherSensitive },
+      trust: trustTagOf(r.otherSourceClass, r.otherOrigin),
+      at: r.otherRecordedAt.toISOString(),
+    },
+  }));
+}
+
+/** What the retired review queue still holds, oldest first (a person reads it from the
+ *  start). Read-only: the archive expires with its table (§11.8).
  *
  *  `denied` is excluded — the user said they did not want that material, and listing it
  *  would put it back on the screen it was refused from. `auto_active` is excluded
  *  because it was never a question. */
-async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]> {
+async function archiveOf(spaceId: string, userId: string): Promise<ArchivedView[]> {
   const rows = await db
     .select({
       id: memoryCandidates.id,
@@ -336,14 +570,14 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
     )
     .orderBy(asc(memoryCandidates.createdAt), asc(memoryCandidates.id));
 
-  // The other half of every conflict, in one statement. Three filters, and each one is a
-  // rule this surface already holds elsewhere:
-  //   - the space, because `conflicts_with` carries no foreign key;
+  // The other half of an archived conflict, in one statement. TWO filters now, and the
+  // third one's removal is the same change the fact list above got: `review_status =
+  // 'confirmed'` used to be here so the archive could not name a claim the page refused
+  // to list, and nothing is refused any more.
+  //   - the space, because `memory_candidates.conflicts_with` carries no foreign key
+  //     (unlike `vault_claims`', which is composite — round-2 N11);
   //   - `superseded_at IS NULL`, because quoting a dead predecessor as the thing this
-  //     would replace misdescribes the choice being asked for;
-  //   - `review_status = 'confirmed'`, the same quarantine rule `topicsOf` holds. The
-  //     head is taken from `headBySlot`/`listHeadClaims`, neither of which filters review
-  //     status, so without this the page names a claim it refuses to list anywhere else.
+  //     would replace misdescribes the choice being asked for.
   // `sensitive` is selected because `StatementView` carries it; nothing here reads it.
   const contestedIds = rows.map((r) => r.conflictsWith).filter((v): v is string => !!v);
   const contested = contestedIds.length
@@ -360,7 +594,6 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
             inArray(vaultClaims.id, contestedIds),
             eq(vaultClaims.spaceId, spaceId),
             isNull(vaultClaims.supersededAt),
-            eq(vaultClaims.reviewStatus, "confirmed"),
           ),
         )
     : [];
@@ -369,9 +602,9 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
     const other = r.conflictsWith ? contested.find((c) => c.id === r.conflictsWith) : undefined;
     return {
       id: r.id,
-      // The owner's own words to decide on. A sensitive candidate is marked, not
-      // withheld — see the module comment: confirming what the screen refuses to show
-      // is not a decision anyone can make.
+      // The owner's own words to decide on. A sensitive row is marked, not withheld —
+      // see the module comment: confirming what the screen refuses to show is not a
+      // decision anyone can make.
       statement: { text: r.statement, sensitive: r.sensitive },
       createdAt: (r.createdAt ?? new Date(0)).toISOString(),
       state: r.policyState === "conflict" ? "conflict" : "pending",
@@ -386,11 +619,15 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
 /**
  * The whole page for one person, optionally narrowed to a search.
  *
- * `query` narrows the FACTS and nothing else. The review queue is what a person still has
- * to decide, it is short by construction, and hiding rows out of it behind a search box
- * would be a way to lose a decision — so it comes back whole whatever is typed.
+ * `query` narrows the FACTS and nothing else. The conflicts are decisions a person still
+ * has to take and the archive is on a deadline; both are short by construction, and
+ * hiding a row out of either behind a search box would be a way to lose it — so they come
+ * back whole whatever is typed.
  */
-export async function readMemoryPage(userId: string, query = ""): Promise<{ scopes: ScopeView[] }> {
+export async function readMemoryPage(
+  userId: string,
+  query = "",
+): Promise<{ scopes: ScopeView[]; archiveExpiresAt: string }> {
   const projectRows = await db
     .select({ id: projects.id, name: projects.name })
     .from(projects)
@@ -421,21 +658,30 @@ export async function readMemoryPage(userId: string, query = ""): Promise<{ scop
     facts: own.facts,
     factsMatched: own.matched,
     factsTotal: own.total,
-    pending: userSpace ? await pendingOf(userSpace.id, userId) : [],
+    conflicts: userSpace ? await readConflicts(userSpace.id) : [],
+    archive: userSpace ? await archiveOf(userSpace.id, userId) : [],
   });
   for (const p of projectRows) {
     const space = spaceRows.find((s) => s.type === "project" && s.refId === p.id);
     if (!space) continue;
-    const [found, pending] = await Promise.all([factsOf(space.id, userId, query), pendingOf(space.id, userId)]);
+    const [found, conflicts, archive] = await Promise.all([
+      factsOf(space.id, userId, query),
+      readConflicts(space.id),
+      archiveOf(space.id, userId),
+    ]);
     // Dropped on the UNFILTERED total, not on the match count: a project section is a
     // heading, and a heading over nothing is noise — but a search that matched nothing in
     // this project has not emptied the project, and making its whole section vanish while
     // the reader types is how a person concludes a project's memory was lost.
-    if (!found.total && !pending.length) continue;
+    if (!found.total && !archive.length) continue;
     scopes.push({
       scope: "project", projectId: p.id, projectName: p.name,
-      facts: found.facts, factsMatched: found.matched, factsTotal: found.total, pending,
+      facts: found.facts, factsMatched: found.matched, factsTotal: found.total, conflicts, archive,
     });
   }
-  return { scopes };
+  // ON THE RESPONSE rather than in the component, because the component is a client
+  // bundle and this module opens a database connection at import. It is one date for the
+  // whole page — the archive expires as a TABLE, not row by row — so it rides beside the
+  // scopes instead of being repeated on every archived row.
+  return { scopes, archiveExpiresAt: archiveExpiresAt() };
 }

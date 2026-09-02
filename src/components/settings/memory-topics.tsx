@@ -10,7 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import type { FactSource, FactView, StatementView } from "@/lib/vault/memory-page";
+import type { FactSource, FactView, StatementView, TrustTag } from "@/lib/vault/memory-page";
 
 /** One day, in the reader's language. Shared by the provenance line and the history
  *  disclosure so a page full of dates has ONE format on it — call sites each calling
@@ -117,6 +117,52 @@ export function SourceCaption({ children, href }: { children: React.ReactNode; h
       >
         {children}
       </Link>
+    </p>
+  );
+}
+
+/**
+ * WHERE A ROW CAME FROM, in three or four words, on every row.
+ *
+ * This is the one thing the release that lets the agent write unattended cannot ship
+ * without (§11.9): with the confirmation gate gone, a person's own statement and the
+ * assistant's guess about them sit in one list, and nothing else on the row tells them
+ * apart. Flattening the two into one generic card is how «Director: Olena», lifted out of
+ * a 2019 contract, comes to read as a confirmed personal fact.
+ *
+ * The `satisfies` is the load-bearing part, not decoration: a sixth `TrustTag` arm is a
+ * COMPILE ERROR here rather than a badge with a missing label, which is the link
+ * `t(`trust.${kind}`)` would sever — the union in one file, the strings in another, and
+ * nothing in between.
+ */
+const TRUST_KEY = {
+  user_direct: "trust.userDirect",
+  owner_authored: "trust.ownerAuthored",
+  agent_inferred: "trust.agentInferred",
+  untrusted_document: "trust.untrustedDoc",
+  untrusted_web: "trust.untrustedWeb",
+} satisfies Record<TrustTag["kind"], string>;
+
+/**
+ * The trust tag, and the sensitive marker beside it when there is one.
+ *
+ * TWO CHIPS AND NOT ONE, because they answer two questions: the first is where the fact
+ * came from, the second is who may read it. A single merged label would have to drop one
+ * of them, and `sensitive` collapses every class to one channel — so merging would lose
+ * exactly the provenance this tag exists to show.
+ *
+ * QUIET BY DESIGN. Fifty facts each wearing a coloured pill is fifty alerts; these are
+ * captions in the row's own type scale, and the only one that takes any colour at all is
+ * the sensitive marker, which is genuinely about who can see the words.
+ */
+export function TrustBadge({ trust, sensitive }: { trust: TrustTag; sensitive: boolean }) {
+  const t = useTranslations("settings.memory");
+  return (
+    <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+      {/* The document's name travels as a VALUE, never interpolated here: Ukrainian
+          declines the words around a quoted title. */}
+      <span>{trust.kind === "untrusted_document" ? t(TRUST_KEY[trust.kind], { name: trust.name }) : t(TRUST_KEY[trust.kind])}</span>
+      {sensitive && <span className="text-warning-text">{t("trust.sensitive")}</span>}
     </p>
   );
 }
@@ -233,21 +279,14 @@ export function Statement({
   );
 }
 
-/** Why editing a sensitive fact will not make it visible to the assistant again.
- *
- *  Lives here, and takes the whole `StatementView`, for the reason the hook above does:
- *  a caller that asked "is this sensitive?" to decide whether to print a sentence would be
- *  the second reader of the rule. It renders nothing for an ordinary fact.
- *
- *  Sensitivity only ever rises (`confirmClaim` ORs it in SQL), so a person who opens Edit
- *  precisely to strip a code out of a statement gets a fact that stays hidden from the
- *  assistant. That is correct and it is also surprising, and until store-only visibility
- *  has a column of its own the honest thing is to say so. */
-export function SensitiveEditNote({ value }: { value: StatementView }) {
-  const t = useTranslations("settings.memory");
-  if (!value.sensitive) return null;
-  return <p className="text-[11.5px] leading-relaxed text-muted-foreground">{t("editStaysSensitive")}</p>;
-}
+/* WHERE `SensitiveEditNote` WENT. It explained that editing a sensitive fact would not
+ * make it visible to the assistant again — true, and surprising, and worth saying while
+ * the review queue offered "Edit wording" on a row that had never been saved. That
+ * affordance is gone with the queue (§11.8): the archive is read-only, so there is no
+ * composing surface left for the note to sit under. The underlying asymmetry has not
+ * changed — sensitivity only ever rises, because `confirmClaim` ORs it in SQL — and it
+ * gets its sentence back when store-only visibility earns the column of its own that
+ * `memory-page.ts`'s docstring says it needs. */
 
 /** One row. Tight on purpose: these are single sentences, and the difference between a
  *  fact and where it came from is carried by the type scale, not by padding.
@@ -386,6 +425,11 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
               </>
             )}
           </Statement>
+          {/* OUTSIDE `Statement`, deliberately: its children are gated on the reveal, and
+              the tag is not the secret — on a sensitive row it is the sentence that
+              explains why the words above are blurred, so hiding it until they are
+              readable would withhold the explanation exactly when it is needed. */}
+          <TrustBadge trust={fact.trust} sensitive={fact.statement.sensitive} />
         </div>
         <DeleteFact fact={fact} onChanged={onChanged} />
       </div>

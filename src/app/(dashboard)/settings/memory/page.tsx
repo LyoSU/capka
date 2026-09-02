@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { MemoryReview } from "@/components/settings/memory-review";
+import { MemoryArchive, MemoryConflicts } from "@/components/settings/memory-review";
 import { MemoryFacts } from "@/components/settings/memory-topics";
 import {
   SettingsEmpty,
@@ -41,23 +41,39 @@ import type { ScopeView } from "@/lib/vault/memory-page";
  * capped: filtering in the browser could only ever search the rows the server chose to
  * send, which is the search failing precisely on the memory large enough to need one.
  *
+ * THERE IS NO CONFIRMATION STEP ANY MORE, and the page's copy is what had to change with
+ * it. Every fact the assistant saves is live from the moment it is written; what tells a
+ * person's own statement apart from the assistant's guess is the TRUST TAG on the row, not
+ * a queue in front of it. Two sections beside the list carry what is left of a decision:
+ * `MemoryConflicts`, where two live facts disagree and one tap settles it, and
+ * `MemoryArchive`, the leftovers of the retired review queue, which expires with its
+ * table thirty days after this release.
+ *
  * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
  * control to state it with. A hand-typed fact has no honest provenance, and provenance
  * is the whole reason the vault exists — so the sentence IS the affordance. The live
  * data is what made this worth a line: of 31 candidates, 30 arrived from the post-turn
- * extraction (which files them as waiting, by design) and exactly one from a person
- * saying "remember that…" out loud. The mechanism works; nothing on either surface said
- * so, and the maintainer read that silence as a broken page.
+ * extraction and exactly one from a person saying "remember that…" out loud. The
+ * mechanism works; nothing on either surface said so, and the maintainer read that
+ * silence as a broken page.
  */
 
 /** One scope's contents. The user's own memory is unheaded — it is what the page is
  *  about — while a project's is a titled section, because "which project" is the thing
  *  the reader needs to know before reading a single fact under it. */
-function Scope({ scope, onChanged }: { scope: ScopeView; onChanged: () => void }) {
+function Scope({ scope, archiveExpiresAt, onChanged }: {
+  scope: ScopeView;
+  archiveExpiresAt: string;
+  onChanged: () => void;
+}) {
   const body = (
     <>
+      {/* Conflicts FIRST: they are the only thing here that is waiting on the reader, and
+          both of their halves are also in the list below — a question printed under its
+          own answers is one nobody reaches. */}
+      <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
       <MemoryFacts facts={scope.facts} matched={scope.factsMatched} onChanged={onChanged} />
-      <MemoryReview pending={scope.pending} onChanged={onChanged} />
+      <MemoryArchive archive={scope.archive} expiresAt={archiveExpiresAt} onChanged={onChanged} />
     </>
   );
   if (scope.scope === "user") return <div className="space-y-10">{body}</div>;
@@ -141,6 +157,10 @@ function ForgetEverything({ facts, onChanged }: { facts: number; onChanged: () =
 export default function MemoryPage() {
   const t = useTranslations("settings.memory");
   const [scopes, setScopes] = useState<ScopeView[] | null>(null);
+  // The archive's own deadline, as the server computed it. Held beside the scopes rather
+  // than derived here: it is one date for the whole page, and a client that computed it
+  // would be a second answer to "when does this go".
+  const [archiveExpiresAt, setArchiveExpiresAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -219,8 +239,9 @@ export default function MemoryPage() {
       setError("");
       const res = await fetch(`/api/memory?q=${encodeURIComponent(asked)}`, { signal: ac.signal });
       if (!res.ok) throw new Error();
-      const data: { scopes: ScopeView[] } = await res.json();
+      const data: { scopes: ScopeView[]; archiveExpiresAt: string } = await res.json();
       setScopes(data.scopes ?? []);
+      setArchiveExpiresAt(data.archiveExpiresAt ?? "");
     } catch {
       // Aborted means a newer `load` superseded this one — not a failure, and the newer
       // call already owns `error`/`loading`. Only a request still current gets to report.
@@ -243,7 +264,7 @@ export default function MemoryPage() {
   // an empty search result that read "Nothing remembered yet" would tell a person their
   // memory is gone. `factsTotal` is the query-independent count, so it stays true while
   // the search box has words in it.
-  const empty = !!scopes && scopes.every((s) => !s.factsTotal && !s.pending.length);
+  const empty = !!scopes && scopes.every((s) => !s.factsTotal && !s.archive.length && !s.conflicts.length);
   const nothingYet = empty && !asked;
   const noMatches = !!scopes && !!asked && scopes.every((s) => !s.factsMatched);
   // Shown once there is anything to search — and kept on screen while the box has words in
@@ -251,7 +272,7 @@ export default function MemoryPage() {
   const searchable = !!scopes && (!!query || scopes.some((s) => s.factsTotal));
 
   return (
-    <SettingsPage title={t("title")} description={`${t("subtitle")} ${t("searchImproved")}`}>
+    <SettingsPage title={t("title")} description={`${t("subtitle")} ${t("trustExplainer")}`}>
       <SettingsGroup>
         <SettingsRow
           id="memory-enabled"
@@ -309,7 +330,12 @@ export default function MemoryPage() {
           )}
 
           {scopes?.map((scope) => (
-            <Scope key={scope.projectId ?? "user"} scope={scope} onChanged={load} />
+            <Scope
+              key={scope.projectId ?? "user"}
+              scope={scope}
+              archiveExpiresAt={archiveExpiresAt}
+              onChanged={load}
+            />
           ))}
           {/* Last on the page, after everything it would destroy: a reset offered before
               the reader has seen what they have is a question asked too early.

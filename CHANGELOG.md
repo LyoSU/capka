@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- When a fact the assistant saved contradicts one already stored, the memory page shows both side by side and one click keeps either or both.
 - The assistant can write and update project notes, and link them to each other; links are stored as ids, so renaming a note updates every reference.
 - The assistant can file a saved fact or note under a topic.
 - `memory_open` lets the assistant read one saved item in full by its handle.
@@ -30,6 +31,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The memory page lists everything the assistant saved, each row tagged with where it came from; the old review queue becomes a read-only "Earlier suggestions" archive that expires 30 days after this release.
 - Facts found by post-turn extraction are saved directly instead of waiting in a review queue; legacy memory documents migrate as assistant conclusions, not as confirmed facts.
 - The person card and the capability rule dialog use hairline rows instead of boxed items; the Allow / Ask / Deny switch is the shared segmented control and no longer stretches across the dialog.
 - Text fields carry the same edge weight as buttons, and every grey well in Settings (segmented switches, code and command boxes, category chips) is recessed again instead of rendering as a white pill on the page.

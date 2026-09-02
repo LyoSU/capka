@@ -222,9 +222,9 @@ run("vault: DELETE /api/memory — forget everything", () => {
 
     const body = await page();
     expect(body.scopes.flatMap((s) => s.facts)).toHaveLength(0);
-    // The waiting list goes with it. A review queue that survived "forget everything"
+    // The archive goes with it. Leftover suggestions that survived "forget everything"
     // would offer the person, a moment later, the very facts they just erased.
-    expect(body.scopes.flatMap((s) => s.pending)).toHaveLength(0);
+    expect(body.scopes.flatMap((s) => s.archive)).toHaveLength(0);
   });
 
   /** Its own test rather than a fourth assertion above, and the ordering is the reason:
@@ -385,7 +385,7 @@ run("vault: POST /api/memory/candidates/[candidateId]", () => {
     // The half of the defect that a status code cannot see: as briefed, this task would
     // have shipped a Keep button over a blank row.
     const page = await readMemoryPage(OWNER);
-    const waiting = page.scopes.flatMap((s) => s.pending).find((p) => p.id === sensitiveId);
+    const waiting = page.scopes.flatMap((s) => s.archive).find((p) => p.id === sensitiveId);
     // The text and the flag arrive as ONE value, which is what stops a new render site
     // from picking up the words and forgetting the advisory — see `StatementView`.
     expect(waiting?.statement).toEqual({ text: SECRET, sensitive: true });

@@ -4,8 +4,9 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *
  *  The projection is all joins and ownership filters — exactly what a mocked `db` would
  *  simply agree with. What it must prove: the relations survive the read (provenance,
- *  version history), a sensitive fact arrives in full and marked, a pending candidate
- *  arrives separately from a confirmed fact, and nothing crosses a user boundary.
+ *  version history), a sensitive fact arrives in full and marked, EVERY live head is
+ *  listed whatever its review status, each row carries the trust tag that tells the
+ *  person's words from the assistant's, and nothing crosses a user boundary.
  *
  *  Since the topic rail was removed it must also prove the thing that removal was FOR: one
  *  list holds the whole space, whichever topic note a fact hangs off, and the search over
@@ -16,7 +17,7 @@ import { seedConfirmedClaim, testServerClass } from "./fixtures";
 import { proposeCandidate } from "../candidates";
 import { getOrCreateSpace } from "../spaces";
 import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "../topics";
-import { FACT_LIMIT, readMemoryPage } from "../memory-page";
+import { FACT_LIMIT, readConflicts, readMemoryPage, trustTagOf } from "../memory-page";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "mempage-";
@@ -170,7 +171,7 @@ run("vault: memory page projection", () => {
     expect(fact.previous?.statement.text).toBe("Works from the Kyiv office");
   });
 
-  it("lists a waiting fact apart from the facts in use", async () => {
+  it("lists an archived suggestion apart from the facts in use", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     const res = await proposeCandidate({
@@ -182,24 +183,96 @@ run("vault: memory page projection", () => {
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
     expect(scope.facts).toHaveLength(0);
-    expect(scope.pending.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
-    expect(scope.pending[0].state).toBe("pending");
+    expect(scope.archive.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
+    expect(scope.archive[0].state).toBe("pending");
   });
 
-  it("does not show an unverified claim among the facts", async () => {
+  it("renders unresolved candidates as a read-only archive with its own expiry date", async () => {
+    // §11.8. Nothing writes `memory_candidates` any more, so these rows are leftovers on
+    // a deadline: the page states the date from the day it appears, which is what keeps
+    // the drop from being a surprise. The date is on the RESPONSE and not per row — the
+    // archive expires as a table, in one release.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    await proposeCandidate({
+      idempotencyKey: `${P}archived`, spaceId,
+      statement: "Might prefer the Lviv office",
+      provenance: { kind: "derived" },
+    });
+
+    const page = await readMemoryPage(OWNER);
+    expect(page.scopes[0].archive.map((a) => a.statement.text)).toEqual(["Might prefer the Lviv office"]);
+    // A real date, thirty days after the release, and the same one for every scope.
+    expect(Number.isNaN(Date.parse(page.archiveExpiresAt))).toBe(false);
+    expect(page.archiveExpiresAt).toBe((await readMemoryPage(OWNER)).archiveExpiresAt);
+  });
+
+  it("shows every live head, whatever its review_status (§11.9)", async () => {
+    // THE REGRESSION THIS CLOSES: leaving the `review_status = 'confirmed'` filter in
+    // place while slice 2 removes the confirmation gate makes every fact the agent writes
+    // invisible on the only surface where a person can see, edit, undo or delete it — and
+    // this release's own shipping copy would be false. Left UNCONFIRMED, which is simply
+    // what `createClaim` produces: there is no field that could ask for anything else.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-    // Left UNCONFIRMED, which since the cutover is simply what `createClaim` produces:
-    // there is no field that could ask for anything else, and `confirmClaim` is not
-    // called. That is the quarantine this assertion is about.
-    await createClaim(
-      { spaceId, statement: "Read off a web page", origin: { kind: "web" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred") },
+    const agentWritten = await createClaim(
+      { spaceId, statement: "Prefers invoices as PDF", origin: { kind: "agent_inference" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred") },
       { kind: "agent" },
     );
-    expect((await readMemoryPage(OWNER)).scopes[0].facts).toHaveLength(0);
+    const page = await readMemoryPage(OWNER);
+    expect(page.scopes[0].facts.map((f) => f.id)).toContain(agentWritten.id);
   });
 
-  it("shows a waiting fact that is sensitive in full, marked", async () => {
+  it("carries a trust tag on every row, derived from source_class", async () => {
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    // One head per class the owner's own space can legally hold. `untrusted_derived` is
+    // absent for a reason and not by omission: §4.5 step 3 refuses it for a user space,
+    // so a fixture that wrote one here would be building a state the product cannot reach
+    // — its two arms are covered by the `trustTagOf` unit assertions below instead.
+    for (const [statement, cls] of [
+      ["Told it in a chat", "user_direct"],
+      ["Typed on this page", "owner_authored"],
+      ["Worked out on its own", "agent_inferred"],
+      ["Kept before the cutover", "legacy_confirmed"],
+    ] as const) {
+      await createClaim(
+        { spaceId, statement, origin: { kind: "agent_inference" }, topicNoteId: noteId, sourceClass: testServerClass(cls) },
+        { kind: "agent" },
+      );
+    }
+    const facts = (await readMemoryPage(OWNER)).scopes[0].facts;
+    expect(facts).toHaveLength(4);
+    // EVERY row, not most of them: a tag missing from one row is the flattening §9.1
+    // forbids, and it is invisible in a screenshot of the other three.
+    expect(facts.every((f) => !!f.trust.kind)).toBe(true);
+    const tagOf = (text: string) => facts.find((f) => f.statement.text === text)!.trust;
+    expect(tagOf("Told it in a chat")).toEqual({ kind: "user_direct" });
+    expect(tagOf("Typed on this page")).toEqual({ kind: "owner_authored" });
+    expect(tagOf("Worked out on its own")).toEqual({ kind: "agent_inferred" });
+    // A pre-cutover claim the person confirmed reads as something they told Capka,
+    // because that is what it is — the two classes stay distinct in the column.
+    expect(tagOf("Kept before the cutover")).toEqual({ kind: "user_direct" });
+  });
+
+  it("names the MEDIUM from provenance and the CLASS from source_class, never the other way", async () => {
+    // §2.3's deviation, in one assertion: `untrusted_derived` is a TRUST TIER over all
+    // non-user ingress, and what kind of ingress it was lives in `origin`. Reading the
+    // medium off the class is the round-1 H2 hole (a fetched page fell outside every
+    // poisoning bound because the class named a file); reading the class off the medium is
+    // the same error mirrored. Both arms of one class, and the class is unchanged by
+    // either.
+    expect(trustTagOf("untrusted_derived", { kind: "retrieved", documentName: "Acme MSA.pdf" })).toEqual({
+      kind: "untrusted_document",
+      name: "Acme MSA.pdf",
+    });
+    expect(trustTagOf("untrusted_derived", { kind: "retrieved" })).toEqual({ kind: "untrusted_web" });
+    // And the reverse direction: a document named in the origin of a TRUSTED row does not
+    // demote it. The class decides the tag; provenance only ever fills in the medium.
+    expect(trustTagOf("user_direct", { documentName: "Acme MSA.pdf" })).toEqual({ kind: "user_direct" });
+  });
+
+  it("still blurs a sensitive statement and never withholds it from the owner", async () => {
     // The candidate half, and the one where withholding was not merely inconsistent but
     // incoherent: this row carries Keep and Discard controls, so a blank statement asks
     // the person to approve words the screen refuses to show them. Written straight into
@@ -213,8 +286,12 @@ run("vault: memory page projection", () => {
     );
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
-    expect(scope.pending).toHaveLength(1);
-    expect(scope.pending[0].statement).toEqual({
+    expect(scope.archive).toHaveLength(1);
+    // IN FULL AND MARKED — the text travels, and `sensitive: true` is what the page
+    // blurs on. Withholding it from the OWNER is the mistake this module's docstring
+    // exists to undo: `sensitive` withholds from the model, and a row this person
+    // cannot read is one they cannot judge, correct or delete.
+    expect(scope.archive[0].statement).toEqual({
       text: "Recovery code 447192 for the shared mailbox",
       sensitive: true,
     });
@@ -246,7 +323,7 @@ run("vault: memory page projection", () => {
     });
     expect(res.state).toBe("conflict");
 
-    const waiting = (await readMemoryPage(OWNER)).scopes[0].pending[0];
+    const waiting = (await readMemoryPage(OWNER)).scopes[0].archive[0];
     expect(waiting.state).toBe("conflict");
     expect(waiting.conflictsWith?.statement.text).toBe("Works as a technical lead");
   });
@@ -273,37 +350,89 @@ run("vault: memory page projection", () => {
     });
     expect(res.state).toBe("conflict");
 
-    const waiting = (await readMemoryPage(OWNER)).scopes[0].pending[0];
+    const waiting = (await readMemoryPage(OWNER)).scopes[0].archive[0];
     expect(waiting.state).toBe("conflict");
     expect(waiting.conflictsWith?.statement.text).toBe("The client pays in hryvnia");
   });
 
-  it("a conflict never quotes a head the page itself refuses to list", async () => {
-    // `conflict(head.id)` takes its head from `headBySlot`/`listHeadClaims`, neither of
-    // which filters review status, while `factsOf` lists only `confirmed`. Without the
-    // same filter here the page says "keeping this replaces «…»" about quarantined
-    // material it will not show anywhere else — the module's own quarantine rule, walked
-    // past at the entrance Amendment D created.
+  it("an archived conflict names an unverified head, because nothing is refused any more", async () => {
+    // THE FILTER THAT WENT, from the other side. This used to assert the opposite: the
+    // archive was not allowed to say "keeping this replaces «…»" about a head `factsOf`
+    // refused to list, so it carried the same `review_status = 'confirmed'` clause. With
+    // the clause gone from both selects the head is listed, so quoting it is no longer a
+    // reference to something invisible — and keeping the clause HERE while dropping it
+    // there would be the two-readers-one-rule split this module is written against.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-    const quarantined = await createClaim(
-      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred") },
+    const unverified = await createClaim(
+      { spaceId, statement: "Read off a web page", origin: { kind: "agent_inference" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred") },
       { kind: "agent" },
     );
     await proposeCandidate({
       idempotencyKey: `${P}quarantine`, spaceId,
       statement: "Something the user actually said",
       provenance: { kind: "derived" },
-      forceConflict: { conflictsWith: quarantined.id },
+      forceConflict: { conflictsWith: unverified.id },
     });
 
     const page = await readMemoryPage(OWNER);
-    expect(page.scopes[0].pending[0].state).toBe("conflict");
-    expect(page.scopes[0].pending[0].conflictsWith).toBeNull();
-    expect(JSON.stringify(page)).not.toContain("never verified");
+    expect(page.scopes[0].archive[0].state).toBe("conflict");
+    expect(page.scopes[0].archive[0].conflictsWith?.statement.text).toBe("Read off a web page");
+    // And it IS in the fact list, which is what makes the quote legible at all.
+    expect(page.scopes[0].facts.map((f) => f.id)).toContain(unverified.id);
   });
 
-  it("a plain waiting fact names nothing it conflicts with", async () => {
+  it("readConflicts is the ONE reader of the conflict state, and returns BOTH statements", async () => {
+    // §4.5 step 5 stores a correction it may not apply as a live row pointing at the fact
+    // it contests. A person cannot choose between two facts against one they cannot see,
+    // so the reader returns both halves with both trust tags — and there is exactly one
+    // reader, because two with different predicates is a recorded near-miss here (the
+    // confirm path read `policy_state` while the page read the evidence column, so a
+    // person authorised a replacement and got a second contradicting head forever).
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    const target = await createClaim(
+      { spaceId, statement: "Acme invoices are paid monthly", origin: { kind: "current_user_quote" }, topicNoteId: noteId, sourceClass: testServerClass("user_direct") },
+      { kind: "agent" },
+    );
+    const contesting = await createClaim(
+      { spaceId, statement: "Acme invoices are paid quarterly", origin: { kind: "agent_inference" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred"), conflictsWith: target.id },
+      { kind: "agent" },
+    );
+
+    const conflicts = await readConflicts(spaceId);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].claim).toMatchObject({ id: contesting.id, trust: { kind: "agent_inferred" } });
+    expect(conflicts[0].claim.statement.text).toBe("Acme invoices are paid quarterly");
+    expect(conflicts[0].contested).toMatchObject({ id: target.id, trust: { kind: "user_direct" } });
+    expect(conflicts[0].contested.statement.text).toBe("Acme invoices are paid monthly");
+    // The same reader is what the page ships, so the card and the list cannot disagree.
+    const page = await readMemoryPage(OWNER);
+    expect(page.scopes[0].conflicts).toEqual(conflicts);
+    // Both halves are ALSO live heads: nothing decides visibility on the owner's page, so
+    // the card is a second view of them and not a filter over the list.
+    expect(page.scopes[0].facts.map((f) => f.id).sort()).toEqual([contesting.id, target.id].sort());
+  });
+
+  it("readConflicts drops a pointer whose target is no longer live", async () => {
+    // The control: a reader that always joined something would satisfy the test above
+    // while quoting a dead predecessor as the thing this would replace — which
+    // misdescribes the choice being asked for.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    const target = await createClaim(
+      { spaceId, statement: "Acme invoices are paid monthly", origin: { kind: "current_user_quote" }, topicNoteId: noteId, sourceClass: testServerClass("user_direct") },
+      { kind: "agent" },
+    );
+    await createClaim(
+      { spaceId, statement: "Acme invoices are paid quarterly", origin: { kind: "agent_inference" }, topicNoteId: noteId, sourceClass: testServerClass("agent_inferred"), conflictsWith: target.id },
+      { kind: "agent" },
+    );
+    await q(`UPDATE vault_claims SET superseded_at = now() WHERE id = $1`, [target.id]);
+    expect(await readConflicts(spaceId)).toEqual([]);
+  });
+
+  it("a plain archived suggestion names nothing it conflicts with", async () => {
     // The control: a projection that always joined something would satisfy the test
     // above while telling every ordinary row it disagrees with a fact.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
@@ -313,7 +442,7 @@ run("vault: memory page projection", () => {
       statement: "Uses Linux as their main operating system",
       provenance: { kind: "derived" },
     });
-    expect((await readMemoryPage(OWNER)).scopes[0].pending[0].conflictsWith).toBeNull();
+    expect((await readMemoryPage(OWNER)).scopes[0].archive[0].conflictsWith).toBeNull();
   });
 
   it("never shows a space owned by someone else, even under this user's own project", async () => {
@@ -445,9 +574,9 @@ run("vault: memory page projection", () => {
     ]);
   });
 
-  it("leaves the waiting list alone whatever is searched for", async () => {
-    // The queue is what a person still has to decide, and a decision hidden behind a
-    // search box is a decision that gets lost. `query` narrows the facts and nothing else.
+  it("leaves the archive alone whatever is searched for", async () => {
+    // The archive is on a deadline, and a row hidden behind a search box is a row that
+    // expires unseen. `query` narrows the facts and nothing else.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedFact("Prefers metric units");
     await proposeCandidate({
@@ -458,7 +587,7 @@ run("vault: memory page projection", () => {
 
     const scope = (await readMemoryPage(OWNER, "metric")).scopes[0];
     expect(scope.facts).toHaveLength(1);
-    expect(scope.pending.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
+    expect(scope.archive.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
   });
 
   it("caps the rows and reports the total independently of them", async () => {
