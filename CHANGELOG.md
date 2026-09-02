@@ -88,6 +88,8 @@ All notable changes to Capka are documented here. Format follows
 - Undo in the chat's "saved to memory" notice now reverts an edit the turn made to an existing topic file, instead of deleting the file and its whole history; the notice says how many files were updated apart from what was saved.
 - A fact deleted on the memory page can be put back from the toast, and the per-fact delete no longer asks for confirmation first.
 - A topic file linking a sensitive fact no longer prints that fact's words on the memory page, and a link to a fact that has since been replaced no longer shows the old wording.
+- A topic file that links to a sensitive file no longer shows that file's title on the memory page.
+- Undoing an edit from the chat's "saved to memory" notice refuses with a clear message if the file changed in the meantime, instead of dropping that later change.
 - Empty topic containers no longer appear on the memory page as rows with a title and a date and nothing else.
 - The unfiled list on the memory page now says how many facts it is showing of how many.
 - A topic file the owner deleted and the assistant then re-used keeps the facts filed under it visible to the parity check, instead of reading as a divergence that blocks the next write into that topic.
