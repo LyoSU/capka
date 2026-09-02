@@ -4,13 +4,22 @@
 # `npm run release`. It is deliberately NOT wired into that script: `release.mjs` refuses a
 # dirty tree, and that refusal is its whole guard - a gate failing from inside it would
 # leave a half-bumped `package.json` and a rewritten CHANGELOG behind. Every check prints
-# PASS or FAIL with the value it read, none of them writes anything, and the script exits
-# non-zero if any failed so it can also sit in CI. The eight checks are the things this
-# repo has actually shipped broken: a migration that never applies because its journal
-# timestamp is not the newest, a schema edit with no migration generated for it, a page
-# promising an archive deadline that has already passed, one locale missing a key the other
-# has, Ukrainian text in code rather than in the catalogue, a symbol deleted everywhere but
-# one reference, an empty Unreleased section, and a red typecheck.
+# PASS or FAIL with the value it read, and the script exits non-zero if any failed so it
+# can also sit in CI. The eight checks are the things this repo has actually shipped
+# broken: a migration that never applies because its journal timestamp is not the newest,
+# a schema edit with no migration generated for it, a page promising an archive deadline
+# that has already passed, one locale missing a key the other has, Ukrainian text in code
+# rather than in the catalogue, a symbol deleted everywhere but one reference, an empty
+# Unreleased section, and a red typecheck.
+#
+# ONE CHECK CAN WRITE INTO YOUR TREE, and you have to know which. Check 1 runs
+# `drizzle-kit generate`, and if the schema has drifted from the snapshots that command
+# CREATES a migration under `drizzle/`. The check then fails and NAMES the file, because an
+# untracked file in this working directory has no undo and a peer's commit can sweep it -
+# review it and either commit it with the release or delete it, but do not leave it lying
+# there. Everything else is read-only, and every log the script captures goes into a
+# per-run scratch directory whose path is printed below rather than a fixed `/tmp` name
+# two concurrent runs would fight over.
 
 # `-e` so a command nobody wrapped in an `if` stops the run instead of being skipped
 # silently; every check below is written as a condition or with `|| rc=$?`, so `-e` never
@@ -28,9 +37,14 @@ cd "$(dirname "$0")/.." || { echo "FAIL  cannot cd to the repository root" >&2; 
 # One scratch tree per run, so two concurrent runs never read each other's evidence - up to
 # five sessions share this working directory.
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/release-gate.XXXXXX")
-trap 'rm -rf "$SCRATCH"' EXIT
 CONTROL="$SCRATCH/control"
 mkdir -p "$CONTROL"
+echo "scratch (logs, control plants): $SCRATCH"
+# The trap is what makes an INTERRUPTED run tidy up after itself - without one, every
+# `./scripts/release-gate.sh | head` leaves a directory behind forever. A failing run sets
+# the flag first, so its logs survive for the operator to read.
+KEEP_SCRATCH=0
+trap '[ "$KEEP_SCRATCH" = 0 ] && rm -rf "$SCRATCH"' EXIT
 
 fails=0
 pass() { printf 'PASS  %s\n' "$1"; }
@@ -60,22 +74,31 @@ grep_scan() {
 }
 
 echo "== 1. migrations are generated and the snapshots agree =="
-if ./node_modules/.bin/drizzle-kit check >/tmp/rg-check.log 2>&1; then
-  pass "drizzle-kit check: $(tail -1 /tmp/rg-check.log)"
+if ./node_modules/.bin/drizzle-kit check >"$SCRATCH/drizzle-check.log" 2>&1; then
+  pass "drizzle-kit check: $(tail -1 "$SCRATCH/drizzle-check.log")"
 else
-  fail "drizzle-kit check failed: $(tail -3 /tmp/rg-check.log)"
+  fail "drizzle-kit check failed:"$'\n'"$(tail -3 "$SCRATCH/drizzle-check.log")"
 fi
-before=$(git status --porcelain | sort)
-gen=$(./node_modules/.bin/drizzle-kit generate 2>&1 | tail -1)
-after=$(git status --porcelain | sort)
-case "$gen" in
-  *"No schema changes"*) pass "drizzle-kit generate: $gen" ;;
-  *) fail "drizzle-kit generate wrote a migration - commit it before tagging: $gen" ;;
-esac
-if [ "$before" = "$after" ]; then
+git status --porcelain | sort > "$SCRATCH/tree-before"
+gen_rc=0
+./node_modules/.bin/drizzle-kit generate >"$SCRATCH/drizzle-generate.log" 2>&1 || gen_rc=$?
+gen=$(tail -1 "$SCRATCH/drizzle-generate.log")
+git status --porcelain | sort > "$SCRATCH/tree-after"
+if [ "$gen_rc" -ne 0 ]; then
+  fail "drizzle-kit generate exited $gen_rc:"$'\n'"$(tail -5 "$SCRATCH/drizzle-generate.log")"
+else
+  case "$gen" in
+    *"No schema changes"*) pass "drizzle-kit generate: $gen" ;;
+    *) fail "drizzle-kit generate had schema changes to write: $gen" ;;
+  esac
+fi
+# NAME WHAT IT LEFT BEHIND. `git status --porcelain` before and after is what catches a
+# generated migration, and the operator needs the path, not the fact - an unnamed untracked
+# file in a directory five sessions share is one a peer's commit picks up.
+if cmp -s "$SCRATCH/tree-before" "$SCRATCH/tree-after"; then
   pass "generate left the tree unchanged"
 else
-  fail "generate changed the tree:"$'\n'"$(diff <(echo "$before") <(echo "$after"))"
+  fail "generate wrote into the tree - review, then commit with the release or delete:"$'\n'"$(comm -13 "$SCRATCH/tree-before" "$SCRATCH/tree-after")"
 fi
 
 echo "== 2. journal timestamps are strictly increasing in idx order =="
@@ -205,21 +228,25 @@ PY
 ); then pass "changelog: $out"; else fail "changelog: $out"; fi
 
 echo "== 8. typecheck and lint =="
-if ./node_modules/.bin/tsc --noEmit >/tmp/rg-tsc.log 2>&1; then
+if ./node_modules/.bin/tsc --noEmit >"$SCRATCH/tsc.log" 2>&1; then
   pass "tsc --noEmit clean"
 else
-  fail "tsc --noEmit:"$'\n'"$(tail -20 /tmp/rg-tsc.log)"
+  fail "tsc --noEmit:"$'\n'"$(tail -20 "$SCRATCH/tsc.log")"
 fi
-if npm run lint >/tmp/rg-lint.log 2>&1; then
-  pass "lint clean: $(tail -1 /tmp/rg-lint.log)"
+if npm run lint >"$SCRATCH/lint.log" 2>&1; then
+  pass "lint clean: $(tail -1 "$SCRATCH/lint.log")"
 else
-  fail "npm run lint:"$'\n'"$(tail -20 /tmp/rg-lint.log)"
+  fail "npm run lint:"$'\n'"$(tail -20 "$SCRATCH/lint.log")"
 fi
 
 echo
 if [ "$fails" -eq 0 ]; then
   echo "RELEASE GATE: PASS - the tree is fit to tag."
 else
+  # Nothing to read after a clean run, so the trap takes the scratch with it. After a
+  # failure the logs the FAIL lines quote from are in there, so keep them.
+  KEEP_SCRATCH=1
   echo "RELEASE GATE: FAIL - $fails check(s) failed. Do not tag."
+  echo "logs: $SCRATCH"
 fi
 exit "$fails"
