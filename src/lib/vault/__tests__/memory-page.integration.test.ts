@@ -110,7 +110,7 @@ const agentCtx = (userSpaceId: string): WriteCtx => ({
  *  token that mentions it inside one transaction, the edge created between the note row that
  *  makes it legal and the version that names it (§4.8). A test cannot type a token — only
  *  the server mints one — so the fixture goes through `linkNodes` rather than a literal. */
-const seedNoteLinking = (spaceId: string, title: string, claimId: string) =>
+const seedNoteLinking = (spaceId: string, title: string, targetId: string) =>
   db.transaction((tx) =>
     createNote(
       {
@@ -121,7 +121,7 @@ const seedNoteLinking = (spaceId: string, title: string, claimId: string) =>
             {
               spaceId,
               from: noteId,
-              to: claimId,
+              to: targetId,
               relation: "references",
               createdBy: { kind: "user", id: OWNER },
             },
@@ -728,18 +728,38 @@ run("vault: memory page projection", () => {
     expect(topic.body.text).toContain("## Summary");
   });
 
-  it("a file linking a SENSITIVE fact prints none of that fact's words", async () => {
+  it("a file linking a SENSITIVE target prints none of that target's words, fact or file", async () => {
     // The page's promise about a sensitive statement is a reveal control over it, and a note
     // body is markdown with no control anywhere inside it. So the words cannot appear here at
-    // all: the detail view gates the body on the NOTE's flag, which says nothing about a
-    // claim the body links. The reader still reaches the fact — it has its own row, with its
-    // own reveal.
+    // all: the detail view gates the body on the NOTE's flag, which says nothing about the
+    // target the body links. The reader still reaches the target — it has its own row, with
+    // its own reveal.
     const { spaceId, claim } = await seedFact("The door code is 4417", { sensitive: true });
     await seedNoteLinking(spaceId, "Office", claim.id);
     const topic = topicNamed((await readMemoryPage(OWNER)).scopes[0], "Office");
     expect(topic.body.text).not.toContain("4417");
     expect(topic.body.text).not.toContain("door code");
     expect(topic.body.text).toContain(UNRESOLVED_LINK);
+
+    // A NOTE target is as markable as a claim: `insertNoteVersion` screens the title with
+    // `looksLikeSecret` and stores the flag beside it, and nothing screens a plain note's
+    // title the way `resolveTopic` screens a topic's. So the same clause has to stand on
+    // both arms of the lookup — the target below is a fake token shaped to trip the screen.
+    const secretTitle = "ghp16CkQ2fVbNq8sPzYw3TmXrLdA5eHjU9Ki";
+    const marked = await createNote(
+      {
+        spaceId,
+        title: secretTitle,
+        bodyMarkdown: "Kept for the door panel.",
+        sourceClass: testServerClass("owner_authored"),
+        provenance: { kind: "test" },
+      },
+      undefined,
+    );
+    await seedNoteLinking(spaceId, "Panel", marked.id);
+    const linking = topicNamed((await readMemoryPage(OWNER)).scopes[0], "Panel");
+    expect(linking.body.text).not.toContain(secretTitle);
+    expect(linking.body.text).toContain(UNRESOLVED_LINK);
   });
 
   it("a link to a fact that has since been REPLACED renders the removed-link text, not the old wording", async () => {

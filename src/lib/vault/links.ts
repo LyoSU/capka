@@ -158,6 +158,12 @@ export async function edgeTargets(
  *     gates the whole body on the NOTE's flag, which says nothing about a claim the body
  *     links; a sensitive fact reaches the reader through its own row, which has the control.
  *
+ * A NOTE target contributes its HEAD version's title, and carries the second of those two
+ * clauses for the identical reason. The cure has to be two-sided or it is not a cure: a
+ * note version is marked by the same screen a claim is, and a secret-shaped title reaches
+ * this lookup exactly as a secret-shaped statement does. There is no supersede clause on
+ * this arm because a note has no successor row — its head IS the join condition.
+ *
  * An excluded target therefore renders as `UNRESOLVED_LINK` — the same text a closed edge
  * gets, and the honest one: the file no longer shows a link there.
  *
@@ -182,7 +188,18 @@ export async function renderBody(bodyMarkdown: string, spaceId: string, ex: Ex =
         eq(vaultNoteVersions.revision, vaultNotes.currentRevision),
       ),
     )
-    .where(and(eq(vaultNotes.spaceId, spaceId), inArray(vaultNotes.id, nodeIds)));
+    .where(
+      and(
+        eq(vaultNotes.spaceId, spaceId),
+        inArray(vaultNotes.id, nodeIds),
+        // The same clause the claim arm carries, for the same reason: a note version is as
+        // markable as a claim — `insertNoteVersion` screens the title with `looksLikeSecret`
+        // — and nothing screens a plain note's title the way `resolveTopic` screens a
+        // topic's. Head-ness is the join above, so this reads the HEAD's flag and not an
+        // older revision's.
+        eq(vaultNoteVersions.sensitive, false),
+      ),
+    );
   for (const n of notes) titles.set(n.id, fitNoteTitle(n.title));
   const claims = await ex
     .select({ id: vaultClaims.id, statement: vaultClaims.statement })
