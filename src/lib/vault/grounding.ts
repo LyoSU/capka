@@ -1,5 +1,6 @@
-// The LEAF, and the only import this module has. See Ruling 14: importing `candidates.ts`
-// here is a runtime cycle, because `candidates.ts` imports `ownerAuthored()` back.
+// THE LEAF, and the only VALUE this module imports — the line below it is a type. See
+// Ruling 14: importing `candidates.ts` here is a runtime cycle, because `candidates.ts`
+// imports `ownerAuthored()` back.
 import { QUOTED, verifyDirectProvenance } from "./quote-match";
 import type { SourceClass } from "./claims";
 

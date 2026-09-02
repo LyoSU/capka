@@ -248,9 +248,17 @@ run("memory_open", () => {
     // second number for one line would be an address that addresses nothing.
     expect(first.body.startsWith("     1\t")).toBe(true);
 
-    // The pages CONCATENATE to the stored body — which is the property a cursor has to have
-    // and the one a "roughly right" implementation loses. The line prefix is stripped back
-    // off, which is the only thing the numbering added.
+    // WHAT THE PAGES PROMISE, now that they are numbered. Raw concatenation is NOT the
+    // contract any more and cannot be: a page that ends on a line boundary emits no trailing
+    // newline and the next emits no leading one, so three lines page to `alpha`, `beta`,
+    // `gamma` whose unnumbered concatenation is `alphabetagamma`. What holds instead is the
+    // NUMBERED form — every line of the file appears exactly once, under the number the file
+    // calls it — and the model reads addresses off those numbers rather than gluing pages.
+    //
+    // This note is ONE line, so concatenation is still exactly right for it: the continuation
+    // resumes mid-line under the same number, which is the one case where the pieces really
+    // do abut. That is what this case asserts, and the multi-line case above asserts the
+    // numbering instead.
     const unnumber = (page: string) => page.replace(/^ *\d+\t/, "");
     let assembled = unnumber(first.body);
     let cursor = first.cursor;

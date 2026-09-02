@@ -181,8 +181,13 @@ function orphanTokenCount(body: string): number {
 const cutsAToken = (body: string, start: number, end: number): boolean =>
   tokenSpans(body).some((t) => (start > t.start && start < t.end) || (end > t.start && end < t.end));
 
-/** Every start offset of `needle` in `haystack`. Overlapping occurrences count once each
- *  from where they start, which is what a line report has to say. */
+/** Every NON-OVERLAPPING occurrence of `needle` in `haystack`, scanning left to right — the
+ *  same count Claude's own text editor makes, and the reason a self-overlapping `old_str`
+ *  ("ha ha" in "ha ha ha") is one match rather than two. That is a real limit of the
+ *  ambiguity check and is stated rather than hidden: a model that sends such a string gets a
+ *  replacement at the leftmost position instead of a refusal naming both. It is not worth
+ *  closing by scanning every offset, because the strings a model copies off a numbered page
+ *  are sentences, and a sentence that overlaps itself is not a case that arises. */
 function occurrences(haystack: string, needle: string): number[] {
   const out: number[] = [];
   for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + needle.length)) out.push(i);

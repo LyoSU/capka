@@ -1054,7 +1054,8 @@ export const NOTE_EDIT_SAID = {
    *  half of one — and the advice cannot be shared, because "do not type links" says nothing
    *  useful to a model that was trying to delete a sentence next to one. */
   split_link: "That edit would cut through a link. Select the whole [[link]] in old_str, or leave it out.",
-  too_long: "That would make the file longer than a memory file may be. Start a second file on the subject instead.",
+  too_long:
+    "That would make the file longer than a memory file may be. Start a second file with memory_note_write op create.",
   title_taken: NOTE_SAID.title_taken,
   not_readable:
     "That file is not readable as memory, so its text cannot be edited here. Tell the user it is on their memory page.",
@@ -1108,6 +1109,12 @@ const SNIPPET_CONTEXT = 4;
  * `model-view.ts`. The second call also answers a question the writer cannot: whether the
  * new text tripped the secret screen, in which case there is no snippet to show and the
  * reply says only that the edit landed.
+ *
+ * IT COSTS A SECOND `last_used_at` STAMP, and that is accepted rather than overlooked.
+ * `openNoteForModel` stamps unconditionally because the stamp means "the model received this
+ * row", and on this path it did — twice in one turn, which is the same answer to the question
+ * the column asks. Suppressing it would need a flag on the mint, and a mint with a "do not
+ * record that you were read" mode is a worse thing to own than one redundant timestamp.
  */
 async function editSnippet(
   spaceId: string,

@@ -114,12 +114,11 @@ echo "== 5. no Cyrillic in src/ outside the exception list =="
 offenders=$(LC_ALL=C grep -rlI "$CYRILLIC" src/ 2>/dev/null | grep -v \
   -e '^src/i18n/config\.ts$' \
   -e '^src/app/global-error\.tsx$' \
-  -e '^src/lib/sandbox/sandbox-probes\.ts$' \
   -e '^src/lib/vault/extract\.ts$' \
   -e '^src/lib/vault/__tests__/extract\.test\.ts$' \
   -e '^src/lib/vault/eval/' | sort)
 if [ -z "$offenders" ]; then
-  pass "no Cyrillic outside the 6 exceptions"
+  pass "no Cyrillic outside the 5 exceptions"
 else
   fail "Cyrillic in code:"$'\n'"$offenders"
 fi
