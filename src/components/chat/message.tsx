@@ -1095,8 +1095,8 @@ function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; c
 
   const row = (
     <div
-      className={`animate-step-in group/step relative flex min-h-8 items-center gap-2.5 py-1 ${
-        isError ? "text-destructive" : "text-muted-foreground"
+      className={`animate-step-in group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
+        isError ? "text-destructive" : "text-muted-foreground has-[button:hover]:text-foreground"
       }`}
     >
       {/* The disclosure trigger lies UNDER the row's content rather than wrapping
@@ -1108,10 +1108,13 @@ function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; c
       {expandable && (
         <CollapsibleTrigger
           aria-label={label}
-          // Bleeds 8px past the text on both sides so the hover wash has a margin
-          // around the words instead of clipping at them. Everything drawn on top
-          // of it carries `relative z-10`, or the wash paints over it.
-          className="absolute -inset-x-2 inset-y-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          // No hover wash. The row is as wide as its words (`w-fit` above), and a
+          // grey slab behind four words in a wide column read as a misplaced
+          // block; the hover is the row's ink stepping up from grey to
+          // foreground (see `has-[button:hover]` on the row) plus the chevron
+          // appearing — the same hover the group header above has. The ring
+          // bleeds 8px so keyboard focus frames the words with a margin.
+          className="absolute -inset-x-2 inset-y-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       )}
       <span className="pointer-events-none relative z-10 flex h-5 w-5 shrink-0 items-center justify-center">
