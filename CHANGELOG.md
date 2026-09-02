@@ -27,6 +27,11 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Chat UI: one accent colour (ink-blue) for the send button, focus ring, unread dot and selected chips; hover/active surfaces and hairlines are a full step stronger, so the current chat and the hovered row are visible at a glance.
+- The model and thinking controls now live in the composer footer on every screen; the floating pill under the greeting and the copy in the chat header are gone.
+- The new-chat screen drops the "Recent" list (it duplicated the sidebar) and the drag-a-file hint; the greeting and mark are smaller.
+- Tool steps render as a single bordered list — one row per step, details behind the chevron — instead of a timeline with ringed nodes and a "Done" cap.
+- Sidebar rows are 15px; the chat search is a quiet borderless field; settings section labels are sentence-case.
 - The interface palette is now graphite: a warm near-achromatic ramp with no accent hue, so colour is reserved for error, warning and success. Links are ink and permanently underlined; audit-log category badges are no longer colour-coded.
 - Input fields are a white raised well with a mid-grey border instead of a sunken grey fill, so a field no longer looks like a disabled control. `--popover` again shares `--card`'s value.
 - A correction the assistant cannot prove came from the user is stored beside the existing fact as a conflict rather than replacing it.
