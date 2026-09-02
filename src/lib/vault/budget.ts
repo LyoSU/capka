@@ -34,6 +34,19 @@ export const MEMORY_SEARCH_MAX_BYTES = 8_400;
  */
 export const MEMORY_OPEN_MAX_BYTES = 8_000;
 
+/**
+ * THE EDIT REPLY'S SNIPPET, in UTF-8 BYTES — a quarter of a `memory_open` page.
+ *
+ * It exists because the turn ceiling is STICKY: once one reply does not fit, every later
+ * vault call in the turn gets the exhausted sentence instead of an answer. An edit's snippet
+ * is the one body-bearing reply that lands AFTER a write has already committed, so an
+ * unbounded one turns "the edit worked" into "memory is unavailable for the rest of this
+ * turn" — and the model, unable to re-open the file, may tell the person the edit did not
+ * land. A quarter of a page, because the snippet is nine lines of context and not a read:
+ * `memory_open` is what reads a file, and the reply says so when it cuts.
+ */
+export const EDIT_SNIPPET_MAX_BYTES = 2_000;
+
 /** The turn ceiling: ~11,900 tokens at 4.2 B/tok. */
 export const VAULT_TURN_MAX_BYTES = 50_000;
 

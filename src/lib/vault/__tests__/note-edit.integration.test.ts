@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
  */
 import { db, pool } from "@/lib/db";
 import { makeTurnTaint } from "@/lib/tasks/turn-taint";
-import { makeVaultBudget } from "../budget";
+import { EDIT_SNIPPET_MAX_BYTES, makeVaultBudget } from "../budget";
 import type { SourceClass } from "../claims";
 import { makeHandleMap, type HandleMap } from "../handles";
 import { edgeIdsIn } from "../links";
@@ -130,6 +130,33 @@ run("in-place note edits", () => {
     expect(r.said).toContain("The memory file has been edited.");
     expect(r.said).toContain("     1\tThe deadline is the twentieth.");
     expect(r.said).toContain("     3\tAsk Olena.");
+  });
+
+  it("the success snippet is bounded, and the turn's budget survives editing a huge line", async () => {
+    // THE STICKY BUDGET IS THE HAZARD. `makeVaultBudget` refuses everything for the rest of a
+    // turn once one reply does not fit, and this reply lands after the write has committed —
+    // so an unbounded snippet turns a successful edit into "memory is unavailable", with the
+    // model unable to re-open the file to see that it worked.
+    const long = "lorem ipsum dolor sit amet. ".repeat(1_100);
+    const note = await seedNote(PS, "Deadlines", `${long}TAIL`);
+    const ctx = clean();
+    const r = await noteEdit({
+      op: { kind: "str_replace", noteHandle: note.handle, expectedRevision: 1, oldStr: "TAIL", newStr: "END" },
+      grounding: { kind: "agent_inference" },
+      ctx,
+    });
+    if (r.status !== "edited") throw new Error(`expected edited, got ${r.status}: ${r.said}`);
+
+    // THE STATUS COMES FIRST, always: a cut snippet must never hide that the write landed.
+    expect(r.said.startsWith("The memory file has been edited.")).toBe(true);
+    expect(Buffer.byteLength(r.said, "utf8")).toBeLessThanOrEqual(EDIT_SNIPPET_MAX_BYTES + 200);
+    expect(r.said).toContain("memory_open for the rest");
+    expect(r.said).not.toContain("�");
+
+    // AND THE TURN STILL WORKS. Spend the reply against the same budget the tools spend
+    // against, then ask it for something else — which is what the model's next call does.
+    ctx.budget.emit(JSON.stringify(r));
+    expect(ctx.budget.emit("a later memory result")).toBe("a later memory result");
   });
 
   it("insert adds lines after the one it names and leaves the rest alone", async () => {

@@ -2,7 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { TurnTaint } from "@/lib/tasks/turn-taint";
 import { db } from "@/lib/db";
 import { vaultEdges, vaultNodes, vaultNotes } from "@/lib/db/schema";
-import type { VaultBudget } from "./budget";
+import { EDIT_SNIPPET_MAX_BYTES, type VaultBudget } from "./budget";
 import {
   attachEvidence,
   attachToTopic,
@@ -1098,7 +1098,30 @@ async function editSnippet(
   const last = Math.min(lines.length, changed.to + SNIPPET_CONTEXT);
   if (last < first) return "";
   const shown = lines.slice(first - 1, last).map((text, i) => numberLine(first + i, text));
-  return `\n${shown.join("\n")}`;
+  // CLAMPED, because nothing bounds one LINE of a note and this reply lands AFTER the write
+  // has committed. The turn's vault budget is sticky: one oversize reply and every later
+  // memory call in the turn gets the exhausted sentence, so the model is told memory is
+  // unavailable for an edit that actually landed, and cannot re-open the file to check.
+  //
+  // The cut is `memory_open`'s — whole lines while they fit, and a UTF-8 boundary when even
+  // the first will not — written out rather than borrowed from `pageLines`, because these
+  // lines already carry the FILE's numbers and paging them again would number them twice.
+  const kept: string[] = [];
+  let spent = 0;
+  for (const line of shown) {
+    const size = Buffer.byteLength(line, "utf8") + (kept.length ? 1 : 0);
+    if (spent + size > EDIT_SNIPPET_MAX_BYTES) break;
+    kept.push(line);
+    spent += size;
+  }
+  if (!kept.length) {
+    const buf = Buffer.from(shown[0], "utf8");
+    let end = EDIT_SNIPPET_MAX_BYTES;
+    while (end > 0 && (buf[end] & 0xc0) === 0x80) end -= 1;
+    kept.push(buf.subarray(0, end).toString("utf8"));
+  }
+  const cut = kept.length < shown.length || kept[0] !== shown[0];
+  return `\n${kept.join("\n")}${cut ? "\n... (snippet cut; memory_open for the rest)" : ""}`;
 }
 
 /** A refusal from the pure editor, in the tool's own vocabulary. Written as one place so a
