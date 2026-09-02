@@ -506,13 +506,13 @@ function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: numb
  * A FILE WITH NO TEXT STILL GETS A SECOND LINE, and it says how many facts are filed under
  * it. This is not a placeholder for a missing feature — it is the honest description of the
  * five topic containers every existing account already has: `resolveTopic` mints them while
- * filing a fact and writes an EMPTY body, so «Оновлено 30 серпня» was the whole row and five
+ * filing a fact and writes an EMPTY body, so the localized “Updated 30 August” line was the whole row and five
  * of them read as five identical blanks. The count is the file's actual content until the
  * agent writes prose into it, and it is a NUMBER — nothing about it can be sensitive, which
  * the first linked fact's statement (the other candidate) very much can be.
  *
  * THE DATE IS NOT ON ITS OWN COLUMN. A right-aligned stamp needs a width that fits «29
- * серпня» and "29 August" alike, which on a narrow pane is width taken from the title —
+ * a long-form Ukrainian date and "29 August" alike, which on a narrow pane is width taken from the title —
  * the one thing the reader is scanning. It sits under the preview as a caption instead.
  *
  * THE HOVER IS AN INSET ROUNDED SURFACE, not a flush band. `-mx-3 px-3` is what makes both
