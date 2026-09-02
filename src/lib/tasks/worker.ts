@@ -41,6 +41,11 @@ const RECONCILE_MS = 30_000;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const CATALOG_STALE_MS = 12 * 60 * 60 * 1000;
 const RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
+/** §11.5's dual-write control, as the production witness. Six hours because a divergence
+ *  is a defect to notice, not an incident to page on, and the repair is a release rather
+ *  than a restart. The sweep is READ-ONLY, so several replicas running it merely produce
+ *  the same warning twice - there is nothing to coordinate and no lock to take. */
+const CONTAINS_PARITY_MS = 6 * 60 * 60_000;
 /** On shutdown, how long to let already-running tasks finish before exiting.
  *  Most turns finish well inside this; the rare long one is reconciled as a
  *  retryable "interrupted" by the next instance. Keep the platform's
@@ -222,6 +227,15 @@ export async function startWorker(): Promise<void> {
   void sweepRetention();
   const retentionTimer = setInterval(() => void sweepRetention(), RETENTION_SWEEP_MS);
 
+  // Report any `note_claims` / `vault_edges` divergence per live space (§11.5). Never
+  // repairs and never throws: a repair would close the divergence the dual-write period
+  // exists to detect. Delayed rather than immediate so a boot is not spent on a full-table
+  // scan of every space.
+  const { sweepContainsParity } = await import("@/lib/vault/edges");
+  const parityRun = () => void sweepContainsParity().catch((e) => log.error("vault contains parity sweep failed", { err: String(e) }));
+  const parityFirstRun = setTimeout(parityRun, 60_000);
+  const parityTimer = setInterval(parityRun, CONTAINS_PARITY_MS);
+
   // Periodic health line: heap + the retainers a slow leak would show up in
   // (realtime listeners, the NOTIFY client's query queue, in-flight/aux work).
   // One line a minute so a memory incident can be diagnosed from the log
@@ -274,6 +288,8 @@ export async function startWorker(): Promise<void> {
     clearInterval(opsTimer);
     clearInterval(schedulerTimer);
     clearInterval(teardownTimer);
+    clearTimeout(parityFirstRun);
+    clearInterval(parityTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
     // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.

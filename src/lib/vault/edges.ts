@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { vaultEdges, vaultNodes } from "@/lib/db/schema";
+import { spaces as spacesTable, vaultEdges, vaultNodes } from "@/lib/db/schema";
+import { log } from "@/lib/log";
 // Type-only, both of them, so nothing travels back at runtime: `claims.ts` imports this
 // module for its value exports, and a runtime import in the other direction would be a
 // cycle. `Actor` lives in `claims.ts` because that is where the audit log spells it.
@@ -239,6 +240,60 @@ export async function containsParity(
     onlyInNoteClaims: rows.filter((r) => !r.only_in_edges).map((r) => `${r.from_id}:${r.to_id}`),
     onlyInEdges: rows.filter((r) => r.only_in_edges).map((r) => `${r.from_id}:${r.to_id}`),
   };
+}
+
+export type ContainsParity = Awaited<ReturnType<typeof containsParity>>;
+
+/**
+ * THE PRODUCTION WITNESS for the control above, run periodically by the worker.
+ *
+ * `assertContainsParity` throws, and it is disarmed in production for good reason — a
+ * divergence is a reporting matter, not grounds for taking a write down in front of a
+ * person. So production needs a reader that looks at every live space on a slow interval
+ * and says so in the log. That is this: it READS, it never repairs, and it never throws.
+ * Repairing would close the very divergence the dual-write period exists to detect, and
+ * the next release switches reads to the side that would then have been quietly patched
+ * into agreement.
+ *
+ * A retired space is skipped: nothing writes to it any more, so a divergence there is
+ * frozen history rather than a defect anybody can act on, and reporting it every six hours
+ * would train the operator to ignore the line.
+ *
+ * ONE `log.warn` PER DIVERGED SPACE, carrying both directions, because which side has the
+ * extra membership is the whole diagnosis — `note_claims` ahead of the edges means a
+ * writer skipped `linkNodes`, the edges ahead means a delete closed an edge without
+ * touching the projection.
+ *
+ * The two dependencies are INJECTED so the sweep can be unit-tested without a database:
+ * the interesting behavior is which log lines come out, and a test that needed live
+ * divergence to see one could not produce the diverged case at all.
+ */
+export async function sweepContainsParity(deps?: {
+  liveSpaceIds?: () => Promise<string[]>;
+  check?: (spaceId: string) => Promise<ContainsParity>;
+}): Promise<void> {
+  const liveSpaceIds =
+    deps?.liveSpaceIds ??
+    (async () =>
+      (await db.select({ id: spacesTable.id }).from(spacesTable).where(isNull(spacesTable.retiredAt))).map((r) => r.id));
+  const check = deps?.check ?? ((spaceId: string) => containsParity(spaceId));
+
+  for (const spaceId of await liveSpaceIds()) {
+    // PER SPACE, so one space that cannot be read does not end the sweep for the rest.
+    // A control that reports on 4 of 40 spaces and says nothing about the other 36 is
+    // worse than one that reports on none, because its silence reads as agreement.
+    try {
+      const parity = await check(spaceId);
+      if (parity.ok) continue;
+      log.warn("vault contains parity diverged", {
+        spaceId,
+        onlyInNoteClaims: parity.onlyInNoteClaims,
+        onlyInEdges: parity.onlyInEdges,
+      });
+    } catch (e) {
+      log.error("vault contains parity check failed", { spaceId, err: String(e) });
+    }
+  }
 }
 
 /**
