@@ -637,6 +637,31 @@ describe("the schemas the provider actually sees", () => {
         grounding: g,
       }),
     ).toBe(false);
+    // AT THE TOP LEVEL TOO, which the arm's own `.strict()` says nothing about: a body sent
+    // beside the op rather than inside it was silently stripped, so a model that put it in
+    // the wrong place was told its edit succeeded with a body it thinks it sent.
+    expect(
+      await accepts({
+        op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a", new_str: "b" },
+        content: [{ kind: "markdown", text: "x" }],
+        grounding: g,
+      }),
+    ).toBe(false);
+    expect(
+      await accepts({
+        op: { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a" },
+        title: "Beans",
+        grounding: g,
+      }),
+    ).toBe(false);
+    // And the arms that DO take them still do, so the outer strictness is a fence and not a
+    // wall.
+    expect(
+      await accepts({
+        op: { kind: "create", scope: "user", title: "Beans", content: [{ kind: "markdown", text: "x" }] },
+        grounding: g,
+      }),
+    ).toBe(true);
     // And an invented arm is not an arm.
     expect(await accepts({ op: { kind: "delete", note_handle: "n1", expected_revision: 2 }, grounding: g })).toBe(false);
 

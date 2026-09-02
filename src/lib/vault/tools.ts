@@ -470,7 +470,12 @@ export async function makeVaultMemoryTools(ctx: {
           .describe(
             "The subject in the user's words, or an n-handle of an existing topic. On a create, leave it out to file under General; on an update, leave it out to keep the current filing",
           ),
-      }),
+      })
+        // STRICT OUT HERE AS WELL AS INSIDE EACH ARM. The arm's own strictness says nothing
+        // about the level above it, so a `content` sent BESIDE a `str_replace` rather than
+        // inside it was stripped in silence — and a model that put the field in the wrong
+        // place was then told its edit succeeded, carrying a body it believes it sent.
+        .strict(),
       execute: async ({ op, grounding, topic, section }) =>
         writeCtx.budget.emit(
           JSON.stringify(
