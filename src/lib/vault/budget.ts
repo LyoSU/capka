@@ -16,7 +16,23 @@ export const BYTES_PER_TOKEN = 4.2;
  *  must not be able to eat the whole turn's allowance in a single answer. */
 export const MEMORY_SEARCH_MAX_RESULTS = 20;
 export const MEMORY_SEARCH_MAX_BYTES = 8_400;
-export const MEMORY_OPEN_MAX_CHARS = 8_000;
+
+/**
+ * ONE PAGE of `memory_open`, in UTF-8 BYTES — and the unit is the whole of this name.
+ *
+ * §4.3 spells the parameter `max_chars`, which is the unit this file's own ceiling rejected
+ * for the reason `emit` states one line down: a Ukrainian answer is two bytes per character,
+ * so a character count grants a Cyrillic turn twice the context an English one gets. A page
+ * measured in characters and spent against a ceiling measured in bytes is two units for one
+ * quantity, which is how a budget stops bounding anything.
+ *
+ * The wire parameter is therefore `max_bytes` as well: naming it `max_chars` while measuring
+ * bytes would be a lie told to the only reader who cannot check it.
+ *
+ * A page boundary never splits a UTF-8 sequence — see `read-tools.ts`, which snaps the cut
+ * down to a character boundary and refuses a cursor that does not sit on one.
+ */
+export const MEMORY_OPEN_MAX_BYTES = 8_000;
 
 /** The turn ceiling: ~11,900 tokens at 4.2 B/tok. */
 export const VAULT_TURN_MAX_BYTES = 50_000;

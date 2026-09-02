@@ -1,13 +1,14 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { TurnTaint } from "@/lib/tasks/turn-taint";
-import { MEMORY_SEARCH_MAX_RESULTS, type VaultBudget } from "./budget";
+import { MEMORY_OPEN_MAX_BYTES, MEMORY_SEARCH_MAX_RESULTS, type VaultBudget } from "./budget";
 import type { HandleMap } from "./handles";
 import { proposeCandidate, spaceForScope } from "./candidates";
 import { findCurrentHead, STATEMENT_MAX_CHARS, type ClaimHead, type SourceClass } from "./claims";
 import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolText } from "./model-view";
 import { NOTE_BLOCKS_MAX, NOTE_BLOCK_MAX_CHARS, NOTE_TITLE_MAX_CHARS } from "./notes";
 import { verifyDirectProvenance } from "./quote-match";
+import { memoryOpen } from "./read-tools";
 import { getOrCreateSpace } from "./spaces";
 import { TOPIC_TITLE_MAX_CHARS } from "./topics";
 import { factWrite, memoryFile, memoryLink, noteWrite, type WriteCtx } from "./write-tools";
@@ -483,6 +484,33 @@ export async function makeVaultMemoryTools(ctx: {
               ctx: writeCtx,
             }),
           ),
+        ),
+    }),
+
+    /**
+     * ONE ITEM, IN FULL, by the handle a search returned — the read `memory_search`'s one-line
+     * excerpts exist to make cheap. A note comes back a page at a time, and the page is
+     * measured in the same UTF-8 bytes the turn's ceiling is spent in.
+     */
+    memory_open: tool({
+      description:
+        "Read one saved item in full, by a handle memory_search returned. Use it when an excerpt is not enough — the whole of a note, or what a fact is filed under and whether anything contradicts it. A long note comes back in pages: if the reply carries a cursor, call again with it to read on. A document handle returns only its details, never its contents.",
+      inputSchema: z.object({
+        handle: z.string().describe("A handle from memory_search, like m1 or n2"),
+        cursor: z.string().optional().describe("Continue a long note: pass the cursor from the previous reply"),
+        max_bytes: z
+          .number()
+          .int()
+          .min(500)
+          .max(MEMORY_OPEN_MAX_BYTES)
+          .optional()
+          .describe(`How much of a note to read at once, in bytes. Default: ${MEMORY_OPEN_MAX_BYTES}`),
+      }),
+      execute: async ({ handle, cursor, max_bytes }) =>
+        // Through the SAME per-turn ceiling, which is what makes paging honest: a model that
+        // pages through a note pays for every page out of one allowance.
+        writeCtx.budget.emit(
+          JSON.stringify(await memoryOpen({ handle, cursor, maxBytes: max_bytes, ctx: writeCtx })),
         ),
     }),
 

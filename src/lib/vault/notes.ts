@@ -98,8 +98,15 @@ async function resolveBody(body: NoteBody, noteId: string, ex: Ex): Promise<stri
  *  content and class, the identity's lifecycle, and the channel the version generated.
  *
  *  `promptAccess` is read and never selected on here — `model-view.ts` owns every channel
- *  clause. This shape carries it so a caller holding a head (the `memory_open` reply in
- *  T12) can make the same decision the mints made, off the row it already has. */
+ *  clause. It is on this shape so a caller that already holds a head can REPORT the channel
+ *  the database put the row on: `memory_note_write` reads it back onto its return, exactly as
+ *  `factWrite` reads `findCurrentHead`'s.
+ *
+ *  It is NOT what `memory_open` switches on, which is what an earlier draft of this line
+ *  said. That decision lives inside `openNoteForModel`, because §3.4's NEW-3 requires
+ *  `memory_open`'s text to come from the mint for the row's channel — so the mint is what
+ *  refuses an off-channel row, and a channel check written against this field in the tool
+ *  would be a second answer to the same question. */
 export type NoteHead = {
   id: string;
   spaceId: string;

@@ -190,7 +190,7 @@ beforeEach(() => {
 });
 
 describe("makeVaultMemoryTools — the factory", () => {
-  it("hands back exactly eight tools", async () => {
+  it("hands back exactly nine tools", async () => {
     // The new writers join the set one commit at a time and the two legacy ones have not
     // left it yet: `memory_propose` and `memory_update` are retired in their own commit
     // (plan Task 13), so for this window a turn holds both the write tools and the two
@@ -202,6 +202,7 @@ describe("makeVaultMemoryTools — the factory", () => {
       "memory_forget",
       "memory_link",
       "memory_note_write",
+      "memory_open",
       "memory_propose",
       "memory_search",
       "memory_update",

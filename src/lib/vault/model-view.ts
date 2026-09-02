@@ -1,7 +1,18 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { noteClaims, vaultClaims, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
-import { fitSlotKey, fitStatement, looksLikeSecret, type ClaimHead, type SourceClass } from "./claims";
+import {
+  knowledgeSourceVersions,
+  knowledgeSources,
+  noteClaims,
+  vaultClaims,
+  vaultEdges,
+  vaultNodes,
+  vaultNotes,
+  vaultNoteVersions,
+} from "@/lib/db/schema";
+import { fitSlotKey, fitStatement, looksLikeSecret, type ClaimHead, type PromptAccess, type SourceClass } from "./claims";
+import { edgeTargets, substituteTokens } from "./links";
+import type { NodeKind } from "./nodes";
 import { fitNoteTitle } from "./notes";
 import { type Ex } from "./spaces";
 import { TOPIC_LABELS, fitTopicTitle } from "./topics";
@@ -17,7 +28,11 @@ import { norm } from "./text";
  * fifth reader that an enumeration built from one accessor's call sites simply did not
  * contain. So the predicate is not written down once per reader; it is written here, and a
  * reader that wants stored text for a prompt has to come through one of this module's
- * MINTS — `listManifestClaims`, `listManifestTopics`, `listMemoryToolRows`, `modelTextOf`.
+ * MINTS — `listManifestClaims`, `listManifestTopics`, `listMemoryToolRows`, `modelTextOf`,
+ * and since `memory_open` the three handle-addressed ones (`openClaimForModel`,
+ * `openNoteForModel`, `openSourceForModel`). Those three are not a fifth PRODUCER: they are
+ * the same decision asked about one row instead of a query (§3.4, NEW-3), which is precisely
+ * why they live here rather than in the tool.
  *
  * WHAT THE DECISION IS NOW, and it is no longer one `WHERE`. It is a CHANNEL clause over
  * `prompt_access` — a generated column, so no writer can set it by hand — ANDed with one
@@ -52,9 +67,12 @@ declare const evidenceText: unique symbol;
  * is constructible by anyone and the discriminant is data, so the discrimination lives in
  * the type system instead, where a bypass fails `tsc`.
  *
- * `EvidenceText` has no mint in this slice. It is declared here because the union is what
- * makes the other two unassignable to each other's formatters, and because the mint that
- * produces it (`listEvidenceRows`) ships with its only reader, `knowledge_search`.
+ * `EvidenceText` has ONE producer, and it is the smallest possible one: `openSourceForModel`
+ * mints a document's TITLE. The mint for fragments and file-derived note text
+ * (`listEvidenceRows`) still ships with its only reader, `knowledge_search`, in slice 3 —
+ * the brand exists before it because the union is what makes the other two unassignable to
+ * each other's formatters, and because `memory_open`'s `f` arm cannot mint a document's title
+ * on either of them.
  */
 export type ManifestText = string & { readonly [manifestText]: true };
 export type MemoryToolText = string & { readonly [memoryToolText]: true };
@@ -68,6 +86,11 @@ export type ModelText = ManifestText | MemoryToolText | EvidenceText;
 
 const mintManifest = (s: string) => s as ManifestText;
 const mintMemoryTool = (s: string) => s as MemoryToolText;
+/** The evidence channel's mint. Its only producer in this slice is `openSourceForModel`: a
+ *  document is `untrusted_derived` by construction, so its title cannot ride either of the
+ *  other two channels, and `listEvidenceRows` — the mint for fragments and file-derived notes
+ *  — ships with its reader, `knowledge_search`, in slice 3. */
+const mintEvidence = (s: string) => s as EvidenceText;
 
 /**
  * ONE MODULE OWNS LIVENESS — the arms side by side, each the only one of its kind.
@@ -110,6 +133,23 @@ function liveNoteForModel() {
     eq(vaultNoteVersions.sensitive, false),
     eq(vaultNoteVersions.revision, vaultNotes.currentRevision),
   );
+}
+
+/**
+ * Used by `openSourceForModel`, and it is the fourth node kind's arm — added HERE, beside
+ * the other two, which is the whole point of the invariant being "one module owns liveness"
+ * rather than "one function".
+ *
+ * FOR A SOURCE THIS ARM *IS* THE CHANNEL CLAUSE (§3.4, NEW-5's argument for fragments, which
+ * holds for the source row it hangs off for the same reason): `knowledge_sources` has no
+ * `prompt_access` column and must not grow one. A document is `untrusted_derived` by
+ * construction — that is what document content IS — so a second copy of that standing would
+ * be a second entrance to a question the class already answers.
+ *
+ * The `vault_nodes` join is the MINT'S obligation, as with the other two.
+ */
+function liveSourceForModel() {
+  return and(isNull(vaultNodes.deletedAt), isNull(knowledgeSources.deletedAt));
 }
 
 /**
@@ -703,4 +743,333 @@ export async function countWithheld(spaceId: string, ex: Ex = db): Promise<numbe
       ),
     );
   return row?.n ?? 0;
+}
+
+/* ------------------------------------------------------------------------------------------
+ * `memory_open`'s MINTS — one row, addressed by a handle instead of by a query (§3.4, §4.3)
+ * ---------------------------------------------------------------------------------------- */
+
+/**
+ * `memory_open` IS NOT A FIFTH TEXT PRODUCER (§3.4, round-3 NEW-3), and these three functions
+ * are what makes that true. It is the one tool that takes a handle and returns prose, so its
+ * text is minted here — by the mint for the row's channel — and an implementer wiring
+ * `memory_open(handle)` straight to a row read would re-open, one tool over, exactly the leak
+ * N4 closed.
+ *
+ * WHY THE CHANNEL CHECK IS IN JAVASCRIPT HERE and in SQL in the list mints: a list must not
+ * return an ineligible row at all, while this reader has to tell "there is nothing at that
+ * address" apart from "that row is not for you" — and the model needs the difference, because
+ * it can hold a handle to a note IT wrote whose class puts it on the evidence channel. Same
+ * shape as `modelTextOf`, which has made the same decision off a head its caller already read
+ * since the channel cutover. The LIVENESS half stays in SQL, in the arms above.
+ *
+ * `owner_only` is the one state that comes back as `not_found` rather than `off_channel`: the
+ * liveness arms exclude `sensitive` rows outright, `countWithheld` is the only thing that may
+ * say how many exist, and a per-handle "that one is withheld" would confirm the category the
+ * withholding exists to protect.
+ */
+export type OpenOutcome<T> = { ok: true; item: T } | { ok: false; reason: "not_found" | "off_channel" };
+
+/** IDS TRAVEL, TEXT DOES NOT. The `nodeId`/`spaceId` pairs on these shapes are what
+ *  `handles.mint` addresses a node by, and the caller turns each into a handle before the
+ *  model sees anything — the same arrangement `MemoryToolRow` already has. What must not
+ *  leave this module unminted is prose. */
+export type OpenedClaim = {
+  id: string;
+  revision: number;
+  statement: MemoryToolText;
+  /** The label of the topic this fact is filed under, resolved from the KEY through
+   *  `topicLabel` exactly as both other mints resolve it, and `null` when it is filed
+   *  nowhere or the label is secret-shaped. */
+  topic: MemoryToolText | null;
+  sourceClass: SourceClass;
+  recordedAt: Date;
+  /** §4.3's N4 field: THE HANDLE AND THE TRUST TAG ONLY, never the contesting statement's
+   *  text. The contesting row is by construction the weaker one — typically
+   *  `untrusted_derived`, whose whole point is that it lives on the evidence channel — so its
+   *  words would have arrived on the memory-tool channel as a passenger on this claim. Bound
+   *  3 and the one-conflict-reader invariant both failed on that one line in round 1. */
+  conflict: { spaceId: string; nodeId: string; trust: SourceClass } | null;
+};
+
+export type OpenedNote = {
+  id: string;
+  revision: number;
+  title: MemoryToolText;
+  /** THE WHOLE BODY, with canonical edge tokens resolved to their targets' CURRENT titles —
+   *  and resolved through this module's own channel-filtered lookup, not through
+   *  `renderBody`, which serves the owner's page and may read any title. A link to an
+   *  untrusted note renders as `UNRESOLVED_LINK`: an edge is not text, but a title is.
+   *
+   *  It is NOT clamped. `memory_open` exists because `listMemoryToolRows`' excerpt is one
+   *  line, and the caller pages this by bytes. */
+  body: MemoryToolText;
+  sourceClass: SourceClass;
+  staleSince: Date | null;
+  /** Claims this note contains, as node ids for the caller to mint handles from. Capped:
+   *  a topic with three hundred facts is a legitimate row and not an answer. */
+  containedClaimIds: string[];
+  /** Where this note's live `references` edges point, each with its node KIND so the caller
+   *  can mint the right handle letter. Ids only — a handle carries no text,
+   *  which is why these are not channel-filtered: the model learns that a link exists and
+   *  gets the one address that can be opened, and `memory_open` on an off-channel target
+   *  refuses exactly as it does for any other handle. */
+  linkTargets: { nodeId: string; kind: NodeKind }[];
+};
+
+export type OpenedSource = {
+  id: string;
+  title: EvidenceText;
+  versions: { observedAt: Date; status: string; superseded: boolean }[];
+};
+
+/** How many neighbours one `memory_open` may name. The bound is on the ANSWER rather than on
+ *  the data: a topic containing three hundred facts is ordinary, and the tool's job is to
+ *  hand back an openable set, not a census. */
+const OPEN_NEIGHBOURS_MAX = 20;
+
+const memoryToolChannel = (access: PromptAccess) => access === "manifest" || access === "memory_search";
+
+/** One claim, in full, for `memory_open`'s `m` arm. */
+export async function openClaimForModel(
+  spaceId: string,
+  nodeId: string,
+  ex: Ex = db,
+): Promise<OpenOutcome<OpenedClaim>> {
+  const [row] = await ex
+    .select({
+      id: vaultClaims.id,
+      revision: vaultClaims.revision,
+      statement: vaultClaims.statement,
+      sourceClass: vaultClaims.sourceClass,
+      promptAccess: vaultClaims.promptAccess,
+      recordedAt: vaultClaims.recordedAt,
+      conflictsWith: vaultClaims.conflictsWith,
+    })
+    .from(vaultClaims)
+    // The mint's own obligation: `liveClaimForModel` assumes this join has been made.
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+    .where(and(eq(vaultClaims.spaceId, spaceId), eq(vaultClaims.id, nodeId), liveClaimForModel()))
+    .limit(1);
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!memoryToolChannel(row.promptAccess)) return { ok: false, reason: "off_channel" };
+
+  // The containing topic, through `note_claims`. NOT through the `contains` edge: §11.5's
+  // read switch is a later release, and reading the new side here would make this the one
+  // reader that answers from the other table.
+  const [topicRow] = await ex
+    .select({ topicKey: vaultNotes.topicKey, title: vaultNoteVersions.title })
+    .from(noteClaims)
+    .innerJoin(vaultNotes, eq(vaultNotes.id, noteClaims.noteId))
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+    .innerJoin(
+      vaultNoteVersions,
+      and(eq(vaultNoteVersions.noteId, vaultNotes.id), eq(vaultNoteVersions.revision, vaultNotes.currentRevision)),
+    )
+    .where(and(eq(noteClaims.claimId, nodeId), eq(vaultNotes.spaceId, spaceId), liveNoteForModel()))
+    .limit(1);
+  const label = topicRow ? topicLabel(topicRow.topicKey, topicRow.title) : null;
+
+  // The conflict: its TRUST TAG, off the authoritative row, and its id for the caller to
+  // mint a handle from. Scoped to a live head, because a forgotten disagreement is not one.
+  let conflict: OpenedClaim["conflict"] = null;
+  if (row.conflictsWith) {
+    const [c] = await ex
+      .select({ id: vaultClaims.id, spaceId: vaultClaims.spaceId, sourceClass: vaultClaims.sourceClass })
+      .from(vaultClaims)
+      .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+      .where(and(eq(vaultClaims.id, row.conflictsWith), eq(vaultClaims.spaceId, spaceId), liveClaimForModel()))
+      .limit(1);
+    if (c) conflict = { spaceId: c.spaceId, nodeId: c.id, trust: c.sourceClass };
+  }
+
+  // THE STAMP IS THE MINT'S (M1), exactly as it is in `listMemoryToolRows`' query branch:
+  // `last_used_at` means "the model received this row", and this call is that.
+  await ex.update(vaultClaims).set({ lastUsedAt: new Date() }).where(eq(vaultClaims.id, nodeId));
+
+  return {
+    ok: true,
+    item: {
+      id: row.id,
+      revision: row.revision,
+      statement: mintMemoryTool(fitStatement(row.statement)),
+      topic: label ? mintMemoryTool(label) : null,
+      sourceClass: row.sourceClass,
+      recordedAt: row.recordedAt,
+      conflict,
+    },
+  };
+}
+
+/** One note, in full, for `memory_open`'s `n` arm. */
+export async function openNoteForModel(
+  spaceId: string,
+  nodeId: string,
+  ex: Ex = db,
+): Promise<OpenOutcome<OpenedNote>> {
+  const [row] = await ex
+    .select({
+      id: vaultNotes.id,
+      revision: vaultNotes.currentRevision,
+      title: vaultNoteVersions.title,
+      body: vaultNoteVersions.bodyMarkdown,
+      sourceClass: vaultNoteVersions.sourceClass,
+      promptAccess: vaultNoteVersions.promptAccess,
+      staleSince: vaultNoteVersions.staleSince,
+    })
+    .from(vaultNotes)
+    // Two obligations, both the mint's: `liveNoteForModel` assumes the node join AND the
+    // version join, and head-ness is a clause in the arm rather than a join condition.
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+    .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
+    .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.id, nodeId), liveNoteForModel()))
+    .limit(1);
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!memoryToolChannel(row.promptAccess)) return { ok: false, reason: "off_channel" };
+
+  // THE TOKENS, resolved against titles this channel may read. `renderBody` is the owner's
+  // renderer and reads any title; `substituteTokens` is the one implementation both share,
+  // which is why the title SOURCE is a parameter of it.
+  const targets = await edgeTargets(row.body, spaceId, ex);
+  const titles = new Map<string, string>();
+  const targetIds = [...targets.values()].map((t) => t.nodeId);
+  if (targetIds.length) {
+    const notes = await ex
+      .select({ id: vaultNotes.id, title: vaultNoteVersions.title })
+      .from(vaultNotes)
+      .innerJoin(vaultNodes, eq(vaultNodes.id, vaultNotes.id))
+      .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
+      .where(
+        and(
+          eq(vaultNotes.spaceId, spaceId),
+          inArray(vaultNotes.id, targetIds),
+          inArray(vaultNoteVersions.promptAccess, ["manifest", "memory_search"]),
+          liveNoteForModel(),
+        ),
+      );
+    for (const n of notes) titles.set(n.id, fitNoteTitle(n.title));
+    const claims = await ex
+      .select({ id: vaultClaims.id, statement: vaultClaims.statement })
+      .from(vaultClaims)
+      .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+      .where(
+        and(
+          eq(vaultClaims.spaceId, spaceId),
+          inArray(vaultClaims.id, targetIds),
+          inArray(vaultClaims.promptAccess, ["manifest", "memory_search"]),
+          liveClaimForModel(),
+        ),
+      );
+    for (const c of claims) titles.set(c.id, fitStatement(c.statement));
+  }
+  const body = substituteTokens(row.body, (edgeId) => {
+    const t = targets.get(edgeId);
+    return t ? (titles.get(t.nodeId) ?? null) : null;
+  });
+
+  // What this note contains, and where it points. Both are ID sets and neither is text; the
+  // contained set is channel-filtered because a claim the model cannot open is not an answer,
+  // while the link set is not — see `linkTargetIds`.
+  const contained = await ex
+    .select({ id: vaultClaims.id })
+    .from(noteClaims)
+    .innerJoin(vaultClaims, eq(vaultClaims.id, noteClaims.claimId))
+    .innerJoin(vaultNodes, eq(vaultNodes.id, vaultClaims.id))
+    .where(
+      and(
+        eq(noteClaims.noteId, nodeId),
+        eq(vaultClaims.spaceId, spaceId),
+        inArray(vaultClaims.promptAccess, ["manifest", "memory_search"]),
+        liveClaimForModel(),
+      ),
+    )
+    .orderBy(asc(vaultClaims.id))
+    .limit(OPEN_NEIGHBOURS_MAX);
+
+  const links = await ex
+    .select({ id: vaultEdges.toNodeId, kind: vaultNodes.kind })
+    .from(vaultEdges)
+    .innerJoin(
+      vaultNodes,
+      and(eq(vaultNodes.id, vaultEdges.toNodeId), eq(vaultNodes.spaceId, vaultEdges.spaceId)),
+    )
+    .where(
+      and(
+        eq(vaultEdges.spaceId, spaceId),
+        eq(vaultEdges.fromNodeId, nodeId),
+        eq(vaultEdges.relation, "references"),
+        isNull(vaultEdges.deletedAt),
+        isNull(vaultNodes.deletedAt),
+      ),
+    )
+    .orderBy(asc(vaultEdges.toNodeId))
+    .limit(OPEN_NEIGHBOURS_MAX);
+
+  // The stamp sits on the note IDENTITY and not on the version, because "when was this read"
+  // is a question about the note.
+  await ex.update(vaultNotes).set({ lastUsedAt: new Date() }).where(eq(vaultNotes.id, nodeId));
+
+  return {
+    ok: true,
+    item: {
+      id: row.id,
+      revision: row.revision,
+      title: mintMemoryTool(fitNoteTitle(row.title)),
+      body: mintMemoryTool(body),
+      sourceClass: row.sourceClass,
+      staleSince: row.staleSince,
+      containedClaimIds: contained.map((c) => c.id),
+      linkTargets: links.map((l) => ({ nodeId: l.id, kind: l.kind })),
+    },
+  };
+}
+
+/**
+ * One document, for `memory_open`'s `f` arm — METADATA ONLY. It never dumps a file, and there
+ * is no arm here that could: the only text it reads is the title a person gave the document,
+ * and the fragments that hold its contents are `knowledge_search`'s business.
+ *
+ * `EvidenceText`, because a document is `untrusted_derived` by construction and the evidence
+ * channel is the one it rides. That is also the whole channel check — see
+ * `liveSourceForModel`.
+ *
+ * NO `last_used_at` STAMP: `knowledge_sources` has no such column. It is not an omission to
+ * repair here — the column arrives with slice 3's retention story for documents, and inventing
+ * one now would put the stamp somewhere the retention job does not read.
+ */
+export async function openSourceForModel(
+  spaceId: string,
+  nodeId: string,
+  ex: Ex = db,
+): Promise<OpenOutcome<OpenedSource>> {
+  const [row] = await ex
+    .select({ id: knowledgeSources.id, title: knowledgeSources.title })
+    .from(knowledgeSources)
+    .innerJoin(vaultNodes, eq(vaultNodes.id, knowledgeSources.id))
+    .where(and(eq(knowledgeSources.spaceId, spaceId), eq(knowledgeSources.id, nodeId), liveSourceForModel()))
+    .limit(1);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  const versions = await ex
+    .select({
+      observedAt: knowledgeSourceVersions.observedAt,
+      status: knowledgeSourceVersions.status,
+      supersededAt: knowledgeSourceVersions.supersededAt,
+    })
+    .from(knowledgeSourceVersions)
+    .where(eq(knowledgeSourceVersions.sourceId, nodeId))
+    .orderBy(asc(knowledgeSourceVersions.observedAt));
+
+  return {
+    ok: true,
+    item: {
+      id: row.id,
+      title: mintEvidence(fitNoteTitle(row.title)),
+      versions: versions.map((v) => ({
+        observedAt: v.observedAt,
+        status: v.status,
+        superseded: v.supersededAt !== null,
+      })),
+    },
+  };
 }

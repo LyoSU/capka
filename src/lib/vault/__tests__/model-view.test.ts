@@ -35,7 +35,15 @@ const OWNER = "src/lib/vault/model-view.ts";
  *  below apply to it; that is the intended way to extend this list, and the reason it is
  *  a list rather than a directory walk is that "model-facing" is a judgment about
  *  AUDIENCE, which no path pattern encodes. */
-const MODEL_FACING = ["src/lib/vault/manifest.ts", "src/lib/vault/tools.ts", "src/lib/vault/write-tools.ts"];
+const MODEL_FACING = [
+  "src/lib/vault/manifest.ts",
+  "src/lib/vault/tools.ts",
+  "src/lib/vault/write-tools.ts",
+  // `memory_open`'s module. It is the one tool that takes a handle and returns prose, so it
+  // is the reader §3.4's NEW-3 was written about — and it belongs on this list for the
+  // ordinary reason every other entry does, not as an exception to it.
+  "src/lib/vault/read-tools.ts",
+];
 
 /** Accessors that return claim text with NO admission decision attached. They exist for
  *  callers that must see every row — the ledger's dedup, the confirm path, the human
@@ -164,7 +172,12 @@ describe("the three channels", () => {
     const expected: Record<string, string[]> = {
       ManifestText: [OWNER],
       MemoryToolText: [OWNER],
-      EvidenceText: [],
+      // ONE producer, and the smallest one: `openSourceForModel` mints a document's TITLE,
+      // because a document is `untrusted_derived` by construction and its title cannot ride
+      // either other channel. `listEvidenceRows` — the mint for fragments and file-derived
+      // note text — still ships with its only reader, `knowledge_search`, in slice 3, so the
+      // roster is one entry rather than two.
+      EvidenceText: [OWNER],
       // THE STRUCTURAL CURE for what the deleted `it("lets only the confirm path choose a
       // manifest-tier source class")` guarded, and it REPLACES that test rather than
       // joining it — as its own comment said slice 2 would: "a type that cannot express
@@ -216,10 +229,16 @@ describe("the three channels", () => {
     //                  on. An exclusion, stated: it was previously silent, which reads as
     //                  an oversight rather than as the decision it is.
     //   model-view.ts  the owner: every channel clause, all three arms.
-    //   notes.ts       READS it into `NoteHead.promptAccess` for `memory_open`'s channel
-    //                  check to switch on, and never SELECTS on it — the same exclusion,
-    //                  and the same reason, as `claims.ts` above. Stated rather than left
-    //                  silent, because a silent entry reads as an oversight.
+    //   notes.ts       READS it into `NoteHead.promptAccess` so a caller holding a head can
+    //                  REPORT the channel the database chose — `memory_note_write` puts it on
+    //                  its return, exactly as `factWrite` does — and never SELECTS on it: the
+    //                  same exclusion, and the same reason, as `claims.ts` above. It is NOT
+    //                  `memory_open`'s channel check, which an earlier round of this entry
+    //                  predicted it would be: that check is inside `openNoteForModel`, in the
+    //                  owner module, because §3.4's NEW-3 requires the TEXT to come from the
+    //                  mint for the row's channel — so `read-tools.ts` contains no token of
+    //                  this vocabulary at all, and its absence from this roster is the
+    //                  assertion, not an omission.
     //   write-tools.ts REPORTS it back on `memory_fact_write`'s return (§4.5's Returns
     //                  table), read off the row the write just made through
     //                  `findCurrentHead` — so the value is the generated column's, not a
