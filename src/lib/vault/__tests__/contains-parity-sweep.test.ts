@@ -30,9 +30,32 @@ describe("sweepContainsParity", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("vault contains parity diverged", {
       spaceId: "space-diverged",
-      onlyInNoteClaims: ["n1:c1"],
-      onlyInEdges: ["n2:c2", "n2:c3"],
+      onlyInNoteClaims: 1,
+      onlyInEdges: 2,
+      onlyInNoteClaimsSample: ["n1:c1"],
+      onlyInEdgesSample: ["n2:c2", "n2:c3"],
     });
+  });
+
+  it("bounds the line at 20 ids a side while keeping the counts exact", async () => {
+    // The size of a wholesale divergence is the size of the log line, and nothing repairs
+    // it, so the same line would repeat every six hours until a release. A count is what
+    // says how bad it is; a sample is what says where to start looking.
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    const many = Array.from({ length: 1000 }, (_, i) => `n${i}:c${i}`);
+    await sweepContainsParity({
+      liveSpaceIds: async () => ["big"],
+      check: async () => ({ ok: false, onlyInNoteClaims: many, onlyInEdges: many }),
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [, ctx] = warn.mock.calls[0] as [string, Record<string, unknown>];
+    expect(ctx.onlyInNoteClaims).toBe(1000);
+    expect(ctx.onlyInEdges).toBe(1000);
+    expect(ctx.onlyInNoteClaimsSample).toHaveLength(20);
+    expect(ctx.onlyInEdgesSample).toHaveLength(20);
+    // The sample is the HEAD of the list, not an arbitrary slice, so two readings of the
+    // same unrepaired divergence name the same rows.
+    expect(ctx.onlyInNoteClaimsSample).toEqual(many.slice(0, 20));
   });
 
   it("is silent when every live space agrees, and asks each of them", async () => {
@@ -72,8 +95,10 @@ describe("sweepContainsParity", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("vault contains parity diverged", {
       spaceId: "later",
-      onlyInNoteClaims: ["n1:c1"],
-      onlyInEdges: [],
+      onlyInNoteClaims: 1,
+      onlyInEdges: 0,
+      onlyInNoteClaimsSample: ["n1:c1"],
+      onlyInEdgesSample: [],
     });
   });
 });

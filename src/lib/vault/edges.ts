@@ -244,6 +244,10 @@ export async function containsParity(
 
 export type ContainsParity = Awaited<ReturnType<typeof containsParity>>;
 
+/** How many diverged pair ids one warning carries per side. The counts beside them are
+ *  exact, so this bounds the LINE without bounding the diagnosis. */
+const PARITY_LOG_SAMPLE = 20;
+
 /**
  * THE PRODUCTION WITNESS for the control above, run periodically by the worker.
  *
@@ -285,10 +289,18 @@ export async function sweepContainsParity(deps?: {
     try {
       const parity = await check(spaceId);
       if (parity.ok) continue;
+      // COUNTS IN FULL, IDS AS A SAMPLE. `containsParity` has no `LIMIT` - the assert path
+      // needs the whole set to name it in the thrown message - so a wholesale divergence
+      // (a bad backfill, a writer that stopped calling `linkNodes`) would put one line the
+      // size of the divergence into the log. And nothing repairs it by design, so that line
+      // repeats every six hours until a release lands. The counts are the size of the
+      // problem and the sample is enough to start reading rows; the rest is in the tables.
       log.warn("vault contains parity diverged", {
         spaceId,
-        onlyInNoteClaims: parity.onlyInNoteClaims,
-        onlyInEdges: parity.onlyInEdges,
+        onlyInNoteClaims: parity.onlyInNoteClaims.length,
+        onlyInEdges: parity.onlyInEdges.length,
+        onlyInNoteClaimsSample: parity.onlyInNoteClaims.slice(0, PARITY_LOG_SAMPLE),
+        onlyInEdgesSample: parity.onlyInEdges.slice(0, PARITY_LOG_SAMPLE),
       });
     } catch (e) {
       log.error("vault contains parity check failed", { spaceId, err: String(e) });
