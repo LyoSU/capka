@@ -9,7 +9,7 @@ import {
   BarChart3, SearchX, Clock, ArrowUpRight,
 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Segmented } from "@/components/settings/segmented";
 import { SettingsPage, SettingsEmpty, ShowMore, useShowMore } from "@/components/settings/shell";
 import { ChartTooltip } from "@/components/shared/chart-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -238,47 +238,24 @@ export default function UsagePage() {
       description={t(scope === "own" ? "subtitleOwn" : "subtitleShared")}
       wide
     >
-      <div className="flex items-start justify-end gap-4">
-        <ToggleGroup
-          value={[String(days)]}
-          onValueChange={(v) => {
-            if (v.length) {
-              resetForReload();
-              setDays(Number(v[0]));
-            }
-          }}
-          variant="outline"
-          size="sm"
-        >
-          {RANGES.map((r) => (
-            <ToggleGroupItem key={r} value={String(r)} aria-label={t("rangeDays", { days: r })}>
-              {t("rangeDays", { days: r })}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-
-      {/* Control bar: whose spend + the rare-dimension filters. */}
+      {/* One control bar: whose spend, over which window, and the rare-dimension
+          filters. Two switchers of the same kind used to sit in two rows, one
+          right-aligned and one stretched full width — the same control drawn
+          two ways on one screen. */}
       <div className="flex flex-wrap items-center gap-2">
-        <ToggleGroup
-          value={[scope]}
-          onValueChange={(v) => {
-            if (v.length) {
-              resetForReload();
-              setScope(v[0] as Scope);
-            }
-          }}
-          variant="outline"
-          size="sm"
-          className="flex-1"
-        >
-          {SCOPES.map((s) => (
-            <ToggleGroupItem key={s} value={s} className="flex-1">
-              {t(s === "own" ? "scopeOwn" : "scopeShared")}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <FiltersControl t={t} data={data} filters={filters} setFilter={setFilter} activeCount={activeFilterCount} />
+        <Segmented
+          value={scope}
+          onChange={(v) => { resetForReload(); setScope(v); }}
+          options={SCOPES.map((sc) => ({ key: sc, label: t(sc === "own" ? "scopeOwn" : "scopeShared") }))}
+        />
+        <Segmented
+          value={String(days)}
+          onChange={(v) => { resetForReload(); setDays(Number(v)); }}
+          options={RANGES.map((r) => ({ key: String(r), label: t("rangeDays", { days: r }) }))}
+        />
+        <div className="ml-auto">
+          <FiltersControl t={t} data={data} filters={filters} setFilter={setFilter} activeCount={activeFilterCount} />
+        </div>
       </div>
 
       {/* Active filters as removable chips. */}
@@ -347,27 +324,15 @@ export default function UsagePage() {
           </div>
 
           {/* Section switch */}
-          <ToggleGroup
-            value={[tab]}
-            onValueChange={(v) => v.length && setTab(v[0] as Tab)}
-            variant="outline"
-            size="sm"
-            className="w-full"
-          >
-            {TABS.map((tb) => (
-              <ToggleGroupItem key={tb} value={tb} className="flex-1">
-                {t(`tab.${tb}`)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <Segmented value={tab} onChange={setTab} options={TABS.map((tb) => ({ key: tb, label: t(`tab.${tb}`) }))} />
 
           {tab === "overview" && (
             <>
               <DailyChart series={data.series} days={data.days} dailyAvg={dailyAvg} money={money} locale={locale} t={t} />
 
               <section className="space-y-2">
-                <h3 className="text-sm font-medium">{t("byProject")}</h3>
-                <p className="text-xs text-muted-foreground">{t("byProjectHint")}</p>
+                <h3 className="text-base font-semibold tracking-tight">{t("byProject")}</h3>
+                <p className="text-sm text-muted-foreground">{t("byProjectHint")}</p>
                 <Breakdown
                   rows={data.byProject.map((p) => ({
                     key: p.projectId ?? "__none__",
@@ -383,8 +348,8 @@ export default function UsagePage() {
               </section>
 
               <section className="space-y-2">
-                <h3 className="text-sm font-medium">{t("byConnection")}</h3>
-                <p className="text-xs text-muted-foreground">{t("byConnectionHint")}</p>
+                <h3 className="text-base font-semibold tracking-tight">{t("byConnection")}</h3>
+                <p className="text-sm text-muted-foreground">{t("byConnectionHint")}</p>
                 <Breakdown
                   rows={data.byConnection.map((c) => ({
                     key: c.configId ?? "__none__",
@@ -400,7 +365,7 @@ export default function UsagePage() {
               </section>
 
               <section className="space-y-2">
-                <h3 className="text-sm font-medium">{t("byChannel")}</h3>
+                <h3 className="text-base font-semibold tracking-tight">{t("byChannel")}</h3>
                 <Breakdown
                   rows={data.byChannel.map((c) => ({
                     key: c.channel,
@@ -417,7 +382,7 @@ export default function UsagePage() {
 
               {/* Technical detail — token counts and per-million rates. Collapsed by
                   default: engineer metrics, not what an admin acts on day to day. */}
-              <details className="group rounded-lg border">
+              <details className="group rounded-xl bg-card shadow-panel">
                 <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   {t("technicalDetails")}
                   <span className="text-xs text-muted-foreground/70 group-open:hidden">{t("tokensSummary", { tokens: compact(totalTok) })}</span>
@@ -433,7 +398,7 @@ export default function UsagePage() {
 
           {tab === "models" && (
             <section className="space-y-2">
-              <h3 className="text-sm font-medium">{t("byModel")}</h3>
+              <h3 className="text-base font-semibold tracking-tight">{t("byModel")}</h3>
               <Breakdown
                 rows={data.byModel.map((m) => {
                   const tok = Number(m.inputTokens) + Number(m.cachedInputTokens) + Number(m.outputTokens);
@@ -458,7 +423,7 @@ export default function UsagePage() {
             <>
               <section className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-medium">{t("byUser")}</h3>
+                  <h3 className="text-base font-semibold tracking-tight">{t("byUser")}</h3>
                   {data.byUser.length > 5 && (
                     <div className="relative w-44">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -507,7 +472,7 @@ export default function UsagePage() {
               {data.recent?.length ? (
                 <section className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-medium">{t("recentActivity")}</h3>
+                    <h3 className="text-base font-semibold tracking-tight">{t("recentActivity")}</h3>
                     {selectedUser && (
                       <button
                         onClick={() => setSelectedUser(null)}
@@ -523,7 +488,7 @@ export default function UsagePage() {
                       return <SettingsEmpty icon={Clock} title={t("noRecentForUser")} hint={t("noRecentForUserHint")} />;
                     }
                     return (
-                      <div className="overflow-hidden rounded-lg border">
+                      <div className="overflow-hidden rounded-xl bg-card shadow-panel">
                         {rows.map((r, i) => (
                           <RecentItem key={r.id} row={r} money={moneyPrecise} compact={compact} locale={locale} t={t} border={i > 0} />
                         ))}
@@ -587,8 +552,8 @@ function FiltersControl({
     <Popover>
       <PopoverTrigger
         className={cn(
-          "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors hover:bg-hover disabled:opacity-50",
-          activeCount > 0 && "border-primary/50 bg-hover-strong",
+          "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm shadow-btn transition-micro hover:bg-hover disabled:opacity-50",
+          activeCount > 0 && "bg-hover-strong",
         )}
         disabled={!opts}
       >
@@ -756,13 +721,13 @@ function UsageSkeleton() {
 
 function Stat({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: React.ReactNode }) {
   return (
-    <div className="rounded-lg border p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-0.5 flex items-baseline justify-between gap-2">
-        <p className="text-lg font-semibold tabular-nums">{value}</p>
+    <div className="rounded-xl bg-card p-4 shadow-panel">
+      <p className="text-[13px] text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-baseline justify-between gap-2">
+        <p className="text-xl font-semibold tabular-nums tracking-tight">{value}</p>
         {delta}
       </div>
-      {sub ? <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{sub}</p> : null}
+      {sub ? <p className="mt-1 truncate text-xs text-muted-foreground">{sub}</p> : null}
     </div>
   );
 }
@@ -823,10 +788,13 @@ function Breakdown({
 }) {
   const max = Math.max(...rows.map((r) => r.cost), 0);
   if (rows.length === 0) {
-    return <SettingsEmpty icon={SearchX} title={t("noMatches")} hint={t("noMatchesHint")} />;
+    // Its own sentence: this used to borrow the people-search "Nobody found /
+    // try another name", under a heading about projects, on a page with no
+    // search box in sight.
+    return <SettingsEmpty icon={BarChart3} title={t("emptyBreakdown")} hint={t("emptyBreakdownHint")} />;
   }
   return (
-    <div className="overflow-hidden rounded-lg border">
+    <div className="overflow-hidden rounded-xl bg-card shadow-panel">
       {rows.map((r, i) => {
         const share = total > 0 ? r.cost / total : 0;
         const selected = selectedKey === r.key;
@@ -927,14 +895,14 @@ function DailyChart({
   return (
     <section className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-sm font-medium">{t("dailyTrend")}</h3>
+        <h3 className="text-base font-semibold tracking-tight">{t("dailyTrend")}</h3>
         <span className="text-xs text-muted-foreground">{t("peakDay", { cost: money(max) })}</span>
       </div>
       {/* Pointer x decides the day, so the whole strip is a target — bar-by-bar
           hover meant aiming at a 4px column on a 90-day window, and the browser's
           own <title> tooltip took a second to appear and could not be styled. */}
       <div
-        className="relative rounded-lg border p-3"
+        className="relative rounded-xl bg-card p-3 shadow-panel"
         onPointerMove={(e) => {
           const box = e.currentTarget.getBoundingClientRect();
           const ratio = (e.clientX - box.left - 12) / (box.width - 24);

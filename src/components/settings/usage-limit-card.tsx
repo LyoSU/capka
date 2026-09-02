@@ -69,7 +69,7 @@ export function UsageLimitCard() {
     <section className="space-y-3">
       <div className="flex items-center gap-2">
         <Gauge className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-medium">{t("title")}</h3>
+        <h3 className="text-base font-semibold tracking-tight">{t("title")}</h3>
         {billing.limits?.blocked && (
           <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive-text">
             {t("reached")}
@@ -98,7 +98,7 @@ export function UsageLimitCard() {
         })}
       </div>
 
-      <p className="text-xs leading-relaxed text-muted-foreground">{t("hint")}</p>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">{t("hint")}</p>
     </section>
   );
 }

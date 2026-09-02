@@ -94,12 +94,15 @@ export default function UpdatesSettingsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      {/* Version state */}
-      <div className="rounded-lg border p-4">
-        <div className="flex items-center justify-between">
-          <div>
+      {/* Version state — a row in the same card grammar as every other setting.
+          The version is a name, not code: mono only for the real tag and its
+          short sha, never for the "development build" sentence. */}
+      <SettingsGroup>
+        <div className="px-4 py-3.5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
             <p className="text-sm font-medium">{t("running")}</p>
-            <p className="font-mono text-sm text-muted-foreground">
+            <p className={isDev ? "text-[13px] text-muted-foreground" : "font-mono text-[13px] text-muted-foreground"}>
               {isDev ? t("devBuild") : status!.current}
               {status?.sha ? <span className="ml-1.5 opacity-60">({status.sha.slice(0, 7)})</span> : null}
             </p>
@@ -131,7 +134,7 @@ export default function UpdatesSettingsPage() {
               )}
             </div>
             {status.notes && (
-              <div className="chat-prose mt-2 max-h-48 overflow-y-auto rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+              <div className="chat-prose mt-2 max-h-48 overflow-y-auto rounded-lg bg-field p-3 text-[13px] text-muted-foreground">
                 <Markdown>{status.notes}</Markdown>
               </div>
             )}
@@ -140,7 +143,7 @@ export default function UpdatesSettingsPage() {
                 href={status.releaseUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium underline-offset-4 hover:underline"
               >
                 {t("viewChangelog")}
                 <ExternalLink className="h-3 w-3" />
@@ -148,12 +151,13 @@ export default function UpdatesSettingsPage() {
             )}
           </div>
         )}
-      </div>
+        </div>
+      </SettingsGroup>
 
       {/* How to update */}
       <SettingsSection title={t("howTo")} description={t("howToHint")}>
-        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2 pl-3">
-          <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{UPDATE_CMD}</code>
+        <div className="flex items-center gap-2 rounded-xl bg-field p-1.5 pl-3.5 shadow-hairline">
+          <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px]">{UPDATE_CMD}</code>
           <Button variant="ghost" size="sm" onClick={copy} className="shrink-0 text-muted-foreground">
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? t("copied") : t("copy")}

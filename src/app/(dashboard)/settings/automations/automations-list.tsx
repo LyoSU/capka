@@ -196,7 +196,7 @@ export default function AutomationsList() {
       {automations.map((a) => {
         const status = statusOf(a);
         return (
-          <div key={a.id} className="flex items-start gap-3 rounded-lg border bg-card p-3 transition-colors hover:border-foreground/15">
+          <div key={a.id} className="flex items-start gap-3 rounded-xl bg-card p-3.5 shadow-panel">
             <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
               <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             </div>

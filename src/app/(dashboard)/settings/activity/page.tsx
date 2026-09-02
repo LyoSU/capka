@@ -5,7 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import {
   Loader2, UserCog, Puzzle, SlidersHorizontal, ShieldAlert, Dot, History, Lock,
 } from "lucide-react";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Segmented } from "@/components/settings/segmented";
 import { SettingsPage, SettingsEmpty, SettingsGroup } from "@/components/settings/shell";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
@@ -158,17 +158,11 @@ export default function ActivityPage() {
   return (
     <SettingsPage title={t("title")} description={t("subtitle")} wide>
 
-      <ToggleGroup
-        value={[category]}
-        onValueChange={(v) => { if (v.length) { setLoading(true); setCategory(v[0] as Category); } }}
-        variant="outline"
-        size="sm"
-        className="flex-wrap justify-start"
-      >
-        {CATEGORIES.map((c) => (
-          <ToggleGroupItem key={c} value={c}>{t(`category.${c}`)}</ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      <Segmented
+        value={category}
+        onChange={(c) => { setLoading(true); setCategory(c); }}
+        options={CATEGORIES.map((c) => ({ key: c, label: t(`category.${c}`) }))}
+      />
 
       {loading ? (
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -178,7 +172,7 @@ export default function ActivityPage() {
         <div className="space-y-5">
           {groups.map((g) => (
             <div key={g.day} className="space-y-1.5">
-              <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">{g.label}</p>
+              <p className="px-1 text-sm font-medium text-muted-foreground">{g.label}</p>
               <SettingsGroup>
                 {g.items.map((e) => {
                   const grp = groupOf(e.action);
@@ -187,7 +181,7 @@ export default function ActivityPage() {
                   const cs = chips(e);
                   const actor = e.actorName || e.actorEmail || t("systemActor");
                   return (
-                    <div key={e.id} className="flex items-start gap-3 px-3 py-2.5">
+                    <div key={e.id} className="flex items-start gap-3 px-4 py-3">
                       <div className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full", GROUP_TINT[grp])}>
                         <Icon className="h-3.5 w-3.5" />
                       </div>
@@ -196,10 +190,10 @@ export default function ActivityPage() {
                           {actionLabel(e.action)}
                           {target ? <span className="font-medium"> {target}</span> : null}
                           {cs.map((c) => (
-                            <span key={c} className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{c}</span>
+                            <span key={c} className="ml-1.5 rounded-md bg-field px-1.5 py-0.5 text-xs text-muted-foreground">{c}</span>
                           ))}
                         </p>
-                        <p className="mt-0.5 flex items-center text-xs text-muted-foreground">
+                        <p className="mt-0.5 flex items-center text-[13px] text-muted-foreground">
                           <span className="truncate">{actor}</span>
                           <Dot className="h-3 w-3 shrink-0" />
                           <Hint label={fullTime(e.createdAt)}>

@@ -148,8 +148,8 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <Plus className="mr-2 h-4 w-4" />
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Plus className="mr-1.5 h-4 w-4" />
         {t("addProvider")}
       </Button>
       <Dialog open={open} onOpenChange={onOpenChange}>

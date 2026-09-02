@@ -118,9 +118,9 @@ export function TelegramLinkCard() {
     // Heading outside the card, card at SettingsGroup geometry (see shell.tsx).
     // The heading stays in this component rather than moving to the consumer's
     // SettingsSection, because that page doesn't wrap this card in one.
-    <section className="space-y-3">
+    <section className="space-y-4">
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">{t("link.title")}</h3>
+        <h3 className="text-base font-semibold tracking-tight">{t("link.title")}</h3>
         <p className="text-sm leading-relaxed text-muted-foreground">{t("link.desc")}</p>
       </div>
 

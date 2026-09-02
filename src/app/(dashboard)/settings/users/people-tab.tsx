@@ -7,7 +7,7 @@ import { Shield, ShieldCheck, Eye, Users, Search, UserCheck, UserX, Clock } from
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Segmented } from "@/components/settings/segmented";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -118,18 +118,17 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
       </div>
 
       {showFilters && (
-        <ToggleGroup
-          value={[roleFilter]}
-          onValueChange={(v) => v.length && setRoleFilter(v[0] as typeof roleFilter)}
-          variant="outline"
+        <Segmented
+          value={roleFilter}
+          onChange={setRoleFilter}
           size="sm"
-          className="flex-wrap justify-start"
-        >
-          <ToggleGroupItem value="all">{t("filterAll")}</ToggleGroupItem>
-          <ToggleGroupItem value="admin">{t("roles.admin")}</ToggleGroupItem>
-          <ToggleGroupItem value="user">{t("roles.user")}</ToggleGroupItem>
-          <ToggleGroupItem value="viewer">{t("roles.viewer")}</ToggleGroupItem>
-        </ToggleGroup>
+          options={[
+            { key: "all", label: t("filterAll") },
+            { key: "admin", label: t("roles.admin") },
+            { key: "user", label: t("roles.user") },
+            { key: "viewer", label: t("roles.viewer") },
+          ]}
+        />
       )}
 
       {error && <SettingsError message={error} />}
@@ -142,7 +141,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
             {t("pendingTitle")}
             <Badge variant="secondary" className="text-[10px]">{pending.length}</Badge>
           </div>
-          <div className="overflow-hidden rounded-lg border border-warning-border bg-warning-surface/40 divide-y divide-warning-border/50">
+          <div className="overflow-hidden rounded-xl border border-warning-border bg-warning-surface/40 divide-y divide-warning-border/50">
             {pending.map((u) => (
               <div key={u.id} className="flex items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
@@ -192,8 +191,8 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
           ? <SettingsEmpty icon={Search} title={t("noMatches")} hint={t("noMatchesHint")} />
           : <SettingsEmpty icon={Users} title={t("empty")} hint={t("emptyHint")} />
       ) : (
-      <div className="overflow-hidden rounded-lg border">
-        <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid">
+      <div className="overflow-hidden rounded-xl bg-card shadow-panel">
+        <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b px-4 py-2.5 text-[13px] font-medium text-muted-foreground sm:grid">
           <span>{t("colUser")}</span>
           <span>{t("colAccess")}</span>
           <span className="text-right">{t("colUsage")}</span>
@@ -267,7 +266,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
 
       <ShowMore shown={activePage.visible.length} total={activePage.total} onMore={activePage.more} />
 
-      <p className="text-xs text-muted-foreground/80">{t("spendHint")}</p>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">{t("spendHint")}</p>
 
       <UserDialog
         user={openUser}

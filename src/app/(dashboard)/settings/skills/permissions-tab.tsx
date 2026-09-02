@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SettingsEmpty, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsGroup, SettingsNote, SettingsSection, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
 import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
@@ -153,20 +153,16 @@ export function PermissionsTab() {
 
       {!loading && inventory.length > 0 && (
         <>
-          <div className="flex items-start gap-2.5 rounded-lg border bg-muted/30 p-3">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">{t("bannerTitle")}</p>
-              <p className="text-xs text-muted-foreground">{t("bannerBody")}</p>
-            </div>
-          </div>
+          <SettingsNote icon={ShieldCheck}>
+            <p className="font-medium">{t("bannerTitle")}</p>
+            <p className="text-[13px] text-muted-foreground">{t("bannerBody")}</p>
+          </SettingsNote>
 
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">{t("configuredTitle")}</h3>
+          <SettingsSection title={t("configuredTitle")}>
             {configured.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("configuredEmpty")}</p>
             ) : (
-              <div className="space-y-1.5">
+              <SettingsGroup>
                 {configured.map((i) => (
                   <CapabilityRow
                     key={`${i.capabilityType}:${i.capabilityKey}`}
@@ -175,9 +171,9 @@ export function PermissionsTab() {
                     exceptionCount={exceptionsFor(i).length}
                   />
                 ))}
-              </div>
+              </SettingsGroup>
             )}
-          </section>
+          </SettingsSection>
 
           <DefaultsSection items={defaults} t={t} onOpen={setOpen} />
         </>
@@ -224,7 +220,7 @@ function CapabilityRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-colors hover:bg-hover"
+      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-micro hover:bg-hover"
     >
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(item.capabilityType === "skill" ? "skills" : "connectors")} />
       <span className="min-w-0 flex-1">
@@ -264,7 +260,7 @@ function DefaultsSection({ items, t, onOpen }: { items: InvItem[]; t: T; onOpen:
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 text-left text-sm font-medium"
+        className="flex w-full items-center gap-2 text-left text-base font-semibold tracking-tight"
       >
         <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
         {t("defaultsTitle", { count: items.length })}
@@ -292,14 +288,16 @@ function DefaultsGroup({ title, items, t, onOpen }: { title: string; items: InvI
   const page = useShowMore(items, `${items.length}`);
   if (items.length === 0) return null;
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-medium text-muted-foreground">{title} · {items.length}</p>
+    <div className="space-y-2">
+      <p className="text-[13px] font-medium text-muted-foreground">{title} · {items.length}</p>
+      <SettingsGroup>
       {page.visible.map((i) => (
         <CapabilityRow
           key={`${i.capabilityType}:${i.capabilityKey}`}
           item={i} t={t} onOpen={() => onOpen(i)} effect="allow" exceptionCount={0}
         />
       ))}
+      </SettingsGroup>
       <ShowMore shown={page.visible.length} total={page.total} onMore={page.more} />
     </div>
   );
@@ -532,9 +530,7 @@ function CheckAccess({
         )}
       </div>
       {userId && (
-        <div className="rounded-md border bg-muted/30 p-2.5 text-sm">
-          {explanation()}
-        </div>
+        <SettingsNote>{explanation()}</SettingsNote>
       )}
     </section>
   );

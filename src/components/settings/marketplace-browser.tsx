@@ -198,7 +198,7 @@ export function MarketplaceBrowser() {
           {markets.map((m) => (
             <div
               key={m.id}
-              className={`flex items-center gap-1 rounded-md border px-2 py-1 text-sm ${
+              className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-sm shadow-btn transition-micro ${
                 selected === m.id ? "bg-hover-strong font-medium" : "text-muted-foreground"
               }`}
             >
@@ -240,7 +240,7 @@ export function MarketplaceBrowser() {
           <div key={cat} className="space-y-2">
             <p className="px-1 text-xs font-medium text-muted-foreground">{cat}</p>
             {items.map((c) => (
-              <div key={c.name} className="flex items-start justify-between gap-4 rounded-lg bg-card p-3 shadow-panel">
+              <div key={c.name} className="flex items-start justify-between gap-4 rounded-xl bg-card p-4 shadow-panel">
                 <div className="flex flex-1 items-start gap-3">
                   <PluginIcon name={c.name} homepage={c.homepage} size={40} />
                   <div className="min-w-0 flex-1 space-y-1">

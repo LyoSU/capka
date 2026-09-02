@@ -8,12 +8,12 @@ import {
   SettingsSkeleton,
   SettingsEmpty,
   SettingsError,
+  SettingsChoice,
 } from "@/components/settings/shell";
-import { Loader2, Check, KeyRound, Layers } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
 type KeyMode = "shared_plus_own" | "shared_only" | "own_only";
 const MODES: KeyMode[] = ["shared_plus_own", "shared_only", "own_only"];
@@ -38,6 +38,12 @@ export default function BillingPage() {
   const [limitMonth, setLimitMonth] = useState("");
   const [budgetMonthly, setBudgetMonthly] = useState("");
   const [savingLimits, setSavingLimits] = useState(false);
+  // What the server last confirmed, so Save can appear only once a field differs
+  // from it — a Save button that is always there is a button that always looks
+  // like it has something to do.
+  const [saved, setSaved] = useState("");
+  const limitsKey = [budgetMonthly, limit5h, limitWeek, limitMonth].map((v) => v.trim()).join("|");
+  const limitsDirty = limitsKey !== saved;
 
   useEffect(() => {
     fetch("/api/admin/billing")
@@ -53,6 +59,7 @@ export default function BillingPage() {
         setLimitWeek(dt.limitWeek ?? "");
         setLimitMonth(dt.limitMonth ?? "");
         setBudgetMonthly(d.monthlyBudget ?? "");
+        setSaved([d.monthlyBudget ?? "", dt.limit5h ?? "", dt.limitWeek ?? "", dt.limitMonth ?? ""].map((v: string) => v.trim()).join("|"));
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
@@ -88,8 +95,10 @@ export default function BillingPage() {
           budgetMonthly: budgetMonthly.trim() || null,
         }),
       });
-      if (res.ok) toast.success(tc("saved"));
-      else toast.error(t("saveFailed"));
+      if (res.ok) {
+        setSaved(limitsKey);
+        toast.success(tc("saved"));
+      } else toast.error(t("saveFailed"));
     } finally {
       setSavingLimits(false);
     }
@@ -109,36 +118,13 @@ export default function BillingPage() {
     <SettingsPage title={t("title")} description={t("subtitle")}>
       {/* Provider key mode */}
       <SettingsSection title={t("mode.title")} description={t("mode.desc")}>
-        <div className="space-y-2">
-          {MODES.map((m) => {
-            const active = keyMode === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                disabled={savingMode}
-                onClick={() => saveMode(m)}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                  active ? "border-primary bg-hover-strong" : "hover:bg-hover",
-                )}
-              >
-                <span
-                  className={cn(
-                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                    active ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
-                  )}
-                >
-                  {active && <Check className="h-3 w-3" />}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{t(`mode.${m}.label`)}</span>
-                  <span className="block text-xs text-muted-foreground">{t(`mode.${m}.desc`)}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <SettingsChoice
+          value={keyMode}
+          onChange={saveMode}
+          disabled={savingMode}
+          label={t("mode.title")}
+          options={MODES.map((m) => ({ key: m, label: t(`mode.${m}.label`), hint: t(`mode.${m}.desc`) }))}
+        />
       </SettingsSection>
 
       {/* Default spend limits (shared key only) */}
@@ -150,7 +136,7 @@ export default function BillingPage() {
             {/* Instance-wide monthly budget — the org's whole shared-key bill.
                 Drives the analytics overrun trigger and "% of budget" line. */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">{t("budget.label")}</label>
+              <label className="text-sm font-medium">{t("budget.label")}</label>
               <div className="relative max-w-[12rem]">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                 <Input
@@ -163,7 +149,7 @@ export default function BillingPage() {
                   className="pl-6"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">{t("budget.hint")}</p>
+              <p className="text-[13px] text-muted-foreground">{t("budget.hint")}</p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {([
@@ -172,7 +158,7 @@ export default function BillingPage() {
                 ["limitMonth", limitMonth, setLimitMonth, t("limits.window.m1")],
               ] as const).map(([key, val, set, lbl]) => (
                 <div key={key} className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">{lbl}</label>
+                  <label className="text-sm font-medium">{lbl}</label>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
                     <Input
@@ -188,19 +174,21 @@ export default function BillingPage() {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">{t("limits.hint")}</p>
-            <Button size="sm" onClick={saveLimits} disabled={savingLimits}>
-              {savingLimits && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {tc("save")}
-            </Button>
+            <p className="text-[13px] text-muted-foreground">{t("limits.hint")}</p>
+            {limitsDirty && (
+              <div className="flex justify-end">
+                <Button size="sm" onClick={saveLimits} disabled={savingLimits} className="animate-step-in">
+                  {savingLimits && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {tc("save")}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </SettingsSection>
-
-      {/* Per-user tiers — scaffolded for a later iteration. */}
-      <SettingsSection title={t("tiers.title")}>
-        <SettingsEmpty icon={Layers} title={t("tiers.emptyTitle")} hint={t("tiers.soon")} />
-      </SettingsSection>
+      {/* The per-user tiers section that stood here was an empty state promising
+          a feature "soon". A settings page is not a roadmap: a heading with
+          nothing under it to decide is one more thing to read and be unsure of. */}
     </SettingsPage>
   );
 }

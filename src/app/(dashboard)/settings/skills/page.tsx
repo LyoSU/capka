@@ -55,10 +55,6 @@ export default function CustomizePage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground/80">
-        <MessageSquare className="h-3 w-3" />
-        {t("chatHint")}
-      </p>
 
       <Segmented value={active} onChange={setTab} options={visibleTabs} />
 
@@ -66,6 +62,13 @@ export default function CustomizePage() {
       {active === "connectors" && <ConnectorList chrome={false} />}
       {active === "plugins" && <PluginsPanel view={pluginsView} onView={setPluginsView} />}
       {active === "permissions" && <PermissionsTab />}
+      {/* A tip, not an instruction, so it reads last: the reader came for the
+          list, and a sentence about the chat before the list made them look for
+          the list somewhere else. */}
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <MessageSquare className="size-4 shrink-0" aria-hidden />
+        {t("chatHint")}
+      </p>
     </SettingsPage>
   );
 }

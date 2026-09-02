@@ -89,7 +89,7 @@ export default function MemberPluginBrowser() {
       ) : (
         <div className="space-y-2">
           {filtered.map((c) => (
-            <div key={c.name} className="flex items-center gap-3 rounded-xl border p-3">
+            <div key={c.name} className="flex items-center gap-3 rounded-xl bg-card p-3 shadow-panel">
               <PluginIcon name={c.name} homepage={c.homepage} size={36} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

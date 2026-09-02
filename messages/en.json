@@ -85,7 +85,6 @@
     "archived": "Archived",
     "projects": "Projects",
     "settings": "Settings",
-    "noChatsFound": "No chats found",
     "startNewChat": "Start a new chat to get going",
     "groups": {
       "today": "Today",
@@ -163,7 +162,6 @@
     },
     "panel": {
       "greeting": "What can I help with?",
-      "greetingHint": "You can drag a file straight into the window",
       "workspaceFiles": "Workspace files",
       "sendFailed": "Failed to send message",
       "recent": "Recent",
@@ -530,7 +528,6 @@
       "showAll": "Show all",
       "showLess": "Show less",
       "truncated": "Showing {shown, number} of {total, number} characters",
-      "outputLines": "{count, plural, one {# line} other {# lines}}",
       "openFile": "Open {name}"
     },
     "notice": {
@@ -613,7 +610,6 @@
       "budgetReached": "Spending limit reached. Please contact your admin.",
       "offline": "No connection. Check your internet and try again."
     },
-    "clearSearch": "Clear search",
     "citations": {
       "sources": "Sources",
       "openSource": "Source {n}: {title}",
@@ -1154,16 +1150,12 @@
         "label": "Instance monthly budget",
         "placeholder": "No budget",
         "hint": "The organization's whole shared-key bill. When set, Analytics warns if the monthly projection goes over. Leave empty for none."
-      },
-      "tiers": {
-        "title": "User tiers",
-        "emptyTitle": "Everyone is on the default tier",
-        "soon": "Limits are the same for everyone for now. Per-user tiers are coming in a later release."
       }
     },
     "connections": {
       "title": "Providers",
       "subtitle": "Manage AI provider connections and API keys",
+      "listTitle": "Connections",
       "empty": "No providers connected",
       "emptyHint": "Add an API key to start using AI models",
       "active": "active",
@@ -1243,6 +1235,8 @@
       "scopeShared": "Shared key",
       "scopeOwn": "Own keys",
       "rangeDays": "{days, plural, one {# day} other {# days}}",
+      "emptyBreakdown": "No spend yet",
+      "emptyBreakdownHint": "Once someone starts using the assistant, the breakdown appears here.",
       "filters": "Filters",
       "filterAll": "All",
       "filterMember": "Member",
@@ -1955,8 +1949,6 @@
         "confirm": "Turn off"
       }
     },
-    "searchPlaceholder": "Search",
-    "searchEmpty": "Nothing found",
     "showMore": "Show more",
     "showingOf": "Showing {shown} of {total}",
     "people": {

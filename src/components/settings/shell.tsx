@@ -39,38 +39,118 @@ export function SettingsPage({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("space-y-10", wide ? "max-w-5xl" : "max-w-2xl")}>
-      <div className="space-y-1">
-        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-2xl")}>
+      <div className="space-y-1.5">
+        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+        {description && <p className="text-[15px] leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {children}
     </div>
   );
 }
 
-/** A titled band of related settings. `footnote` is where the long explanation
- *  goes — the prose that used to bloat every row to four lines. */
+/**
+ * A titled band of related settings. `footnote` is where the long explanation
+ * goes — the prose that used to bloat every row to four lines.
+ *
+ * Three sizes, one per level: the page title (2xl), the section title (base),
+ * the row title (sm). An earlier version gave sections and rows the SAME size
+ * and left position alone to say which was which — so "Model filter" and
+ * "Minimum context window" read as siblings, and a page of six sections had no
+ * skeleton to skim by.
+ *
+ * `action` is the one button that belongs to the section as a whole — "Add
+ * provider", "Add connector" — and it sits on the title line, right-aligned,
+ * on every page alike. Before, one page put it under the list, another floated
+ * it above the list with nothing beside it, and a third put it inside the empty
+ * state only: the same verb in three places is three things to learn.
+ */
 export function SettingsSection({
   title,
   description,
   footnote,
+  action,
   children,
 }: {
   title: string;
   description?: string;
   footnote?: React.ReactNode;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="text-sm font-medium">{title}</h3>
-        {description && <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>}
+    <section className="space-y-4">
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+          {description && <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>}
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
-      {footnote && <p className="text-xs leading-relaxed text-muted-foreground">{footnote}</p>}
+      {footnote && <p className="text-[13px] leading-relaxed text-muted-foreground">{footnote}</p>}
     </section>
+  );
+}
+
+/**
+ * Pick one of a few named options — key mode, a preset — as rows of one card,
+ * each with a radio mark, the way every OS settings list draws the choice.
+ *
+ * Replaces a stack of bordered buttons whose chosen one was painted with a dark
+ * fill AND a dark border AND a filled check: three signals for one bit, and the
+ * fill was the same grey the hover uses elsewhere, so the selected option looked
+ * permanently hovered. Here the mark alone carries the state; the row keeps the
+ * hover the other rows have.
+ */
+export function SettingsChoice<K extends string>({
+  value,
+  onChange,
+  options,
+  label,
+  disabled,
+}: {
+  value: K;
+  onChange: (key: K) => void;
+  options: { key: K; label: string; hint?: string }[];
+  /** Accessible name of the group — the question the options answer. */
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <SettingsGroup role="radiogroup" aria-label={label}>
+      {options.map((o) => {
+        const on = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            disabled={disabled}
+            onClick={() => onChange(o.key)}
+            className={cn(
+              "flex w-full items-start gap-3 px-4 py-3.5 text-left outline-none transition-micro",
+              "hover:bg-hover focus-visible:bg-hover disabled:pointer-events-none disabled:opacity-60",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-micro",
+                on ? "border-foreground" : "border-border-strong",
+              )}
+            >
+              <span className={cn("size-2 rounded-full bg-foreground transition-micro", on ? "scale-100" : "scale-0")} />
+            </span>
+            <span className="min-w-0 space-y-0.5">
+              <span className="block text-sm font-medium">{o.label}</span>
+              {o.hint && <span className="block text-[13px] leading-relaxed text-muted-foreground">{o.hint}</span>}
+            </span>
+          </button>
+        );
+      })}
+    </SettingsGroup>
   );
 }
 
@@ -99,7 +179,7 @@ export function SettingsSkeleton({
     // `wide` has to mirror SettingsPage: a skeleton fixed at max-w-2xl in front of
     // a max-w-5xl page snaps sideways the moment the real content lands, which is
     // the same jump this component exists to prevent — just on the other axis.
-    <div className={cn("space-y-10", wide ? "max-w-5xl" : "max-w-2xl")} aria-hidden>
+    <div className={cn("space-y-12", wide ? "max-w-5xl" : "max-w-2xl")} aria-hidden>
       {/* `Skeleton`, not hand-rolled `animate-pulse` divs. Tailwind's default pulse
           is a 2s ease-in-out that globals.css already calls out as reading sluggish
           for a loading state — the whole reason `animate-pulse-fast` exists — and
@@ -108,7 +188,7 @@ export function SettingsSkeleton({
           carrying no information a shape wasn't. */}
       {header && (
         <div className="space-y-2">
-          <Skeleton className="h-6 w-40 rounded" />
+          <Skeleton className="h-7 w-44 rounded" />
           <Skeleton className="h-4 w-72 rounded" />
         </div>
       )}
@@ -215,7 +295,7 @@ export function ShowMore({ shown, total, onMore }: { shown: number; total: numbe
       <button
         type="button"
         onClick={onMore}
-        className="rounded-md border px-3 py-1.5 text-xs transition-colors hover:bg-hover"
+        className="rounded-lg px-3 py-1.5 text-sm shadow-btn transition-micro hover:bg-hover active:scale-[0.98]"
       >
         {t("showMore")}
       </button>
@@ -226,8 +306,61 @@ export function ShowMore({ shown, total, onMore }: { shown: number; total: numbe
 
 /** One card holding several rows separated by hairlines, instead of one card
  *  per row. This is what turns a wall of boxes back into a list. */
-export function SettingsGroup({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("divide-y overflow-hidden rounded-xl bg-card shadow-panel", className)}>{children}</div>;
+export function SettingsGroup({
+  children,
+  className,
+  ...rest
+}: { children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("divide-y overflow-hidden rounded-xl bg-card shadow-panel", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One card of free-form content — a form, a connector, a plugin — at the same
+ * geometry as {@link SettingsGroup}, with padding built in.
+ *
+ * The settings screens had grown four card skins: `rounded-md border`,
+ * `rounded-lg border`, `rounded-xl border`, and the shadow-ringed panel the
+ * groups use. Side by side on one page they read as four kinds of thing. There
+ * is one kind of thing — a card — and this is its only skin.
+ */
+export function SettingsCard({
+  children,
+  className,
+  ...rest
+}: { children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("rounded-xl bg-card p-4 shadow-panel", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A quiet aside inside a page — context, not a control: "these rules apply on
+ * top of the project's", a cron expression read back in words. Recessed rather
+ * than raised, so it sits below the cards in the depth order instead of
+ * competing with them; an earlier `border bg-muted/30` box had the same weight
+ * as the settings around it and read as a setting with its switch missing.
+ */
+export function SettingsNote({
+  icon: Icon,
+  children,
+  className,
+}: {
+  icon?: LucideIcon;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex items-start gap-2.5 rounded-xl bg-field px-4 py-3 text-sm leading-relaxed", className)}>
+      {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
 }
 
 /**
@@ -304,8 +437,10 @@ export function SettingsRow({
           ) : (
             <p className="text-sm font-medium">{title}</p>
           )}
-          {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
-          {warning && <p className="text-xs font-medium text-warning-text">{warning}</p>}
+          {/* 13px, not 12: the hint is the sentence a non-technical reader
+              actually decides by, and it was the smallest text on the page. */}
+          {hint && <p className="text-[13px] leading-relaxed text-muted-foreground">{hint}</p>}
+          {warning && <p className="text-[13px] font-medium text-warning-text">{warning}</p>}
         </div>
         {control && <div className="shrink-0">{control}</div>}
       </div>

@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Copy, Check, Send } from "lucide-react";
+import { Loader2, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { SettingsSkeleton } from "@/components/settings/shell";
-import { cn } from "@/lib/utils";
+import { SettingsChoice, SettingsGroup, SettingsRow, SettingsSection, SettingsSkeleton } from "@/components/settings/shell";
 import { copyToClipboard } from "@/lib/clipboard";
 
 type Mode = "open" | "approval" | "closed";
@@ -117,140 +116,114 @@ export function SignInTab() {
   if (loading) return <SettingsSkeleton rows={3} header={false} />;
 
   return (
-    <div className="space-y-6">
-      {/* Telegram login provider */}
-      <div className="space-y-4 rounded-md border p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#229ED9]/10">
-              <Send className="h-4.5 w-4.5 text-[#229ED9]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium">{t("telegram.title")}</h3>
+    <div className="space-y-10">
+      {/* Telegram login provider — a row with its switch, and the credential
+          fields folded under it while it is on. Same card, same row anatomy as
+          every other setting, so this page stops being the one with its own look. */}
+      <SettingsSection title={t("telegram.title")} description={t("telegram.desc")}>
+        <SettingsGroup>
+          <SettingsRow
+            title={t("telegram.title")}
+            hint={enabled ? t("telegram.botFatherHint") : undefined}
+            onLabelClick={() => { const v = !enabled; setEnabled(v); persist({ enabled: v }, () => setEnabled(!v)); }}
+            control={
+              <div className="flex items-center gap-2.5">
                 {enabled && (
                   <Badge variant={ready ? "secondary" : "outline"} className="text-xs">
                     {ready ? t("telegram.active") : t("telegram.incomplete")}
                   </Badge>
                 )}
+                <Switch
+                  checked={enabled}
+                  onCheckedChange={(v) => { setEnabled(v); persist({ enabled: v }, () => setEnabled(!v)); }}
+                  aria-label={t("telegram.toggleAria")}
+                />
               </div>
-              <p className="text-sm text-muted-foreground">{t("telegram.desc")}</p>
-            </div>
-          </div>
-          <Switch
-            checked={enabled}
-            onCheckedChange={(v) => { setEnabled(v); persist({ enabled: v }, () => setEnabled(!v)); }}
-            aria-label={t("telegram.toggleAria")}
-          />
-        </div>
-
-        {enabled && (
-          <div className="space-y-3 pt-1">
-            <p className="text-xs text-muted-foreground">{t("telegram.botFatherHint")}</p>
-            <div className="space-y-1.5">
-              <Label htmlFor="clientId">{t("telegram.clientId")}</Label>
-              <Input id="clientId" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="8521897198" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="clientSecret">{t("telegram.clientSecret")}</Label>
-              <Input
-                id="clientSecret"
-                type="password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder={hasSecret ? t("telegram.secretStored") : t("telegram.secretPlaceholder")}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("telegram.redirectUri")}</Label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 text-xs font-mono">{redirectUri}</code>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={copyRedirect}
-                  aria-label={copied ? t("copied") : t("copyRedirect")}
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-                <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("telegram.redirectHint")}</p>
-            </div>
-            {/* Sits with the two fields it saves, and only once they differ from
-                what's stored — so nothing on this tab is silently unsaved. */}
-            {credentialsDirty && (
-              <div className="flex items-center justify-end gap-3">
-                <p className="text-xs text-warning-text">{t("unsavedCredentials")}</p>
-                <Button size="sm" onClick={save} disabled={saving}>
-                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("save")}
-                </Button>
+            }
+          >
+            {enabled && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="clientId">{t("telegram.clientId")}</Label>
+                  <Input id="clientId" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="8521897198" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="clientSecret">{t("telegram.clientSecret")}</Label>
+                  <Input
+                    id="clientSecret"
+                    type="password"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder={hasSecret ? t("telegram.secretStored") : t("telegram.secretPlaceholder")}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("telegram.redirectUri")}</Label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-lg bg-field px-3 py-2 font-mono text-[13px] shadow-hairline">{redirectUri}</code>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={copyRedirect}
+                      aria-label={copied ? t("copied") : t("copyRedirect")}
+                    >
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                    <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
+                  </div>
+                  <p className="text-[13px] text-muted-foreground">{t("telegram.redirectHint")}</p>
+                </div>
+                {/* Sits with the two fields it saves, and only once they differ from
+                    what's stored — so nothing on this tab is silently unsaved. */}
+                {credentialsDirty && (
+                  <div className="flex items-center justify-end gap-3">
+                    <p className="text-[13px] text-warning-text">{t("unsavedCredentials")}</p>
+                    <Button size="sm" onClick={save} disabled={saving} className="animate-step-in">
+                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("save")}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
-      </div>
+          </SettingsRow>
+        </SettingsGroup>
+      </SettingsSection>
 
       {/* Registration mode */}
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium">{t("mode.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("mode.desc")}</p>
-        </div>
-        {/* radiogroup + aria-checked: these are radio buttons drawn by hand, and
-            without the roles the chosen one was signalled only by a filled circle
-            and a background — nothing a screen reader can report. */}
-        <div role="radiogroup" aria-label={t("mode.title")} className="grid gap-2">
-          {modes.map(({ key }) => (
-            <button
-              key={key}
-              type="button"
-              role="radio"
-              aria-checked={mode === key}
-              onClick={() => { const prev = mode; setMode(key); persist({ registrationMode: key }, () => setMode(prev)); }}
-              className={cn(
-                "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
-                mode === key ? "border-foreground/40 bg-hover-strong" : "hover:bg-hover",
-              )}
-            >
-              <div aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0 rounded-full border-2", mode === key ? "border-foreground bg-foreground" : "border-muted-foreground/40")} />
-              <div>
-                <p className="text-sm font-medium">{t(`mode.${key}.label`)}</p>
-                <p className="text-xs text-muted-foreground">{t(`mode.${key}.desc`)}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
+      <SettingsSection
+        title={t("mode.title")}
+        description={t("mode.desc")}
+        // Approvals are the sibling tab now, not another page — say where, don't
+        // navigate away from a form that may have unsaved changes.
+        footnote={mode === "approval" ? t("pending.moved") : undefined}
+      >
+        <SettingsChoice
+          value={mode}
+          onChange={(key) => { const prev = mode; setMode(key); persist({ registrationMode: key }, () => setMode(prev)); }}
+          label={t("mode.title")}
+          options={modes.map(({ key }) => ({ key, label: t(`mode.${key}.label`), hint: t(`mode.${key}.desc`) }))}
+        />
+      </SettingsSection>
 
       {/* Email sign-up toggle — a separate axis from the mode above. Off = no new
           email accounts; existing email users still sign in, and Telegram (if
           configured) stays open. */}
-      <div className="space-y-3 rounded-md border p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-medium">{t("email.title")}</h3>
-            <p className="text-sm text-muted-foreground">{t("email.desc")}</p>
-          </div>
-          <Switch
-            checked={emailSignup}
-            onCheckedChange={(v) => { setEmailSignup(v); persist({ emailSignupEnabled: v }, () => setEmailSignup(!v)); }}
-            aria-label={t("email.toggleAria")}
-          />
-        </div>
-        {!emailSignup && !ready && (
-          <p className="rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-xs text-foreground">
-            {t("email.deadEndWarning")}
-          </p>
-        )}
-      </div>
-
-      {/* Approvals are the sibling tab now, not another page — say where, don't
-          navigate away from a form that may have unsaved changes. */}
-      {mode === "approval" && (
-        <p className="text-xs text-muted-foreground">{t("pending.moved")}</p>
-      )}
+      <SettingsGroup>
+        <SettingsRow
+          title={t("email.title")}
+          hint={t("email.desc")}
+          warning={!emailSignup && !ready ? t("email.deadEndWarning") : undefined}
+          onLabelClick={() => { const v = !emailSignup; setEmailSignup(v); persist({ emailSignupEnabled: v }, () => setEmailSignup(!v)); }}
+          control={
+            <Switch
+              checked={emailSignup}
+              onCheckedChange={(v) => { setEmailSignup(v); persist({ emailSignupEnabled: v }, () => setEmailSignup(!v)); }}
+              aria-label={t("email.toggleAria")}
+            />
+          }
+        />
+      </SettingsGroup>
     </div>
   );
 }

@@ -363,12 +363,14 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         </>
       )}
 
-      <div className="flex justify-end">
-        {!showForm && <Button variant="outline" size="sm" onClick={() => setShowForm(true)}><Plus className="mr-1.5 h-4 w-4" />{t("add")}</Button>}
-      </div>
+      {!showForm && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => setShowForm(true)}><Plus className="mr-1.5 h-4 w-4" />{t("add")}</Button>
+        </div>
+      )}
 
       {showForm && (
-        <div className="space-y-3 rounded-md border p-4">
+        <div className="space-y-3 rounded-xl bg-card p-4 shadow-panel">
           {/* Remote (URL) vs Local (sandbox command) — local is admin-only. */}
           {isAdmin && (
             <Segmented
@@ -499,7 +501,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         const h = health[s.id];
         const isOauth = s.authKind === "oauth";
         return (
-          <div key={s.id} className="flex items-start justify-between gap-4 rounded-md border p-3">
+          <div key={s.id} className="flex items-start justify-between gap-4 rounded-xl bg-card p-4 shadow-panel">
             <div className="flex flex-1 items-start gap-3">
               <ConnectorIcon />
               <div className="min-w-0 flex-1 space-y-1">

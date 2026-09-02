@@ -7,6 +7,7 @@ import {
   SettingsPage,
   SettingsSection,
   SettingsGroup,
+  SettingsRow,
   SettingsEmpty,
   SettingsError,
 } from "@/components/settings/shell";
@@ -276,122 +277,102 @@ export default function ConnectionsPage() {
     <SettingsPage title={t("title")} description={t("subtitle")}>
       {error && <SettingsError message={error} />}
 
-      {/* Provider list — compact, draggable rows that expand to full settings. */}
-      <div className="space-y-2">
-        {loading &&
-          Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border px-3 py-2.5">
-              <Skeleton className="h-4 w-4 rounded" />
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="ml-auto h-4 w-16" />
-            </div>
-          ))}
+      {/* Provider list — compact, draggable rows that expand to full settings.
+          "Add" sits on the section's title line, where every other list on
+          these pages keeps its one action. */}
+      <SettingsSection
+        title={t("listTitle")}
+        action={<AddProviderDialog isAdmin={isAdmin} onAdded={fetchConfigs} />}
+      >
+        <div className="space-y-2">
+          {loading &&
+            Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-xl bg-card px-3 py-2.5 shadow-panel">
+                <Skeleton className="h-4 w-4 rounded" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="ml-auto h-4 w-16" />
+              </div>
+            ))}
 
-        {!loading && configs.length === 0 && (
-          <SettingsEmpty icon={Unplug} title={t("empty")} hint={t("emptyHint")} />
-        )}
+          {!loading && configs.length === 0 && (
+            <SettingsEmpty icon={Unplug} title={t("empty")} hint={t("emptyHint")} />
+          )}
 
-        {!loading &&
-          configs.map((c) => (
-            <ConnectionRow
-              key={c.id}
-              config={c}
-              isAdmin={isAdmin}
-              isDefault={c.id === defaultId}
-              expanded={expandedId === c.id}
-              onExpandedChange={(open) => setExpandedId(open ? c.id : null)}
-              dragging={draggingId === c.id}
-              dragHandleProps={{
-                onPointerDown: (e) => startDrag(c.id, e),
-                onPointerMove: dragMove,
-                onPointerUp: endDrag,
-                onKeyDown: (e) => handleHandleKey(c.id, e),
-              }}
-              rowRef={(el) => {
-                if (el) rowRefs.current.set(c.id, el);
-                else rowRefs.current.delete(c.id);
-              }}
-              onToggle={(enabled) => handleToggle(c.id, enabled)}
-              onDelete={() => setDeleteId(c.id)}
-              onUpdateModel={(model) => handleUpdateModel(c.id, model)}
-              onLabelChange={(label) => handleLabelChange(c.id, label)}
-              onLabelCommit={() => handleLabelCommit(c.id)}
-              onIconChange={(slug) => handleIconChange(c.id, slug)}
-              onToggleShared={(shared) => handleToggleShared(c.id, shared)}
-              onUpdateApiStyle={(style) => handleUpdateApiStyle(c.id, style)}
-            />
-          ))}
-      </div>
-
-      <AddProviderDialog isAdmin={isAdmin} onAdded={fetchConfigs} />
+          {!loading &&
+            configs.map((c) => (
+              <ConnectionRow
+                key={c.id}
+                config={c}
+                isAdmin={isAdmin}
+                isDefault={c.id === defaultId}
+                expanded={expandedId === c.id}
+                onExpandedChange={(open) => setExpandedId(open ? c.id : null)}
+                dragging={draggingId === c.id}
+                dragHandleProps={{
+                  onPointerDown: (e) => startDrag(c.id, e),
+                  onPointerMove: dragMove,
+                  onPointerUp: endDrag,
+                  onKeyDown: (e) => handleHandleKey(c.id, e),
+                }}
+                rowRef={(el) => {
+                  if (el) rowRefs.current.set(c.id, el);
+                  else rowRefs.current.delete(c.id);
+                }}
+                onToggle={(enabled) => handleToggle(c.id, enabled)}
+                onDelete={() => setDeleteId(c.id)}
+                onUpdateModel={(model) => handleUpdateModel(c.id, model)}
+                onLabelChange={(label) => handleLabelChange(c.id, label)}
+                onLabelCommit={() => handleLabelCommit(c.id)}
+                onIconChange={(slug) => handleIconChange(c.id, slug)}
+                onToggleShared={(shared) => handleToggleShared(c.id, shared)}
+                onUpdateApiStyle={(style) => handleUpdateApiStyle(c.id, style)}
+              />
+            ))}
+        </div>
+      </SettingsSection>
 
       {/* Model filter — global governance, admin only. Lives here because it
           shapes which models the picker offers across every connection. */}
       {isAdmin && !minCtx.loading && (
         <SettingsSection title={t("modelFilter")} description={t("modelFilterDesc")}>
           <SettingsGroup>
-            <div className="space-y-2 p-3.5">
-              <label className="text-sm font-medium">{t("minContext")}</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={minCtx.value}
-                  onChange={(e) => minCtx.update(e.target.value)}
-                  placeholder="100000"
-                  className="h-8 w-32 text-right"
-                />
-                <span className="text-xs text-muted-foreground">{contextLabel(minCtx.value)}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("minContextHint")}</p>
-              {minCtx.dirty && <Button size="sm" onClick={saveMinCtx}>{tc("save")}</Button>}
-            </div>
+            {/* Number, unit, Save — one row per limit, control on the right like
+                every other row. The unit label reads the number back in words
+                ("100k tokens", "no cap"), which is the part a non-technical
+                admin actually checks. */}
+            {([
+              ["min-context", minCtx, t("minContext"), t("minContextHint"), contextLabel(minCtx.value), saveMinCtx, { placeholder: "100000" }],
+              ["max-price", maxPrice, t("maxPrice"), t("maxPriceHint"), priceLabel(maxPrice.value), saveMaxPrice, { min: "0", step: "1", placeholder: "25" }],
+              ["max-context-tokens", maxCtxTokens, t("maxContextTokens"), t("maxContextTokensHint"), ctxTokensLabel(maxCtxTokens.value), saveMaxCtxTokens, { min: "0", step: "1000", placeholder: "0" }],
+            ] as const).map(([id, s, title, hint, unit, save, attrs]) => (
+              <SettingsRow key={id} id={id} labelFor={`${id}-input`} title={title} hint={hint}>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <Input
+                    id={`${id}-input`}
+                    type="number"
+                    value={s.value}
+                    onChange={(e) => s.update(e.target.value)}
+                    className="h-8 w-32 text-right tabular-nums"
+                    {...attrs}
+                  />
+                  <span className="text-[13px] text-muted-foreground">{unit}</span>
+                  {s.dirty && (
+                    <Button size="sm" onClick={save} className="animate-step-in ml-auto">{tc("save")}</Button>
+                  )}
+                </div>
+              </SettingsRow>
+            ))}
 
-            <div className="space-y-2 p-3.5">
-              <label className="text-sm font-medium">{t("maxPrice")}</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={maxPrice.value}
-                  onChange={(e) => maxPrice.update(e.target.value)}
-                  placeholder="25"
-                  className="h-8 w-32 text-right"
-                />
-                <span className="text-xs text-muted-foreground">{priceLabel(maxPrice.value)}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("maxPriceHint")}</p>
-              {maxPrice.dirty && <Button size="sm" onClick={saveMaxPrice}>{tc("save")}</Button>}
-            </div>
-
-            <div className="space-y-2 p-3.5">
-              <label className="text-sm font-medium">{t("maxContextTokens")}</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={maxCtxTokens.value}
-                  onChange={(e) => maxCtxTokens.update(e.target.value)}
-                  placeholder="0"
-                  className="h-8 w-32 text-right"
-                />
-                <span className="text-xs text-muted-foreground">{ctxTokensLabel(maxCtxTokens.value)}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{t("maxContextTokensHint")}</p>
-              {maxCtxTokens.dirty && <Button size="sm" onClick={saveMaxCtxTokens}>{tc("save")}</Button>}
-            </div>
-
-            <div className="flex items-center justify-between gap-3 p-3.5">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{t("resyncModels")}</p>
-                <p className="text-xs text-muted-foreground">{t("resyncModelsHint")}</p>
-              </div>
-              <Button size="sm" variant="outline" onClick={handleResync} disabled={resyncing} className="shrink-0">
-                {resyncing && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t("resyncModelsButton")}
-              </Button>
-            </div>
+            <SettingsRow
+              title={t("resyncModels")}
+              hint={t("resyncModelsHint")}
+              control={
+                <Button size="sm" variant="outline" onClick={handleResync} disabled={resyncing}>
+                  {resyncing && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("resyncModelsButton")}
+                </Button>
+              }
+            />
           </SettingsGroup>
         </SettingsSection>
       )}

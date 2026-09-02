@@ -100,8 +100,9 @@ export default function AgentSettingsPage() {
 
   // Instructions are the one field here with an explicit Save, so it is the one
   // place a half-written change can be lost. Guard the browser-level exits; an
-  // in-app route change still loses it, which is why the Save button stays
-  // prominent rather than hiding until hover.
+  // in-app route change still loses it, which is why Save appears the moment the
+  // text differs from what is stored — and not before: a greyed-out Save under an
+  // untouched field read as a control that had stopped working.
   useEffect(() => {
     if (!instructions.dirty) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -131,11 +132,13 @@ export default function AgentSettingsPage() {
           placeholder={t("instructions.placeholder")}
           className="min-h-32 scroll-mt-24"
         />
-        <div className="flex justify-end">
-          <Button size="sm" onClick={saveInstructions} disabled={!instructions.dirty}>
-            {tc("save")}
-          </Button>
-        </div>
+        {instructions.dirty && (
+          <div className="flex justify-end">
+            <Button size="sm" onClick={saveInstructions} className="animate-step-in">
+              {tc("save")}
+            </Button>
+          </div>
+        )}
       </SettingsSection>
 
       <SettingsSection title={t("abilities.title")} description={t("abilities.desc")}>

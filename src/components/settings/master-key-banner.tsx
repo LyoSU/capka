@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { ShieldAlert, ShieldCheck, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { copyToClipboard } from "@/lib/clipboard";
+import { SettingsGroup, SettingsSection } from "@/components/settings/shell";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface SecurityStatus {
   source: "env" | "db" | "none";
@@ -21,6 +23,7 @@ interface SecurityStatus {
  */
 export function MasterKeyBanner() {
   const t = useTranslations("settings.security.masterKey");
+  const ts = useTranslations("settings.security");
   const tc = useTranslations("common");
   const [status, setStatus] = useState<SecurityStatus | null>(null);
   const [copied, setCopied] = useState(false);
@@ -33,7 +36,24 @@ export function MasterKeyBanner() {
       .catch(() => {});
   }, []);
 
-  if (!status || status.source === "none") return null;
+  // Owns its section heading, so the heading appears only with a body under it.
+  // `none` (no key configured at all) has nothing to say and says nothing.
+  if (status?.source === "none") return null;
+  const section = (body: React.ReactNode) => (
+    <SettingsSection title={ts("encryptionKey")} description={ts("encryptionKeyDesc")}>
+      {body}
+    </SettingsSection>
+  );
+  if (!status) {
+    return section(
+      <SettingsGroup>
+        <div className="flex items-center gap-2.5 px-4 py-3.5">
+          <Skeleton className="size-4 rounded-full" />
+          <Skeleton className="h-4 w-56 rounded" />
+        </div>
+      </SettingsGroup>,
+    );
+  }
 
   const envLine = `CAPKA_MASTER_KEY=${status.key ?? ""}`;
 
@@ -65,8 +85,8 @@ export function MasterKeyBanner() {
 
   // Insecure: master key lives in the DB. Offer to promote it to the env.
   if (status.source === "db") {
-    return (
-      <div className="space-y-3 rounded-lg border border-warning-border bg-warning-surface p-4">
+    return section(
+      <div className="space-y-3 rounded-xl border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
           <div className="space-y-1">
@@ -83,15 +103,15 @@ export function MasterKeyBanner() {
             {copied ? tc("copied") : tc("copy")}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">{t("restartHint")}</p>
-      </div>
+        <p className="text-[13px] text-muted-foreground">{t("restartHint")}</p>
+      </div>,
     );
   }
 
   // Secure via env, but a stale DB copy remains — offer to finish the cleanup.
   if (status.dbKeyPresent) {
-    return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-border bg-warning-surface p-4">
+    return section(
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
           <p className="text-sm text-foreground">{t("secureLeftover")}</p>
@@ -99,15 +119,18 @@ export function MasterKeyBanner() {
         <Button variant="outline" size="sm" onClick={removeDbCopy} disabled={removing}>
           {t("removeDbCopy")}
         </Button>
-      </div>
+      </div>,
     );
   }
 
-  // Fully secure.
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <ShieldCheck className="h-4 w-4 text-success" />
-      {t("secureClean")}
-    </div>
+  // Fully secure: one row in the same card grammar as every other setting, so
+  // "all is well" looks like a state and not like a footnote.
+  return section(
+    <SettingsGroup>
+      <div className="flex items-center gap-2.5 px-4 py-3.5 text-sm">
+        <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
+        {t("secureClean")}
+      </div>
+    </SettingsGroup>,
   );
 }

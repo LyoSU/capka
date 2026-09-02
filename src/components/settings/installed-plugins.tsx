@@ -256,7 +256,7 @@ export default function InstalledPlugins() {
         const unfinished = p.applyState?.status === "failed";
         const inFlight = p.applyState?.status === "applying";
         return (
-          <div key={p.id} className="space-y-3 rounded-xl border p-4">
+          <div key={p.id} className="space-y-3 rounded-xl bg-card p-4 shadow-panel">
             {/* Above everything, because it explains why the rest of the row is inert. A
                 plugin whose apply did not finish is hidden from every run, and a user
                 staring at a connector that stopped answering has no other way to learn why. */}

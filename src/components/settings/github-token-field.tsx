@@ -63,7 +63,7 @@ export default function GithubTokenField() {
   if (!loaded) return null;
 
   return (
-    <div className="space-y-2 rounded-xl border p-3">
+    <div className="space-y-2 rounded-xl bg-card p-4 shadow-panel">
       <div className="flex items-center gap-2">
         <p className="text-sm font-medium">{t("tokenTitle")}</p>
         {configured && (

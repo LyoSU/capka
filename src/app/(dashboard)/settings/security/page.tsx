@@ -9,7 +9,7 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { MasterKeyBanner } from "@/components/settings/master-key-banner";
 import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
-import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/settings/segmented";
 
 /**
  * Settings → Security: the PERIMETER only — the stored-key encryption, what the
@@ -94,9 +94,9 @@ export default function SecuritySettingsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <SettingsSection title={t("encryptionKey")} description={t("encryptionKeyDesc")}>
-        <MasterKeyBanner />
-      </SettingsSection>
+      {/* Renders its own section, or nothing: a heading over an empty space
+          read as a row that had failed to load. */}
+      <MasterKeyBanner />
 
       <SettingsSection title={t("network")} description={t("networkDesc")} footnote={t("networkNote")}>
         <SettingsGroup>
@@ -148,26 +148,14 @@ export default function SecuritySettingsPage() {
             }
           />
           <SettingsRow id="pc-folders" title={t("pcFolders")} hint={t("pcFoldersHint")}>
-            {/* group + aria-pressed: which option is chosen was carried only by a
-                background colour, so this announced as three unlabelled buttons. */}
-            <div role="group" aria-label={t("pcFolders")} className="inline-flex rounded-lg border bg-muted/40 p-0.5">
-              {(["off", "admins", "everyone"] as const).map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  aria-pressed={pcFolders.value === opt}
-                  onClick={() => save(pcFolders, opt)}
-                  className={cn(
-                    "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                    pcFolders.value === opt
-                      ? "bg-card shadow-btn"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t(`folder_${opt}`)}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              as="radiogroup"
+              label={t("pcFolders")}
+              size="sm"
+              value={pcFolders.value as "off" | "admins" | "everyone"}
+              onChange={(opt) => save(pcFolders, opt)}
+              options={(["off", "admins", "everyone"] as const).map((opt) => ({ key: opt, label: t(`folder_${opt}`) }))}
+            />
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>
