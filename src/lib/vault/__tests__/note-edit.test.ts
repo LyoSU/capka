@@ -205,6 +205,34 @@ describe("str_replace", () => {
     expect(r).toEqual({ ok: false, reason: "bad_link" });
   });
 
+  it("a title in new_str that old_str did not carry stays TEXT, and mints no second token", () => {
+    // §4.6: the model cannot type a persistent link, and the tool description says so in
+    // those words. Mapping every rendered title in `new_str` broke that for one arm: an edit
+    // to a sentence elsewhere in the file could plant a SECOND copy of a token the body
+    // already held, just by naming the target's title.
+    const stored = `Intro ${edgeToken(E1)} outro. Tail sentence.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Tail sentence.",
+      newStr: "See [[Reporting]] again.",
+    });
+    if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
+    expect(r.body).toBe(`Intro ${edgeToken(E1)} outro. See [[Reporting]] again.`);
+    // ONE token, and the typed title left as the text the model actually wrote.
+    expect(r.body.match(/capka-edge:/g)).toHaveLength(1);
+    expect(r.linksRemoved).toEqual([]);
+  });
+
+  it("both arms answer the same typed title the same way", () => {
+    // The asymmetry the docstring used to justify is gone: `insert` and `str_replace` now
+    // treat a title the edit did not already hold identically.
+    const stored = `Intro ${edgeToken(E1)} outro.`;
+    const inserted = applyInsert({ storedBody: stored, insertLine: 1, insertText: "See [[Reporting]] again." });
+    if (!inserted.ok) throw new Error(`expected ok, got ${inserted.reason}`);
+    expect(inserted.body).toBe(`Intro ${edgeToken(E1)} outro.\nSee [[Reporting]] again.`);
+  });
+
   it("leaves [[Plain]] in new_str as text rather than minting a link", () => {
     const r = applyStrReplace({ storedBody: "one two", edges: [], oldStr: "two", newStr: "[[Plain]]" });
     if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);

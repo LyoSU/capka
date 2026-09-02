@@ -113,6 +113,12 @@ function linkIndex(storedBody: string, edges: RenderedEdge[]) {
  * A `[[Title]]` that matches NO edge stays literal text, which is §7's rule read forwards:
  * the model cannot type a link into existence, so text that looks like one is text.
  *
+ * `only` RESTRICTS WHICH TOKENS MAY BE PRODUCED, and it is how §4.6's "the model cannot type
+ * a persistent link" is enforced on the replacement half of an edit. `old_str` is mapped with
+ * no restriction, because it is text the model READ; `new_str` is mapped with the set of edge
+ * ids `old_str` actually carried, so a title the edit is merely moving keeps its link while a
+ * title typed fresh stays the plain text the tool description promises it is.
+ *
  * AMBIGUITY IS RAISED ONLY WHERE IT BITES — when the duplicated title actually appears in
  * the string being mapped. A note may perfectly well link two files that happen to share a
  * title and be edited somewhere else entirely, and refusing that edit would make a
@@ -122,6 +128,7 @@ export function mapRenderedToStored(
   rendered: string,
   storedBody: string,
   edges: RenderedEdge[],
+  only?: ReadonlySet<string>,
 ): { ok: true; text: string } | { ok: false; reason: "ambiguous_link"; title: string } {
   const { byTitle, dead } = linkIndex(storedBody, edges);
   const removedLabel = UNRESOLVED_LINK.slice(2, -2);
@@ -131,7 +138,7 @@ export function mapRenderedToStored(
     // copied from somewhere it should not have; `applyStrReplace` decides what that means.
     if (inner.startsWith("capka-edge:")) return all;
     if (inner === removedLabel) {
-      if (dead.length === 1) return edgeToken(dead[0]);
+      if (dead.length === 1) return only && !only.has(dead[0]) ? all : edgeToken(dead[0]);
       if (dead.length > 1) ambiguous ??= removedLabel;
       return all;
     }
@@ -141,7 +148,7 @@ export function mapRenderedToStored(
       ambiguous ??= inner;
       return all;
     }
-    return edgeToken(ids[0]);
+    return only && !only.has(ids[0]) ? all : edgeToken(ids[0]);
   });
   return ambiguous === null ? { ok: true, text } : { ok: false, reason: "ambiguous_link", title: ambiguous };
 }
@@ -269,12 +276,16 @@ export function applyStrReplace(a: {
   // BEFORE the mapping, on the RAW strings: a canonical token in the replacement that was
   // not in the text being replaced is the model minting a link out of an id it should never
   // have seen. Tokens carried across unchanged are fine — that is an edit that kept a link.
-  const carried = new Set(typedTokens(a.oldStr));
-  if (typedTokens(a.newStr).some((id) => !carried.has(id))) return { ok: false, reason: "bad_link" };
+  const typedInOld = new Set(typedTokens(a.oldStr));
+  if (typedTokens(a.newStr).some((id) => !typedInOld.has(id))) return { ok: false, reason: "bad_link" };
 
   const mappedOld = mapRenderedToStored(a.oldStr, a.storedBody, a.edges);
   if (!mappedOld.ok) return mappedOld;
-  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges);
+  // WHICH LINKS THIS EDIT IS ALLOWED TO WRITE: exactly the ones the text it replaces already
+  // held. Anything else in `new_str` that looks like a link is text the model typed, and §4.6
+  // is that the model cannot type one.
+  const carried = new Set(edgeIdsIn(mappedOld.text));
+  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges, carried);
   if (!mappedNew.ok) return mappedNew;
 
   let fuzzy = false;
@@ -320,11 +331,12 @@ export function applyStrReplace(a: {
  * newline is trimmed off the inserted text, because the insertion already lands on lines of
  * its own and a model that ends its paragraph with a newline means the paragraph.
  *
- * THE INSERTED TEXT IS NEVER MAPPED. `[[Title]]` in it stays literal text even when an edge
- * of that name exists on this note: mapping it would mint a SECOND token for one edge —
- * §7's "typed into existence" case arriving through the back door — while a `str_replace`
- * that carries a title across is moving a token the body already holds. That asymmetry is
- * the rule, not an oversight.
+ * THE INSERTED TEXT IS NEVER MAPPED, and `str_replace` now holds the same rule from the other
+ * side: a rendered title becomes a token only when the text being replaced already carried
+ * that token. An insert replaces nothing, so it carries nothing, so `[[Title]]` in it is
+ * always plain text — the two arms answer the same input the same way. Mapping it would mint
+ * a token for an edge the model merely NAMED, which is §7's "typed into existence" case and
+ * the thing the tool description promises does not happen.
  */
 export function applyInsert(a: { storedBody: string; insertLine: number; insertText: string }): EditResult {
   const lines = a.storedBody === "" ? [] : a.storedBody.split("\n");
