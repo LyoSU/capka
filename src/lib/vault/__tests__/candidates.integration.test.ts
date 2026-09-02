@@ -740,7 +740,18 @@ run("vault candidates", () => {
       `SELECT action, payload FROM audit_events WHERE space_id = $1`,
       [SPACE_A],
     );
-    expect(events.map((e) => e.action).sort()).toEqual(["candidate.confirm", "candidate.propose", "claim.create"]);
+    // `note.revise` is the fourth, and it is the DEFAULT TOPIC being created: this confirm
+    // files the claim under it, `resolveTopic` writes the container's revision 1, and
+    // `insertNoteVersion` — the one implementation of a version write — attests to it
+    // (§2.11). Enumerated here rather than filtered out, because the whole point of the
+    // list is that it is exhaustive: a fifth action has to be argued for, and this one
+    // carries no text either, which is what the assertion below is about.
+    expect(events.map((e) => e.action).sort()).toEqual([
+      "candidate.confirm",
+      "candidate.propose",
+      "claim.create",
+      "note.revise",
+    ]);
     for (const e of events) expect(e.payload).not.toHaveProperty("slotKey");
   });
 
