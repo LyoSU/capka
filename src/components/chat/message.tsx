@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronLeft, ChevronRight, GitBranch, X, Lightbulb, Info,
+  ChevronDown, ChevronLeft, ChevronRight, GitBranch, X, Info,
   MoreHorizontal, ArrowRight, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -809,7 +809,7 @@ function StepFileChip({ path, name, chatId }: { path: string; name: string; chat
       onClick={() => open([file], 0)}
       title={t("openFile", { name })}
       aria-label={t("openFile", { name })}
-      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-muted py-0.5 pl-0.5 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-[13.5px] underline decoration-border-strong underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
     >
       <FileThumb file={file} className="h-4 w-4 shrink-0 overflow-hidden rounded-[3px]" />
       <span className="truncate">{name}</span>
@@ -1008,41 +1008,32 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
-    <div className="animate-step-in flex gap-2.5 px-3 py-2.5 text-muted-foreground">
-      {/* No pulse on the icon while streaming: the group header above already
-          ticks a live duration and the list shows a spinner on the running step.
-          Three motions for one fact reads as a busy interface, not an
-          informative one. */}
-      <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="animate-step-in py-1.5">
+      {/* A thought reads as prose in the answer's own column — same size, same ink
+          — because that is what it is: the assistant talking through the task.
+          Boxing it or greying it out made it look like machine output the reader
+          was meant to skip. The header above already says this is the run, not
+          the reply; the tool rows below it are the ones set apart. No icon, no
+          pulse: the running step carries the one spinner. */}
       {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
           mechanically slanted — the same reason blockquotes dropped italic in
-          globals.css. Reasoning is already set apart by the muted colour and the
-          smaller size; it doesn't need a second, worse-legibility signal. */}
-      <div className="reasoning-prose min-w-0 flex-1 text-[13px] leading-relaxed">
+          globals.css. */}
+      <div className="reasoning-prose min-w-0 text-base leading-relaxed text-foreground">
         <Markdown isStreaming={isStreaming}>{clean}</Markdown>
       </div>
     </div>
   );
 }
 
-/** The glyph that opens a step row: a category icon, a branded chip for
- *  connected apps (MCP), or a live spinner while the step runs. A plain 16px
- *  icon, not a ringed node — the rows sit in one bordered list now, and the list
- *  is what says "these belong together"; a circle around every icon was a second
- *  frame inside the first. */
-function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
-  if (state === "running") {
-    return (
-      <span className="grid h-4 w-4 shrink-0 place-items-center text-foreground">
-        <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
-      </span>
-    );
-  }
-  // Connected app with a known brand — a coloured letter chip, not a wrench.
+/** The 16px glyph that opens a step row: the category icon, a branded letter for
+ *  a connected app (MCP), or the spinner while the step runs. Inline, never
+ *  ringed — a circle around every icon is a frame the row does not need. */
+function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
+  if (state === "running") return <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />;
   if (d.category === "mcp" && d.brand?.color) {
     return (
       <span
-        className="animate-step-in grid h-4 w-4 shrink-0 place-items-center rounded-[5px] text-[9px] font-bold leading-none text-white"
+        className="animate-step-in grid h-4 w-4 place-items-center rounded-[5px] text-[9px] font-bold leading-none text-white"
         style={{ backgroundColor: d.brand.color }}
       >
         {d.brand.letter}
@@ -1050,14 +1041,15 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
     );
   }
   const Icon = d.Icon;
-  return (
-    <Icon className={`animate-step-in h-4 w-4 shrink-0 ${state === "error" ? "text-destructive" : "text-muted-foreground"}`} />
-  );
+  return <Icon className="animate-step-in h-4 w-4" />;
 }
 
-/** One step on the rail: badge + intent label + optional dim detail, with the
- *  output/error tucked into a click-to-expand block beneath it. */
-function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
+/** One step: a small glyph, the intent label, and the literal thing acted on
+ *  right after it — one quiet line, the way Grok draws a run. Consecutive steps
+ *  are joined by a hairline under the glyph (`connect`), so a burst of actions
+ *  reads as one sequence and a thought between them breaks it. The whole row
+ *  expands to the payload beneath; the chevron only shows under the cursor. */
+function StepRow({ part, chatId, connect }: { part: ToolPart; chatId?: string; connect?: boolean }) {
   const tSteps = useTranslations("steps");
   const anchorDisclosure = useDisclosureAnchor();
   const t = useTranslations("chat.tool");
@@ -1100,20 +1092,13 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
 
   const fileChip =
     d.file && d.detail && chatId ? <StepFileChip path={d.file} name={d.detail} chatId={chatId} /> : null;
-  // Tells you whether opening this is worth it, before you open it — and only
-  // when that question has an answer worth printing. Below a handful of lines
-  // everything is worth opening, so a count there is a number per row that
-  // decides nothing; on a twelve-step turn that is twelve of them.
-  const lines = outText ? outText.split("\n").length : 0;
-  const showLineCount = lines >= 5;
 
   const row = (
     <div
-      className={`animate-step-in relative flex min-h-[38px] items-center gap-2.5 px-3 py-1.5 ${
-        isError ? "text-destructive" : "text-foreground"
+      className={`animate-step-in group/step relative flex min-h-8 items-center gap-2.5 py-1 ${
+        isError ? "text-destructive" : "text-muted-foreground"
       }`}
     >
-      <StepBadge d={d} state={state} />
       {/* The disclosure trigger lies UNDER the row's content rather than wrapping
           it. Wrapping was fine while the row held only text, but the file chip is
           a real button now, and a button inside a button is invalid HTML and
@@ -1123,44 +1108,42 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       {expandable && (
         <CollapsibleTrigger
           aria-label={label}
-          // Full-bleed: the whole row is the control, and its hover wash is the
-          // list row lighting up — the icon is content inside it, not chrome beside it.
-          className="absolute inset-0 z-0 transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          // Bleeds 8px past the text on both sides so the hover wash has a margin
+          // around the words instead of clipping at them. Everything drawn on top
+          // of it carries `relative z-10`, or the wash paints over it.
+          className="absolute -inset-x-2 inset-y-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       )}
-      <span className="pointer-events-none relative z-10 text-sm">
+      <span className="pointer-events-none relative z-10 flex h-5 w-5 shrink-0 items-center justify-center">
+        <StepGlyph d={d} state={state} />
+        {/* The hairline to the next step, hung from this glyph so it exists only
+            between two actions and never trails off after the last one. Its
+            height is exactly the gap between two glyph boxes (row min-h-8, py-1). */}
+        {connect && <span aria-hidden className="absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
+      </span>
+      <span className="pointer-events-none relative z-10 min-w-0 truncate text-[15px] leading-snug">
         {label}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
-      {/* The literal thing acted on — a filename, a command — gets its own chip
-          rather than trailing the sentence as dim text. The chip is what makes
-          the row LESS technical, not more: it reads as "machine detail,
-          skippable", so the eye can take the sentence in the user's own language
-          and skip the token, instead of having to parse a mono fragment spliced
-          into the middle of a phrase.
-          Styled as INLINE CODE (globals.css `[data-streamdown="inline-code"]`).
-          A filename is the same kind of thing here as it is in the answer's
-          prose, so it looks the same in both. When we know WHICH file it is, the
-          chip earns a thumbnail and opens it. */}
+      {/* The literal thing acted on — a filename, a command — follows the sentence
+          in mono, on the same baseline, no chip: the typeface change alone says
+          "machine detail" and lets the eye take the sentence in its own language.
+          When we know WHICH file it is, it gets a thumbnail and opens the file. */}
       {fileChip ??
         (d.detail && (
-          <span className="pointer-events-none relative z-10 min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+          <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-[13.5px]">
             {d.detail}
           </span>
         ))}
-      <span className="pointer-events-none relative z-10 ml-auto flex shrink-0 items-center gap-2">
-        {expandable && showLineCount && (
-          <span className="text-[11px] tabular-nums opacity-70">{t("outputLines", { count: lines })}</span>
-        )}
-        {expandable && (
-          /* `opacity-40 → 100` on hover rather than hide-until-hover: an affordance
-             nobody can see is an affordance nobody finds, so the chevron stays
-             faintly present at rest and only firms up under the cursor. */
-          <ChevronRight
-            className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/step:opacity-100 ${open ? "rotate-90" : ""}`}
-          />
-        )}
-      </span>
+      {/* Present only under the cursor (and while open): at rest the run should
+          read as a quiet list of what happened, not as a stack of controls. */}
+      {expandable && (
+        <ChevronRight
+          className={`pointer-events-none relative z-10 h-3.5 w-3.5 shrink-0 transition-[opacity,transform] ${
+            open ? "rotate-90 opacity-100" : "opacity-0 group-hover/step:opacity-100"
+          }`}
+        />
+      )}
     </div>
   );
 
@@ -1180,7 +1163,7 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       <div className="group/step">{row}</div>
       <CollapsibleContent>
         {/* Sent, then returned, in that order — the order they happened in. */}
-        <div className="space-y-2.5 border-t border-border bg-background/50 px-3 py-3">
+        <div className="mb-2 ml-[30px] mt-1 space-y-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
           {inv && <Invocation inv={inv} />}
           <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
         </div>
@@ -1192,31 +1175,30 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
 /** A single unit of work on the rail — either the model thinking or a tool call. */
 type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: ToolPart };
 
-/** Renders an interleaved run of reasoning + tool calls as one bordered list —
- *  one row per step, hairline-divided, so thinking and actions read as a single
- *  quiet "here's what I did" record rather than two different styles. The list
- *  edge is the only frame: no connecting line, no ringed nodes, no "Done" cap. */
+/** Renders an interleaved run of reasoning + tool calls the way the run actually
+ *  went: thoughts as prose, actions as small glyph rows between them, consecutive
+ *  actions joined by a hairline. No container and no cap — the group header is
+ *  the frame. */
 function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />,
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool"} />,
   );
   // Why the longest pause in the product gets a footnote and not a node: the
   // container is built FOR the step above — the first tool call that needs it —
   // so it is that step taking a while, not a separate thing happening. A node
   // would put a second spinner on screen for one piece of work, which is the
   // "pile of loaders" failure; a dim line at the tail adds the missing sentence
-  // and nothing else. It sits OUTSIDE the list so the list edge stays the frame
-  // of what happened, not of what is being waited for.
+  // and nothing else.
   const note = isStreaming && sandboxPending ? (
-    <div className="animate-step-in px-3 pt-1.5 text-xs text-muted-foreground">{tStatus("sandbox")}</div>
+    <div className="animate-step-in pl-[30px] pt-1 text-xs text-muted-foreground">{tStatus("sandbox")}</div>
   ) : null;
 
   return (
     <>
-      <div className="my-1 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+      <div className="my-1">
         {rows}
       </div>
       {note}
@@ -1331,12 +1313,12 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
           shows a spinning node on the running step, so a pulsing header is the
           same fact stated a second time. `tabular-nums` keeps the ticking duration
           from reflowing the row a digit at a time. */}
-      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
+      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-[15px] text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-180">
         <span className="min-w-0 truncate tabular-nums">{label}</span>
         {countLabel && (
           <span className="shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
         )}
-        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/act:opacity-100" />
+        <ChevronDown className="chevron h-4 w-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">

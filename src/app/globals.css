@@ -123,9 +123,14 @@
      the padding back off the element — the reading line the whole state machine is
      measured against. There is no second copy of this number anywhere. */
   --reading-line: 4rem;
-  --background: oklch(0.967 0.003 106);
+  /* Near-white, not grey. At 0.967 the page read as a grey sheet with white
+     cards fighting it; the products this is measured against (ChatGPT, Grok,
+     Claude) all work on a white or warm-white canvas and keep grey for the
+     navigation. Still a hair off pure white so the white field and card sit
+     visibly above it. */
+  --background: oklch(0.985 0.003 106);
   --foreground: oklch(0.205 0.006 92);
-  --card: oklch(0.989 0.002 68);
+  --card: oklch(0.996 0.002 68);
   --card-foreground: oklch(0.205 0.006 92);
   /* The same value as `--card`, as it was before this palette landed. The
      reference separates them (surface #fcfbfa < raised #ffffff) and gets away
@@ -136,13 +141,13 @@
      white for the field, which then sits strictly above ALL FOUR host surfaces.
      A popover is separated from a card by its shadow (`--elev-overlay` vs
      `--elev-panel`), which is the rung that actually reads. */
-  --popover: oklch(0.989 0.002 68);
+  --popover: oklch(0.996 0.002 68);
   --popover-foreground: oklch(0.205 0.006 92);
   --primary: oklch(0.236 0.008 85);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.934 0.004 91);
+  --secondary: oklch(0.945 0.004 91);
   --secondary-foreground: oklch(0.236 0.008 85);
-  --muted: oklch(0.934 0.004 91);
+  --muted: oklch(0.945 0.004 91);
   /* Graphite's own mid-ink (#696763), measured at 5.12:1 on the page and
      4.65:1 on `--field` — the worst surface a caption ever lands on — so it
      clears WCAG AA in both places. Lighter than the 0.46 this sat at, which
@@ -159,7 +164,7 @@
      a non-colour cue. Every `text-link` in the app is therefore permanently
      underlined — never `hover:underline`. */
   --link: oklch(0.301 0.013 94);
-  --accent: oklch(0.934 0.004 91);
+  --accent: oklch(0.945 0.004 91);
   --accent-foreground: oklch(0.236 0.008 85);
   --destructive: oklch(0.577 0.245 27.33);
   --destructive-foreground: oklch(0.985 0 0);
@@ -223,8 +228,8 @@
      surface step is now at least a quarter-stop of lightness: hover 1.15:1,
      active/open 1.30:1. Fewer levels, bigger gaps — the way the products people
      compare this to are built (three greys, not eight). */
-  --hover: oklch(0.928 0.004 88);
-  --hover-strong: oklch(0.898 0.006 92);
+  --hover: oklch(0.94 0.004 88);
+  --hover-strong: oklch(0.905 0.006 92);
   /* The ONE hue the palette spends. Graphite stays achromatic for identity and
      hierarchy; this cool ink-blue is reserved for the two signals nothing else
      can carry: the focus ring and the unread dot. Not the send button — that is
@@ -243,19 +248,17 @@
      are. It is the accent: a ring that shares a grey with the field edge is a
      ring nobody finds. */
   --ring: var(--brand);
-  /* Recessed, but only half a step. The reference palette puts the sidebar a full
-     step under the page (0.943 vs 0.967) and the direction is right — the sidebar
-     is navigation, the page is the work — but at that depth it reads as a dark
-     slab, because it is the largest single surface in the app and area weighs more
-     than tone. Same step, spread over twice the distance: the hierarchy survives,
-     the weight does not. (The fields on it are white now, which is the other half
-     of why the full step was too much — it doubled the edge they sit against.) */
+  /* A full step under the page now that the page is near-white (0.985): the
+     sidebar is navigation, the page is the work, and this is the one place the
+     app spends a whole stop of grey on structure. At the old page value (0.967)
+     the same depth read as a dark slab; against near-white it reads as ChatGPT's
+     grey rail beside a white sheet. */
   --sidebar: oklch(0.955 0.003 85);
   --sidebar-foreground: oklch(0.205 0.006 92);
   --sidebar-primary: oklch(0.236 0.008 85);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.872 0.006 95);
-  --sidebar-accent: oklch(0.898 0.006 92);
+  --sidebar-accent: oklch(0.905 0.006 92);
   --sidebar-accent-foreground: oklch(0.236 0.008 85);
   --sidebar-ring: var(--brand);
   --chart-1: oklch(0.646 0.222 41.12);
