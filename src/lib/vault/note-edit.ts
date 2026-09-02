@@ -286,21 +286,47 @@ export function applyStrReplace(a: {
 
   const mappedOld = mapRenderedToStored(a.oldStr, a.storedBody, a.edges);
   if (!mappedOld.ok) return mappedOld;
-  // WHICH LINKS THIS EDIT IS ALLOWED TO WRITE: exactly the ones the text it replaces already
-  // held. Anything else in `new_str` that looks like a link is text the model typed, and §4.6
-  // is that the model cannot type one.
-  const carried = new Set(edgeIdsIn(mappedOld.text));
-  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges, carried);
-  if (!mappedNew.ok) return mappedNew;
+
+  // TWO TIERS OF NEEDLE, and the second one exists because `new_str` may legitimately write
+  // the characters `[[Reporting]]` as TEXT — the tool description says a typed title stays
+  // text, and this module enforces it. Once that text is in the file, `memory_open` renders
+  // it identically to a real link, and every `old_str` naming it was mapped to the token and
+  // matched nothing: the model was told to open the note and copy the text exactly, which is
+  // what it had just done. A fragment nothing can address is a loop the model cannot argue
+  // its way out of.
+  //
+  // So when the MAPPED needle finds nothing in either tier, the RAW one is tried. It cannot
+  // touch a link by accident: a raw `[[Title]]` and a stored `[[capka-edge:<id>]]` share no
+  // bytes, so a span found this way never overlaps a token and `droppedLinks` sees the same
+  // tokens on both sides of the edit. And the raw tier carries its OWN allowance — the tokens
+  // the raw string itself names, which the check above has already validated — so a title the
+  // raw text mentions stays text on the way out too.
+  const tiers: { needle: string; carried: Set<string> }[] = [
+    { needle: mappedOld.text, carried: new Set(edgeIdsIn(mappedOld.text)) },
+  ];
+  if (a.oldStr !== mappedOld.text) tiers.push({ needle: a.oldStr, carried: new Set(edgeIdsIn(a.oldStr)) });
 
   let fuzzy = false;
-  let spans = occurrences(a.storedBody, mappedOld.text).map((i) => ({
-    start: i,
-    end: i + mappedOld.text.length,
-  }));
-  if (spans.length === 0) {
-    spans = fuzzySpans(a.storedBody, mappedOld.text);
-    fuzzy = spans.length > 0;
+  let spans: { start: number; end: number }[] = [];
+  let carried = tiers[0].carried;
+  for (const tier of tiers) {
+    let found = occurrences(a.storedBody, tier.needle).map((i) => ({
+      start: i,
+      end: i + tier.needle.length,
+    }));
+    let wasFuzzy = false;
+    if (found.length === 0) {
+      found = fuzzySpans(a.storedBody, tier.needle);
+      wasFuzzy = found.length > 0;
+    }
+    // AMBIGUITY STOPS THE SEARCH. Two matches on the mapped needle is an answer — "say which
+    // one" — and falling through to the raw tier would replace it with a different question.
+    if (found.length) {
+      spans = found;
+      fuzzy = wasFuzzy;
+      carried = tier.carried;
+      break;
+    }
   }
   if (spans.length === 0) return { ok: false, reason: "no_match" };
   if (spans.length > 1) {
@@ -310,6 +336,11 @@ export function applyStrReplace(a: {
       lines: [...new Set(spans.map((s) => lineAt(a.storedBody, s.start)))],
     };
   }
+
+  // AFTER the tier is chosen, because which links this edit may write depends on which text
+  // it is replacing: exactly the ones that text already held.
+  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges, carried);
+  if (!mappedNew.ok) return mappedNew;
 
   const [span] = spans;
   // TOKEN-ATOMIC, and checked on the SPAN before the splice rather than on the result alone:

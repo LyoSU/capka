@@ -240,6 +240,64 @@ describe("str_replace", () => {
     expect(r.body).not.toContain("capka-edge");
   });
 
+  it("a literal [[Title]] the model wrote is addressable again, and closes no edge", () => {
+    // THE LOOP THIS TIER EXISTS TO BREAK. `new_str` may legitimately write the words
+    // `[[Reporting]]` as text (H6a). After that the file holds a token AND a literal that
+    // `memory_open` renders identically — and every `old_str` naming the literal was mapped
+    // to the token, so it matched nothing. The model copied the line verbatim off its own
+    // screen and was told to copy it again.
+    const stored = `Intro ${edgeToken(E1)} outro. Tail.`;
+    const wrote = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Tail.",
+      newStr: "See [[Reporting]] here.",
+    });
+    if (!wrote.ok) throw new Error(`expected ok, got ${wrote.reason}`);
+    expect(wrote.body).toBe(`Intro ${edgeToken(E1)} outro. See [[Reporting]] here.`);
+
+    const back = applyStrReplace({
+      storedBody: wrote.body,
+      edges: [live(E1, "Reporting")],
+      oldStr: "See [[Reporting]] here.",
+      newStr: "gone.",
+    });
+    if (!back.ok) throw new Error(`expected ok, got ${back.reason}`);
+    expect(back.body).toBe(`Intro ${edgeToken(E1)} outro. gone.`);
+    // THE EDGE IS UNTOUCHED. A raw `[[Title]]` and a stored `[[capka-edge:<id>]]` share no
+    // bytes, so a span found on the raw tier can never overlap a token.
+    expect(back.linksRemoved).toEqual([]);
+  });
+
+  it("the raw tier mints no token either — a title it names stays text", () => {
+    const stored = `Intro ${edgeToken(E1)} outro. See [[Reporting]] here.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "See [[Reporting]] here.",
+      newStr: "See [[Reporting]] instead.",
+    });
+    if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
+    expect(r.body).toBe(`Intro ${edgeToken(E1)} outro. See [[Reporting]] instead.`);
+    expect(r.body.match(/capka-edge:/g)).toHaveLength(1);
+  });
+
+  it("the MAPPED tier wins when both could match, and the literal is left alone", () => {
+    // The raw tier runs only when the mapped one found NOTHING, so a file holding both forms
+    // is edited where the model's rendered text actually pointed — at the link. Answering
+    // `ambiguous_match` here would be wrong: the mapped tier matched exactly once.
+    const stored = `Intro ${edgeToken(E1)} outro. Also [[Reporting]] here.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Intro [[Reporting]] outro.",
+      newStr: "Intro [[Reporting]] changed.",
+    });
+    if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
+    expect(r.body).toBe(`Intro ${edgeToken(E1)} changed. Also [[Reporting]] here.`);
+    expect(r.linksRemoved).toEqual([]);
+  });
+
   it("matches a CRLF body byte-exactly in the exact tier", () => {
     const stored = "one\r\ntwo\r\nthree";
     const r = applyStrReplace({ storedBody: stored, edges: [], oldStr: "one\r\ntwo", newStr: "ONE\r\nTWO" });
