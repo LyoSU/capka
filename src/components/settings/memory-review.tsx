@@ -57,7 +57,7 @@ function Side({ side, keeping, onKeep }: { side: ConflictSide; keeping: boolean;
   return (
     <div className="min-w-0 flex-1 space-y-1.5">
       <Statement value={side.statement} reveal={reveal} />
-      <TrustBadge trust={side.trust} sensitive={side.statement.sensitive} />
+      <TrustBadge trust={side.trust} value={side.statement} />
       <p className="text-[11.5px] leading-relaxed text-muted-foreground">
         {t("savedOn", { date: formatDay(side.at, locale) })}
       </p>

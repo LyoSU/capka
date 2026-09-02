@@ -18,10 +18,10 @@ import { join } from "node:path";
  *
  * The structural half of the fix is `StatementView` (`memory-page.ts`): the text is not a
  * `string` on the wire, so it cannot be dropped into JSX or interpolated into a translated
- * sentence without failing `tsc`, and the only consumer of the shape is `Statement`. That
- * catches the accidental bypass. It does NOT catch a deliberate one — `value.text` is
- * still structurally reachable, and `memory-review.tsx` reaches for it once on purpose, to
- * seed the edit textarea after the person has revealed the fact.
+ * sentence without failing `tsc`, and the only consumers of the shape are `Statement` and
+ * `TrustBadge`. That catches the accidental bypass. It does NOT catch a deliberate one —
+ * `value.text` is still structurally reachable, which is why the count below is an
+ * equality and why it is currently EMPTY.
  *
  * So this test covers what the type cannot: that `sensitive` is READ in exactly one module.
  * A second reader is a second copy of the rule, and a second copy is how all three
@@ -30,8 +30,15 @@ import { join } from "node:path";
 
 const ROOTS = ["src/components/settings", "src/app/(dashboard)/settings/memory"];
 
-/** The module that owns `Statement`, `useReveal` and `SensitiveEditNote` — the three
- *  things allowed to know a statement's sensitivity, all of them rendering decisions. */
+/** The module that owns `Statement`, `useReveal` and `TrustBadge` — the three things
+ *  allowed to know a statement's sensitivity, all of them rendering decisions.
+ *
+ *  `TrustBadge` arrived with the trust tag and takes the whole `StatementView` rather than
+ *  a `sensitive` boolean, for exactly the reason this file exists: a caller computing
+ *  `sensitive={x.statement.sensitive}` to pick a chip would have been the second reader,
+ *  and every breach in the paragraph above was a second reader. `SensitiveEditNote` left
+ *  with the archive's edit control (§11.8) — see `memory-topics.tsx` for where its
+ *  argument went. */
 const OWNER = "src/components/settings/memory-topics.tsx";
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -79,21 +86,23 @@ describe("a statement's legibility is decided in one place", () => {
     expect(blurring).toEqual([OWNER]);
   });
 
-  it("unwraps a statement's raw text at exactly one site outside the owner", () => {
+  it("unwraps a statement's raw text NOWHERE outside the owner", () => {
     // `sensitive` is only half of it. The conflict line did not read the flag either — it
     // took the WORDS and interpolated them into a sentence, and that is the same bypass
     // with the same result. `StatementView` makes the unwrap visible (`.statement.text`)
-    // rather than impossible: it must stay reachable, because the edit box has to be
-    // seeded with the words, and that one site is gated on the reveal below.
+    // rather than impossible.
     //
-    // An equality assertion, not a ceiling: a second unwrap has to be argued for here,
-    // in this file, next to the reason there is one.
+    // IT WAS ONE, AND IT IS NOW NONE. The single sanctioned unwrap seeded the archive's
+    // edit textarea with the words, gated on the reveal; the archive is read-only since
+    // §11.8 removed the review queue, so the last consumer of a raw statement outside
+    // `Statement` is gone. An equality assertion, not a ceiling: a new unwrap has to be
+    // argued for here, in this file, next to the reason there is one.
     const counted = Object.fromEntries(
       files
         .map((f) => [f, (readFileSync(f, "utf8").match(/\.statement\.text\b/g) ?? []).length] as const)
         .filter(([, n]) => n > 0),
     );
-    expect(counted).toEqual({ "src/components/settings/memory-review.tsx": 1 });
+    expect(counted).toEqual({});
   });
 
   it("never marks up a matched substring inside a statement", () => {
@@ -113,12 +122,18 @@ describe("a statement's legibility is decided in one place", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("gates the editor on the reveal, not on a flag of its own", () => {
+  it("gates a decision about a hidden statement on the reveal, not on a flag of its own", () => {
     // A source-text assertion, and deliberately so: this repo's vitest runs
     // `environment: "node"` with no renderer, so "the button is disabled" is not
     // something any test here can observe. The alternative to a brittle assertion is no
-    // assertion, and this is the entrance where one click on a button labelled "Edit
-    // wording" put a sensitive statement on screen with nothing having asked.
+    // assertion.
+    //
+    // WHAT IT GUARDS MOVED WITH THE SURFACE. It was "Edit wording", the entrance where one
+    // click put a sensitive statement on screen with nothing having asked. That control is
+    // gone; what is there now is heavier — keeping one side of a conflict DELETES the
+    // other, and keeping an archived suggestion writes a real fact — and neither is a
+    // decision anybody can take against words they cannot read. Same rule, same
+    // mechanism, and it is `reveal.shown` rather than a second read of the flag.
     const review = readFileSync("src/components/settings/memory-review.tsx", "utf8");
     expect(review).toMatch(/disabled=\{[^}]*!reveal\.shown[^}]*\}/);
   });

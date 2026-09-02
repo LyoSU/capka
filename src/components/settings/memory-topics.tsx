@@ -154,15 +154,21 @@ const TRUST_KEY = {
  * QUIET BY DESIGN. Fifty facts each wearing a coloured pill is fifty alerts; these are
  * captions in the row's own type scale, and the only one that takes any colour at all is
  * the sensitive marker, which is genuinely about who can see the words.
+ *
+ * IT TAKES THE WHOLE `StatementView`, not a `sensitive` boolean, and that is not a style
+ * choice: `sensitive` is read in exactly one module (`memory-statement.test.ts` asserts it
+ * as an equality), because a second reader is a second copy of the rule and a second copy
+ * is how the conflict line and the edit textarea both shipped broken. A caller hands over
+ * the value; this file decides.
  */
-export function TrustBadge({ trust, sensitive }: { trust: TrustTag; sensitive: boolean }) {
+export function TrustBadge({ trust, value }: { trust: TrustTag; value: StatementView }) {
   const t = useTranslations("settings.memory");
   return (
     <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
       {/* The document's name travels as a VALUE, never interpolated here: Ukrainian
           declines the words around a quoted title. */}
       <span>{trust.kind === "untrusted_document" ? t(TRUST_KEY[trust.kind], { name: trust.name }) : t(TRUST_KEY[trust.kind])}</span>
-      {sensitive && <span className="text-warning-text">{t("trust.sensitive")}</span>}
+      {value.sensitive && <span className="text-warning-text">{t("trust.sensitive")}</span>}
     </p>
   );
 }
@@ -429,7 +435,7 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
               the tag is not the secret — on a sensitive row it is the sentence that
               explains why the words above are blurred, so hiding it until they are
               readable would withhold the explanation exactly when it is needed. */}
-          <TrustBadge trust={fact.trust} sensitive={fact.statement.sensitive} />
+          <TrustBadge trust={fact.trust} value={fact.statement} />
         </div>
         <DeleteFact fact={fact} onChanged={onChanged} />
       </div>
