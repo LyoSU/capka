@@ -1171,6 +1171,36 @@
 [data-streamdown="table-header-cell"]:first-child,
 [data-streamdown="table-cell"]:first-child {
   padding-inline-start: var(--table-bleed, 0px);
+  /* Pinned. A ten-column table on a phone is a strip of numbers with no row
+     labels the moment it scrolls sideways; the first column stays put so every
+     number keeps its name — on a desktop trackpad too. Opaque, so scrolled
+     content passes under it rather than through it; `left: 0` is the scroller's
+     edge, which on a phone is the screen edge, and the bleed padding above
+     lands the label back on the answer's own text edge. */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--background);
+}
+/* The seam. A number whose first digits slid under the pinned column must read
+   as cut, not as wrong, so the column casts a shadow — but only once something
+   has scrolled under it; a resting table shows no seam. Driven by the scroller's
+   own inline scroll position, no JS and no measuring: the shadow fades in over
+   the first 2rem of travel. Guarded by @supports because without a scroll
+   timeline the zero-duration animation would fill to its end state and the
+   shadow would be on at rest; such browsers keep the pinned column and simply
+   show no seam. */
+@supports (animation-timeline: scroll()) {
+  [data-streamdown="table-header-cell"]:first-child,
+  [data-streamdown="table-cell"]:first-child {
+    animation: table-pin-shadow linear both;
+    animation-timeline: scroll(nearest inline);
+    animation-range: 0 2rem;
+  }
+}
+@keyframes table-pin-shadow {
+  from { box-shadow: none; }
+  to   { box-shadow: 10px 0 14px -10px color-mix(in oklab, var(--foreground) 22%, transparent); }
 }
 [data-streamdown="table-header-cell"]:last-child,
 [data-streamdown="table-cell"]:last-child {

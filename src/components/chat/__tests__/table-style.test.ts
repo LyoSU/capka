@@ -19,6 +19,18 @@ function rule(css: string, selector: string): string {
   return css.slice(open, css.indexOf("}", open));
 }
 
+/** The rule that drives the pinned column's seam from the scroller's own inline
+ *  scroll position (the file mentions scroll timelines in prose elsewhere, so the
+ *  declaration itself is what is looked for). */
+function pinnedShadow(css: string): string {
+  const i = css.indexOf("animation-timeline: scroll(nearest inline)");
+  expect(i, "a scroll-driven rule").toBeGreaterThan(-1);
+  const open = css.lastIndexOf("{", i);
+  const selector = css.slice(css.lastIndexOf("}", open) + 1, open);
+  expect(selector).toMatch(/table-cell"\]:first-child/);
+  return css.slice(open, css.indexOf("}", i));
+}
+
 describe("markdown tables", () => {
   const css = readFileSync(CSS, "utf8");
 
@@ -34,6 +46,25 @@ describe("markdown tables", () => {
     const cells = rule(css, '[data-streamdown="table-header-cell"],\n[data-streamdown="table-cell"] {');
     expect(cells).toMatch(/font-variant-numeric:\s*tabular-nums/);
     expect(cells).toMatch(/font-size:\s*0\.9375rem/);
+  });
+
+  it("the first column stays put while a wide table scrolls sideways", () => {
+    // On a phone a ten-column table is a strip of numbers with no row labels the
+    // moment it scrolls; the label column is pinned so every number keeps its
+    // name. Opaque, so scrolled content passes under it rather than through it.
+    const pinned = rule(css, '[data-streamdown="table-header-cell"]:first-child,\n[data-streamdown="table-cell"]:first-child {');
+    expect(pinned).toMatch(/position:\s*sticky/);
+    expect(pinned).toMatch(/left:\s*0/);
+    expect(pinned).toMatch(/background:\s*var\(--background\)/);
+  });
+
+  it("the pinned column casts a shadow only once something has scrolled under it", () => {
+    // A resting table shows no seam; one that has scrolled shows where the cut is,
+    // so a number whose first digits slid under the label column reads as cut
+    // rather than as wrong. Scroll-driven, no JS; browsers without it keep the
+    // pinned column and simply show no seam.
+    expect(css).toMatch(/@keyframes table-pin-shadow/);
+    expect(pinnedShadow(css)).toMatch(/animation-timeline:\s*scroll\(nearest inline\)/);
   });
 
   it("the controls are out of the way at rest on a pointer device and reachable on touch", () => {
