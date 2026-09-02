@@ -647,8 +647,11 @@ export type NoteWriteResult =
       /** Edges this write INSERTED. A link the previous revision already carried keeps its
        *  edge — and therefore its token, byte for byte — so it is not counted again. */
       linksCreated: number;
-      /** The topic's HANDLE, never its id. */
-      filedUnder: string;
+      /** The topic's HANDLE, never its id. ABSENT when the write filed nothing, which is an
+       *  update that named no topic: omitted means "leave it where it is", so there is no
+       *  topic this call can name — and a handle for whatever the note happened to be filed
+       *  under would report a move this write did not make. A create always files. */
+      filedUnder?: string;
       sourceClass: SourceClass;
       promptAccess: PromptAccess;
       said: string;
@@ -807,7 +810,17 @@ export async function noteWrite(a: {
 
     // STEP 6 — the topic. Resolved before the note exists (it creates nothing about the
     // note) and attached after, because the `contains` edge needs both endpoints as rows.
-    const topic = await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h) });
+    //
+    // AN UPDATE THAT NAMES NO TOPIC FILES NOTHING, which is the same rule `section` holds:
+    // omitted means "leave it where it is". Falling through with `undefined` resolves to
+    // General, so every text edit of a note filed under something else added a SECOND
+    // `contains` edge from General — invisible on the page, since notes are not listed under
+    // their topic, and one more edge per update. A CREATE still always files: a note with no
+    // container at all is the one case §4.6 does not leave open.
+    const topic =
+      updating && a.topic === undefined
+        ? null
+        : await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h) });
 
     const provenance: Record<string, unknown> = {
       kind: a.grounding.kind,
@@ -881,14 +894,17 @@ export async function noteWrite(a: {
       revision = created.revision;
     }
 
-    // The topic's `contains` edge, in THIS transaction. Idempotent, so a re-filed note on an
-    // update keeps the one edge it had. No `note_claims` row: that table links a topic to
-    // CLAIMS and cannot represent a topic containing a note, which is also why
-    // `containsParity` scopes its edge side to claim targets.
-    await linkNodes(
-      { spaceId, from: topic.id, to: noteId, relation: "contains", createdBy: ctx.actor, originMessageId: ctx.messageId },
-      tx,
-    );
+    // The topic's `contains` edge, in THIS transaction, and only when this write named a
+    // topic. Idempotent, so a re-filed note on an update keeps the one edge it had. No
+    // `note_claims` row: that table links a topic to CLAIMS and cannot represent a topic
+    // containing a note, which is also why `containsParity` scopes its edge side to claim
+    // targets.
+    if (topic) {
+      await linkNodes(
+        { spaceId, from: topic.id, to: noteId, relation: "contains", createdBy: ctx.actor, originMessageId: ctx.messageId },
+        tx,
+      );
+    }
 
     // Read back rather than computed, exactly as `factWrite` reads `prompt_access`: the
     // column is generated, and the head is the version this transaction just wrote.
@@ -897,13 +913,16 @@ export async function noteWrite(a: {
 
     const status: NoteWriteStatus = verdict.downgraded
       ? "downgraded"
-      : topic.state === "secret_fallback"
+      : topic?.state === "secret_fallback"
         ? "topic_secret_fallback"
         : updating
           ? "updated"
           : "created";
-    const filed =
-      topic.state === "secret_fallback"
+    // Nothing at all when this write filed nothing: a sentence naming a topic it did not
+    // touch would be the tool reporting a move that did not happen.
+    const filed = !topic
+      ? ""
+      : topic.state === "secret_fallback"
         ? NOTE_SAID.topic_secret_fallback
         : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
     const notice = verdict.sourceClass === "untrusted_derived" ? ` ${UNTRUSTED_NOTE_NOTICE}` : "";
@@ -912,10 +931,10 @@ export async function noteWrite(a: {
       handle: ctx.handles.mint({ kind: "n", spaceId, nodeId: noteId }),
       revision,
       linksCreated,
-      filedUnder: ctx.handles.mint({ kind: "n", spaceId, nodeId: topic.id }),
+      ...(topic ? { filedUnder: ctx.handles.mint({ kind: "n", spaceId, nodeId: topic.id }) } : {}),
       sourceClass: verdict.sourceClass,
       promptAccess: written.promptAccess,
-      said: `${NOTE_SAID[status]} ${filed}${notice}`,
+      said: `${NOTE_SAID[status]}${filed ? ` ${filed}` : ""}${notice}`,
     };
   });
 }

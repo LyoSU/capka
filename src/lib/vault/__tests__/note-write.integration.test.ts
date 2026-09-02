@@ -291,6 +291,41 @@ run("memory_note_write", () => {
     expect(await versionCount(first.handle)).toBe(2);
   });
 
+  it("an update that names no topic re-files nothing and adds no contains edge", async () => {
+    // OMITTED MEANS "LEAVE IT WHERE IT IS", the same rule `section` holds one line below.
+    // An update used to fall through `resolveTopic` with `undefined`, which resolves to
+    // General — so every text edit of a note filed under "Acme" added a SECOND `contains`
+    // edge, from General, to a note already filed elsewhere. Invisible on the page (notes
+    // are not listed under their topic) and the graph gains an edge per update.
+    const first = await noteWrite({
+      op: { kind: "create", scope: "project" },
+      title: "Payment terms",
+      content: [{ kind: "markdown", text: "Net 30." }],
+      grounding: { kind: "agent_inference" },
+      topic: "Acme",
+      ctx: clean(),
+    });
+    if (first.status !== "created") throw new Error("narrowing");
+    // The create DID file it: one container, one edge. The control for the assertion below.
+    expect(await edgeCount(PS, "contains")).toBe(1);
+
+    const second = await noteWrite({
+      op: { kind: "update", noteHandle: first.handle, expectedRevision: 1 },
+      title: "Payment terms",
+      content: [{ kind: "markdown", text: "Net 45 from October." }],
+      grounding: { kind: "agent_inference" },
+      ctx: clean(),
+    });
+    expect(second).toMatchObject({ status: "updated", revision: 2 });
+    expect(await edgeCount(PS, "contains")).toBe(1);
+    // No General container was minted either — a topic nobody named is a topic nobody got.
+    const topics = await q(`SELECT title FROM vault_notes WHERE space_id = $1 AND kind = 'memory_topic'`, [PS]);
+    expect(topics.rows.map((r) => (r as { title: string }).title)).toEqual(["Acme"]);
+    // And the sentence the model reads says nothing about a topic, because nothing filed.
+    if (second.status !== "updated") throw new Error("narrowing");
+    expect(second.said).toBe("Updated the note. The previous version is kept as history.");
+  });
+
   it("a section lands on the column, and an update that omits one does not move the file", async () => {
     // THE SECOND HALF IS THE POINT. `section` lives on the note IDENTITY and not on a
     // revision, so a defaulted parameter would make every text edit quietly re-file the
