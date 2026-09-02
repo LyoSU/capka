@@ -8,6 +8,7 @@ import { carriedClass, horizonFor, type ServerClass } from "./grounding";
 import { edgeTargets } from "./links";
 import type { TopicSection } from "./memory-sections";
 import { deleteNode, insertNode, restoreNode } from "./nodes";
+import { fitNoteTitle } from "./note-title";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
@@ -41,12 +42,11 @@ import { spaceAcceptsWrites, type Ex } from "./spaces";
  * without a version after it ran can never be re-checked by anything.
  */
 
-/** `fitStatement`'s sibling, and the same three operations for the same reason: a note
- *  title is rendered into a byte-budgeted model tier and into the memory page's list, both
- *  of which are built for one line. 160 rather than 500 because a title is a label — the
- *  body is where the prose goes, and a title long enough to be prose is one that will be
- *  truncated by every surface that shows it anyway. */
-export const NOTE_TITLE_MAX_CHARS = 160;
+/** The title bound and its clamp are RE-EXPORTED, not defined here: they moved to the
+ *  import-free `note-title.ts` so `links.ts` could stop importing this module. Existing
+ *  callers keep their import path; see that file for why the cycle was worth removing
+ *  while it was still benign. */
+export { NOTE_TITLE_MAX_CHARS, fitNoteTitle } from "./note-title";
 
 /**
  * WHAT ONE TOOL CALL MAY WRITE INTO A BODY, as a schema bound rather than a clamp.
@@ -72,10 +72,6 @@ export const NOTE_BLOCKS_MAX = 20;
  *  that OWNS the four values rather than restated here — see `memory-sections.ts` for why
  *  that module has no imports and why the schema's copy is the one that stays literal. */
 export type NoteSection = TopicSection;
-
-export function fitNoteTitle(raw: string): string {
-  return raw.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, NOTE_TITLE_MAX_CHARS);
-}
 
 /**
  * A BODY, or a function that computes one from the note's OWN id.

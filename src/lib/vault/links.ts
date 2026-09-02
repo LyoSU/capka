@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { vaultClaims, vaultEdges, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
 import { fitStatement } from "./claims";
-import { fitNoteTitle } from "./notes";
+import { fitNoteTitle } from "./note-title";
 import type { Ex } from "./spaces";
 
 /**
