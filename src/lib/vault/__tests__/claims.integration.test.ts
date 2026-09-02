@@ -16,6 +16,7 @@ import {
   createClaim,
   updateClaim,
   forgetClaim,
+  restoreClaim,
   attachEvidence,
   attachToTopic,
   confirmClaim,
@@ -589,6 +590,79 @@ run("vault claims", () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].payload).toEqual({ revision: 1 });
+  });
+
+  it("restore: the forgotten fact is a live head again, filed where it was", async () => {
+    // The inverse of the per-fact delete, which the memory page now offers as an Undo toast
+    // instead of a confirmation dialog — the same trade the topic file's delete makes, and
+    // honest only if this genuinely puts everything back: the head, the node, the `contains`
+    // edge the delete closed, and the search projection.
+    const { id } = await seed({ statement: "forget then keep", slotKey: "undo", topicNoteId: NOTE_A });
+    expect(await forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR })).toEqual({
+      ok: true,
+    });
+    expect(await count("vault_search_documents", "node_id = $1", [id])).toBe(0);
+
+    expect(await restoreClaim({ claimId: id, allowedSpaceIds: [SPACE_A], actor: ACTOR })).toEqual({ ok: true });
+
+    expect((await claimRow(id)).superseded_at).toBeNull();
+    expect(await count("vault_nodes", "id = $1 AND deleted_at IS NULL", [id])).toBe(1);
+    expect(await count("vault_edges", "to_node_id = $1 AND relation = 'contains' AND deleted_at IS NULL", [id])).toBe(1);
+    // Live again for every reader, including the one a restore that forgot to re-project
+    // would leave dark for the rest of the row's life.
+    expect((await findCurrentHead(id, [SPACE_A]))?.statement).toBe("forget then keep");
+    expect(await count("vault_search_documents", "node_id = $1", [id])).toBe(1);
+    // The event says the person did it — there is no tool that can undo the owner's delete.
+    const { rows } = await pool.query<{ actor: Record<string, unknown>; payload: Record<string, unknown> }>(
+      `SELECT actor, payload FROM audit_events WHERE action = 'claim.restore' AND subject_id = $1`,
+      [id],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor).toMatchObject({ kind: "user" });
+    expect(rows[0].payload).toEqual({ revision: 1 });
+  });
+
+  it("restore REFUSES a fact that was replaced rather than deleted", async () => {
+    // `superseded_at` carries two different states, and only one of them is undoable here. A
+    // predecessor with a successor is a step in a live chain: clearing its stamp would put
+    // two heads of one chain on the page at once, which is the fork the partial unique index
+    // exists to make unrepresentable.
+    const { id } = await seed({ statement: "version 1", slotKey: "chain" });
+    const upd = await updateClaim({
+      claimId: id,
+      expectedRevision: 1,
+      patch: { statement: "version 2" },
+      sourceClass: testServerClass("owner_authored"),
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    expect(upd).toMatchObject({ ok: true });
+
+    expect(await restoreClaim({ claimId: id, allowedSpaceIds: [SPACE_A], actor: ACTOR })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect((await claimRow(id)).superseded_at).not.toBeNull();
+    expect(await count("audit_events", "action = 'claim.restore' AND subject_id = $1", [id])).toBe(0);
+  });
+
+  it("restore authz: another space's deleted fact stays deleted, with one answer", async () => {
+    const foreign = await createClaim(
+      { spaceId: SPACE_B, statement: "not yours to put back", origin: {}, sourceClass: testServerClass("owner_authored") },
+      ACTOR,
+    );
+    expect(
+      await forgetClaim({ claimId: foreign.id, expectedRevision: 1, allowedSpaceIds: [SPACE_B], actor: ACTOR }),
+    ).toEqual({ ok: true });
+
+    // The same 404-shaped answer "no such fact" gets: telling them apart would make another
+    // user's claim ids probeable one at a time.
+    expect(await restoreClaim({ claimId: foreign.id, allowedSpaceIds: [SPACE_A], actor: ACTOR })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect((await claimRow(foreign.id)).superseded_at).not.toBeNull();
+    expect(await count("vault_nodes", "id = $1 AND deleted_at IS NULL", [foreign.id])).toBe(0);
   });
 
   it("update AFTER forget: {ok:false, current:null} and not one new row", async () => {

@@ -6,10 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Markdown } from "@/components/chat/markdown";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 // TYPE-ONLY from the projection module, which opens a database connection at import: a
@@ -313,12 +309,15 @@ export function FactRow({ children }: { children: React.ReactNode }) {
  * are precisely what is hidden. A click sends an id and no text, so the same control
  * serves both kinds without a branch.
  *
- * CONFIRMED, and the dialog is the smaller of two mistakes. These rows are one line tall
- * and stacked on a hairline, so a bare one-click destroy sits a few pixels from the row
- * above it with no undo behind it — and there is no undo to build, since `forgetClaim`
- * ends a claim's chain. The dialog names nothing about the fact (not even a
- * non-sensitive statement): one confirmation reads the same for every row, and quoting
- * the text would give a sensitive row a second, emptier dialog of its own.
+ * NO DIALOG, AND AN UNDO TOAST INSTEAD — the same trade the topic file's delete makes, and
+ * for the same reason: a confirmation in front of every delete makes the frequent, correct
+ * case tedious in order to defend against the rare mis-click, while an undo makes the
+ * mis-click free and costs the correct case nothing. It became available when `restoreClaim`
+ * did; before that there genuinely was no undo to offer, which is what the dialog was for.
+ *
+ * THE TOAST NAMES NOTHING about the fact it removed — not even a non-sensitive statement.
+ * A sensitive statement in a toast is the shoulder-surfing case with no reveal control to
+ * defend it, and one sentence that reads the same for every row cannot get that wrong.
  *
  * VISIBILITY, deliberately not hover-only: hover-only is unreachable by keyboard and
  * simply absent on touch. The control is always in the tab order, appears on focus, and
@@ -326,16 +325,29 @@ export function FactRow({ children }: { children: React.ReactNode }) {
  */
 function DeleteFact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
   const t = useTranslations("settings.memory");
-  const tc = useTranslations("common");
-  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const remove = async () => {
-    setConfirming(false);
     setBusy(true);
     try {
       const res = await fetch(`/api/memory/claims/${encodeURIComponent(fact.id)}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
+      toast.success(t("factDeleted"), {
+        action: {
+          label: t("undo"),
+          onClick: () => {
+            void fetch(`/api/memory/claims/${encodeURIComponent(fact.id)}`, { method: "POST" })
+              // The page is re-read either way. A restore that failed leaves the fact
+              // absent, and a toast is the only thing that can say so — the row it was
+              // clicked from is gone by now.
+              .then((r) => {
+                if (!r.ok) toast.error(t("factRestoreFailed"));
+              })
+              .catch(() => toast.error(t("factRestoreFailed")))
+              .finally(onChanged);
+          },
+        },
+      });
       // Re-read rather than splice locally: deleting the last fact in a topic empties the
       // topic, and the server is what decides whether the topic is still on the page.
       onChanged();
@@ -347,38 +359,23 @@ function DeleteFact({ fact, onChanged }: { fact: FactView; onChanged: () => void
   };
 
   return (
-    <AlertDialog open={confirming} onOpenChange={setConfirming}>
-      <AlertDialogTrigger
-        render={
-          <button
-            type="button"
-            disabled={busy}
-            aria-label={t("deleteFact")}
-            className={cn(
-              "relative mt-0.5 -mr-1 flex size-7 shrink-0 items-center justify-center rounded-md",
-              // A 28px icon inside a 40px touch target — the row is denser than a finger.
-              "before:absolute before:-inset-1.5 before:content-['']",
-              "text-muted-foreground hover:bg-hover hover:text-destructive",
-              "opacity-0 transition-opacity motion-reduce:transition-none",
-              "focus:opacity-100 group-hover/fact:opacity-100 pointer-coarse:opacity-100 data-[popup-open]:opacity-100",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-          >
-            <Trash2 aria-hidden className="size-3.5" />
-          </button>
-        }
-      />
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("deleteFactConfirm")}</AlertDialogTitle>
-          <AlertDialogDescription>{t("deleteFactConfirmBody")}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{tc("cancel")}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={remove}>{t("deleteFact")}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <button
+      type="button"
+      disabled={busy}
+      onClick={remove}
+      aria-label={t("deleteFact")}
+      className={cn(
+        "relative mt-0.5 -mr-1 flex size-7 shrink-0 items-center justify-center rounded-md",
+        // A 28px icon inside a 40px touch target — the row is denser than a finger.
+        "before:absolute before:-inset-1.5 before:content-['']",
+        "text-muted-foreground hover:bg-hover hover:text-destructive",
+        "opacity-0 transition-opacity motion-reduce:transition-none",
+        "focus:opacity-100 group-hover/fact:opacity-100 pointer-coarse:opacity-100",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+    >
+      <Trash2 aria-hidden className="size-3.5" />
+    </button>
   );
 }
 
@@ -624,9 +621,9 @@ export function MemoryTopicList({ topics, onOpen }: { topics: TopicView[]; onOpe
  * where they were. A toast offering an undo that half-worked would be worse than the
  * dialog.
  *
- * The per-FACT delete next door keeps its dialog, and the difference is not inconsistency:
- * `forgetClaim` ends a claim's chain and there is no undo to offer, which is exactly why
- * that control has to ask first.
+ * The per-FACT delete next door makes the same trade, through `restoreClaim`. It used to
+ * keep a dialog, because `forgetClaim` had no inverse and a control with nothing behind it
+ * has to ask first; both controls now behave the same way for the same reason.
  *
  * THE TOAST NAMES NOTHING about the file it removed. A sensitive title interpolated into a
  * toast is the shoulder-surfing case with no reveal control to defend it — the same reason

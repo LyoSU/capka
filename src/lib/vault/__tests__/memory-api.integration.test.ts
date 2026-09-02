@@ -96,7 +96,12 @@ const cleanup = async () => {
   await q(`DELETE FROM projects WHERE id = $1`, [PROJECT]);
 };
 
-run("vault: DELETE /api/memory/claims/[claimId]", () => {
+const restore = async (claimId: string) => {
+  const { POST } = await import("@/app/api/memory/claims/[claimId]/route");
+  return POST(new Request("http://t", { method: "POST" }), { params: Promise.resolve({ claimId }) });
+};
+
+run("vault: DELETE and POST /api/memory/claims/[claimId]", () => {
   let plainClaimId = "";
   let sensitiveClaimId = "";
 
@@ -144,6 +149,26 @@ run("vault: DELETE /api/memory/claims/[claimId]", () => {
     expect(await res.json()).toEqual({ error: "not_found" });
     // A 404 that still deleted the row would pass an assertion on the status alone.
     expect(await supersededAt(plainClaimId)).toBeNull();
+  });
+
+  it("puts a deleted fact back when the person undoes it", async () => {
+    // The row's delete has no confirmation any more, so this is the whole of what makes
+    // that honest. Same verb pair, same directory, same one thing addressed.
+    expect((await del(plainClaimId)).status).toBe(200);
+    const res = await restore(plainClaimId);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(await supersededAt(plainClaimId)).toBeNull();
+  });
+
+  it("refuses to put back somebody else's fact as if it did not exist", async () => {
+    expect((await del(plainClaimId)).status).toBe(200);
+    requireWriter.mockResolvedValue({ userId: STRANGER, role: "user", status: "active" });
+    const res = await restore(plainClaimId);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+    // A 404 that still restored the row would pass an assertion on the status alone.
+    expect(await supersededAt(plainClaimId)).not.toBeNull();
   });
 
   it("leaves an audit event naming the person, not the agent", async () => {

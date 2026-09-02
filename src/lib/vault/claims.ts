@@ -3,13 +3,13 @@ import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
+import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNodes, vaultNotes } from "@/lib/db/schema";
 // Runtime, and it is safe: `grounding.ts` imports only the leaf `quote-match.ts` plus a
 // TYPE from here, so nothing travels back at runtime. `horizonFor` is called INSIDE both
 // inserts rather than passed in — see `ClaimInput.sourceClass`.
 import { assertContainsParity, linkNodes, unlinkContainsInto } from "./edges";
 import { horizonFor, type ServerClass } from "./grounding";
-import { deleteNode, insertNode } from "./nodes";
+import { deleteNode, insertNode, restoreNode } from "./nodes";
 import { projectClaimDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
@@ -831,6 +831,93 @@ export async function forgetClaim(
     subjectType: "claim",
     subjectId: claimId,
     payload: { revision: prev.revision },
+  });
+  return { ok: true };
+}
+
+/**
+ * THE OWNER'S UNDO of `forgetClaim` — the fact back on the page, filed where it was.
+ *
+ * IT EXISTS SO THE PER-FACT DELETE CAN STOP ASKING. Those rows are one line tall on a
+ * hairline, and the choice is between a confirmation in front of every delete and an undo
+ * behind it: the dialog makes the frequent, correct case tedious to defend against the rare
+ * mis-click, an undo makes the mis-click free. `restoreNote` made that trade for a topic
+ * file; this is the same trade for a fact, and it is only honest because this genuinely
+ * restores — the head, the node, the `contains` edges the delete closed, the projection.
+ *
+ * OWNER-ONLY, and no tool grows beside `memory_forget`. A model that could put back what the
+ * person just removed would make the person's delete a suggestion, which is the same
+ * sentence `restoreNote` carries and the same reason there is no `requireCreatedTaskId`
+ * here: this path is never the agent's.
+ *
+ * `superseded_at` CARRIES TWO STATES AND ONLY ONE IS UNDOABLE HERE. A forget stamps it with
+ * no successor; a supersede stamps it and writes the successor that replaced it. So the
+ * clearing is gated on `not exists (a row that supersedes this one)`, IN THE STATEMENT's
+ * own `WHERE` rather than as a read the caller does first — clearing a predecessor's stamp
+ * would put two heads of one chain on the page at once, which is exactly the fork
+ * `uniq_vclaims_one_successor` exists to make unrepresentable.
+ *
+ * `not_found` covers four things on purpose — no such claim, not in a space this caller
+ * holds, not deleted, and replaced rather than deleted. Telling them apart would make
+ * another user's claim ids probeable one at a time, which is the same argument
+ * `forgetClaim`'s undifferentiated answer makes.
+ */
+export async function restoreClaim(
+  args: { claimId: string; allowedSpaceIds: string[]; actor: Actor },
+  ex?: Ex,
+): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+  if (!ex || ex === db) return db.transaction((tx) => restoreClaim(args, tx));
+  const { claimId, allowedSpaceIds, actor } = args;
+  if (!allowedSpaceIds.length) return { ok: false, reason: "not_found" };
+
+  // The space AND the stamp `deleteNode` wrote, in one read, inside the transaction that is
+  // about to clear it — so the timestamp scoping the edge half cannot belong to a different
+  // delete than the one being undone. The ownership filter is here rather than in the route
+  // for the reason every other move in this module states: the caller passes what it holds,
+  // and the statement is what enforces it.
+  const [tomb] = await ex
+    .select({ spaceId: vaultClaims.spaceId, deletedAt: vaultNodes.deletedAt })
+    .from(vaultClaims)
+    .innerJoin(vaultNodes, and(eq(vaultNodes.id, vaultClaims.id), eq(vaultNodes.spaceId, vaultClaims.spaceId)))
+    .where(
+      and(
+        eq(vaultClaims.id, claimId),
+        inArray(vaultClaims.spaceId, allowedSpaceIds),
+        isNotNull(vaultNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!tomb?.deletedAt) return { ok: false, reason: "not_found" };
+
+  const [revived] = await ex
+    .update(vaultClaims)
+    .set({ supersededAt: null })
+    .where(
+      and(
+        eq(vaultClaims.id, claimId),
+        eq(vaultClaims.spaceId, tomb.spaceId),
+        isNotNull(vaultClaims.supersededAt),
+        sql`not exists (select 1 from ${vaultClaims} s where s.supersedes = ${claimId})`,
+      ),
+    )
+    .returning({ revision: vaultClaims.revision });
+  if (!revived) return { ok: false, reason: "not_found" };
+  if (!(await restoreNode(claimId, tomb.spaceId, tomb.deletedAt, ex))) return { ok: false, reason: "not_found" };
+
+  // The projection, by the module that owns the claim side of it — see `restoreNode` for why
+  // this half is the caller's. Without it the fact is on the page and invisible to
+  // `memory_search` for the rest of its life.
+  await projectClaimDoc(claimId, ex);
+  await ex.insert(auditEvents).values({
+    id: nanoid(),
+    spaceId: tomb.spaceId,
+    actor,
+    action: "claim.restore",
+    subjectType: "claim",
+    subjectId: claimId,
+    // No statement, the same rule `forgetClaim`'s event states: the audit log outlives the
+    // space's own content.
+    payload: { revision: revived.revision },
   });
   return { ok: true };
 }
