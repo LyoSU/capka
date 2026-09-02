@@ -9,6 +9,7 @@ import { insertNode, restoreNode } from "./nodes";
 import { insertNoteVersion } from "./notes";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { isTitleFoldConflict } from "./title-fold";
 
 /** The topic a fact lands in when nothing else chose one — as a KEY, which is what
  *  `vault_notes.topic_key` holds and what `getOrCreateTopicNote` resolves on.
@@ -131,18 +132,6 @@ const foldedTitle = sql`lower(btrim(regexp_replace(${vaultNotes.title}, '[[:spac
  *  lookup would miss a row the insert then collided with. Immutable functions over a bound
  *  parameter, so the expression index is still usable. */
 const foldOf = (raw: string) => sql`lower(btrim(regexp_replace(${raw}::text, '[[:space:]]+', ' ', 'g')))`;
-
-/** Whether a failed insert is the title fold saying "somebody already has this subject".
- *  Named rather than "any 23505": a foreign-key or check failure is a fault, and answering
- *  it with "reuse the existing topic" would report a real defect as routine reuse. Drizzle
- *  wraps driver errors from v0.36 on and keeps the `pg` error as `cause`; both shapes are
- *  read rather than pinning a version — the same test `barrier.ts` makes. */
-function isTitleFoldConflict(e: unknown): boolean {
-  const err = (e as { code?: unknown; constraint?: unknown }).code
-    ? (e as { code?: unknown; constraint?: unknown })
-    : ((e as { cause?: { code?: unknown; constraint?: unknown } }).cause ?? {});
-  return err.code === "23505" && err.constraint === "uniq_vnotes_topic_title";
-}
 
 export async function resolveTopic(
   spaceId: string,

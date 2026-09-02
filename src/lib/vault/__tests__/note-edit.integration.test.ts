@@ -408,6 +408,43 @@ run("in-place note edits", () => {
     expect(r.said).toContain("node_link");
   });
 
+  it("a rename onto an existing topic title is refused, and overwrites nothing", async () => {
+    // The one index a note write can be refused by at the statement. Caught as a sentence
+    // rather than left to poison the transaction — and the file it collided with is
+    // untouched, which is the half a "rename overwrites" implementation would lose.
+    const taken = await resolveTopic(PS, "Reporting deadline", db);
+    const mine = await resolveTopic(PS, "Suppliers", db);
+    const handle = handles.mint({ kind: "n", spaceId: PS, nodeId: mine.id });
+
+    const r = await noteEdit({
+      op: { kind: "rename", noteHandle: handle, expectedRevision: 1, title: "Reporting deadline" },
+      grounding: { kind: "current_user_quote", quote: "quarterly reporting deadline" },
+      ctx: clean(),
+    });
+    expect(r.status).toBe("title_taken");
+    expect(r.said).toContain("already exists");
+
+    const still = await noteHead(mine.id, [PS]);
+    expect(still!.title).toBe("Suppliers");
+    expect(still!.revision).toBe(1);
+    expect(await versionCount(mine.id)).toBe(1);
+    // And the transaction survived the collision, which is what the savepoint buys: the
+    // other file is readable and unchanged.
+    expect((await noteHead(taken.id, [PS]))!.title).toBe("Reporting deadline");
+  });
+
+  it("two PLAIN notes may share a title — the fold is a topic-container rule", async () => {
+    await seedNote(PS, "Deadlines", "first");
+    const second = await seedNote(PS, "Payroll", "second");
+    const r = await noteEdit({
+      op: { kind: "rename", noteHandle: second.handle, expectedRevision: 1, title: "Deadlines" },
+      grounding: { kind: "agent_inference" },
+      ctx: clean(),
+    });
+    if (r.status !== "renamed") throw new Error(`expected renamed, got ${r.status}: ${r.said}`);
+    expect((await noteHead(second.id, [PS]))!.title).toBe("Deadlines");
+  });
+
   it("a topic container is a file and is edited like one", async () => {
     // §4.6's handle rule is `n` only, and a container IS an `n`. What still stands over it is
     // the class fence: `resolveTopic` writes a container at `owner_authored`, so an agent

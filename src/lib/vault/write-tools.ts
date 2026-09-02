@@ -33,6 +33,7 @@ import {
   type NoteSection,
 } from "./notes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { isTitleFoldConflict } from "./title-fold";
 import { resolveTopic } from "./topics";
 
 /**
@@ -1216,31 +1217,53 @@ export async function noteEdit(a: {
       return { status: "too_long", said: NOTE_EDIT_SAID.too_long };
     }
 
-    const upd = await reviseNote(
-      {
-        noteId: head.id,
-        spaceId,
-        expectedRevision: head.revision,
-        title,
-        // AFTER the CAS, which is what the callback shape buys: a lost race must close no
-        // edges. §4.8 is symmetric — a token the new body no longer carries is a link the
-        // file no longer makes, and an edge that outlives its token renders one it does not.
-        bodyMarkdown: async () => {
-          for (const edgeId of linksRemoved) await unlinkEdge(edgeId, spaceId, tx);
-          return body;
+    // A RENAME RUNS UNDER A SAVEPOINT, because the title is the one field a note write can
+    // be REFUSED for at the statement: `uniq_vnotes_topic_title` makes a topic container's
+    // subject unique per space, and `reviseNote`'s first statement is what raises the 23505.
+    // Caught here it becomes a sentence; uncaught it poisons the whole transaction — and a
+    // savepoint is what lets the caller's transaction survive the attempt at all.
+    //
+    // ONLY a topic container can collide. There is no unique index over a plain note's
+    // title, on purpose: two files may legitimately be called the same thing, and only a
+    // heading on the person's own page has to be unique. A rename NEVER overwrites the file
+    // it collides with — the reply points the model at that file instead.
+    const revise = (ex: Ex) =>
+      reviseNote(
+        {
+          noteId: head.id,
+          spaceId,
+          expectedRevision: head.revision,
+          title,
+          // AFTER the CAS, which is what the callback shape buys: a lost race must close no
+          // edges. §4.8 is symmetric — a token the new body no longer carries is a link the
+          // file no longer makes, and an edge that outlives its token renders one it does not.
+          bodyMarkdown: async () => {
+            for (const edgeId of linksRemoved) await unlinkEdge(edgeId, spaceId, ex);
+            return body;
+          },
+          section: a.section,
+          sourceClass: verdict.sourceClass,
+          // `edit` is what tells the chat notice's Undo, and anyone reading the audit log,
+          // that this revision changed part of a file rather than replacing it. The rest is
+          // the shape every other note write stores, which is what keeps `readTurnWrites`
+          // naming this note once with the new revision and `revertNote` able to undo it.
+          provenance: { kind: a.grounding.kind, edit: op.kind, messageId: ctx.messageId, taskId: ctx.taskId },
+          createdTaskId: ctx.taskId,
+          actor: ctx.actor,
         },
-        section: a.section,
-        sourceClass: verdict.sourceClass,
-        // `edit` is what tells the chat notice's Undo, and anyone reading the audit log,
-        // that this revision changed part of a file rather than replacing it. The rest is
-        // the shape every other note write stores, which is what keeps `readTurnWrites`
-        // naming this note once with the new revision and `revertNote` able to undo it.
-        provenance: { kind: a.grounding.kind, edit: op.kind, messageId: ctx.messageId, taskId: ctx.taskId },
-        createdTaskId: ctx.taskId,
-        actor: ctx.actor,
-      },
-      tx,
-    );
+        ex,
+      );
+
+    const upd =
+      op.kind === "rename"
+        ? await tx
+            .transaction((sp) => revise(sp))
+            .catch((e: unknown) => {
+              if (!isTitleFoldConflict(e)) throw e;
+              return "title_taken" as const;
+            })
+        : await revise(tx);
+    if (upd === "title_taken") return { status: "title_taken", said: NOTE_EDIT_SAID.title_taken };
     // The CAS lost between the pre-check above and the statement. Nothing was written —
     // including no closed edges, which is why the callback runs after the CAS.
     if (!upd.ok) {
