@@ -38,8 +38,16 @@ describe("markdown tables", () => {
     expect(rule(css, '[data-streamdown="table-header"] {')).toMatch(/background:\s*(transparent|none)/);
   });
 
-  it("the table takes its content width; a short table is not stretched across the column", () => {
-    expect(rule(css, '[data-streamdown="table"] {')).not.toMatch(/min-width:\s*100%/);
+  it("a table fills the text column; a wider one centres and grows into both margins", () => {
+    // The scroller is wider than the column by the bleed and `--table-wide` on
+    // each side; the table's minimum is the column itself, so a short table starts
+    // on the answer's text edge, and auto margins centre anything wider.
+    const table = rule(css, '[data-streamdown="table"] {');
+    expect(table).toMatch(/min-width:\s*calc\(100% - 2 \* var\(--table-wide, 0px\)\)/);
+    expect(table).toMatch(/margin-inline:\s*auto/);
+    // A flex item shrinks by default, and a table shrinks by wrapping every cell.
+    expect(table).toMatch(/flex:\s*none/);
+    expect(rule(css, '[data-streamdown="table-wrapper"] > :last-child {')).toMatch(/display:\s*flex/);
   });
 
   it("cells read at nearly the prose size and line up their digits", () => {
@@ -72,17 +80,18 @@ describe("markdown tables", () => {
     expect(pinnedShadow(css)).toMatch(/animation-timeline:\s*scroll\(nearest inline\)/);
   });
 
-  it("on a wide screen a table wider than the text column runs into the right margin", () => {
+  it("on a wide screen the table's scroller spans the free width on both sides", () => {
     // The column is 48–56rem in a window that is often twice that; a wide table
     // had to scroll inside the column with empty page on both sides. The scroller
-    // may now extend to the right by `--table-wide`, which the panel sets from the
-    // transcript's own width (container units) and caps; a table narrower than
-    // the column is unaffected because it takes its content width.
+    // extends into both margins by `--table-wide`, which the panel derives from the
+    // transcript's own width in container units, uncapped. A right-only version
+    // was tried and read as lopsided.
     const scroller = rule(css, '[data-streamdown="table-wrapper"] > :last-child {');
-    expect(scroller).toMatch(/margin-inline-end:\s*calc\(-1 \* \(var\(--table-bleed, 0px\) \+ var\(--table-wide, 0px\)\)\)/);
+    expect(scroller).toMatch(/margin-inline:\s*calc\(-1 \* \(var\(--table-bleed, 0px\) \+ var\(--table-wide, 0px\)\)\)/);
     const panel = readFileSync("src/components/chat/chat-panel.tsx", "utf8");
     expect(panel).toMatch(/\[container-type:inline-size\]/);
-    expect(panel).toMatch(/lg:\[--table-wide:/);
+    expect(panel).toMatch(/lg:\[--table-wide:max\(0px,calc\(/);
+    expect(panel).not.toMatch(/--table-wide:max\(0px,min\(/);
   });
 
   it("the controls are out of the way at rest on a pointer device and reachable on touch", () => {

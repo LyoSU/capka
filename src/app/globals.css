@@ -1106,15 +1106,19 @@
      stays put because the inset moves onto the edge CELLS below — which also
      runs the row rules edge to edge, and, unlike a padding-inline-end on a
      horizontal scroller, reliably survives into the scrollable overflow. */
-  margin-inline-start: calc(-1 * var(--table-bleed, 0px));
   /* On a wide screen the text column sits in a window often twice its width, and
      a wide table had to scroll inside it with empty page on both sides. The
-     scroller may run into the RIGHT margin by `--table-wide` — the panel sets it
-     from the transcript's own width and caps it — so a table wider than the
-     column gets that room before it has to scroll. Right only: the table's left
-     edge stays on the answer's text edge, and a table narrower than the column
-     is untouched because it takes its content width. */
-  margin-inline-end: calc(-1 * (var(--table-bleed, 0px) + var(--table-wide, 0px)));
+     scroller now spans the whole free width on BOTH sides (`--table-wide`, which
+     the panel derives from the transcript's own width), and the table centres in
+     it: a table up to the column's width fills the column exactly (see the
+     table's min-width), a wider one grows symmetrically into the margins, and
+     only one wider than the whole pane scrolls. A right-only version was tried
+     first and read as lopsided. */
+  margin-inline: calc(-1 * (var(--table-bleed, 0px) + var(--table-wide, 0px)));
+  /* Flex, so the table's auto margins centre it while it fits and collapse to
+     zero once it overflows — a plain block centred with `justify-content` would
+     clip its start beyond reach of the scrollbar. */
+  display: flex;
   /* Streamdown's rounded border, dropped: at full bleed it would butt into the
      screen edge mid-radius, and a framed box inside the already-flattened
      wrapper is the card-in-a-card this file removes from code blocks too. The
@@ -1146,6 +1150,17 @@
      on a narrow screen instead of crushing its columns. */
   width: max-content;
   max-width: none;
+  /* At least the text column (the scroller is wider than the column by the bleed
+     and `--table-wide` on each side, so 100% minus those is the column): a short
+     table fills the column and starts on the answer's text edge instead of
+     floating centred somewhere inside the widened scroller; a wide one centres
+     itself with the auto margins and grows into both margins. */
+  min-width: calc(100% - 2 * var(--table-wide, 0px));
+  margin-inline: auto;
+  /* A flex item shrinks to its container by default, and a table shrinks by
+     wrapping every cell — the note column came out one letter per line. Never
+     shrink: keep the content width and let the scroller scroll. */
+  flex: none;
 }
 /* The header is a rule under the labels, not a band behind them. A grey band
    across the column is the one slab the graphite palette removed everywhere
