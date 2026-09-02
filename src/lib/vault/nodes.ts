@@ -125,6 +125,60 @@ export async function deleteNode(
 }
 
 /**
+ * THE INVERSE OF `deleteNode`, and it lives here for the same reason that one does: putting
+ * a node back and reopening the edges the delete closed are one act.
+ *
+ * IT TAKES THE TIMESTAMP, and that parameter is the whole design. `deleteNode` stamps the
+ * node and its live edges with one `now`, so "the edges this delete closed" is exactly the
+ * set carrying that value — and an edge closed by some EARLIER act (a supersede, a fact the
+ * person forgot last month) carries a different one and correctly stays closed. An
+ * un-timestamped restore would have to reopen every edge of the node, which is how an undo
+ * resurrects relationships nobody asked to have back.
+ *
+ * WHY THE EDGES MUST COME BACK AT ALL, since `resolveTopic`'s revive arm deliberately does
+ * not bring them: `containsParity` compares `note_claims` against LIVE `contains` edges,
+ * scoped to LIVE nodes. While the topic's node is a tombstone the pair is out of scope and
+ * agrees; the moment the node is live again with its edges still closed, every fact filed
+ * under it reads as "only in note_claims" — and `assertContainsParity` throws inside the
+ * next `contains` write anywhere in that space, outside production. So a restore that
+ * skipped this would not merely lose a relationship, it would poison the next write.
+ *
+ * `false` when nothing matched: the node is already live, or it is not in this space. A
+ * caller that reported that as a failure would tell a person their undo broke for a row
+ * that is exactly where they wanted it.
+ *
+ * THE PROJECTION IS THE CALLER'S HALF, which is the one asymmetry with `deleteNode` —
+ * `unprojectNode` is kind-blind and the two re-projectors are not (`projectNoteDoc`,
+ * `projectClaimDoc`), so a switch here would be this module deciding a question the
+ * subtype services own. `resolveTopic`'s revive arm already sets that precedent: it clears
+ * the tombstone and calls `projectNoteDoc` itself.
+ */
+export async function restoreNode(
+  nodeId: string,
+  spaceId: string,
+  deletedAt: Date,
+  ex: Ex,
+): Promise<boolean> {
+  const reopened = await ex
+    .update(vaultNodes)
+    .set({ deletedAt: null })
+    .where(and(eq(vaultNodes.id, nodeId), eq(vaultNodes.spaceId, spaceId), eq(vaultNodes.deletedAt, deletedAt)))
+    .returning({ id: vaultNodes.id });
+  if (!reopened.length) return false;
+  await ex
+    .update(vaultEdges)
+    .set({ deletedAt: null })
+    .where(
+      and(
+        eq(vaultEdges.spaceId, spaceId),
+        eq(vaultEdges.deletedAt, deletedAt),
+        or(eq(vaultEdges.fromNodeId, nodeId), eq(vaultEdges.toNodeId, nodeId)),
+      ),
+    );
+  return true;
+}
+
+/**
  * The same inverse for a WHOLE SPACE, set-based. `retireProjectSpace` is its only caller.
  *
  * It is a second function rather than a loop over `deleteNode` because a project's space

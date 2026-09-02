@@ -64,6 +64,13 @@ const noteCount = async (spaceId: string) =>
     (await q(`SELECT count(*) AS c FROM vault_notes WHERE space_id = $1 AND kind = 'note'`, [spaceId])).rows[0].c,
   );
 
+/** Which heading the owner's memory page will file this note under. Read off the IDENTITY
+ *  row, which is where the column lives: `section` is not a property of a revision, and a
+ *  helper that read it off the head version would not be able to see the bug this pair of
+ *  tests is about. */
+const sectionOf = async (handle: string) =>
+  (await q(`SELECT section FROM vault_notes WHERE id = $1`, [nodeIdOf(handle)])).rows[0].section as string;
+
 const versionCount = async (handle: string) =>
   Number(
     (await q(`SELECT count(*) AS c FROM vault_note_versions WHERE note_id = $1`, [nodeIdOf(handle)])).rows[0].c,
@@ -282,6 +289,59 @@ run("memory_note_write", () => {
     expect(second).toMatchObject({ status: "updated", revision: 2, handle: first.handle });
     expect(await bodyOf(first.handle)).toBe("two");
     expect(await versionCount(first.handle)).toBe(2);
+  });
+
+  it("a section lands on the column, and an update that omits one does not move the file", async () => {
+    // THE SECOND HALF IS THE POINT. `section` lives on the note IDENTITY and not on a
+    // revision, so a defaulted parameter would make every text edit quietly re-file the
+    // note under `'topic'` — a person would watch their own filing undo itself each time
+    // the agent rewrote the words. Omitted therefore means "leave it alone", all the way
+    // from the tool schema down to `reviseNote`'s SET list.
+    const first = await noteWrite({
+      op: { kind: "create", scope: "project" },
+      title: "Olena Kravets",
+      content: [{ kind: "markdown", text: "Signs off the quarterly numbers." }],
+      grounding: { kind: "agent_inference" },
+      section: "person",
+      ctx: clean(),
+    });
+    if (first.status !== "created") throw new Error("narrowing");
+    expect(await sectionOf(first.handle)).toBe("person");
+
+    const second = await noteWrite({
+      op: { kind: "update", noteHandle: first.handle, expectedRevision: 1 },
+      title: "Olena Kravets",
+      content: [{ kind: "markdown", text: "Signs off the quarterly numbers and the forecast." }],
+      grounding: { kind: "agent_inference" },
+      ctx: clean(),
+    });
+    expect(second.status).toBe("updated");
+    expect(await sectionOf(first.handle)).toBe("person");
+
+    // …and a write that DOES name one moves it, so the assertion above is not passing on a
+    // parameter that never reaches the column at all.
+    const third = await noteWrite({
+      op: { kind: "update", noteHandle: first.handle, expectedRevision: 2 },
+      title: "Olena Kravets",
+      content: [{ kind: "markdown", text: "Signs off the quarterly numbers and the forecast." }],
+      grounding: { kind: "agent_inference" },
+      section: "area",
+      ctx: clean(),
+    });
+    expect(third.status).toBe("updated");
+    expect(await sectionOf(first.handle)).toBe("area");
+  });
+
+  it("a create that names no section takes the column's own default", async () => {
+    const r = await noteWrite({
+      op: { kind: "create", scope: "project" },
+      title: "Deadlines",
+      content: [{ kind: "markdown", text: "one" }],
+      grounding: { kind: "agent_inference" },
+      ctx: clean(),
+    });
+    if (r.status !== "created") throw new Error("narrowing");
+    expect(await sectionOf(r.handle)).toBe("topic");
   });
 
   it("an update that drops a link closes its edge, and one that keeps a link keeps the token", async () => {

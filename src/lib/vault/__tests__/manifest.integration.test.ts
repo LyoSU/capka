@@ -275,7 +275,7 @@ run("vault: memory manifest", () => {
     expect(manifest).not.toContain("Recent facts:");
     expect(manifest).not.toContain("Memory (being migrated)");
     expect(manifest).toBe(
-      "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write, and longer notes with memory_note_write.",
+      "Use memory_search before assuming facts about the user or project. When you learn something worth keeping, write it with memory_note_write as a short topic file — one file per subject, and update the existing file rather than adding a second about the same thing; use memory_fact_write only for a single standalone fact.",
     );
   });
 
@@ -384,7 +384,7 @@ run("vault: memory manifest", () => {
         "- «beta fact»",
         "- «alpha fact»",
         "",
-        "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write, and longer notes with memory_note_write.",
+        "Use memory_search before assuming facts about the user or project. When you learn something worth keeping, write it with memory_note_write as a short topic file — one file per subject, and update the existing file rather than adding a second about the same thing; use memory_fact_write only for a single standalone fact.",
       ].join("\n"),
     );
   });

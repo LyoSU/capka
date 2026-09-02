@@ -582,4 +582,43 @@ describe("the schemas the provider actually sees", () => {
     expect(tools.memory_forget.description).toContain("memory page");
     expect(tools.memory_forget.description).not.toContain("cannot remove");
   });
+
+  it("memory_note_write takes a section, and refuses a fifth value at the schema", async () => {
+    // THE BOUND IS THE PROVIDER'S, like `queries` above: a model that invents a heading is
+    // corrected before a database is touched, and the CHECK on `vault_notes.section` is the
+    // backstop rather than the diagnosis. Four values and no more — a free string here
+    // would give the page a fifth group to render and explain.
+    const schema = asSchema((await make()).memory_note_write.inputSchema as never);
+    const call = (section?: string) => ({
+      op: { kind: "create", scope: "user" },
+      title: "Beans",
+      content: [{ kind: "markdown", text: "The dog's name." }],
+      grounding: { kind: "agent_inference" },
+      ...(section === undefined ? {} : { section }),
+    });
+    const accepts = async (v: unknown) => (await schema.validate!(v)).success;
+
+    for (const s of ["you", "topic", "area", "person"]) expect(await accepts(call(s))).toBe(true);
+    expect(await accepts(call("relationship"))).toBe(false);
+    expect(await accepts(call(""))).toBe(false);
+    // OPTIONAL, and that is load-bearing rather than lenient: an update that says nothing
+    // about the heading must leave the file where the person filed it, so `section` cannot
+    // be required and cannot carry a schema default either.
+    expect(await accepts(call())).toBe(true);
+    const js = asSchema((await make()).memory_note_write.inputSchema).jsonSchema as { required?: string[] };
+    expect(js.required ?? []).not.toContain("section");
+  });
+
+  it("the note description steers a topic FILE per subject, updated rather than duplicated", async () => {
+    // The page's top level is a list of files a person opens and reads. A turn that saves
+    // everything it learns as one-line claims therefore produces a page of empty headings,
+    // and this description plus the manifest's line are the only two things that decide
+    // which writer a model reaches for. Pinned, because copy that steers behaviour is not
+    // decoration — the release that shipped the write tools while the prompt still named
+    // `memory_propose` is the recorded cost of leaving it unpinned.
+    const { description } = (await make()).memory_note_write;
+    expect(description).toContain("topic file");
+    expect(description).toContain("UPDATE it rather than writing a second");
+    expect(description).toContain("section");
+  });
 });

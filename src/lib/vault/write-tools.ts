@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { vaultEdges, vaultNodes, vaultNotes } from "@/lib/db/schema";
 import type { VaultBudget } from "./budget";
 import {
+  attachEvidence,
   attachToTopic,
   createClaim,
   findCurrentHead,
@@ -19,7 +20,7 @@ import { linkNodes, unlinkReferencesFrom } from "./edges";
 import { classify, type Grounding } from "./grounding";
 import type { HandleMap } from "./handles";
 import { appendLinkBlock, serializeBlocks, type NoteBlock } from "./links";
-import { createNote, forgetNote, noteHead, reviseNote } from "./notes";
+import { createNote, forgetNote, noteHead, reviseNote, type NoteSection } from "./notes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 import { resolveTopic } from "./topics";
 
@@ -485,6 +486,11 @@ export async function factWrite(a: {
           said: SAID.revision_mismatch,
         };
       }
+      // THE CONVERSATION THIS FACT CAME OUT OF — see the create arm below. On this arm it
+      // is the successor's own evidence and not the predecessor's carried over: the row is
+      // new and its words were written in THIS turn, whatever the fact it replaces came
+      // out of.
+      await attachEvidence(upd.id, { messageId: ctx.messageId }, tx);
       return {
         status: "superseded",
         handle: ctx.handles.mint({ kind: "m", spaceId, nodeId: upd.id }),
@@ -515,6 +521,19 @@ export async function factWrite(a: {
       tx,
     );
     const handle = ctx.handles.mint({ kind: "m", spaceId, nodeId: claim.id });
+
+    // THE CONVERSATION THIS FACT CAME OUT OF, and it is one line that was missing.
+    //
+    // `runExtraction` attaches it and this path did not, so a fact the model saved with
+    // `memory_fact_write` — the WRITER this release steers every turn towards — arrived on
+    // the memory page under "the conversation is no longer available", thirty seconds after
+    // the person watched it be saved, on the one screen they can undo it from. Same
+    // relation, same argument, same one call: `claim_evidence.message_id` is what lets the
+    // page name the chat, and `ctx.messageId` is the turn that wrote the row.
+    //
+    // IN THE WRITE'S OWN TRANSACTION, so a fact and its provenance are one act. Evidence
+    // for a claim that rolled back would be a row about content nobody stored.
+    await attachEvidence(claim.id, { messageId: ctx.messageId }, tx);
 
     if (replacing && conflictReason) {
       return {
@@ -698,6 +717,11 @@ export async function noteWrite(a: {
   content: NoteBlock[];
   grounding: GroundingInput;
   topic?: string;
+  /** WHICH HEADING the owner's memory page files this under. Omitted means "leave it
+   *  alone": a create takes the column's `'topic'` default, and an UPDATE that says nothing
+   *  keeps whatever shelf the file is on — see `reviseNote` for why a defaulted parameter
+   *  here would silently undo the person's own filing on every text edit. */
+  section?: NoteSection;
   ctx: WriteCtx;
 }): Promise<NoteWriteResult> {
   const { ctx } = a;
@@ -824,6 +848,7 @@ export async function noteWrite(a: {
           expectedRevision: head.revision,
           title: a.title,
           bodyMarkdown: bodyFor,
+          section: a.section,
           sourceClass: verdict.sourceClass,
           provenance,
           createdTaskId: ctx.taskId,
@@ -844,6 +869,7 @@ export async function noteWrite(a: {
           spaceId,
           title: a.title,
           bodyMarkdown: bodyFor,
+          section: a.section,
           sourceClass: verdict.sourceClass,
           provenance,
           createdTaskId: ctx.taskId,

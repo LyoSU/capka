@@ -128,8 +128,16 @@ export async function buildMemoryManifest(args: {
   // from their own descriptions once the model is already in the memory tools; what the
   // always-on tier has to say is the thing a model will otherwise not do at all, which is
   // look before it asserts and write when it learns.
+  //
+  // WHICH WRITER IT NAMES FIRST CHANGED, and that is the whole of this edit. Both tools are
+  // live and neither is deprecated, but the owner's page is now a list of topic FILES a
+  // person opens and reads, with facts as a disclosure inside one — so a turn that saves
+  // everything it learns as one-line claims produces a page of empty headings, and the
+  // person's only handle on their own memory is a delete button. The line therefore steers
+  // the DEFAULT: a file per subject for anything worth reading, updated rather than
+  // duplicated, and a bare fact where a bare fact is genuinely all there is.
   blocks.push(
-    "Use memory_search before assuming facts about the user or project; save new facts with memory_fact_write, and longer notes with memory_note_write.",
+    "Use memory_search before assuming facts about the user or project. When you learn something worth keeping, write it with memory_note_write as a short topic file — one file per subject, and update the existing file rather than adding a second about the same thing; use memory_fact_write only for a single standalone fact.",
   );
 
   return blocks.join("\n\n");

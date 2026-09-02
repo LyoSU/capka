@@ -6,6 +6,7 @@ import type { HandleMap } from "./handles";
 import { STATEMENT_MAX_CHARS, type SourceClass } from "./claims";
 import { countWithheld, listMemoryToolRows, type MemoryToolText } from "./model-view";
 import { NOTE_BLOCKS_MAX, NOTE_BLOCK_MAX_CHARS, NOTE_TITLE_MAX_CHARS } from "./notes";
+import { TOPIC_SECTIONS } from "./memory-sections";
 import { memoryOpen } from "./read-tools";
 import { getOrCreateSpace } from "./spaces";
 import { TOPIC_TITLE_MAX_CHARS } from "./topics";
@@ -322,7 +323,7 @@ export async function makeVaultMemoryTools(ctx: {
      */
     memory_note_write: tool({
       description:
-        "Write a note to memory, or update one you found with memory_search. A note is for something longer than one sentence — a summary, a procedure, a set of details that belong together. It is saved immediately and the user can undo it on their memory page, so do not ask them to confirm. To link to another saved note or fact, put a 'node_link' block in the content with its handle; typing [[a title]] in the text does NOT make a link, it stays as plain text. Say where the content came from in 'grounding', the same way memory_fact_write does. Updating a note replaces its current version and needs the revision you were given; a note carrying more authority than this write, or any update in a turn that read a document or a web page, is refused — write a new note instead.",
+        "Write a short topic file to memory, or update one you found with memory_search. This is the writer to reach for whenever you learn something a person would want to READ later — how they work, what a project needs, who somebody is — because the user sees these files on their memory page as a list they can open, and a single fact is a line they cannot edit. Keep ONE file per subject and keep it short: search first, and if a file about this subject already exists, UPDATE it rather than writing a second one about the same thing. Say which heading it belongs under in 'section'. It is saved immediately and the user can undo it on their memory page, so do not ask them to confirm. To link to another saved note or fact, put a 'node_link' block in the content with its handle; typing [[a title]] in the text does NOT make a link, it stays as plain text. Say where the content came from in 'grounding', the same way memory_fact_write does. Updating a file replaces its current version and needs the revision you were given; a file carrying more authority than this write, or any update in a turn that read a document or a web page, is refused — write a new one instead.",
       inputSchema: z.object({
         op: z.discriminatedUnion("kind", [
           z.object({
@@ -337,7 +338,29 @@ export async function makeVaultMemoryTools(ctx: {
             expected_revision: z.number().int().min(1),
           }),
         ]),
-        title: z.string().min(1).max(NOTE_TITLE_MAX_CHARS).describe("One line, no newlines"),
+        title: z
+          .string()
+          .min(1)
+          .max(NOTE_TITLE_MAX_CHARS)
+          .describe("The subject, in the user's own words. One line, no newlines"),
+        /**
+         * THE SHELF, and the reason it is a `z.enum` rather than a free string: a fifth
+         * value is refused by the provider before a database is touched, so the CHECK on
+         * `vault_notes.section` is the backstop and not the diagnosis.
+         *
+         * OPTIONAL, and the default is stated in the description rather than applied here:
+         * §4.6's write is `create` OR `update`, and an update that omits this must leave the
+         * file where the person filed it — a `.default("topic")` would make every text edit
+         * quietly move it back. `noteWrite` passes `undefined` through for exactly that.
+         */
+        section: z
+          // FROM THE TUPLE, not a fourth copy of the four values — `memory-sections.ts`
+          // owns them and says why the schema's copy is the one that stays literal.
+          .enum(TOPIC_SECTIONS)
+          .optional()
+          .describe(
+            "Which heading this belongs under on the user's memory page: 'you' = what the person is like, 'topic' = a subject, 'area' = a part of their life or work, 'person' = somebody they deal with. Default: 'topic'. On an update, leave it out to keep the heading it already has",
+          ),
         content: z
           .array(
             z.discriminatedUnion("kind", [
@@ -368,7 +391,7 @@ export async function makeVaultMemoryTools(ctx: {
           .optional()
           .describe("The subject in the user's words, or an n-handle of an existing topic. Default: General"),
       }),
-      execute: async ({ op, title, content, grounding, topic }) =>
+      execute: async ({ op, title, content, grounding, topic, section }) =>
         writeCtx.budget.emit(
           JSON.stringify(
             await noteWrite({
@@ -377,6 +400,7 @@ export async function makeVaultMemoryTools(ctx: {
                   ? { kind: "create", scope: op.scope }
                   : { kind: "update", noteHandle: op.note_handle, expectedRevision: op.expected_revision },
               title,
+              section,
               // The wire shape is snake_case and the writer's is not, mapped in ONE place —
               // right here — so neither side has to speak the other's.
               content: content.map((b) =>

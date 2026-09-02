@@ -81,6 +81,14 @@ const rowOf = async (handle: string) =>
 const spaceOf = async (handle: string) => (await rowOf(handle)).space_id as string;
 const conflictsWithOf = async (handle: string) => (await rowOf(handle)).conflicts_with as string | null;
 
+/** Which conversation a saved fact points back at — the relation the memory page turns into
+ *  «from the chat "…", 30 August». Ordered, so the assertion is about the set and not about
+ *  whatever the planner returns. */
+const evidenceMessages = async (handle: string) =>
+  (
+    await q(`SELECT message_id FROM claim_evidence WHERE claim_id = $1 ORDER BY message_id`, [claimIdOf(handle)])
+  ).rows.map((r) => r.message_id as string);
+
 const claimById = async (claimId: string) =>
   (await q(`SELECT * FROM vault_claims WHERE id = $1`, [claimId])).rows[0];
 
@@ -130,6 +138,35 @@ run("memory_fact_write", () => {
     // And not re-scoped into the project either: "refused" means nothing was written
     // anywhere, which is the half a silent fallback would satisfy the first assertion with.
     expect(await claimCount(PS)).toBe(0);
+  });
+
+  it("records the conversation the fact came out of, on a create AND on a supersede", async () => {
+    // WHAT WAS MISSING, and what it cost. `runExtraction` attaches `claim_evidence` and this
+    // path did not, so a fact the model saved with the writer this release steers every turn
+    // towards arrived on the memory page under "the conversation is no longer available" —
+    // thirty seconds after the person watched it be saved, on the one screen they can undo
+    // it from. `claim_evidence.message_id` is the only thing that lets the page name a chat.
+    //
+    // BOTH ARMS, because they are two `createClaim`/`updateClaim` calls and one missing line
+    // is exactly how this shipped: the supersede writes a NEW row whose words were composed
+    // in THIS turn, so it gets its own evidence rather than the predecessor's carried over.
+    const created = await factWrite({
+      op: { kind: "create", scope: "user" },
+      statement: "I prefer EUR",
+      grounding: { kind: "current_user_quote", quote: "I prefer EUR for everything" },
+      ctx: clean(),
+    });
+    if (created.status !== "created") throw new Error("narrowing");
+    expect(await evidenceMessages(created.handle)).toEqual([`${P}msg`]);
+
+    const superseded = await factWrite({
+      op: { kind: "replace", targetHandle: created.handle, expectedRevision: 1 },
+      statement: "I prefer USD",
+      grounding: { kind: "current_user_quote", quote: "I prefer EUR for everything" },
+      ctx: clean(),
+    });
+    if (superseded.status !== "superseded") throw new Error("narrowing");
+    expect(await evidenceMessages(superseded.handle)).toEqual([`${P}msg`]);
   });
 
   it("step 3 — a NON-untrusted personal fact stated inside a project chat DOES write to personal memory (Q1)", async () => {

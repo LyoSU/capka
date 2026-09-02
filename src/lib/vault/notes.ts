@@ -1,10 +1,11 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { auditEvents, noteVersionEvidence, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
+import { auditEvents, noteVersionEvidence, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
 import { looksLikeSecret, type Actor, type PromptAccess, type SourceClass } from "./claims";
 import { horizonFor, type ServerClass } from "./grounding";
-import { deleteNode, insertNode } from "./nodes";
+import type { TopicSection } from "./memory-sections";
+import { deleteNode, insertNode, restoreNode } from "./nodes";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
@@ -64,6 +65,11 @@ export const NOTE_TITLE_MAX_CHARS = 160;
  */
 export const NOTE_BLOCK_MAX_CHARS = 2_000;
 export const NOTE_BLOCKS_MAX = 20;
+
+/** Which heading the owner's memory page lists a note under. Re-exported from the module
+ *  that OWNS the four values rather than restated here — see `memory-sections.ts` for why
+ *  that module has no imports and why the schema's copy is the one that stays literal. */
+export type NoteSection = TopicSection;
 
 export function fitNoteTitle(raw: string): string {
   return raw.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, NOTE_TITLE_MAX_CHARS);
@@ -231,6 +237,11 @@ export async function createNote(
     bodyMarkdown: NoteBody;
     kind?: "note" | "memory_topic" | "index";
     topicKey?: string | null;
+    /** Which heading the owner's memory page lists this file under. Omitted is `'topic'`,
+     *  by the column's own default — see `vault_notes.section`. It is a SHELF and nothing
+     *  else: no model-facing read looks at it and it grants no authority, which is why it
+     *  sits beside `kind` here rather than anywhere near `sourceClass`. */
+    section?: NoteSection;
     sourceClass: ServerClass;
     sensitive?: boolean;
     provenance: Record<string, unknown>;
@@ -258,6 +269,9 @@ export async function createNote(
     body: typeof a.bodyMarkdown === "string" ? a.bodyMarkdown : "",
     kind: a.kind ?? "note",
     topicKey: a.topicKey ?? null,
+    // Omitted leaves the column's `'topic'` default in place rather than writing it here:
+    // one default, in the schema, where the CHECK that bounds it also lives.
+    ...(a.section ? { section: a.section } : {}),
     currentRevision: 1,
     // Armed at insert, by the writer, from the class this note is about to store — never
     // by a trigger and never by a backfill (§4.5 step 8).
@@ -316,6 +330,12 @@ export async function reviseNote(
     expectedRevision: number;
     title: string;
     bodyMarkdown: NoteBody;
+    /** A NEW shelf for this file, when the write names one. OMITTED LEAVES IT WHERE IT IS,
+     *  which is the whole reason this is optional rather than defaulted: `section` lives on
+     *  the note IDENTITY and not on a revision, so a rewrite that says nothing about the
+     *  shelf must not silently move the file back to `'topic'` — a person would watch their
+     *  own filing undo itself every time the agent updated the text. */
+    section?: NoteSection;
     sourceClass: ServerClass;
     sensitive?: boolean;
     provenance: Record<string, unknown>;
@@ -342,6 +362,7 @@ export async function reviseNote(
       body: typeof a.bodyMarkdown === "string" ? a.bodyMarkdown : "",
       updatedAt: new Date(),
       expiresAt: horizonFor(a.sourceClass),
+      ...(a.section ? { section: a.section } : {}),
     })
     .where(
       and(
@@ -535,6 +556,71 @@ export async function forgetNote(
     subjectType: "note",
     subjectId: a.noteId,
     payload: { revision: a.expectedRevision, createdTaskId: a.createdTaskId ?? null },
+  });
+  return { ok: true };
+}
+
+/**
+ * THE OWNER'S UNDO of `forgetNote` — the note back on the page, filed as it was.
+ *
+ * IT EXISTS BECAUSE THE DELETE HAS NO CONFIRMATION. The memory page removes a topic file on
+ * one click and offers Undo in a toast, which is the T16 pattern moved one surface over: a
+ * modal in front of every delete makes the frequent, correct case tedious to defend against
+ * the rare mis-click, while an undo makes the mis-click free. That trade is only honest if
+ * the undo genuinely restores, so this is a real inverse and not a second delete with a
+ * friendlier name.
+ *
+ * NO TASK BOUND AND NO ACTOR CHOICE: this is the owner's own path, exactly like
+ * `forgetNote` without a `createdTaskId`, and there is no agent equivalent. `memory_forget`
+ * has no undo tool beside it and must not grow one — a model that could put back what the
+ * person just removed would make the person's delete a suggestion.
+ *
+ * THE FACTS COME BACK WITH IT AND NEED NOTHING DONE: `deleteNode` leaves `note_claims`
+ * alone ("forgetting a fact does not mean rewriting where it came from"), and the page reads
+ * the filing from that table — so the topic's Related facts list is intact the moment the
+ * node is live again. `restoreNode` reopens the `contains` EDGES, which the page does not
+ * read but `containsParity` does; see its docstring for why that is not optional.
+ *
+ * `not_found` covers three things on purpose — no such note, not in this space, and not
+ * deleted at all. The third is the interesting one and it is still not an error: an undo
+ * clicked twice, or in two tabs, means the person wants the note back, and it is back.
+ */
+export async function restoreNote(
+  a: { noteId: string; spaceId: string; actor: Actor },
+  ex?: Ex,
+): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+  if (!ex || ex === db) return db.transaction((tx) => restoreNote(a, tx));
+
+  // The stamp `deleteNode` wrote, which is what scopes the edge half of the restore. Read
+  // inside the transaction that is about to clear it, so the value cannot belong to a
+  // different delete than the one being undone.
+  const [tomb] = await ex
+    .select({ deletedAt: vaultNodes.deletedAt })
+    .from(vaultNodes)
+    .where(and(eq(vaultNodes.id, a.noteId), eq(vaultNodes.spaceId, a.spaceId), isNotNull(vaultNodes.deletedAt)))
+    .limit(1);
+  if (!tomb?.deletedAt) return { ok: false, reason: "not_found" };
+  if (!(await restoreNode(a.noteId, a.spaceId, tomb.deletedAt, ex))) return { ok: false, reason: "not_found" };
+
+  // The projection, by the module that owns the note side of it — see `restoreNode` for why
+  // this half is the caller's. Without it the note is on the page and invisible to
+  // `memory_search` for the rest of its life.
+  await projectNoteDoc(a.noteId, ex);
+  const [head] = await ex
+    .select({ revision: vaultNotes.currentRevision })
+    .from(vaultNotes)
+    .where(eq(vaultNotes.id, a.noteId))
+    .limit(1);
+  await ex.insert(auditEvents).values({
+    id: nanoid(),
+    spaceId: a.spaceId,
+    actor: a.actor,
+    action: "node.restore",
+    subjectType: "note",
+    subjectId: a.noteId,
+    // No title and no body, the same rule `insertNoteVersion`'s event states: the audit log
+    // outlives the space's own content.
+    payload: { revision: head?.revision ?? null },
   });
   return { ok: true };
 }
