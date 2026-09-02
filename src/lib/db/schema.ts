@@ -152,6 +152,28 @@ export const chats = pgTable("chats", {
   // "telegram" chat is owned by the bot channel and is read-only in the web UI
   // (you reply from Telegram, or fork it into a fresh web chat to take over).
   source: text("source").default("web"),
+  /**
+   * WHAT KIND OF CONVERSATION THIS IS, and the reason it is not `archived`.
+   *
+   * "chat" is every conversation a person opened; "memory" is the single hidden chat behind
+   * the memory page's composer, where the owner tells the assistant what to change or forget
+   * and the turn runs through the ordinary queue with only the `memory_*` tools. That turn has
+   * to be a real chat row — the queue, the runner, the message tree and the effect ledger are
+   * all keyed on one — and it must never be something a person can navigate to: it holds one
+   * instruction and a one-sentence reply, and the settings page is its whole interface.
+   *
+   * `archived` cannot express that and must not be borrowed for it. Archiving is a place a
+   * person PUT a chat and can take it back out of; the archive screen lists them, the sidebar
+   * offers the bucket, and `?archived=all` shows both. A flag whose whole job is "no list ever
+   * offers this" is a different question, so it is a different column — and one enumerated
+   * value rather than a boolean, because the next non-chat producer (an automation's own turn,
+   * say) is a third kind and not a second `hidden` bit.
+   *
+   * ONE ENTRANCE READS IT: `chatIsListable` in `src/lib/chat/live.ts`. A predicate copied into
+   * each of the sidebar, the palette and the project hub is the shape this repo has already
+   * paid for twice — see that module.
+   */
+  kind: text("kind", { enum: ["chat", "memory"] }).notNull().default("chat"),
   pinned: boolean("pinned").default(false),
   archived: boolean("archived").default(false),
   // Sharing. "private" (default) = owner-only, the historical behaviour. "link"
@@ -182,6 +204,12 @@ export const chats = pgTable("chats", {
   // Default sidebar query: owner + archive bucket, ordered by pinned/activity/id.
   // The id tail also supports deterministic keyset pagination without a sort.
   index("idx_chats_sidebar").on(table.userId, table.archived, table.pinned, table.updatedAt, table.id),
+  /** ONE memory chat per person, as a database property rather than a convention.
+   *  `resolveMemoryChat` reads then inserts, so two tabs submitting into an empty memory page
+   *  at once is an ordinary race; this index is what makes the loser's insert fail with 23505
+   *  and re-read the winner's row instead of leaving the account with two hidden chats that
+   *  each hold half of its own history. Partial, so it says nothing about ordinary chats. */
+  uniqueIndex("uniq_chats_memory").on(table.userId).where(sql`${table.kind} = 'memory'`),
 ]);
 
 export const messages = pgTable("messages", {
@@ -1062,6 +1090,23 @@ export const vaultNotes = pgTable("vault_notes", {
   // unique index below is what makes it required in practice for a memory topic, and
   // `getOrCreateTopicNote` is the only writer of one.
   topicKey: text("topic_key"),
+  /**
+   * WHICH HEADING THIS TOPIC IS LISTED UNDER on the owner's memory page.
+   *
+   * Four values, and they are a SHELF rather than a taxonomy: "you" is what the person is
+   * like, "topic" is a subject, "area" is a part of their life or work, "person" is somebody
+   * they deal with. The page groups by it and sorts by title inside each group, which is the
+   * whole of what it does — nothing model-facing reads it, and it grants no authority.
+   *
+   * `'topic'` is the default because the writer that does not care must land somewhere honest:
+   * `memory_note_write` may omit the parameter, and every topic container `resolveTopic` mints
+   * while filing a fact omits it by construction. NOT NULL with a default rather than nullable,
+   * so the page has no fifth "unsectioned" group to render and explain.
+   *
+   * A CHECK beside the enum, because the enum is TypeScript's and the check is the database's:
+   * the tool schema refuses a fifth value at the provider, this refuses one from anything else.
+   */
+  section: text("section", { enum: ["you", "topic", "area", "person"] }).notNull().default("topic"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   /** Retention horizon, armed at insert by the note writer; null = no horizon. No note
@@ -1142,6 +1187,7 @@ export const vaultNotes = pgTable("vault_notes", {
   uniqueIndex("uniq_vnotes_topic_title")
     .on(sql`lower(btrim(regexp_replace(${t.title}, '[[:space:]]+', ' ', 'g')))`, t.spaceId)
     .where(sql`${t.kind} = 'memory_topic'`),
+  check("ck_vnotes_section", sql`${t.section} in ('you','topic','area','person')`),
   // Child -> parent, so NO `onDelete`: see `knowledge_source_node_fk`.
   foreignKey({
     name: "vault_note_node_fk",
