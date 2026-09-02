@@ -456,9 +456,12 @@ export async function revertNote(
 ): Promise<
   | { ok: true; revision: number }
   | { ok: false; reason: "not_found" | "not_revertable" }
-  /** The observed head travels with the refusal: the caller's next move is to tell somebody
-   *  what it is now, and re-reading it from outside this transaction would be a third read
-   *  of a value this one already holds. */
+  /** THE HEAD AS OF THE REFUSAL, and on both arms it is a value this transaction has just
+   *  read — never the one the caller sent. A stale `expectedRevision` is answered with the
+   *  head this function read; a lost CAS is answered with the head `reviseNote` re-read
+   *  after losing, which is strictly newer than the one this function started from. The
+   *  caller's next move is to tell somebody what the revision is NOW, and naming the number
+   *  they already believe is current answers nothing. */
   | { ok: false; reason: "revision_moved"; revision: number }
 > {
   if (!ex || ex === db) return db.transaction((tx) => revertNote(a, tx));
@@ -513,10 +516,14 @@ export async function revertNote(
   );
   // The head moved between the read and the CAS — another tab, or the agent mid-turn. The
   // person can look and ask again; silently reverting whatever is there now would undo an
-  // edit they have not seen. The revision reported is the one this transaction read: it is
-  // the newest value this function can honestly name, and it is enough for the caller to
-  // say the file changed.
-  if (!upd.ok) return { ok: false, reason: "revision_moved", revision: head.revision };
+  // edit they have not seen.
+  //
+  // THE REVISION REPORTED IS `reviseNote`'s, not the one read at the top of this function.
+  // A losing CAS re-reads the row before it returns, so the newer value is already in hand
+  // at no cost — while `head.revision` is, on the guarded path, exactly the number the
+  // caller sent as `expectedRevision`. Reporting that would answer "the file moved" and
+  // then name the revision the client already believes is current, which is not an answer.
+  if (!upd.ok) return { ok: false, reason: "revision_moved", revision: upd.currentRevision };
   return { ok: true, revision: upd.revision };
 }
 

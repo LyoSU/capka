@@ -360,6 +360,64 @@ run("vault: what a turn wrote to memory", () => {
     });
   });
 
+  it("a LOST CAS reports the head reviseNote re-read, not the one the revert started from", async () => {
+    // The other `revision_moved` arm, and the one the guarded case above cannot reach: the
+    // head moves AFTER this function read it, inside its own transaction. `reviseNote`
+    // re-reads the row when its CAS loses, so the newer number is already in hand — and the
+    // number this function started from is, on the guarded path, exactly what the caller
+    // sent. Answering with that would say "the file moved" and then name the revision the
+    // client already believes is current.
+    const spaceId = await spaceOf();
+    const note = await seedNoteFrom(spaceId, OTHER_MSG, "The first steps.");
+    const actor = { kind: "user", id: OWNER } as const;
+    for (const [rev, body] of [[1, "The second steps."], [2, "The third steps."]] as const) {
+      await reviseNote({
+        noteId: note.id,
+        spaceId,
+        expectedRevision: rev,
+        title: "Acme onboarding",
+        bodyMarkdown: body,
+        sourceClass: testServerClass("agent_inferred"),
+        provenance: { kind: "agent_inference", messageId: MSG, taskId: TASK },
+        actor: { kind: "agent" },
+      });
+    }
+
+    // A SECOND CONNECTION, held open: the UPDATE takes the row's write lock and stays
+    // invisible to every other reader until it commits. That is what makes this a real lost
+    // CAS rather than a stale parameter, and it is deterministic rather than a race — the
+    // poll below asserts that the revert is actually blocked before the lock is released.
+    const other = await pool.connect();
+    try {
+      await other.query("BEGIN");
+      await other.query(`UPDATE vault_notes SET current_revision = 2 WHERE id = $1`, [note.id]);
+
+      const racing = revertNote({ noteId: note.id, spaceId, toRevision: 1, actor });
+      let blocked = false;
+      for (let i = 0; i < 60 && !blocked; i += 1) {
+        const { rows } = await q(
+          `SELECT count(*) AS n FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND query ILIKE '%vault_notes%'`,
+        );
+        blocked = Number((rows[0] as { n: string }).n) > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 50));
+      }
+      // THE CONTROL. Without it the commit could land before the revert had read anything,
+      // and the case would be testing the guarded arm again under another name.
+      expect(blocked).toBe(true);
+
+      await other.query("COMMIT");
+      expect(await racing).toEqual({ ok: false, reason: "revision_moved", revision: 2 });
+    } finally {
+      await other.query("ROLLBACK").catch(() => {});
+      other.release();
+    }
+
+    // NOTHING was written by the loser, and the head is what the winner left.
+    const versions = await q(`SELECT count(*) AS n FROM vault_note_versions WHERE note_id = $1`, [note.id]);
+    expect(Number((versions.rows[0] as { n: string }).n)).toBe(3);
+  });
+
   it("refuses a revert that is not to an EARLIER revision", async () => {
     // Reverting to the head is a no-op dressed as a write, and reverting forward is not a
     // thing an undo can mean. Both are refused rather than silently doing nothing, so a
