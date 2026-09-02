@@ -85,6 +85,14 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Undo in the chat's "saved to memory" notice now reverts an edit the turn made to an existing topic file, instead of deleting the file and its whole history; the notice says how many files were updated apart from what was saved.
+- A fact deleted on the memory page can be put back from the toast, and the per-fact delete no longer asks for confirmation first.
+- A topic file linking a sensitive fact no longer prints that fact's words on the memory page, and a link to a fact that has since been replaced no longer shows the old wording.
+- Empty topic containers no longer appear on the memory page as rows with a title and a date and nothing else.
+- The unfiled list on the memory page now says how many facts it is showing of how many.
+- A topic file the owner deleted and the assistant then re-used keeps the facts filed under it visible to the parity check, instead of reading as a divergence that blocks the next write into that topic.
+- A topic file's row preview no longer skips a paragraph that merely starts with a hash ("#1 priority is …").
+- Updating a note without naming a topic no longer re-files it under General.
 - The "jump to end" pill no longer flickers while a reply streams.
 - The greeting's composer and starter hints stagger in as designed; the delay never applied before.
 - A fact the assistant saves with `memory_fact_write` now names the conversation it came from on the memory page, instead of reading "the conversation is no longer available".
@@ -120,6 +128,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Removed
 
+- The unused `chats.kind` column and its `uniq_chats_memory` index are dropped (migration 0070); they shipped for a memory-page composer that was cancelled and nothing read them.
 - Removed `memory_propose` and `memory_update`; the assistant writes facts directly and records corrections as conflicts.
 
 ## [0.37.0] - 2026-08-29
