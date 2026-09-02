@@ -417,8 +417,11 @@ export async function reviseNote(
  * IT IS NOT A ROLLBACK EITHER. History is append-only here (§4.6), so putting revision N−1
  * back means writing revision N+1 with those words, through `reviseNote`'s CAS like every
  * other write — the edit stays in the record, and so does the undo. A person can therefore
- * revert a revert, and the memory page's version history explains what happened rather than
- * quietly missing a step.
+ * revert a revert. The record is `vault_note_versions`, and it is a record and not yet a
+ * SURFACE: nothing renders a note's version history in this slice. `topicsOf` projects the
+ * head alone, and the memory page's `showHistory` is the FACT row's superseded chain, which
+ * is a different object. So an undo is currently explained by the words changing back and
+ * by nothing else; a reader for the chain is slice-4 work.
  *
  * THE CLASS IS CARRIED, NEVER RE-DECIDED — see `carriedClass` for why both alternatives are
  * worse. Same for `sensitive`: the words are the old words, so their flag is the old flag,

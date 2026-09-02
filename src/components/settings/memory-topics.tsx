@@ -189,7 +189,16 @@ export function useReveal(value: StatementView): { shown: boolean; toggle: () =>
 }
 
 /**
- * One record's text — blurred behind a reveal control when it is marked sensitive.
+ * One record's text — blurred when it is marked sensitive, and behind a reveal control
+ * wherever the surface can hold one.
+ *
+ * THE QUALIFIER IS NOT A DETAIL. `control={false}` renders the blur, the `aria-hidden` and
+ * the visually-hidden reason and NO button, so on that surface the words are unreadable
+ * full stop and the reveal is one click away in the file's own view. It is still this one
+ * component and this one reader of `sensitive` — the branch is twenty lines down, not a
+ * second module — but a sentence promising "one click to read" everywhere would be wrong
+ * about the list, which is the surface most rows are seen on. See the prop's own doc for
+ * when a caller may pass it.
  *
  * This used to print a fixed apology in place of the words, because the projection sent
  * `null` for them. That was the manifest's rule applied at the wrong entrance:
@@ -198,9 +207,9 @@ export function useReveal(value: StatementView): { shown: boolean; toggle: () =>
  * the waiting list) a Keep button over a blank row.
  *
  * What genuinely applies at a screen is shoulder-surfing, so the defence is a RENDERING
- * one: blurred by default, one click to read, per row and never sticky. Reachable by
- * keyboard because it is an ordinary button, and it does not animate under
- * `prefers-reduced-motion`.
+ * one: blurred by default, one click to read where the control exists, per row and never
+ * sticky. Reachable by keyboard because it is an ordinary button, and it does not animate
+ * under `prefers-reduced-motion`.
  *
  * While blurred the text is `aria-hidden`: a screen reader that read it aloud anyway
  * would defeat the point in the one room where somebody else can hear. The reason it is

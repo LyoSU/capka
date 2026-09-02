@@ -394,7 +394,9 @@ export async function makeVaultMemoryTools(ctx: {
           .string()
           .max(TOPIC_TITLE_MAX_CHARS)
           .optional()
-          .describe("The subject in the user's words, or an n-handle of an existing topic. Default: General"),
+          .describe(
+            "The subject in the user's words, or an n-handle of an existing topic. On a create, leave it out to file under General; on an update, leave it out to keep the current filing",
+          ),
       }),
       execute: async ({ op, title, content, grounding, topic, section }) =>
         writeCtx.budget.emit(
