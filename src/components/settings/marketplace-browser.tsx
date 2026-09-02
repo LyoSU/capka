@@ -238,7 +238,7 @@ export function MarketplaceBrowser() {
         selected &&
         sections.map(({ cat, items }) => (
           <div key={cat} className="space-y-2">
-            <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">{cat}</p>
+            <p className="px-1 text-xs font-medium text-muted-foreground">{cat}</p>
             {items.map((c) => (
               <div key={c.name} className="flex items-start justify-between gap-4 rounded-lg bg-card p-3 shadow-panel">
                 <div className="flex flex-1 items-start gap-3">

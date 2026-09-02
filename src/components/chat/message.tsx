@@ -1008,33 +1008,32 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
-    <div className="animate-step-in relative py-1 pl-10 text-muted-foreground">
-      {/* No pulse on the badge while streaming: the group header above already
-          ticks a live duration and the rail shows a spinner on the running step.
+    <div className="animate-step-in flex gap-2.5 px-3 py-2.5 text-muted-foreground">
+      {/* No pulse on the icon while streaming: the group header above already
+          ticks a live duration and the list shows a spinner on the running step.
           Three motions for one fact reads as a busy interface, not an
           informative one. */}
-      <span className="absolute left-0 top-1 grid h-[27px] w-[27px] place-items-center rounded-full border border-border bg-card text-muted-foreground">
-        <Lightbulb className="animate-step-in h-3.5 w-3.5" />
-      </span>
+      <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
       {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
           mechanically slanted — the same reason blockquotes dropped italic in
-          globals.css. Reasoning is already set apart by the rail and the muted
-          colour; it doesn't need a second, worse-legibility signal. */}
-      <div className="reasoning-prose text-sm leading-relaxed">
+          globals.css. Reasoning is already set apart by the muted colour and the
+          smaller size; it doesn't need a second, worse-legibility signal. */}
+      <div className="reasoning-prose min-w-0 flex-1 text-[13px] leading-relaxed">
         <Markdown isStreaming={isStreaming}>{clean}</Markdown>
       </div>
     </div>
   );
 }
 
-/** The round node on the rail: a category icon, a branded chip for connected
- *  apps (MCP), or a live spinner while the step runs. Centred on the rail line. */
+/** The glyph that opens a step row: a category icon, a branded chip for
+ *  connected apps (MCP), or a live spinner while the step runs. A plain 16px
+ *  icon, not a ringed node — the rows sit in one bordered list now, and the list
+ *  is what says "these belong together"; a circle around every icon was a second
+ *  frame inside the first. */
 function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
-  const base =
-    "absolute left-0 top-1/2 -translate-y-1/2 grid h-[27px] w-[27px] place-items-center overflow-hidden rounded-full border bg-card";
   if (state === "running") {
     return (
-      <span className={`${base} border-border text-foreground`}>
+      <span className="grid h-4 w-4 shrink-0 place-items-center text-foreground">
         <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
       </span>
     );
@@ -1042,22 +1041,17 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
   // Connected app with a known brand — a coloured letter chip, not a wrench.
   if (d.category === "mcp" && d.brand?.color) {
     return (
-      <span className={`${base} ${state === "error" ? "border-destructive/45" : "border-border"}`}>
-        <span
-          className="animate-step-in grid h-full w-full place-items-center text-[11px] font-bold text-white"
-          style={{ backgroundColor: d.brand.color }}
-        >
-          {d.brand.letter}
-        </span>
+      <span
+        className="animate-step-in grid h-4 w-4 shrink-0 place-items-center rounded-[5px] text-[9px] font-bold leading-none text-white"
+        style={{ backgroundColor: d.brand.color }}
+      >
+        {d.brand.letter}
       </span>
     );
   }
   const Icon = d.Icon;
-  const tone = state === "error" ? "border-destructive/45 text-destructive" : "border-border text-muted-foreground";
   return (
-    <span className={`${base} ${tone}`}>
-      <Icon className="animate-step-in h-3.5 w-3.5" />
-    </span>
+    <Icon className={`animate-step-in h-4 w-4 shrink-0 ${state === "error" ? "text-destructive" : "text-muted-foreground"}`} />
   );
 }
 
@@ -1115,8 +1109,8 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
 
   const row = (
     <div
-      className={`animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 ${
-        isError ? "text-destructive" : isRunning ? "text-foreground" : "text-muted-foreground"
+      className={`animate-step-in relative flex min-h-[38px] items-center gap-2.5 px-3 py-1.5 ${
+        isError ? "text-destructive" : "text-foreground"
       }`}
     >
       <StepBadge d={d} state={state} />
@@ -1129,13 +1123,9 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       {expandable && (
         <CollapsibleTrigger
           aria-label={label}
-          // Starts AFTER the 27px badge (badge + a 7px breath), not at inset-0:
-          // painted later in DOM order, a full-bleed trigger put its hover wash
-          // OVER the badge and across the rail line — an opaque pill swallowing
-          // the one icon that says what the step is. The icon strip gives up its
-          // few pixels of click target so the wash reads as "this row's text
-          // expands", which is the true claim.
-          className="absolute inset-y-0 left-[34px] right-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          // Full-bleed: the whole row is the control, and its hover wash is the
+          // list row lighting up — the icon is content inside it, not chrome beside it.
+          className="absolute inset-0 z-0 transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         />
       )}
       <span className="pointer-events-none relative z-10 text-sm">
@@ -1154,7 +1144,7 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
           chip earns a thumbnail and opens it. */}
       {fileChip ??
         (d.detail && (
-          <span className="pointer-events-none relative z-10 min-w-0 truncate rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+          <span className="pointer-events-none relative z-10 min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
             {d.detail}
           </span>
         ))}
@@ -1190,7 +1180,7 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       <div className="group/step">{row}</div>
       <CollapsibleContent>
         {/* Sent, then returned, in that order — the order they happened in. */}
-        <div className="mb-2 ml-10 space-y-2.5">
+        <div className="space-y-2.5 border-t border-border bg-background/50 px-3 py-3">
           {inv && <Invocation inv={inv} />}
           <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
         </div>
@@ -1202,25 +1192,10 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
 /** A single unit of work on the rail — either the model thinking or a tool call. */
 type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: ToolPart };
 
-/** The terminal "Done ✓" node that caps a finished run, so the rail reads as a
- *  completed timeline rather than trailing off after the last step. Only shown
- *  once the run has stopped streaming. */
-function DoneRow() {
-  const t = useTranslations("chat.tool");
-  return (
-    <div className="animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 text-muted-foreground">
-      <span className="absolute left-0 top-1/2 grid h-[27px] w-[27px] -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground">
-        <Check className="animate-step-in h-3.5 w-3.5" />
-      </span>
-      <span className="text-sm">{t("done")}</span>
-    </div>
-  );
-}
-
-/** Renders an interleaved run of reasoning + tool calls as one vertical step
- *  rail — a single thin line connecting each node, so thinking and actions read
- *  as one quiet "here's what I did" timeline rather than two different styles.
- *  A finished run is capped with a terminal "Done ✓" node. */
+/** Renders an interleaved run of reasoning + tool calls as one bordered list —
+ *  one row per step, hairline-divided, so thinking and actions read as a single
+ *  quiet "here's what I did" record rather than two different styles. The list
+ *  edge is the only frame: no connecting line, no ringed nodes, no "Done" cap. */
 function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
   const rows = items.map((it, i) =>
@@ -1228,27 +1203,20 @@ function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: A
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} />
       : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />,
   );
-  if (!isStreaming) rows.push(<DoneRow key="done" />);
-
   // Why the longest pause in the product gets a footnote and not a node: the
   // container is built FOR the step above — the first tool call that needs it —
   // so it is that step taking a while, not a separate thing happening. A node
   // would put a second spinner on screen for one piece of work, which is the
   // "pile of loaders" failure; a dim line at the tail adds the missing sentence
-  // and nothing else. It sits OUTSIDE the rail wrapper so the connecting line's
-  // geometry (bottom-4, measured to the last badge) stays exactly as it was.
+  // and nothing else. It sits OUTSIDE the list so the list edge stays the frame
+  // of what happened, not of what is being waited for.
   const note = isStreaming && sandboxPending ? (
-    <div className="animate-step-in pl-10 text-xs text-muted-foreground">{tStatus("sandbox")}</div>
+    <div className="animate-step-in px-3 pt-1.5 text-xs text-muted-foreground">{tStatus("sandbox")}</div>
   ) : null;
-
-  // A lone node needs no connecting line.
-  if (rows.length === 1) return <>{rows}{note}</>;
 
   return (
     <>
-      <div className="relative my-0.5">
-        {/* the connecting line, centred under the 27px badges */}
-        <div className="pointer-events-none absolute bottom-4 left-[13px] top-4 w-px bg-border" aria-hidden="true" />
+      <div className="my-1 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
         {rows}
       </div>
       {note}

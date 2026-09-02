@@ -55,7 +55,7 @@ export function ChatSearch({
             }
           }}
           placeholder={t("searchChats")}
-          className="pl-7 h-7 text-sm pr-7"
+          className="h-8 border-0 bg-transparent pl-7 pr-7 text-[15px] shadow-none transition-micro hover:bg-hover focus-visible:bg-field focus-visible:shadow-hairline"
         />
         {value && (
           <button

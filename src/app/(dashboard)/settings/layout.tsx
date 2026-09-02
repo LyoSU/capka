@@ -212,7 +212,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               className={cn(
                 "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
                 isActiveItem(item.href)
-                  ? "bg-hover-strong font-medium"
+                  ? "bg-hover-strong font-medium text-foreground"
                   : "text-muted-foreground hover:bg-hover"
               )}
             >
@@ -230,7 +230,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           {searching && renderResults(true)}
           {!searching && visibleSections.map((section) => (
             <div key={section.titleKey} className="flex flex-col gap-1">
-              <p className="px-2.5 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+              <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">
                 {t(`nav.sections.${section.titleKey}`)}
               </p>
               {section.items.map((item) => (
@@ -240,7 +240,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                   className={cn(
                     "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors",
                     isActiveItem(item.href)
-                      ? "bg-hover-strong font-medium"
+                      ? "bg-hover-strong font-medium text-foreground"
                       : "text-muted-foreground hover:bg-hover"
                   )}
                 >

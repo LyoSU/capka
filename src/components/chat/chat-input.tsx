@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, type KeyboardEvent } from "react";
+import { useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { ArrowUp, Info, Loader2, Paperclip, Square } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
@@ -95,6 +95,12 @@ interface ChatInputProps {
    *  collapses the block the starter button lives in, so without this the focused
    *  button is removed from under the user and focus falls to `<body>`. */
   focusSignal?: number;
+  /** The model / thinking controls, rendered in the composer's own footer beside
+   *  the paperclip. The composer is where these settings belong on every
+   *  breakpoint and in every state: they decide how the message being typed
+   *  will be answered, and one control living in one place is what lets a user
+   *  find it without looking. */
+  leading?: ReactNode;
 }
 
 export function ChatInput({
@@ -113,6 +119,7 @@ export function ChatInput({
   contextUsage,
   focusSignal,
   folders,
+  leading,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const tNotice = useTranslations("chat.notice");
@@ -269,7 +276,8 @@ export function ChatInput({
             )}
           </div>
           <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
-            {/* Attach button */}
+            {/* Left cluster: attach, then the model/thinking controls (`leading`). */}
+            <div className="flex min-w-0 items-center gap-0.5">
             <div className="shrink-0">
               <input
                 ref={fileInputRef}
@@ -304,6 +312,8 @@ export function ChatInput({
                 </Hint>
               )}
             </div>
+            {leading}
+            </div>
 
             {/* Right cluster: context-window ring, then Send/Stop. Grouping them
                 keeps the ring just left of the button, so a loose ring can't drift
@@ -332,7 +342,7 @@ export function ChatInput({
                 <Hint label={isLoading ? t("queue") : t("send")}>
                   <Button
                     size="icon"
-                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full bg-brand text-brand-foreground transition-transform hover:bg-brand/90 active:scale-90"
                     disabled={!canSend}
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send.

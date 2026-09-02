@@ -55,9 +55,9 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             // A standalone chip, not a row in the clipped list below — so this is
             // the one that keeps the project's `active:scale` press.
             aria-pressed={ty === type}
-            className={`rounded-full border px-3 py-1 text-xs transition-micro active:scale-[0.97] ${
+            className={`rounded-full border px-3 py-1.5 text-[13px] transition-micro active:scale-[0.97] ${
               ty === type
-                ? "border-foreground/20 bg-muted text-foreground"
+                ? "border-transparent bg-foreground text-background"
                 : "border-transparent text-muted-foreground hover:bg-hover"
             }`}
           >
@@ -68,7 +68,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
 
       {/* key={type} remounts the list when the type changes, so the rows
           re-run their staggered entrance — switching tabs feels alive. */}
-      <div key={type} className="overflow-hidden rounded-xl border">
+      <div key={type} className="overflow-hidden rounded-xl border border-border bg-card">
         {actions.map(({ key: a, icon: ActionIcon }, i) => (
           <button
             key={a}

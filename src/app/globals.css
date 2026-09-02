@@ -36,6 +36,9 @@
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
@@ -173,7 +176,7 @@
   --warning-text: oklch(0.535 0.115 71);
   --success: oklch(0.506 0.130 152);
   --success-foreground: oklch(0.985 0 0);
-  --border: oklch(0.885 0.006 95);
+  --border: oklch(0.872 0.006 95);
   /* Darker than `--border`, on purpose. A field's edge is the only thing telling
      you where it starts once the inset shadow is gone, and at `--border` (1.28:1
      against the page, measured) it was a suggestion rather than an edge.
@@ -195,7 +198,7 @@
   /* A second, more assertive hairline. `--border` is the quiet divider inside a
      surface; this is the one that has to hold the *outer* edge of a control
      against the page, where the softer value reads as an unfinished button. */
-  --border-strong: oklch(0.811 0.006 85);
+  --border-strong: oklch(0.79 0.006 85);
   /* Surfaces for fields and hover states, as tokens rather than each component
      inventing its own `hover:bg-muted/50`. `--hover` is the quiet rest-to-hover
      step, `--hover-strong` the pressed / currently-open step above it.
@@ -214,15 +217,30 @@
      3.30:1 the edge defines the control with no fill contrast at all, which is
      precisely what WCAG 1.4.11 asks of it. */
   --field: oklch(1 0 0);
-  --hover: oklch(0.943 0.003 85);
-  --hover-strong: oklch(0.919 0.006 95);
+  /* The steps between rest, hover and active used to be 1.07:1 and 1.16:1 against
+     the page — text passed AA everywhere while no surface could be told from its
+     neighbour, which is what "nothing stands out" turned out to mean. Every
+     surface step is now at least a quarter-stop of lightness: hover 1.15:1,
+     active/open 1.30:1. Fewer levels, bigger gaps — the way the products people
+     compare this to are built (three greys, not eight). */
+  --hover: oklch(0.928 0.004 88);
+  --hover-strong: oklch(0.898 0.006 92);
+  /* The ONE hue the palette spends. Graphite stays achromatic for identity and
+     hierarchy; this cool ink-blue is reserved for "the thing you act on next":
+     the send button, the focus ring, the unread dot, a selected chip. Never a
+     background wash, never a heading, never decoration — the moment it appears
+     in a second role it stops meaning anything. Cool against the warm paper on
+     purpose: the temperature contrast is what makes it read as intentional
+     rather than as a leftover default. 0.47 L: 5.3:1 on the page, 5.8:1 under
+     white text, so it passes AA in both roles it plays. */
+  --brand: oklch(0.47 0.12 262);
+  --brand-foreground: oklch(0.985 0 0);
+  --brand-soft: oklch(0.94 0.025 262);
   /* A focus indicator is the one piece of non-text contrast WCAG grants no
      exemption for — a keyboard user has nothing else telling them where they
-     are. 0.621 measures 3.30:1 against the page. Deliberately the SAME value as
-     `--input`: in a palette with no accent hue, the ring cannot announce itself
-     by colour, so it does it by width and offset (see `:focus-visible`), and
-     giving it a second grey would only be a near-miss of the field edge. */
-  --ring: oklch(0.621 0.006 85);
+     are. It is the accent: a ring that shares a grey with the field edge is a
+     ring nobody finds. */
+  --ring: var(--brand);
   /* Recessed, but only half a step. The reference palette puts the sidebar a full
      step under the page (0.943 vs 0.967) and the direction is right — the sidebar
      is navigation, the page is the work — but at that depth it reads as a dark
@@ -234,10 +252,10 @@
   --sidebar-foreground: oklch(0.205 0.006 92);
   --sidebar-primary: oklch(0.236 0.008 85);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.885 0.006 95);
-  --sidebar-accent: oklch(0.919 0.006 95);
+  --sidebar-border: oklch(0.872 0.006 95);
+  --sidebar-accent: oklch(0.898 0.006 92);
   --sidebar-accent-foreground: oklch(0.236 0.008 85);
-  --sidebar-ring: oklch(0.621 0.006 85);
+  --sidebar-ring: var(--brand);
   --chart-1: oklch(0.646 0.222 41.12);
   --chart-2: oklch(0.6 0.118 184.71);
   --chart-3: oklch(0.398 0.07 227.39);
@@ -259,7 +277,11 @@
   --elev-btn: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0.24 0.008 85 / 0.05);
   --elev-panel: 0 0 0 1px var(--border), 0 1px 2px oklch(0.24 0.008 85 / 0.04),
     0 2px 6px oklch(0.24 0.008 85 / 0.03);
-  --elev-raised: 0 0 0 1px var(--border), 0 2px 10px oklch(0.24 0.008 85 / 0.05);
+  /* The composer's rung. One tight contact layer plus a wide soft one, so the
+     one surface the user types into visibly floats off the page instead of
+     sitting on it as a slightly whiter rectangle. */
+  --elev-raised: 0 0 0 1px var(--border), 0 1px 2px oklch(0.24 0.008 85 / 0.05),
+    0 8px 24px oklch(0.24 0.008 85 / 0.08);
   /* Two shadow layers, and the stronger edge. An overlay is the only rung that
      covers OTHER CONTENT, so unlike a card it needs a near "contact" shadow: a
      single wide 28px blur has no dark edge close to the box, and over a busy
@@ -317,7 +339,7 @@
   --success-foreground: oklch(0.174 0.003 68);
   /* White-alpha borders nudged up: on a lighter bg the old 0.08/0.10 nearly
      vanished, so hairlines now read at the same strength they did on black. */
-  --border: oklch(1 0 0 / 0.10);
+  --border: oklch(1 0 0 / 0.13);
   /* The dark counterpart of the light theme's `--input`, and it tracks the same
      middle for the same reason — the argument is written out there. Kept ALPHA
      rather than an opaque grey because a field lands on four different surface
@@ -337,17 +359,20 @@
      move to a raised well (the reasoning is written out there) and the reference
      palette, whose dark field (L 0.301) also sits above its canvas (0.213). */
   --field: oklch(1 0 0 / 0.11);
-  --hover: oklch(1 0 0 / 0.05);
-  --hover-strong: oklch(1 0 0 / 0.10);
-  --ring: oklch(0.559 0.008 89);
+  --hover: oklch(1 0 0 / 0.07);
+  --hover-strong: oklch(1 0 0 / 0.14);
+  --brand: oklch(0.78 0.09 262);
+  --brand-foreground: oklch(0.174 0.003 68);
+  --brand-soft: oklch(0.31 0.05 262);
+  --ring: var(--brand);
   --sidebar: oklch(0.186 0.004 107);
   --sidebar-foreground: oklch(0.955 0.003 85);
   --sidebar-primary: oklch(0.955 0.003 85);
   --sidebar-primary-foreground: oklch(0.174 0.003 68);
-  --sidebar-border: oklch(1 0 0 / 0.08);
-  --sidebar-accent: oklch(0.333 0.005 92);
+  --sidebar-border: oklch(1 0 0 / 0.11);
+  --sidebar-accent: oklch(0.36 0.005 92);
   --sidebar-accent-foreground: oklch(0.955 0.003 85);
-  --sidebar-ring: oklch(0.559 0.008 89);
+  --sidebar-ring: var(--brand);
   --chart-1: oklch(0.488 0.243 264.05);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -366,7 +391,7 @@
   --elev-btn: 0 0 0 1px oklch(1 0 0 / 0.15), 0 1px 2px oklch(0 0 0 / 0.30);
   --elev-panel: 0 0 0 1px oklch(1 0 0 / 0.13), 0 1px 2px oklch(0 0 0 / 0.22),
     0 2px 6px oklch(0 0 0 / 0.16);
-  --elev-raised: 0 0 0 1px oklch(1 0 0 / 0.17), 0 3px 14px oklch(0 0 0 / 0.38);
+  --elev-raised: 0 0 0 1px oklch(1 0 0 / 0.17), 0 1px 2px oklch(0 0 0 / 0.30), 0 10px 28px oklch(0 0 0 / 0.45);
   /* Same two-layer treatment as light (see there): the tight layer is what makes an
      overlay read as covering content rather than blending into it. */
   --elev-overlay: 0 0 0 1px oklch(1 0 0 / 0.22), 0 2px 8px oklch(0 0 0 / 0.40),
@@ -673,7 +698,7 @@
    chat-panel's greeting (`text-3xl md:text-[2.75rem] md:leading-[1.1]`) or the
    auth/setup titles (`text-[1.75rem]`). */
 .text-fluid-display {
-  font-size: clamp(1.875rem, 1.5rem + 1.9vw, 2.75rem);
+  font-size: clamp(1.625rem, 1.375rem + 1.2vw, 2.25rem);
   line-height: 1.1;
 }
 

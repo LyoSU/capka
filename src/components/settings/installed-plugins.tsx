@@ -523,7 +523,7 @@ function FileList({ label, paths, t }: { label: string; paths: string[]; t: Retu
   const shown = paths.slice(0, 50);
   return (
     <div className="space-y-0.5">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <ul className="space-y-0.5">
         {shown.map((p) => (
           <li key={p} className="break-all font-mono text-[11px] text-muted-foreground">{p}</li>

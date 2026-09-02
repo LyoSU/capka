@@ -40,7 +40,6 @@ import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
-import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -69,9 +68,6 @@ interface ChatPanelProps {
   /** Server-known: does this chat already have messages? Lets first paint pick
    *  the message-stream shell over the new-chat greeting while history loads. */
   initialHasHistory?: boolean;
-  /** Server-rendered recent chats for the greeting's quick-resume list, so it
-   *  paints correct immediately instead of fetching and popping in. */
-  recentChats?: { id: string; title: string | null; updatedAt: string | null }[];
   /** The signed-in user's display name — woven into the new-chat greeting. */
   userName?: string | null;
   /** Experimental: offer to import a pasted Claude/ChatGPT share link. Off unless
@@ -80,7 +76,7 @@ interface ChatPanelProps {
   shareImportEnabled?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
   const tGreeting = useTranslations("chat.greetings");
   const [model, setModel] = useState(defaultModel);
@@ -554,7 +550,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // trigger already opens — rendered `inline`, so there's no popover stacked on top
   // of a full-screen sheet.
   const compactControlsEl = readOnly ? null : (
-    <div className="pointer-events-auto inline-flex shrink-0 items-center rounded-full bg-card px-0.5 shadow-raised md:hidden">
+    <div className="inline-flex shrink-0 items-center md:hidden">
       <ModelPicker
         variant="pill"
         compact
@@ -574,6 +570,18 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
         }
       />
     </div>
+  );
+
+  // Both densities, one host: the composer footer. `md:hidden` / `hidden md:*`
+  // decide which is live, so exactly one is ever interactive.
+  const controlsEl = readOnly ? null : (
+    <>
+      {compactControlsEl}
+      <div className="hidden min-w-0 items-center md:inline-flex">
+        <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
+        {thinkingEl}
+      </div>
+    </>
   );
 
   const inputEl = readOnly ? (
@@ -643,6 +651,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       contextUsage={contextUsage}
       folders={folderSync}
       focusSignal={starterFocus}
+      leading={controlsEl}
     />
   );
 
@@ -729,8 +738,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 logo is the single most generic thing an AI product can wear. The
                 mark holds the eye on its own. */}
             <div className="mb-8 flex flex-col items-center px-6">
-              <ClawMark animated className="h-20 w-20 text-foreground md:h-24 md:w-24" />
-              <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-fluid-display font-medium tracking-tight text-foreground">
+              <ClawMark animated className="h-12 w-12 text-foreground md:h-14 md:w-14" />
+              <h1 className="animate-claw-greet mt-5 font-display text-balance text-center text-fluid-display font-medium tracking-tight text-foreground">
                 {greeting ?? t("panel.greeting")}
               </h1>
             </div>
@@ -739,20 +748,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             <div className="animate-blur-rise [animation-delay:80ms]">{inputEl}</div>
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
-              {/* relative z-20 keeps the picker (and its absolute dropdown) in a
-                  stacking context above the starters block below — otherwise the
-                  later sibling paints over the open dropdown. */}
-              {/* Stays on both breakpoints. The greeting gives this pill a row of its
-                  own, so the labelled form fits a phone here — the crowding was only
-                  ever in the chat header, where it shared a row with two other
-                  controls. */}
-              <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
-                <div className="inline-flex min-w-0 items-center rounded-full bg-card px-1 shadow-raised">
-                  <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
-                  {thinkingEl}
-                </div>
-              </div>
-              {/* Hint + recent + starters collapse away the moment the user starts
+              {/* The starters collapse away the moment the user starts
                   typing. Animating grid-rows 1fr→0fr (not unmounting) shrinks the
                   height over 300ms, so the centered composer above glides to its
                   new center instead of snapping. `inert` drops the hidden controls
@@ -765,16 +761,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 inert={input ? true : undefined}
               >
                 <div className="overflow-hidden">
-                  {/* pt-6, not pt-2.5: at the tighter spacing this line sat closer
-                      to the model pill than to anything else and read as a caption
-                      *for the pill* — a sentence about files filed under the model
-                      name. The gap is what says which block it belongs to. */}
-                  <div className="animate-blur-rise pt-6 [animation-delay:200ms]">
-                    <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
-                    <div className="mt-6 space-y-6">
-                      <RecentChats initial={recentChats} />
-                      <FileTypeSuggestions onPick={fillFromStarter} />
-                    </div>
+                  {/* One block of starters, nothing else. The recents list that
+                      used to sit here repeated the sidebar one-for-one, and the
+                      drag-a-file hint was a caption for a feature the drop zone
+                      already announces the moment a file crosses the window. */}
+                  <div className="animate-blur-rise pt-8 [animation-delay:200ms]">
+                    <FileTypeSuggestions onPick={fillFromStarter} />
                   </div>
                 </div>
               </div>
@@ -946,11 +938,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 desktop row honest under width pressure. */}
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full bg-card shadow-raised md:hidden" />
-              {compactControlsEl}
-              <div className="pointer-events-auto hidden min-w-0 items-center rounded-full bg-card px-1 shadow-raised md:inline-flex">
-                <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
-                {thinkingEl}
-              </div>
               {projectId && projectName && (
                 <Hint label={projectName} side="bottom">
                   <Link
