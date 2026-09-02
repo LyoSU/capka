@@ -604,6 +604,7 @@ export type NoteWriteStatus =
   | "refused_no_project"
   | "refused_weaker_class"
   | "refused_untrusted_turn"
+  | "title_taken"
   | "retired"
   | "bad_handle";
 
@@ -637,6 +638,10 @@ export const NOTE_SAID: Record<NoteWriteStatus, string> = {
     "That note carries more authority than this write does, so it was not changed. Write a new note instead and the user will see both.",
   refused_untrusted_turn:
     "This turn read a document or a web page, so an existing note cannot be rewritten in it. Nothing was changed - write a new note instead.",
+  /** ONE SENTENCE FOR BOTH WRITERS. A whole-file update and a rename both send a title, so
+   *  both can collide with `uniq_vnotes_topic_title`; two wordings for one circumstance would
+   *  teach the model that the two calls fail for different reasons. */
+  title_taken: "A file with that title already exists; open it and edit it instead.",
   retired: "This project's memory was deleted. Nothing was saved.",
   bad_handle: "That address is not from this conversation's search results. Run memory_search and use a handle it returned.",
 };
@@ -675,7 +680,14 @@ export type NoteWriteResult =
    *  `memory_open` is the reader that may show the title (T12). */
   | { status: "revision_mismatch"; revision: number; said: string }
   | {
-      status: "refused_scope" | "refused_no_project" | "refused_weaker_class" | "refused_untrusted_turn" | "retired" | "bad_handle";
+      status:
+        | "refused_scope"
+        | "refused_no_project"
+        | "refused_weaker_class"
+        | "refused_untrusted_turn"
+        | "title_taken"
+        | "retired"
+        | "bad_handle";
       said: string;
     };
 
@@ -866,21 +878,33 @@ export async function noteWrite(a: {
     let noteId: string;
     let revision: number;
     if (updating && head) {
-      const upd = await reviseNote(
-        {
-          noteId: head.id,
-          spaceId,
-          expectedRevision: head.revision,
-          title: a.title,
-          bodyMarkdown: bodyFor,
-          section: a.section,
-          sourceClass: verdict.sourceClass,
-          provenance,
-          createdTaskId: ctx.taskId,
-          actor: ctx.actor,
-        },
-        tx,
-      );
+      // UNDER A SAVEPOINT, for the reason `noteEdit`'s rename gives at length: an update
+      // sends a title too, so a topic container renamed onto a subject the space already has
+      // raises 23505 at `reviseNote`'s first statement. Caught it is a sentence; uncaught it
+      // poisons this transaction, and the caller gets a throw where a refusal belongs.
+      const upd = await tx
+        .transaction((sp) =>
+          reviseNote(
+            {
+              noteId: head.id,
+              spaceId,
+              expectedRevision: head.revision,
+              title: a.title,
+              bodyMarkdown: bodyFor,
+              section: a.section,
+              sourceClass: verdict.sourceClass,
+              provenance,
+              createdTaskId: ctx.taskId,
+              actor: ctx.actor,
+            },
+            sp,
+          ),
+        )
+        .catch((e: unknown) => {
+          if (!isTitleFoldConflict(e)) throw e;
+          return "title_taken" as const;
+        });
+      if (upd === "title_taken") return { status: "title_taken", said: NOTE_SAID.title_taken };
       // The CAS lost between the pre-check above and the statement. Nothing was written —
       // including no edges, which is why the callback runs after the CAS and not before it.
       if (!upd.ok) {
@@ -1031,7 +1055,7 @@ export const NOTE_EDIT_SAID = {
    *  useful to a model that was trying to delete a sentence next to one. */
   split_link: "That edit would cut through a link. Select the whole [[link]] in old_str, or leave it out.",
   too_long: "That would make the file longer than a memory file may be. Start a second file on the subject instead.",
-  title_taken: "A file with that title already exists; open it and edit it instead.",
+  title_taken: NOTE_SAID.title_taken,
   not_readable:
     "That file is not readable as memory, so its text cannot be edited here. Tell the user it is on their memory page.",
 } satisfies Record<string, string>;

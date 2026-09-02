@@ -460,6 +460,45 @@ run("in-place note edits", () => {
     expect((await noteHead(taken.id, [PS]))!.title).toBe("Reporting deadline");
   });
 
+  it("a whole-file UPDATE onto a taken topic title is refused the same way a rename is", async () => {
+    // The other arm of the same 23505. `memory_note_write op update` sends a title with the
+    // body, so it can collide exactly as a rename does — and there the raise was not caught,
+    // which poisons the transaction the write opened rather than answering the model.
+    const taken = await resolveTopic(PS, "Reporting deadline", db);
+    const mine = await resolveTopic(PS, "Suppliers", db);
+    const handle = handles.mint({ kind: "n", spaceId: PS, nodeId: mine.id });
+
+    const r = await noteWrite({
+      op: { kind: "update", noteHandle: handle, expectedRevision: 1 },
+      title: "Reporting deadline",
+      content: [{ kind: "markdown", text: "The deadline is the fifteenth of every month." }],
+      // The class fence stands over a container the same way it does over a rename: only the
+      // user's own words reach `owner_authored`'s rank, so the quote has to cover the TITLE
+      // as well as the body for clause 4 to pass.
+      grounding: { kind: "current_user_quote", quote: "quarterly reporting deadline is the fifteenth of every month" },
+      ctx: clean(),
+    });
+    expect(r.status).toBe("title_taken");
+    expect(r.said).toContain("already exists");
+
+    const still = await noteHead(mine.id, [PS]);
+    expect(still!.title).toBe("Suppliers");
+    expect(still!.revision).toBe(1);
+    expect(await versionCount(mine.id)).toBe(1);
+    expect((await noteHead(taken.id, [PS]))!.title).toBe("Reporting deadline");
+
+    // THE TRANSACTION SURVIVED, which is what the savepoint buys and what a bare raise loses:
+    // the very next write in the same space goes through.
+    const after = await noteWrite({
+      op: { kind: "create", scope: "project" },
+      title: "Something else",
+      content: [{ kind: "markdown", text: "Unrelated prose." }],
+      grounding: { kind: "agent_inference" },
+      ctx: clean(),
+    });
+    expect(after.status).toBe("created");
+  });
+
   it("two PLAIN notes may share a title — the fold is a topic-container rule", async () => {
     await seedNote(PS, "Deadlines", "first");
     const second = await seedNote(PS, "Payroll", "second");
