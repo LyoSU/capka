@@ -1067,15 +1067,26 @@
   border-radius: 0;
   padding: 0;
   margin: 0.75rem 0;
+  /* Streamdown's gap-2 between the controls row and the table read as the
+     controls floating in air; a hairline of air is enough to keep them off the
+     header rule. */
+  gap: 0.25rem;
 }
 /* The table's control row (copy/download/fullscreen), when present, is the
-   wrapper's first child with the scroller after it — same faint-at-rest
-   treatment as the code pill above, for the same reason: chrome should not
-   outshout data. `:not(:last-child)` keeps the rule off the scroller when the
-   controls row is absent. */
+   wrapper's first child with the scroller after it. Same rule as the code pill
+   above: chrome must not outshout data. Faint at rest was still three icons
+   hanging above every table, so where a real hover exists they appear on hover
+   or focus only; a touch screen has no hover and keeps them faintly visible so
+   they can be found at all. `:not(:last-child)` keeps the rule off the scroller
+   when the controls row is absent. */
 [data-streamdown="table-wrapper"] > :first-child:not(:last-child) {
   opacity: 0.45;
   transition: opacity 0.15s ease;
+}
+@media (hover: hover) {
+  [data-streamdown="table-wrapper"] > :first-child:not(:last-child) {
+    opacity: 0;
+  }
 }
 [data-streamdown="table-wrapper"]:hover > :first-child:not(:last-child),
 [data-streamdown="table-wrapper"]:focus-within > :first-child:not(:last-child) {
@@ -1118,18 +1129,31 @@
     var(--background);
 }
 [data-streamdown="table"] {
-  /* max-content + min-width:100%: a short table fills the scroller's width, a
-     wide one keeps its natural width and overflows it — the scroller above
-     already has overflow-x-auto from Streamdown — so it scrolls horizontally on
-     a narrow screen instead of crushing every column to fit the bubble.
-     `width:100%` (the old value) forced the squish. */
+  /* Content width, and only content width. The full-column minimum this used
+     to carry stretched every short table across the whole column, and auto table
+     layout hands the slack to the widest column — so a five-column comparison
+     put a void between its fourth and fifth columns and pushed the numbers to
+     the far edge. At its natural width a table reads as a table; a wide one
+     still overflows the scroller (overflow-x-auto from Streamdown) and scrolls
+     on a narrow screen instead of crushing its columns. */
   width: max-content;
-  min-width: 100%;
-  font-size: 0.8125rem;
+  max-width: none;
+}
+/* The header is a rule under the labels, not a band behind them. A grey band
+   across the column is the one slab the graphite palette removed everywhere
+   else, and in a table it outweighs the data it labels. */
+[data-streamdown="table-header"] {
+  background: transparent;
 }
 [data-streamdown="table-header-cell"],
 [data-streamdown="table-cell"] {
-  padding: 0.5rem 0.75rem;
+  /* 15px, one step under the 16px prose: small enough to say "data", not so
+     small as to read as fine print beside the sentence above it. Digits are
+     tabular so a column of numbers lines up by place value. */
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  padding: 0.5rem 1rem 0.5rem 0;
   border-bottom: 1px solid var(--border);
   text-align: left;
   /* .chat-prose sets overflow-wrap:anywhere for running prose; inherited into
@@ -1154,8 +1178,12 @@
 }
 [data-streamdown="table-header-cell"] {
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
+  padding-top: 0.25rem;
+  /* One step stronger than the row hairlines, so the header reads as the
+     table's edge without needing a fill. */
+  border-bottom-color: var(--border-strong);
 }
 
 /* Markdown reading polish for assistant answers. Streamdown ships utility
