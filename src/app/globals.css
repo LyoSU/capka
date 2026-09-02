@@ -425,7 +425,12 @@
   from { opacity: 0; filter: blur(18px); transform: translateY(18px) scale(0.965); }
   to   { opacity: 1; transform: none; }
 }
-.animate-blur-rise { animation: blur-rise 0.5s var(--ease-out) both; }
+/* The delay is a custom property (`[--delay:80ms]` at the call site), not a
+   `[animation-delay:…]` utility: this rule is unlayered and out-ranks every
+   Tailwind utility, so the shorthand's implicit 0s beat the utility and the
+   greeting's stagger never ran. A custom property reaches the shorthand through
+   `var()`, which nothing resets. */
+.animate-blur-rise { animation: blur-rise 0.5s var(--ease-out) var(--delay, 0ms) both; }
 .animate-card-morph { animation: card-morph 0.65s var(--ease-out) both; }
 
 /* Chat message entrance. The chat log is the hottest surface in the app, so

@@ -784,7 +784,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             </div>
 
             {importCardEl}
-            <div className="animate-blur-rise [animation-delay:80ms]">{inputEl}</div>
+            <div className="animate-blur-rise [--delay:80ms]">{inputEl}</div>
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
               {/* The starters collapse away the moment the user starts
@@ -804,7 +804,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       used to sit here repeated the sidebar one-for-one, and the
                       drag-a-file hint was a caption for a feature the drop zone
                       already announces the moment a file crosses the window. */}
-                  <div className="animate-blur-rise pt-8 [animation-delay:200ms]">
+                  <div className="animate-blur-rise pt-8 [--delay:200ms]">
                     <FileTypeSuggestions onPick={fillFromStarter} />
                   </div>
                 </div>
