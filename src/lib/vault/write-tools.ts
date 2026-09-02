@@ -882,6 +882,15 @@ export async function noteWrite(a: {
       // sends a title too, so a topic container renamed onto a subject the space already has
       // raises 23505 at `reviseNote`'s first statement. Caught it is a sentence; uncaught it
       // poisons this transaction, and the caller gets a throw where a refusal belongs.
+      //
+      // NO TEST CAN WITNESS THE SAVEPOINT HERE, and that is a property of this arm rather
+      // than a gap: the `title_taken` return below is immediate, so no statement runs in this
+      // transaction after it, and PostgreSQL answers a COMMIT inside an aborted block with a
+      // silent ROLLBACK rather than an error. Delete the savepoint and every observable
+      // result is identical. It stays because `rename` genuinely needs one — a statement DOES
+      // follow the fold there — and one shape for one hazard is worth more than a line saved
+      // on the arm where the hazard is currently latent. A later edit that adds a statement
+      // after this return would need it, and would not think to add it.
       const upd = await tx
         .transaction((sp) =>
           reviseNote(
