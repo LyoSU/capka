@@ -483,8 +483,24 @@ function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: numb
  * is one client-side state change away. What a button owes a link is the keyboard, and it
  * has it for free.
  *
- * THE PREVIEW IS CLIPPED IN CSS. `line-clamp-1` lands the ellipsis at the column's real
- * width in the reader's own font; a JS slice at N characters is either short of the line or
+ * ONE LINE, FOUR COLUMNS: title, preview, date, chevron. A GRID rather than a stack,
+ * because the three texts answer three different questions and a reader scans DOWN one
+ * column at a time — which subject, what does it say, when did it change. Stacked, the same
+ * three strings read as one paragraph per row and five rows read as a wall.
+ *
+ * `w-[calc(100%+1.5rem)]` is not a decoration and cannot be dropped for `w-full`. A
+ * `<button>` is a form control: it sizes to FIT-CONTENT even with `display: grid`, so
+ * without an explicit width the whole row shrink-wraps to its text and the hover surface
+ * covers a narrow left column. `w-full` alone is also wrong here — with `-mx-3` the box
+ * starts 12px left of the content box and would end 12px short of its right edge, so the
+ * width has to carry both insets.
+ *
+ * TWO LINES BELOW 640px, by moving ONE cell: the date drops to row 2 and the chevron spans
+ * both. Title and preview stay side by side on the first line, so the row still answers
+ * "which subject, what does it say" in one glance on a phone.
+ *
+ * THE PREVIEW IS CLIPPED IN CSS. `truncate` lands the ellipsis at the column's real width
+ * in the reader's own font; a JS slice at N characters is either short of the line or
  * spilling out of it, and it is wrong differently in every locale.
  *
  * A FILE WITH NO TEXT STILL GETS A SECOND LINE, and it says how many facts are filed under
@@ -512,34 +528,35 @@ function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
   const locale = useLocale();
   return (
     <div className="py-1">
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group/topic -mx-3 flex items-center gap-3 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-    >
-      <div className="min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group/topic -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] items-center gap-x-4 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] sm:gap-x-6"
+      >
         {/* Through `Statement`, like every other stored string on this page: a title is
             text somebody or something wrote, and `sensitive` has exactly one reader. */}
-        <Statement value={topic.title} className="font-medium" />
+        <Statement value={topic.title} className="truncate font-medium" />
+        {/* THE FALLBACK IS THE PREVIEW, in the preview's own column — not a third line. A
+            container the agent has written no prose into yet is honestly described by how
+            many facts are filed there, and that is a NUMBER: nothing about it can be
+            sensitive, which the first linked fact's statement very much can be. */}
         {topic.preview.text ? (
-          <Statement
-            value={topic.preview}
-            className="mt-0.5 line-clamp-1 text-[13px] leading-relaxed text-muted-foreground"
-          />
+          <Statement value={topic.preview} className="truncate text-[13px] text-muted-foreground" />
         ) : topic.factsTotal ? (
-          <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+          <p className="truncate text-[13px] text-muted-foreground">
             {t("previewFactCount", { count: topic.factsTotal })}
           </p>
-        ) : null}
-        <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+        ) : (
+          <span />
+        )}
+        <p className="col-start-1 row-start-2 whitespace-nowrap text-[12.5px] text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("updatedOn", { date: formatDay(topic.updatedAt, locale) })}
         </p>
-      </div>
-      <ChevronRight
-        aria-hidden
-        className="size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none group-hover/topic:translate-x-0.5"
-      />
-    </button>
+        <ChevronRight
+          aria-hidden
+          className="col-start-3 row-span-2 row-start-1 size-4 shrink-0 justify-self-end text-muted-foreground transition-transform motion-reduce:transition-none group-hover/topic:translate-x-0.5 sm:col-start-4 sm:row-span-1"
+        />
+      </button>
     </div>
   );
 }
