@@ -205,11 +205,16 @@ describe("str_replace", () => {
     expect(r).toEqual({ ok: false, reason: "bad_link" });
   });
 
-  it("a title in new_str that old_str did not carry stays TEXT, and mints no second token", () => {
+  it("a title new_str names that old_str did NOT carry stays text — the bound is the carried set", () => {
     // §4.6: the model cannot type a persistent link, and the tool description says so in
     // those words. Mapping every rendered title in `new_str` broke that for one arm: an edit
     // to a sentence elsewhere in the file could plant a SECOND copy of a token the body
     // already held, just by naming the target's title.
+    //
+    // THE BOUND IS THE CARRIED SET, not a count. A title `old_str` DID carry may appear as
+    // many times as `new_str` names it — an edit splitting one sentence into two may
+    // legitimately mention the link in both halves — so "no second token" is a property of
+    // the UNCARRIED title this case uses and not of the rule.
     const stored = `Intro ${edgeToken(E1)} outro. Tail sentence.`;
     const r = applyStrReplace({
       storedBody: stored,
