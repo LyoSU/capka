@@ -2076,7 +2076,12 @@
       "navigation": "Навігація",
       "preferences": "Параметри",
       "shortcuts": "Гарячі клавіші",
-      "settings": "Налаштування"
+      "settings": "Знайти налаштування"
+    },
+    "hints": {
+      "navigate": "перейти",
+      "open": "відкрити",
+      "close": "закрити"
     },
     "newChat": "Новий чат",
     "projects": "Проєкти",

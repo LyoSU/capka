@@ -2076,7 +2076,12 @@
       "navigation": "Navigation",
       "preferences": "Preferences",
       "shortcuts": "Keyboard shortcuts",
-      "settings": "Settings"
+      "settings": "Find a setting"
+    },
+    "hints": {
+      "navigate": "navigate",
+      "open": "open",
+      "close": "close"
     },
     "newChat": "New chat",
     "projects": "Projects",

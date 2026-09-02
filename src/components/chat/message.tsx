@@ -471,11 +471,16 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
       <div className={`rounded-lg px-2.5 py-1.5 ${isError ? "bg-destructive/10" : "bg-muted/50"}`}>
         {/* tabIndex on a scrollable region: without it a keyboard user cannot reach
             the part of a long output that is scrolled out of view (WCAG 2.1 AA). */}
+        {/* A tool that answered in a sentence gets the body face at reading size,
+            in ink: "Saved to memory" is a reply to the reader, not machine text,
+            and setting it small, grey and monospaced told them to skip the one
+            line that says what happened. Mono stays for bytes — command output,
+            file contents, a JSON value. */}
         <pre
           tabIndex={0}
           className={`max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
-            mono || pretty ? "font-mono text-[11px]" : "text-xs"
-          } ${isError ? "text-destructive" : "text-muted-foreground"}`}
+            mono || pretty ? "font-mono text-[11px] text-muted-foreground" : "font-sans text-sm text-foreground"
+          } ${isError ? "text-destructive" : ""}`}
         >
           {preBody}
         </pre>

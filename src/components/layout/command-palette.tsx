@@ -12,6 +12,18 @@ import {
   FolderKanban,
   Keyboard,
   Search,
+  Link2,
+  Brain,
+  Sparkles,
+  CalendarClock,
+  Bot,
+  Users,
+  Wallet,
+  Lock,
+  BarChart3,
+  ScrollText,
+  Download,
+  type LucideIcon,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -20,6 +32,7 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
+  CommandKbd,
   CommandShortcut,
   CommandSeparator,
 } from "@/components/ui/command";
@@ -29,6 +42,26 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useBilling } from "@/hooks/use-billing";
 import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { SETTINGS_DIRECTORY, visibleSettings } from "@/lib/settings-directory";
+
+/** The glyph of the settings page a row lives on — the same icons the settings
+ *  sidebar draws for those pages, so a palette result and the page it opens look
+ *  alike. A column of identical gears said nothing about where each row went. */
+const PAGE_ICONS: [string, LucideIcon][] = [
+  ["/settings/connections", Link2],
+  ["/settings/memory", Brain],
+  ["/settings/skills", Sparkles],
+  ["/settings/automations", CalendarClock],
+  ["/settings/agent", Bot],
+  ["/settings/users", Users],
+  ["/settings/billing", Wallet],
+  ["/settings/security", Lock],
+  ["/settings/usage", BarChart3],
+  ["/settings/activity", ScrollText],
+  ["/settings/updates", Download],
+];
+function pageIcon(href: string): LucideIcon {
+  return PAGE_ICONS.find(([prefix]) => href.startsWith(prefix))?.[1] ?? Settings;
+}
 
 export function CommandPalette() {
   const t = useTranslations("commandPalette");
@@ -92,7 +125,7 @@ export function CommandPalette() {
 
         <CommandGroup heading={t("groups.chat")}>
           <CommandItem onSelect={() => run(() => router.push(`/chat/${nanoid()}`))}>
-            <MessageSquarePlus className="mr-2 h-4 w-4" />
+            <MessageSquarePlus />
             {t("newChat")}
             <CommandShortcut>{key("N")}</CommandShortcut>
           </CommandItem>
@@ -100,11 +133,11 @@ export function CommandPalette() {
 
         <CommandGroup heading={t("groups.navigation")}>
           <CommandItem onSelect={() => run(() => router.push("/projects"))}>
-            <FolderKanban className="mr-2 h-4 w-4" />
+            <FolderKanban />
             {t("projects")}
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings"))}>
-            <Settings className="mr-2 h-4 w-4" />
+            <Settings />
             {t("settings")}
           </CommandItem>
         </CommandGroup>
@@ -115,7 +148,9 @@ export function CommandPalette() {
             Integrations: a second, shorter list of the same places, which could
             only ever fall behind the first. */}
         <CommandGroup heading={t("groups.settings")}>
-          {visibleSettings(SETTINGS_DIRECTORY, { isAdmin, ownKeysAllowed: billing?.ownKeysAllowed ?? false }).map((entry) => (
+          {visibleSettings(SETTINGS_DIRECTORY, { isAdmin, ownKeysAllowed: billing?.ownKeysAllowed ?? false }).map((entry) => {
+            const Icon = pageIcon(entry.href);
+            return (
             <CommandItem
               key={`${entry.href}-${entry.label}`}
               // cmdk matches on the item's own text; the synonyms someone actually
@@ -123,21 +158,22 @@ export function CommandPalette() {
               keywords={entry.keywordsKey ? tRoot(entry.keywordsKey).split(/\s+/) : undefined}
               onSelect={() => run(() => router.push(entry.href))}
             >
-              <Settings className="mr-2 h-4 w-4" />
+              <Icon />
               {tRoot(entry.label)}
               <span className="ml-auto text-xs text-muted-foreground">{tRoot(entry.page)}</span>
             </CommandItem>
-          ))}
+            );
+          })}
         </CommandGroup>
 
         <CommandGroup heading={t("groups.preferences")}>
           <CommandItem onSelect={() => run(toggleSidebar)}>
-            <PanelLeft className="mr-2 h-4 w-4" />
+            <PanelLeft />
             {t("toggleSidebar")}
             <CommandShortcut>{key("B")}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => run(cycleTheme)}>
-            <Moon className="mr-2 h-4 w-4" />
+            <Moon />
             {t("toggleTheme")}
           </CommandItem>
         </CommandGroup>
@@ -146,27 +182,34 @@ export function CommandPalette() {
 
         <CommandGroup heading={t("groups.shortcuts")}>
           <CommandItem disabled>
-            <Keyboard className="mr-2 h-4 w-4" />
+            <Keyboard />
             {t("commandPalette")}
             <CommandShortcut>{key("K")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
-            <MessageSquarePlus className="mr-2 h-4 w-4" />
+            <MessageSquarePlus />
             {t("newChat")}
             <CommandShortcut>{key("N")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
-            <PanelLeft className="mr-2 h-4 w-4" />
+            <PanelLeft />
             {t("toggleSidebar")}
             <CommandShortcut>{key("B")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
-            <Search className="mr-2 h-4 w-4" />
+            <Search />
             {t("searchChats")}
             <CommandShortcut>{key("F", true)}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
       </CommandList>
+      {/* The three keys the palette answers to, named once at the foot. It is what
+          tells a first-time reader this is a launcher and not a search box. */}
+      <div className="flex items-center gap-4 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5"><CommandKbd>↑↓</CommandKbd>{t("hints.navigate")}</span>
+        <span className="flex items-center gap-1.5"><CommandKbd>↵</CommandKbd>{t("hints.open")}</span>
+        <span className="ml-auto flex items-center gap-1.5"><CommandKbd>esc</CommandKbd>{t("hints.close")}</span>
+      </div>
     </CommandDialog>
   );
 }
