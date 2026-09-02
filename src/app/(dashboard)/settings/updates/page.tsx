@@ -134,7 +134,7 @@ export default function UpdatesSettingsPage() {
               )}
             </div>
             {status.notes && (
-              <div className="chat-prose mt-2 max-h-48 overflow-y-auto rounded-lg bg-field p-3 text-[13px] text-muted-foreground">
+              <div className="chat-prose mt-2 max-h-48 overflow-y-auto rounded-lg bg-muted p-3 text-[13px] text-muted-foreground">
                 <Markdown>{status.notes}</Markdown>
               </div>
             )}
@@ -156,7 +156,7 @@ export default function UpdatesSettingsPage() {
 
       {/* How to update */}
       <SettingsSection title={t("howTo")} description={t("howToHint")}>
-        <div className="flex items-center gap-2 rounded-xl bg-field p-1.5 pl-3.5 shadow-hairline">
+        <div className="flex items-center gap-2 rounded-xl bg-muted p-1.5 pl-3.5">
           <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px]">{UPDATE_CMD}</code>
           <Button variant="ghost" size="sm" onClick={copy} className="shrink-0 text-muted-foreground">
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

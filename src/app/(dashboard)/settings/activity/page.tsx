@@ -52,10 +52,10 @@ const GROUP_ICON: Record<Exclude<Category, "all">, typeof UserCog> = {
    lets a future category that IS a state (a blocked action, say) take
    `text-destructive-text` without unpicking the call site. */
 const GROUP_TINT: Record<Exclude<Category, "all">, string> = {
-  people: "bg-field text-muted-foreground",
-  extensions: "bg-field text-muted-foreground",
-  settings: "bg-field text-muted-foreground",
-  security: "bg-field text-muted-foreground",
+  people: "bg-muted text-muted-foreground",
+  extensions: "bg-muted text-muted-foreground",
+  settings: "bg-muted text-muted-foreground",
+  security: "bg-muted text-muted-foreground",
 };
 
 export default function ActivityPage() {
@@ -190,7 +190,7 @@ export default function ActivityPage() {
                           {actionLabel(e.action)}
                           {target ? <span className="font-medium"> {target}</span> : null}
                           {cs.map((c) => (
-                            <span key={c} className="ml-1.5 rounded-md bg-field px-1.5 py-0.5 text-xs text-muted-foreground">{c}</span>
+                            <span key={c} className="ml-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{c}</span>
                           ))}
                         </p>
                         <p className="mt-0.5 flex items-center text-[13px] text-muted-foreground">

@@ -201,7 +201,7 @@ export function PluginReviewPanel({
           {review.surface.connectors.map((c) => {
             const exec = byName.get(c.name);
             return (
-              <div key={c.originKey} className="space-y-0.5 rounded-lg bg-field p-2">
+              <div key={c.originKey} className="space-y-0.5 rounded-lg bg-muted p-2">
                 <p className="font-medium">{c.name}</p>
                 {c.endpoint && (
                   <p className="break-all text-muted-foreground">
@@ -222,7 +222,7 @@ export function PluginReviewPanel({
             );
           })}
           {review.surface.skills.map((s) => (
-            <div key={s.name} className="rounded-lg bg-field p-2">
+            <div key={s.name} className="rounded-lg bg-muted p-2">
               <p className="font-medium">{s.name}</p>
               <p className="font-mono text-muted-foreground">{s.originPath}</p>
             </div>

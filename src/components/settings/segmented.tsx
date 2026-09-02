@@ -15,9 +15,11 @@ import { cn } from "@/lib/utils";
  * picks a value. Those are different promises and the control has to make the
  * right one, even though they look alike.
  *
- * Depth carries the state (`bg-field` recesses the track, `shadow-btn` lifts the
+ * Depth carries the state (`bg-muted` recesses the track, `shadow-btn` lifts the
  * selection) rather than colour alone — the same material logic as the thinking
- * slider's knob.
+ * slider's knob. `bg-muted`, not `bg-field`: the field token is the page's
+ * WHITEST value now, so a track painted with it was a white pill with a white
+ * knob in it, and the knob had nothing to rise from.
  */
 export function Segmented<K extends string>({
   value,
@@ -51,7 +53,7 @@ export function Segmented<K extends string>({
   const cell = size === "sm" ? "rounded px-2.5 py-1 text-sm" : "rounded-md px-3 py-1.5 text-sm";
 
   return (
-    <div role={as} aria-label={label} className={cn("inline-flex rounded-lg bg-field", pad)}>
+    <div role={as} aria-label={label} className={cn("inline-flex rounded-lg bg-muted", pad)}>
       {options.map((option) => {
         const on = value === option.key;
         return (

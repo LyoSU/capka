@@ -277,7 +277,7 @@ export default function InstalledPlugins() {
               </div>
             )}
             {inFlight && (
-              <div className="flex items-start gap-2 rounded-lg bg-field p-3 text-xs text-muted-foreground">
+              <div className="flex items-start gap-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
                 <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
                 <div>
                   <p className="font-medium text-foreground">

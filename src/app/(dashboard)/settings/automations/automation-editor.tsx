@@ -129,7 +129,7 @@ export function AutomationEditor({
             <p className="text-sm font-medium">{t("scheduleLabel")}</p>
 
             {schedule.freq === "custom" && !scheduleTouched && (
-              <div className="space-y-1.5 rounded-xl bg-field px-4 py-3">
+              <div className="space-y-1.5 rounded-xl bg-muted px-4 py-3">
                 <p className="font-mono text-xs">{schedule.cron}</p>
                 <p className="text-xs text-muted-foreground">{t("customScheduleHint")}</p>
               </div>

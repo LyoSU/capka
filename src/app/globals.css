@@ -195,11 +195,16 @@
          1.05:1 against the page), so the edge was the SECOND full-strength signal
          for one job, and the control read as an outlined slab.
        0.72 — one cue at full strength, one supporting it.
+       `--border-strong` (1.70:1) — the button's own edge. A field and a button
+         are both "a control on the page" (`--elev-btn` draws its ring with this
+         very value), and at 0.72 a row of three budget fields read louder than
+         the Save button beside them. One edge weight for every control; the
+         white fill carries the rest of the job.
      This does not meet 1.4.11's 3:1, and takes that Success Criterion's own
      exemption for a control whose visible text — a value or a placeholder, and
      ours always has one — identifies it without relying on the boundary. The
      exemption does NOT cover the focus indicator: `--ring` stays at 3.30:1. */
-  --input: oklch(0.72 0.006 85);
+  --input: var(--border-strong);
   /* A second, more assertive hairline. `--border` is the quiet divider inside a
      surface; this is the one that has to hold the *outer* edge of a control
      against the page, where the softer value reads as an unfinished button. */
@@ -350,7 +355,7 @@
      rather than an opaque grey because a field lands on four different surface
      lightnesses here (see `--field` below), so no single opaque value is right on
      more than one of them. */
-  --input: oklch(1 0 0 / 0.28);
+  --input: var(--border-strong);
   --border-strong: oklch(1 0 0 / 0.17);
   /* Both of these are ALPHA, not fixed greys, and for the same reason: they have
      to land on four different surface lightnesses (sidebar 0.186 < bg 0.213 <
