@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { vaultEdges, vaultNodes } from "@/lib/db/schema";
@@ -152,6 +152,39 @@ export async function unlinkContainsInto(claimId: string, spaceId: string, ex: E
         eq(vaultEdges.toNodeId, claimId),
         eq(vaultEdges.relation, "contains"),
         isNull(vaultEdges.deletedAt),
+      ),
+    );
+}
+
+/**
+ * THE inverse of `linkNodes` for the `references` edges a NOTE REVISION no longer mentions.
+ *
+ * A revision replaces a note's whole body, so a link the new body does not carry is a link
+ * the note no longer makes — and an edge that outlived its token is the "edge without its
+ * block" half of §4.8's invariant, arriving from the other side. It is a set operation for
+ * the same reason `unlinkContainsInto` is one: the body is rewritten in a single statement,
+ * so the edges have to move in a single statement or a reader can see the two disagree.
+ *
+ * `keepTargets` is the NEW body's target list, so re-linking a target that survived closes
+ * nothing — `linkNodes` then finds the live edge and returns its id, which is what keeps the
+ * stored token byte-identical across a revision that did not touch that link.
+ */
+export async function unlinkReferencesFrom(
+  noteId: string,
+  spaceId: string,
+  keepTargets: string[],
+  ex: Ex,
+): Promise<void> {
+  await ex
+    .update(vaultEdges)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(
+        eq(vaultEdges.spaceId, spaceId),
+        eq(vaultEdges.fromNodeId, noteId),
+        eq(vaultEdges.relation, "references"),
+        isNull(vaultEdges.deletedAt),
+        ...(keepTargets.length ? [notInArray(vaultEdges.toNodeId, keepTargets)] : []),
       ),
     );
 }

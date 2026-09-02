@@ -45,8 +45,53 @@ import { spaceAcceptsWrites, type Ex } from "./spaces";
  *  truncated by every surface that shows it anyway. */
 export const NOTE_TITLE_MAX_CHARS = 160;
 
+/**
+ * WHAT ONE TOOL CALL MAY WRITE INTO A BODY, as a schema bound rather than a clamp.
+ *
+ * A note body is the one kind of stored text this system means to be long, so there is no
+ * `fitStatement` for it — but "long" is not "unbounded". The vault's turn budget bounds what
+ * a tool HANDS BACK and says nothing about what a tool STORES, and the stored bytes are
+ * re-read on every later `memory_open` and re-indexed on every revision.
+ *
+ * A bound on the SCHEMA rather than a truncation in the writer, because truncating a note
+ * mid-sentence and reporting success is worse than refusing the call: the provider corrects
+ * a schema violation before a database is touched, and the model still has a next step in
+ * which to split the note in two.
+ *
+ * §4.6 states no bound of its own; these are this implementation's, and the pair is chosen so
+ * the worst case (40,000 characters) stays a handful of `MEMORY_OPEN_MAX_BYTES` pages rather
+ * than an unpaginable wall.
+ */
+export const NOTE_BLOCK_MAX_CHARS = 2_000;
+export const NOTE_BLOCKS_MAX = 20;
+
 export function fitNoteTitle(raw: string): string {
   return raw.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, NOTE_TITLE_MAX_CHARS);
+}
+
+/**
+ * A BODY, or a function that computes one from the note's OWN id.
+ *
+ * The callback exists for exactly one caller shape and it is the one §4.6 and §4.8 fix the
+ * write order for: a body carrying canonical edge tokens cannot be known before the note
+ * exists, because a `references` edge needs its FROM-node — this note — to be a row already.
+ * So the order inside both writers is node -> note shell -> (the caller creates its edges
+ * here) -> serialize -> version, and this parameter is where the middle step lands.
+ *
+ * It runs INSIDE the writer's transaction, after the row that makes an edge legal and before
+ * the version that names one. A caller doing the same thing by hand would be a third writer
+ * of a `vault_notes` row, which is the count `insertNoteVersion` exists to keep at two.
+ */
+export type NoteBody = string | ((noteId: string) => Promise<string>);
+
+/** The compatibility column is dual-written with the version body, so a computed body has to
+ *  land on it too — one extra statement, and only on the callback path. It is not folded into
+ *  the CAS or the shell insert because the value does not exist yet at either. */
+async function resolveBody(body: NoteBody, noteId: string, ex: Ex): Promise<string> {
+  if (typeof body === "string") return body;
+  const resolved = await body(noteId);
+  await ex.update(vaultNotes).set({ body: resolved }).where(eq(vaultNotes.id, noteId));
+  return resolved;
 }
 
 /** A note as a reader that is about to DECIDE something needs it: the head version's
@@ -145,7 +190,7 @@ export async function createNote(
   a: {
     spaceId: string;
     title: string;
-    bodyMarkdown: string;
+    bodyMarkdown: NoteBody;
     kind?: "note" | "memory_topic" | "index";
     topicKey?: string | null;
     sourceClass: ServerClass;
@@ -169,7 +214,7 @@ export async function createNote(
     // and what `uniq_vnotes_topic_title` folds, and `body` is what the memory page and the
     // export still read. The head version is authoritative for content from here on.
     title,
-    body: a.bodyMarkdown,
+    body: typeof a.bodyMarkdown === "string" ? a.bodyMarkdown : "",
     kind: a.kind ?? "note",
     topicKey: a.topicKey ?? null,
     currentRevision: 1,
@@ -177,12 +222,15 @@ export async function createNote(
     // by a trigger and never by a backfill (§4.5 step 8).
     expiresAt: horizonFor(a.sourceClass),
   });
+  // The caller's edges are created HERE, between the row that makes one legal and the
+  // version that names one. See `NoteBody`.
+  const bodyMarkdown = await resolveBody(a.bodyMarkdown, id, ex);
   const v = await insertNoteVersion(
     {
       noteId: id,
       revision: 1,
       title,
-      bodyMarkdown: a.bodyMarkdown,
+      bodyMarkdown,
       sourceClass: a.sourceClass,
       sensitive: a.sensitive,
       provenance: a.provenance,
@@ -224,7 +272,7 @@ export async function reviseNote(
     spaceId: string;
     expectedRevision: number;
     title: string;
-    bodyMarkdown: string;
+    bodyMarkdown: NoteBody;
     sourceClass: ServerClass;
     sensitive?: boolean;
     provenance: Record<string, unknown>;
@@ -246,7 +294,7 @@ export async function reviseNote(
     .set({
       currentRevision: revision,
       title,
-      body: a.bodyMarkdown,
+      body: typeof a.bodyMarkdown === "string" ? a.bodyMarkdown : "",
       updatedAt: new Date(),
       expiresAt: horizonFor(a.sourceClass),
     })
@@ -266,12 +314,15 @@ export async function reviseNote(
       .limit(1);
     return { ok: false, currentRevision: cur?.revision ?? 0, currentTitle: cur?.title ?? "" };
   }
+  // AFTER the CAS, never before it: a lost CAS must write nothing at all, and the caller's
+  // callback is where its `references` edges are created (§4.8). See `NoteBody`.
+  const bodyMarkdown = await resolveBody(a.bodyMarkdown, a.noteId, ex);
   const v = await insertNoteVersion(
     {
       noteId: a.noteId,
       revision,
       title,
-      bodyMarkdown: a.bodyMarkdown,
+      bodyMarkdown,
       sourceClass: a.sourceClass,
       sensitive: a.sensitive,
       provenance: a.provenance,

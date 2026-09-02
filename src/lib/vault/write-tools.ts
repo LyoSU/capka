@@ -1,5 +1,7 @@
+import { and, eq, isNull } from "drizzle-orm";
 import type { TurnTaint } from "@/lib/tasks/turn-taint";
 import { db } from "@/lib/db";
+import { vaultEdges } from "@/lib/db/schema";
 import type { VaultBudget } from "./budget";
 import {
   createClaim,
@@ -11,15 +13,17 @@ import {
   type PromptAccess,
   type SourceClass,
 } from "./claims";
+import { linkNodes, unlinkReferencesFrom } from "./edges";
 import { classify, type Grounding } from "./grounding";
 import type { HandleMap } from "./handles";
-import { noteHead } from "./notes";
+import { appendLinkBlock, serializeBlocks, type NoteBlock } from "./links";
+import { createNote, noteHead, reviseNote } from "./notes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 import { resolveTopic } from "./topics";
 
 /**
- * THE WRITE HALF OF THE MEMORY TOOLS — `memory_fact_write` today, the note/file/link
- * writers as slice 2 continues.
+ * THE WRITE HALF OF THE MEMORY TOOLS — `memory_fact_write`, `memory_note_write` and
+ * `memory_link`, with `memory_file` and `memory_forget` beside them.
  *
  * It is a module of its own rather than three hundred more lines in `tools.ts` because the
  * two halves answer different questions: `tools.ts` decides what the model may SEE, and
@@ -232,6 +236,30 @@ const badHandle = (bad: string[]): FactWriteResult => ({
   said: `${SAID.bad_handle} Unusable: ${bad.join(", ")}.`,
 });
 
+/** THE ADDRESS IS RESOLVED BEFORE ANYTHING IS DECIDED, and an unresolvable one rejects the
+ *  WHOLE mutation (§4.1). Shared by both writers because both compute a class from the same
+ *  fold and neither may proceed with a hole: a fact or a note saved with part of its
+ *  grounding silently gone is a row at a class nobody asked for.
+ *
+ *  It returns EVERY bad handle rather than the first, so one call tells the model which of
+ *  its addresses to re-search rather than one per round trip. */
+async function resolveGrounding(
+  g: GroundingInput,
+  ctx: WriteCtx,
+  allowedSpaceIds: string[],
+  ex: Ex,
+): Promise<{ ok: true; grounding: Grounding } | { ok: false; bad: string[] }> {
+  if (g.kind !== "retrieved") return { ok: true, grounding: g };
+  const classes: SourceClass[] = [];
+  const bad: string[] = [];
+  for (const h of g.handles) {
+    const cls = await classOfHandle(h, ctx, allowedSpaceIds, ex);
+    if (cls) classes.push(cls);
+    else bad.push(h);
+  }
+  return bad.length ? { ok: false, bad } : { ok: true, grounding: { kind: "retrieved", classes } };
+}
+
 /**
  * `memory_fact_write`, as §4.5 defines it.
  *
@@ -316,20 +344,9 @@ export async function factWrite(a: {
       target = { id: head.id, revision: head.revision, sourceClass: head.sourceClass };
     }
 
-    let grounding: Grounding;
-    if (a.grounding.kind === "retrieved") {
-      const classes: SourceClass[] = [];
-      const bad: string[] = [];
-      for (const h of a.grounding.handles) {
-        const cls = await classOfHandle(h, ctx, allowedSpaceIds, tx);
-        if (cls) classes.push(cls);
-        else bad.push(h);
-      }
-      if (bad.length) return badHandle(bad);
-      grounding = { kind: "retrieved", classes };
-    } else {
-      grounding = a.grounding;
-    }
+    const resolved = await resolveGrounding(a.grounding, ctx, allowedSpaceIds, tx);
+    if (!resolved.ok) return badHandle(resolved.bad);
+    const grounding: Grounding = resolved.grounding;
 
     // STEP 1 — resolve the grounding to a CLASS. Rule 1's four clauses for a quote, the
     // least-trusted of the resolved handles for `retrieved`, the taint-capped floor for an
@@ -508,9 +525,13 @@ export async function factWrite(a: {
       };
     }
 
-    // `prompt_access` is READ BACK rather than computed: the column is generated, and a
-    // second expression for it in a tool return is the drift `accessOf` is pinned against.
-    // The head is the row this transaction just wrote.
+    // `prompt_access` is READ BACK rather than computed: the column is generated, so the
+    // value on this return is the database's own answer and not a second expression for it
+    // written here. (The `accessOf` helper this comment used to name was DELETED in review
+    // MED-2, along with the class→channel table inside it — there is nothing left to pin,
+    // which is the point. `model-view.test.ts`'s `promptAccess` roster is what keeps this
+    // file's only use of that vocabulary a read.) The head is the row this transaction just
+    // wrote.
     const head = await findCurrentHead(claim.id, [spaceId], tx);
     // The row this transaction just wrote is unreadable from inside the same transaction:
     // that is not a status, it is a broken invariant, and rolling the write back is the
@@ -534,4 +555,478 @@ export async function factWrite(a: {
       said: `${SAID[status]} ${filed}`,
     };
   });
+}
+
+/* ------------------------------------------------------------------------------------------
+ * NOTES — `memory_note_write` and `memory_link` (§4.6, §4.8)
+ * ---------------------------------------------------------------------------------------- */
+
+export type NoteWriteStatus =
+  | "created"
+  | "updated"
+  | "downgraded"
+  | "topic_secret_fallback"
+  | "revision_mismatch"
+  | "refused_scope"
+  | "refused_no_project"
+  | "refused_weaker_class"
+  | "refused_untrusted_turn"
+  | "retired"
+  | "bad_handle";
+
+/**
+ * THE MODEL'S FEEDBACK ON A NOTE WRITE, and the two refusals are the interesting half.
+ *
+ * §4.6 says "scope, grounding, taint, conflict and `expires_at` rules are §4.5's, evaluated
+ * in the same order", and a note CANNOT hold a conflict: `conflicts_with` is a `vault_claims`
+ * column with a composite FK to a claim, and neither `vault_notes` nor
+ * `vault_note_versions` has an equivalent. So the one arm §4.5 answers with
+ * `recorded_conflict` — a correction that may not supersede — has nowhere to land here, and
+ * a new revision IS a supersede: it replaces the head the manifest and every search read.
+ *
+ * Bound 4 of §10.1 is unconditional about that: an untrusted or weaker write "cannot
+ * supersede a trusted claim — not at a weaker class, and not at ANY class in the turn that
+ * read it". With no conflict row to degrade into, the only implementation of that bound for a
+ * note is a REFUSAL, and both sentences therefore say what the model can do instead — write a
+ * new note, which is additive and visible, and which it is not being stopped from doing.
+ */
+export const NOTE_SAID: Record<NoteWriteStatus, string> = {
+  created: "Saved as a note.",
+  updated: "Updated the note. The previous version is kept as history.",
+  downgraded: "Saved, but not as something the user stated - recorded as your conclusion.",
+  topic_secret_fallback: "The topic name looked like a credential, so it was filed under General instead.",
+  revision_mismatch: "That note has moved on. Run memory_search and re-issue against what is there.",
+  refused_scope:
+    "A note based on a document or a web page cannot be saved as personal memory. Save it to the project, or write it as your own conclusion.",
+  refused_no_project:
+    "This chat is not inside a project, so there is no project memory to save to, and nowhere to store knowledge taken from documents or web pages. Nothing was saved.",
+  refused_weaker_class:
+    "That note carries more authority than this write does, so it was not changed. Write a new note instead and the user will see both.",
+  refused_untrusted_turn:
+    "This turn read a document or a web page, so an existing note cannot be rewritten in it. Nothing was changed - write a new note instead.",
+  retired: "This project's memory was deleted. Nothing was saved.",
+  bad_handle: "That address is not from this conversation's search results. Run memory_search and use a handle it returned.",
+};
+
+/** The sentence an `untrusted_derived` note carries, and it is the one thing about a note
+ *  write the model most needs to know: the note exists, it is findable, and it will not
+ *  assert itself in a later chat.
+ *
+ *  §4.6's own example ends "— you will find it with knowledge_search". That half is NOT
+ *  shipped here, for the reason `ABSENCE_NOTE` in `tools.ts` drops the same clause: naming a
+ *  tool the turn does not hold teaches the model to report a search it could not run.
+ *  `knowledge_search` is slice 3 and the clause joins this sentence with it. */
+const UNTRUSTED_NOTE_NOTICE = "It will not be asserted in future chats on its own.";
+
+export type NoteWriteResult =
+  | {
+      status: "created" | "updated" | "downgraded" | "topic_secret_fallback";
+      handle: string;
+      revision: number;
+      /** Edges this write INSERTED. A link the previous revision already carried keeps its
+       *  edge — and therefore its token, byte for byte — so it is not counted again. */
+      linksCreated: number;
+      /** The topic's HANDLE, never its id. */
+      filedUnder: string;
+      sourceClass: SourceClass;
+      promptAccess: PromptAccess;
+      said: string;
+    }
+  /** The CURRENT revision, and deliberately not the current title (§4.6 asks for both). A
+   *  note title is model-facing text and `model-view.ts` owns every route to it; handing one
+   *  back from a row this module read would be the twelfth instance of the defect that module
+   *  exists to prevent. The revision is a number, which is what the model needs to re-issue.
+   *  `memory_open` is the reader that may show the title (T12). */
+  | { status: "revision_mismatch"; revision: number; said: string }
+  | {
+      status: "refused_scope" | "refused_no_project" | "refused_weaker_class" | "refused_untrusted_turn" | "retired" | "bad_handle";
+      said: string;
+    };
+
+const badNoteHandle = (bad: string[]): NoteWriteResult => ({
+  status: "bad_handle",
+  said: `${NOTE_SAID.bad_handle} Unusable: ${bad.join(", ")}.`,
+});
+
+/**
+ * A LINK TARGET, resolved to a node id in THIS space.
+ *
+ * `m` and `n` only: §2.4 runs `references` from a note to a note, a claim or a source, and an
+ * `f` handle has no writer before slice 3 — so a target this slice can resolve is a fact or a
+ * note. An `e` or a `g` handle is not a node at all.
+ *
+ * THE SPACE IS THE NOTE'S, not the caller's allowed list, and that is a fence rather than a
+ * convenience: `vault_edges`' composite FKs make a cross-space edge unrepresentable, so a
+ * foreign target would fail at the statement with a 23503 in the middle of a write — while
+ * checking it here rejects the whole mutation with a sentence, before anything is written.
+ * Both are the boundary; only one of them is an answer.
+ */
+async function linkTargetId(
+  handle: string,
+  ctx: WriteCtx,
+  spaceId: string,
+  ex: Ex,
+): Promise<string | null> {
+  const t = ctx.handles.resolve(handle);
+  if (!t || t.spaceId !== spaceId) return null;
+  if (t.kind === "m") return (await findCurrentHead(t.nodeId, [spaceId], ex))?.id ?? null;
+  if (t.kind === "n") return (await noteHead(t.nodeId, [spaceId], ex))?.id ?? null;
+  return null;
+}
+
+/**
+ * `memory_note_write`, as §4.6 defines it — §4.5's nine steps, on a note.
+ *
+ * WHAT IS DELIBERATELY ABSENT, so nobody reads the shorter body as an oversight:
+ *
+ *   step 4 (dedup) — `normalized_hash` is a `vault_claims` column and there is no note
+ *     equivalent. §8's automatic dedup covers topic titles, claims and file hashes, and a
+ *     note body is none of those. Two notes saying the same thing is a §8 SUGGESTION, never
+ *     a merge.
+ *   step 5 (conflict) — see `NOTE_SAID`: a note cannot store a conflict, so both supersede
+ *     conditions are refusals here.
+ *   `sensitive` — no parameter, because §4.6 has none. `insertNoteVersion` screens the title
+ *     and the body anyway, which is the same write-time screen the claim writers hold.
+ */
+export async function noteWrite(a: {
+  op:
+    | { kind: "create"; scope: "user" | "project" }
+    | { kind: "update"; noteHandle: string; expectedRevision: number };
+  title: string;
+  content: NoteBlock[];
+  grounding: GroundingInput;
+  topic?: string;
+  ctx: WriteCtx;
+}): Promise<NoteWriteResult> {
+  const { ctx } = a;
+  const allowedSpaceIds = ctx.projectSpaceId ? [ctx.userSpaceId, ctx.projectSpaceId] : [ctx.userSpaceId];
+
+  // Where this write lands, decided before a transaction is opened — the same shape, and the
+  // same reasons, as `factWrite`'s. An update lands where the note it revises lives; it does
+  // not get to choose, which is what makes step 3 cover both arms with one line.
+  const updating = a.op.kind === "update" ? a.op : null;
+  let spaceId: string;
+  if (a.op.kind === "create") {
+    if (a.op.scope === "project" && !ctx.projectSpaceId) {
+      return { status: "refused_no_project", said: NOTE_SAID.refused_no_project };
+    }
+    spaceId = a.op.scope === "project" ? (ctx.projectSpaceId as string) : ctx.userSpaceId;
+  } else {
+    const t = ctx.handles.resolve(a.op.noteHandle);
+    // `n` only: a claim is addressed by `memory_fact_write`, and answering a claim handle
+    // with a note write would store prose where the model pointed at a fact.
+    if (!t || t.kind !== "n" || !allowedSpaceIds.includes(t.spaceId)) return badNoteHandle([a.op.noteHandle]);
+    spaceId = t.spaceId;
+  }
+
+  return db.transaction(async (tx): Promise<NoteWriteResult> => {
+    // STEP 9, first statement, for the lock order every vault writer states.
+    if (!(await spaceAcceptsWrites(spaceId, tx))) return { status: "retired", said: NOTE_SAID.retired };
+
+    let head: Awaited<ReturnType<typeof noteHead>> = null;
+    if (updating) {
+      head = await noteHead(ctx.handles.resolve(updating.noteHandle)!.nodeId, [spaceId], tx);
+      // Forgotten since the handle was minted. Not `revision_mismatch`: that status carries
+      // "it is now at revision N", and there is no N.
+      if (!head) return badNoteHandle([updating.noteHandle]);
+      if (head.revision !== updating.expectedRevision) {
+        return { status: "revision_mismatch", revision: head.revision, said: NOTE_SAID.revision_mismatch };
+      }
+    }
+
+    // §4.1 for the LINK targets, before anything is decided and before anything is written.
+    // A note is never saved with half its links.
+    const targetIds = new Map<string, string>();
+    const badTargets: string[] = [];
+    for (const block of a.content) {
+      if (block.kind !== "node_link" || targetIds.has(block.targetHandle)) continue;
+      const id = await linkTargetId(block.targetHandle, ctx, spaceId, tx);
+      if (id) targetIds.set(block.targetHandle, id);
+      else badTargets.push(block.targetHandle);
+    }
+    if (badTargets.length) return badNoteHandle(badTargets);
+
+    const resolved = await resolveGrounding(a.grounding, ctx, allowedSpaceIds, tx);
+    if (!resolved.ok) return badNoteHandle(resolved.bad);
+
+    // STEP 1 — the class. The statement clause 4 measures is the note's OWN words: its title
+    // and its markdown blocks, which is what §4.6 means by "the same three-arm union" over a
+    // note. A link block contributes no prose and is left out — a handle is an address, and
+    // measuring it against the user's turn would dilute the overlap the clause exists to
+    // require.
+    const prose = [a.title, ...a.content.flatMap((b) => (b.kind === "markdown" ? [b.text] : []))].join("\n");
+    const verdict = classify(resolved.grounding, {
+      statement: prose,
+      userTurnText: ctx.userTurnText,
+      untrustedIngressSeen: ctx.taint.seen(),
+    });
+
+    // STEP 3 — THE FENCE, above every step below it, on `create` and `update` alike.
+    if (verdict.sourceClass === "untrusted_derived" && spaceId === ctx.userSpaceId) {
+      return ctx.projectSpaceId
+        ? { status: "refused_scope", said: NOTE_SAID.refused_scope }
+        : { status: "refused_no_project", said: NOTE_SAID.refused_no_project };
+    }
+
+    // STEP 5 — BOTH conditions, as refusals. See `NOTE_SAID` for why a note has no conflict
+    // arm to degrade into, and §10.1 bound 4 for why neither condition is optional.
+    if (head) {
+      if (!mayOutrank(verdict.sourceClass, head.sourceClass)) {
+        return { status: "refused_weaker_class", said: NOTE_SAID.refused_weaker_class };
+      }
+      if (ctx.taint.seen()) {
+        return { status: "refused_untrusted_turn", said: NOTE_SAID.refused_untrusted_turn };
+      }
+    }
+
+    // STEP 6 — the topic. Resolved before the note exists (it creates nothing about the
+    // note) and attached after, because the `contains` edge needs both endpoints as rows.
+    const topic = await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h) });
+
+    const provenance: Record<string, unknown> = {
+      kind: a.grounding.kind,
+      messageId: ctx.messageId,
+      taskId: ctx.taskId,
+    };
+
+    // THE WRITE ORDER IS FIXED (§4.6, §4.8) and the callback is where the middle of it lands:
+    // node -> note shell -> the `references` edges -> serialize the blocks against their edge
+    // ids -> the version -> the projection. An edge without its block would render a link the
+    // note body does not mention; a block without its edge is §7's unresolved-text case,
+    // which no tool may mint.
+    let linksCreated = 0;
+    const bodyFor = async (noteId: string): Promise<string> => {
+      // An UPDATE replaces the whole body, so a link the new content drops is a link the note
+      // no longer makes. Closed FIRST, so a re-linked target's live edge — and therefore its
+      // token — survives untouched.
+      if (updating) await unlinkReferencesFrom(noteId, spaceId, [...targetIds.values()], tx);
+      const edgeIdFor = new Map<string, string>();
+      for (const [handle, targetId] of targetIds) {
+        const edge = await linkNodes(
+          { spaceId, from: noteId, to: targetId, relation: "references", createdBy: ctx.actor, originMessageId: ctx.messageId },
+          tx,
+        );
+        if (edge.created) linksCreated += 1;
+        edgeIdFor.set(handle, edge.id);
+      }
+      return serializeBlocks(a.content, (h) => edgeIdFor.get(h) ?? "");
+    };
+
+    let noteId: string;
+    let revision: number;
+    if (updating && head) {
+      const upd = await reviseNote(
+        {
+          noteId: head.id,
+          spaceId,
+          expectedRevision: head.revision,
+          title: a.title,
+          bodyMarkdown: bodyFor,
+          sourceClass: verdict.sourceClass,
+          provenance,
+          createdTaskId: ctx.taskId,
+        },
+        tx,
+      );
+      // The CAS lost between the pre-check above and the statement. Nothing was written —
+      // including no edges, which is why the callback runs after the CAS and not before it.
+      if (!upd.ok) {
+        return { status: "revision_mismatch", revision: upd.currentRevision, said: NOTE_SAID.revision_mismatch };
+      }
+      noteId = head.id;
+      revision = upd.revision;
+    } else {
+      const created = await createNote(
+        {
+          spaceId,
+          title: a.title,
+          bodyMarkdown: bodyFor,
+          sourceClass: verdict.sourceClass,
+          provenance,
+          createdTaskId: ctx.taskId,
+        },
+        tx,
+      );
+      noteId = created.id;
+      revision = created.revision;
+    }
+
+    // The topic's `contains` edge, in THIS transaction. Idempotent, so a re-filed note on an
+    // update keeps the one edge it had. No `note_claims` row: that table links a topic to
+    // CLAIMS and cannot represent a topic containing a note, which is also why
+    // `containsParity` scopes its edge side to claim targets.
+    await linkNodes(
+      { spaceId, from: topic.id, to: noteId, relation: "contains", createdBy: ctx.actor, originMessageId: ctx.messageId },
+      tx,
+    );
+
+    // Read back rather than computed, exactly as `factWrite` reads `prompt_access`: the
+    // column is generated, and the head is the version this transaction just wrote.
+    const written = await noteHead(noteId, [spaceId], tx);
+    if (!written) throw new Error(`noteWrite: note ${noteId} is not readable in its own transaction`);
+
+    const status: NoteWriteStatus = verdict.downgraded
+      ? "downgraded"
+      : topic.state === "secret_fallback"
+        ? "topic_secret_fallback"
+        : updating
+          ? "updated"
+          : "created";
+    const filed =
+      topic.state === "secret_fallback"
+        ? NOTE_SAID.topic_secret_fallback
+        : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
+    const notice = verdict.sourceClass === "untrusted_derived" ? ` ${UNTRUSTED_NOTE_NOTICE}` : "";
+    return {
+      status,
+      handle: ctx.handles.mint({ kind: "n", spaceId, nodeId: noteId }),
+      revision,
+      linksCreated,
+      filedUnder: ctx.handles.mint({ kind: "n", spaceId, nodeId: topic.id }),
+      sourceClass: verdict.sourceClass,
+      promptAccess: written.promptAccess,
+      said: `${NOTE_SAID[status]} ${filed}${notice}`,
+    };
+  });
+}
+
+export type MemoryLinkStatus =
+  | "linked"
+  | "already_linked"
+  | "revision_mismatch"
+  | "refused_weaker_class"
+  | "refused_untrusted_turn"
+  | "retired"
+  | "bad_handle";
+
+export type MemoryLinkResult =
+  | { status: "linked"; edgeHandle: string; revision: number; said: string }
+  | { status: "already_linked"; edgeHandle: string; revision: number; said: string }
+  | { status: "revision_mismatch"; revision: number; said: string }
+  | { status: "refused_weaker_class" | "refused_untrusted_turn" | "retired" | "bad_handle"; said: string };
+
+/**
+ * `memory_link` (§4.8): a `references` edge AND its canonical link block, through a new note
+ * revision, in ONE transaction.
+ *
+ * Both halves or neither. An edge without its block would render a link the note body does
+ * not mention; a block without its edge is §7's unresolved-text case and must not be minted
+ * by a tool. That is why this is not "add an edge" with a body update bolted on: the body is
+ * computed inside the revision's own CAS, so a lost race writes no edge either.
+ *
+ * A note revision is a supersede of the head, so §4.5 step 5's two conditions apply exactly
+ * as they do to `memory_note_write`'s update arm — see `NOTE_SAID`.
+ */
+export async function memoryLink(a: {
+  fromNoteHandle: string;
+  targetHandle: string;
+  expectedNoteRevision: number;
+  ctx: WriteCtx;
+}): Promise<MemoryLinkResult> {
+  const { ctx } = a;
+  const allowedSpaceIds = ctx.projectSpaceId ? [ctx.userSpaceId, ctx.projectSpaceId] : [ctx.userSpaceId];
+  const from = ctx.handles.resolve(a.fromNoteHandle);
+  if (!from || from.kind !== "n" || !allowedSpaceIds.includes(from.spaceId)) {
+    return { status: "bad_handle", said: `${NOTE_SAID.bad_handle} Unusable: ${a.fromNoteHandle}.` };
+  }
+  const spaceId = from.spaceId;
+
+  return db.transaction(async (tx): Promise<MemoryLinkResult> => {
+    if (!(await spaceAcceptsWrites(spaceId, tx))) return { status: "retired", said: NOTE_SAID.retired };
+
+    const head = await noteHead(from.nodeId, [spaceId], tx);
+    if (!head) return { status: "bad_handle", said: `${NOTE_SAID.bad_handle} Unusable: ${a.fromNoteHandle}.` };
+    if (head.revision !== a.expectedNoteRevision) {
+      return { status: "revision_mismatch", revision: head.revision, said: NOTE_SAID.revision_mismatch };
+    }
+
+    const targetId = await linkTargetId(a.targetHandle, ctx, spaceId, tx);
+    if (!targetId) return { status: "bad_handle", said: `${NOTE_SAID.bad_handle} Unusable: ${a.targetHandle}.` };
+    if (targetId === head.id) {
+      // `ck_vault_edges_not_self` would refuse this at the statement, mid-transaction. A
+      // sentence is the better answer to the same fact.
+      return { status: "bad_handle", said: `${NOTE_SAID.bad_handle} A note cannot link to itself.` };
+    }
+
+    // The class of a link revision: the AGENT is adding the link, so there is nothing to
+    // ground it on and `agent_inference` is the honest arm — floored at `untrusted_derived`
+    // by a tainted turn, which the fence below then refuses outright.
+    const verdict = classify(
+      { kind: "agent_inference" },
+      { statement: head.title, userTurnText: ctx.userTurnText, untrustedIngressSeen: ctx.taint.seen() },
+    );
+    if (!mayOutrank(verdict.sourceClass, head.sourceClass)) {
+      return { status: "refused_weaker_class", said: NOTE_SAID.refused_weaker_class };
+    }
+    if (ctx.taint.seen()) {
+      return { status: "refused_untrusted_turn", said: NOTE_SAID.refused_untrusted_turn };
+    }
+
+    // ALREADY LINKED writes nothing at all — not a second block for one edge, and not a
+    // revision whose only change is a duplicate. `uniq_live_vault_edge` makes the edge
+    // idempotent; the BODY is not, so the check has to be here and not left to the insert.
+    const existing = await liveReferenceEdge(head.id, targetId, spaceId, tx);
+    if (existing) {
+      return {
+        status: "already_linked",
+        edgeHandle: ctx.handles.mint({ kind: "g", spaceId, nodeId: existing }),
+        revision: head.revision,
+        said: "That link is already there - nothing to do.",
+      };
+    }
+
+    let edgeId = "";
+    const upd = await reviseNote(
+      {
+        noteId: head.id,
+        spaceId,
+        expectedRevision: head.revision,
+        title: head.title,
+        bodyMarkdown: async (noteId) => {
+          const edge = await linkNodes(
+            { spaceId, from: noteId, to: targetId, relation: "references", createdBy: ctx.actor, originMessageId: ctx.messageId },
+            tx,
+          );
+          edgeId = edge.id;
+          return appendLinkBlock(head.bodyMarkdown, edge.id);
+        },
+        sourceClass: verdict.sourceClass,
+        provenance: { kind: "link", messageId: ctx.messageId, taskId: ctx.taskId },
+        createdTaskId: ctx.taskId,
+      },
+      tx,
+    );
+    if (!upd.ok) {
+      return { status: "revision_mismatch", revision: upd.currentRevision, said: NOTE_SAID.revision_mismatch };
+    }
+    return {
+      status: "linked",
+      // A `g` handle addresses an EDGE, which is the one handle kind that is not a node —
+      // `nodeId` carries the edge id here, as `handles.ts` says it does for `g`.
+      edgeHandle: ctx.handles.mint({ kind: "g", spaceId, nodeId: edgeId }),
+      revision: upd.revision,
+      said: "Linked. The note now mentions it, and renaming either one keeps the link.",
+    };
+  });
+}
+
+/** Whether these two nodes already carry a live `references` edge. A read, so it lives beside
+ *  its one caller rather than in `edges.ts`: that module owns the WRITES and their inverses,
+ *  and a lookup that exists only to keep one body from gaining a duplicate block is this
+ *  tool's business, not the graph's. */
+async function liveReferenceEdge(from: string, to: string, spaceId: string, ex: Ex): Promise<string | null> {
+  const [row] = await ex
+    .select({ id: vaultEdges.id })
+    .from(vaultEdges)
+    .where(
+      and(
+        eq(vaultEdges.spaceId, spaceId),
+        eq(vaultEdges.fromNodeId, from),
+        eq(vaultEdges.toNodeId, to),
+        eq(vaultEdges.relation, "references"),
+        isNull(vaultEdges.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row?.id ?? null;
 }

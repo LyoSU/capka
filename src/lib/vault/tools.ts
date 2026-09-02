@@ -6,10 +6,11 @@ import type { HandleMap } from "./handles";
 import { proposeCandidate, spaceForScope } from "./candidates";
 import { findCurrentHead, STATEMENT_MAX_CHARS, type ClaimHead, type SourceClass } from "./claims";
 import { countWithheld, listMemoryToolRows, modelTextOf, type MemoryToolText } from "./model-view";
+import { NOTE_BLOCKS_MAX, NOTE_BLOCK_MAX_CHARS, NOTE_TITLE_MAX_CHARS } from "./notes";
 import { verifyDirectProvenance } from "./quote-match";
 import { getOrCreateSpace } from "./spaces";
 import { TOPIC_TITLE_MAX_CHARS } from "./topics";
-import { factWrite, type WriteCtx } from "./write-tools";
+import { factWrite, memoryLink, noteWrite, type WriteCtx } from "./write-tools";
 
 /**
  * WHAT ONE SEARCH HANDS BACK, and why it is JSON with handles in it rather than the
@@ -400,6 +401,109 @@ export async function makeVaultMemoryTools(ctx: {
               topic,
               sensitive,
               valueJson: value_json,
+              ctx: writeCtx,
+            }),
+          ),
+        ),
+    }),
+
+    /**
+     * THE NOTE WRITER. Same nine steps, same order, one longer piece of text — and one thing
+     * the model cannot express: a persistent link out of a title it typed.
+     *
+     * `content` is a list of BLOCKS, and the `node_link` block carrying a HANDLE is the only
+     * way a link can be made. A `[[Title]]` in a markdown block is stored as literal text
+     * forever (§7): the model has no id vocabulary, so it cannot mint an edge, and the server
+     * will not guess which note a title meant.
+     */
+    memory_note_write: tool({
+      description:
+        "Write a note to memory, or update one you found with memory_search. A note is for something longer than one sentence — a summary, a procedure, a set of details that belong together. It is saved immediately and the user can undo it on their memory page, so do not ask them to confirm. To link to another saved note or fact, put a 'node_link' block in the content with its handle; typing [[a title]] in the text does NOT make a link, it stays as plain text. Say where the content came from in 'grounding', the same way memory_fact_write does. Updating a note replaces its current version and needs the revision you were given; a note carrying more authority than this write, or any update in a turn that read a document or a web page, is refused — write a new note instead.",
+      inputSchema: z.object({
+        op: z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("create"),
+            scope: z
+              .enum(["user", "project"])
+              .describe("'user' = about the person, follows them everywhere; 'project' = about this project"),
+          }),
+          z.object({
+            kind: z.literal("update"),
+            note_handle: z.string().describe("The n-handle of the note being rewritten, from memory_search"),
+            expected_revision: z.number().int().min(1),
+          }),
+        ]),
+        title: z.string().min(1).max(NOTE_TITLE_MAX_CHARS).describe("One line, no newlines"),
+        content: z
+          .array(
+            z.discriminatedUnion("kind", [
+              z.object({ kind: z.literal("markdown"), text: z.string().min(1).max(NOTE_BLOCK_MAX_CHARS) }),
+              z.object({
+                kind: z.literal("node_link"),
+                target_handle: z.string().describe("An m- or n-handle from memory_search"),
+              }),
+            ]),
+          )
+          .min(1)
+          .max(NOTE_BLOCKS_MAX)
+          .describe("The note's blocks, in order"),
+        grounding: z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("current_user_quote"),
+            quote: z.string().describe("The user's own words from THIS turn, verbatim, that the note is made of"),
+          }),
+          z.object({
+            kind: z.literal("retrieved"),
+            handles: z.array(z.string()).min(1).max(8).describe("The handles this note was written from"),
+          }),
+          z.object({ kind: z.literal("agent_inference") }),
+        ]),
+        topic: z
+          .string()
+          .max(TOPIC_TITLE_MAX_CHARS)
+          .optional()
+          .describe("The subject in the user's words, or an n-handle of an existing topic. Default: General"),
+      }),
+      execute: async ({ op, title, content, grounding, topic }) =>
+        writeCtx.budget.emit(
+          JSON.stringify(
+            await noteWrite({
+              op:
+                op.kind === "create"
+                  ? { kind: "create", scope: op.scope }
+                  : { kind: "update", noteHandle: op.note_handle, expectedRevision: op.expected_revision },
+              title,
+              // The wire shape is snake_case and the writer's is not, mapped in ONE place —
+              // right here — so neither side has to speak the other's.
+              content: content.map((b) =>
+                b.kind === "markdown" ? { kind: "markdown" as const, text: b.text } : { kind: "node_link" as const, targetHandle: b.target_handle },
+              ),
+              grounding,
+              topic,
+              ctx: writeCtx,
+            }),
+          ),
+        ),
+    }),
+
+    /** ONE link, added to a note that already exists — the edge and the block together, or
+     *  neither (§4.8). `memory_note_write` is how a note gets its links at write time; this
+     *  is how one more is added later without re-sending the whole body. */
+    memory_link: tool({
+      description:
+        "Link a saved note to another saved note or fact, so the connection survives a rename. The note gains a link block mentioning the target and needs the revision you were given. Use this when the note already exists; when you are writing it, put node_link blocks in memory_note_write instead.",
+      inputSchema: z.object({
+        from_note_handle: z.string().describe("The n-handle of the note that will mention the target"),
+        target_handle: z.string().describe("The m- or n-handle being linked to"),
+        expected_note_revision: z.number().int().min(1),
+      }),
+      execute: async ({ from_note_handle, target_handle, expected_note_revision }) =>
+        writeCtx.budget.emit(
+          JSON.stringify(
+            await memoryLink({
+              fromNoteHandle: from_note_handle,
+              targetHandle: target_handle,
+              expectedNoteRevision: expected_note_revision,
               ctx: writeCtx,
             }),
           ),

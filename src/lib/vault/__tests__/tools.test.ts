@@ -190,15 +190,17 @@ beforeEach(() => {
 });
 
 describe("makeVaultMemoryTools — the factory", () => {
-  it("hands back exactly five tools", async () => {
-    // `memory_fact_write` joined the set in slice 2 and the two legacy writers have not
+  it("hands back exactly seven tools", async () => {
+    // The new writers join the set one commit at a time and the two legacy ones have not
     // left it yet: `memory_propose` and `memory_update` are retired in their own commit
-    // (plan Task 13), so for this window a turn holds both the write tool and the two
-    // proposal tools it replaces. Asserted as an equality, not a superset, so the
-    // retirement cannot land silently either.
+    // (plan Task 13), so for this window a turn holds both the write tools and the two
+    // proposal tools they replace. Asserted as an equality, not a superset, so neither an
+    // addition nor the retirement can land silently.
     expect(Object.keys(await make()).sort()).toEqual([
       "memory_fact_write",
       "memory_forget",
+      "memory_link",
+      "memory_note_write",
       "memory_propose",
       "memory_search",
       "memory_update",
