@@ -297,8 +297,8 @@ export async function sweepContainsParity(deps?: {
       // problem and the sample is enough to start reading rows; the rest is in the tables.
       log.warn("vault contains parity diverged", {
         spaceId,
-        onlyInNoteClaims: parity.onlyInNoteClaims.length,
-        onlyInEdges: parity.onlyInEdges.length,
+        onlyInNoteClaimsCount: parity.onlyInNoteClaims.length,
+        onlyInEdgesCount: parity.onlyInEdges.length,
         onlyInNoteClaimsSample: parity.onlyInNoteClaims.slice(0, PARITY_LOG_SAMPLE),
         onlyInEdgesSample: parity.onlyInEdges.slice(0, PARITY_LOG_SAMPLE),
       });

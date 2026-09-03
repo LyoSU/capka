@@ -30,8 +30,8 @@ describe("sweepContainsParity", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("vault contains parity diverged", {
       spaceId: "space-diverged",
-      onlyInNoteClaims: 1,
-      onlyInEdges: 2,
+      onlyInNoteClaimsCount: 1,
+      onlyInEdgesCount: 2,
       onlyInNoteClaimsSample: ["n1:c1"],
       onlyInEdgesSample: ["n2:c2", "n2:c3"],
     });
@@ -49,13 +49,14 @@ describe("sweepContainsParity", () => {
     });
     expect(warn).toHaveBeenCalledTimes(1);
     const [, ctx] = warn.mock.calls[0] as [string, Record<string, unknown>];
-    expect(ctx.onlyInNoteClaims).toBe(1000);
-    expect(ctx.onlyInEdges).toBe(1000);
+    expect(ctx.onlyInNoteClaimsCount).toBe(1000);
+    expect(ctx.onlyInEdgesCount).toBe(1000);
     expect(ctx.onlyInNoteClaimsSample).toHaveLength(20);
     expect(ctx.onlyInEdgesSample).toHaveLength(20);
     // The sample is the HEAD of the list, not an arbitrary slice, so two readings of the
     // same unrepaired divergence name the same rows.
     expect(ctx.onlyInNoteClaimsSample).toEqual(many.slice(0, 20));
+    expect(ctx.onlyInEdgesSample).toEqual(many.slice(0, 20));
   });
 
   it("is silent when every live space agrees, and asks each of them", async () => {
@@ -95,8 +96,8 @@ describe("sweepContainsParity", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("vault contains parity diverged", {
       spaceId: "later",
-      onlyInNoteClaims: 1,
-      onlyInEdges: 0,
+      onlyInNoteClaimsCount: 1,
+      onlyInEdgesCount: 0,
       onlyInNoteClaimsSample: ["n1:c1"],
       onlyInEdgesSample: [],
     });
