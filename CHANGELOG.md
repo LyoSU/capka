@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-03
+
 ### Added
 
 - `scripts/release-gate.sh` checks a tree before `npm run release` (migrations generated, journal timestamps increasing, locale parity, typecheck, lint); run it by hand, it is not wired into the release script.
