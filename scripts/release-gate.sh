@@ -25,6 +25,11 @@
 # silently; every check below is written as a condition or with `|| rc=$?`, so `-e` never
 # fires on an ordinary red check and all eight still run. `-u` catches a typo'd variable
 # name, which in a gate reads as an empty value and therefore as agreement.
+#
+# A RUN IS COMPLETE ONLY WHEN THE FINAL `RELEASE GATE:` LINE PRINTS. A report that ends on a
+# PASS line without that verdict is an ABORTED run - `-e` fired on something no check
+# guarded - and it must be read as a failure, not as agreement from the checks that never
+# ran. The exit status is non-zero either way; the sentence is for the person reading.
 set -euo pipefail
 
 # GUARDED, because the two grep checks below scan RELATIVE paths: from the wrong directory
@@ -36,10 +41,11 @@ cd "$(dirname "$0")/.." || { echo "FAIL  cannot cd to the repository root" >&2; 
 
 # One scratch tree per run, so two concurrent runs never read each other's evidence - up to
 # five sessions share this working directory.
-SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/release-gate.XXXXXX")
+# macOS sets TMPDIR with a trailing slash; strip it so the printed path has no `//`.
+tmp_root=${TMPDIR:-/tmp}
+SCRATCH=$(mktemp -d "${tmp_root%/}/release-gate.XXXXXX")
 CONTROL="$SCRATCH/control"
 mkdir -p "$CONTROL"
-echo "scratch (logs, control plants): $SCRATCH"
 # The trap is what makes an INTERRUPTED run tidy up after itself - without one, every
 # `./scripts/release-gate.sh | head` leaves a directory behind forever. A failing run sets
 # the flag first, so its logs survive for the operator to read.
@@ -82,11 +88,20 @@ if ./node_modules/.bin/drizzle-kit check >"$SCRATCH/drizzle-check.log" 2>&1; the
 else
   fail "drizzle-kit check failed:"$'\n'"$(tail -3 "$SCRATCH/drizzle-check.log")"
 fi
-git status --porcelain | sort > "$SCRATCH/tree-before"
+# GUARDED, because under `pipefail` a bare `git status | sort` that fails (a tree with
+# `package.json` but no reachable `.git`) would abort the run right after the PASS line
+# above, with no verdict printed. `|| rc=$?` keeps it a check.
+tree_rc=0
+tree_before=$(git status --porcelain) || tree_rc=$?
+if [ "$tree_rc" -ne 0 ]; then fail "git status exited $tree_rc before generate - not a git tree?"; fi
+printf '%s\n' "$tree_before" | sort > "$SCRATCH/tree-before"
 gen_rc=0
 ./node_modules/.bin/drizzle-kit generate >"$SCRATCH/drizzle-generate.log" 2>&1 || gen_rc=$?
 gen=$(tail -1 "$SCRATCH/drizzle-generate.log")
-git status --porcelain | sort > "$SCRATCH/tree-after"
+tree_rc=0
+tree_after=$(git status --porcelain) || tree_rc=$?
+if [ "$tree_rc" -ne 0 ]; then fail "git status exited $tree_rc after generate - not a git tree?"; fi
+printf '%s\n' "$tree_after" | sort > "$SCRATCH/tree-after"
 if [ "$gen_rc" -ne 0 ]; then
   fail "drizzle-kit generate exited $gen_rc:"$'\n'"$(tail -5 "$SCRATCH/drizzle-generate.log")"
 else
@@ -95,13 +110,16 @@ else
     *) fail "drizzle-kit generate had schema changes to write: $gen" ;;
   esac
 fi
-# NAME WHAT IT LEFT BEHIND. `git status --porcelain` before and after is what catches a
-# generated migration, and the operator needs the path, not the fact - an unnamed untracked
-# file in a directory five sessions share is one a peer's commit picks up.
+# NAME WHAT APPEARED. `git status --porcelain` before and after is what catches a generated
+# migration, and the operator needs the path, not the fact. But the two snapshots bracket a
+# window of seconds in a directory five sessions write to, so a path listed here is one
+# that APPEARED during that window - generate may have written it, or a concurrent session
+# did. The message says what was observed and never advises deleting anything: a peer's
+# untracked file is the one thing in this directory that has no undo.
 if cmp -s "$SCRATCH/tree-before" "$SCRATCH/tree-after"; then
   pass "generate left the tree unchanged"
 else
-  fail "generate wrote into the tree - review, then commit with the release or delete:"$'\n'"$(comm -13 "$SCRATCH/tree-before" "$SCRATCH/tree-after")"
+  fail "these paths appeared while generate ran - generate may have written them, or a concurrent session did; check before removing anything:"$'\n'"$(comm -13 "$SCRATCH/tree-before" "$SCRATCH/tree-after")"
 fi
 
 echo "== 2. journal timestamps are strictly increasing in idx order =="
