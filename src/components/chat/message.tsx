@@ -2,7 +2,7 @@ import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronDown, ChevronLeft, ChevronRight, GitBranch, X, Info,
-  MoreHorizontal, ArrowRight, Clock,
+  MoreHorizontal, ArrowRight, Clock, BookMarked,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { hostOf, CitedSourcesFooter } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
-import { DISMISSED_KEY, nextDismissed, noticeCounts, parseDismissed, undoRequest } from "@/lib/chat/memory-notice";
+import { edited, undoRequest } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -1221,7 +1221,7 @@ type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: 
  *  went: thoughts as prose, actions as small glyph rows between them, consecutive
  *  actions joined by a hairline. No container and no cap — the group header is
  *  the frame. */
-function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
+function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; onUndone?: (id: string) => void; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
   // How many rows were on screen at the previous commit. Rows above that count are
   // new in THIS commit and cascade from zero; rows at or below it are not new and
@@ -1232,13 +1232,19 @@ function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: A
   const mountedBefore = useRef(0);
   const base = mountedBefore.current;
   useIsomorphicLayoutEffect(() => {
-    mountedBefore.current = items.length;
+    mountedBefore.current = items.length + writes.length;
   });
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} stagger={staggerIndex(i, base)} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool"} stagger={staggerIndex(i, base)} />,
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={staggerIndex(i, base)} />,
   );
+  // What the turn wrote to memory closes the rail: it is the one action of the turn
+  // that outlives it, so it is listed last, after the steps that produced it, and
+  // joined to them by the same hairline.
+  const memoryRows = writes.map((w, j) => (
+    <MemoryRow key={w.id} item={w} connect={j < writes.length - 1} stagger={staggerIndex(items.length + j, base)} onUndone={onUndone} />
+  ));
   // Why the longest pause in the product gets a footnote and not a node: the
   // container is built FOR the step above — the first tool call that needs it —
   // so it is that step taking a while, not a separate thing happening. A node
@@ -1253,6 +1259,7 @@ function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: A
     <>
       <div className="my-1">
         {rows}
+        {memoryRows}
       </div>
       {note}
     </>
@@ -1267,11 +1274,16 @@ function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: A
  *  `timing` is present on the ONE group that owns the turn's measured span (see
  *  the call site); every other group shows its action count and no duration,
  *  because no honest number exists for it. */
-function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; sandboxPending?: boolean }) {
+function ActivityGroup({ items, writes, isStreaming, timing, chatId, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; sandboxPending?: boolean }) {
   const t = useTranslations("chat.message");
   const tDuration = useTranslations("chat.duration");
   const anchorDisclosure = useDisclosureAnchor();
   const streaming = !!isStreaming;
+  // Items the person has undone from this rail. Held here, above the rows, because the
+  // header's count has to fall with each undo and vanish with the last one: a header
+  // still reading "1 in memory" over an empty list is the promise the row just broke.
+  const [gone, setGone] = useState<string[]>([]);
+  const shown = (writes ?? []).filter((w) => !gone.includes(w.id));
   const timed = timing != null;
   const { measuredMs, startedMsAgo } = timing ?? {};
   const [open, setOpen] = useState(streaming);
@@ -1377,162 +1389,137 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
         {countLabel && (
           <span className="animate-in fade-in duration-200 shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
         )}
+        {/* The visible half of "additive, visible, undoable": a turn that wrote memory
+            says so in its own header, collapsed or not. The glyph is the same bookmark
+            the rail's memory steps wear, in the brand tint, so the header and the row it
+            opens onto read as one object at two sizes. On a phone the words go and the
+            glyph and the count stay — a third clause in this row is what pushed the
+            duration into an ellipsis — while the sentence stays for a screen reader. */}
+        {shown.length > 0 && (
+          <span className="animate-in fade-in duration-200 inline-flex shrink-0 items-center gap-1 tabular-nums">
+            <span className="sr-only">{t("memoryCount", { count: shown.length })}</span>
+            <span aria-hidden className="text-muted-foreground/70">·</span>
+            <BookMarked aria-hidden className="h-3.5 w-3.5 text-brand" />
+            <span aria-hidden>
+              {shown.length}
+              <span className="hidden sm:inline"> {t("inMemory")}</span>
+            </span>
+          </span>
+        )}
         <ChevronDown className="chevron h-4 w-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
-          <ActivityRail items={items} isStreaming={isStreaming} chatId={chatId} sandboxPending={sandboxPending} />
+          <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} sandboxPending={sandboxPending} />
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-/** Friendly, role-aware failure notice. Everyone sees `message`; admins can
- *  expand the raw technical `detail`. */
 /**
- * "Capka remembered N things" — the notice after a turn that wrote memory, with Undo on
- * each item.
+ * One row on the rail for one thing the turn wrote to memory, with its Undo.
  *
- * WHY IT EXISTS AT ALL. The confirmation gate is gone: the assistant saves what it learns
- * without asking. What makes that safe is not a smaller model or a stricter predicate, it
- * is that the write is ADDITIVE, VISIBLE and UNDOABLE — and "visible" has to mean in the
- * turn that made it, not on a settings page the person may never open. This is the visible
- * half; the memory page is the durable one.
+ * ON THE RAIL, NOT IN A CARD UNDER THE ANSWER. The confirmation gate is gone: the assistant
+ * saves what it learns without asking, and what makes that safe is that the write is
+ * ADDITIVE, VISIBLE and UNDOABLE — visible in the turn that made it, not on a settings page
+ * the person may never open. Saving is an action of the turn like a search or a command, so
+ * it is listed where the turn's actions are, and the group header carries the count. The
+ * card this replaces said again what the answer had just said, weighed as much as a failure
+ * notice, and needed a hide button and a per-viewer dismissal store to be bearable; a rail
+ * row needs none of that.
  *
- * UNDO IS THE OWNER'S ACT, not `memory_forget`. That tool is bounded to the task that
- * wrote the row, because a model holding a handle has not shown that the person asked. Here
- * the person IS asking, from their own session, and the request carries no words at all —
- * so the bound does not apply and the row goes whoever wrote it. The audit event records
- * `user`, which is the difference the log exists to show.
- *
- * AND WHAT IT UNDOES DEPENDS ON WHAT THE TURN DID, which is what `revision` is here for. A
- * fact, or a file this turn CREATED (revision 1), is undone by deleting it — the turn added
- * it, so removing it leaves the state the person had. A file the turn only EDITED (revision
- * 2 or more) is undone by REVERTING to the revision before it: deleting there would destroy
- * a file, and all its history, that the person asked only to leave alone. The notice's own
- * sentence says which of the two happened, because "saved 2 things" over an edited file is
- * the promise that made the wrong undo look right.
- *
- * DISMISSAL IS PER-VIEWER AND BOUNDED. It lives in `localStorage` rather than on the
- * message row: it is a reading preference about one person's own screen, not a property of
- * the turn, and a column for it would be a second thing every writer has to keep correct.
- * The list is capped and trimmed on write, because "whatever populates a store states its
- * own bound" — an uncapped set of message ids would grow for the life of the browser
- * profile. Every read and write is wrapped: a private window, cleared site data or a
- * browser set to block storage all throw here, and the correct answer to that is to show
- * the notice rather than to break the message.
+ * UNDO IS THE OWNER'S ACT, not `memory_forget`. That tool is bounded to the task that wrote
+ * the row, because a model holding a handle has not shown that the person asked. Here the
+ * person IS asking, from their own session — so the bound does not apply, and the audit
+ * event records `user`, which is the difference the log exists to show. WHAT it undoes — a
+ * delete for a fact or a file this turn created, a revert for a file it only edited — is
+ * decided in `memory-notice.ts`, where it can be tested; the sentence uses the same
+ * predicate, so the verb and the button never disagree.
  */
-function MemoryNotice({ messageId, writes }: { messageId: string; writes: TurnWrite[] }) {
+function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; connect?: boolean; stagger?: number; onUndone?: (id: string) => void }) {
+  // See ReasoningRow: the cascade step is fixed at mount.
+  const [i] = useState(stagger ?? 0);
   const t = useTranslations("chat.memory");
-  // Read in an effect, not in the initial state: `localStorage` does not exist during the
-  // server render, and reading it in a `useState` initializer is the hydration mismatch
-  // that makes a dismissed notice flash back on every navigation.
-  const [dismissed, setDismissed] = useState(false);
-  const [gone, setGone] = useState<string[]>([]);
-  useEffect(() => {
-    try {
-      setDismissed(parseDismissed(localStorage.getItem(DISMISSED_KEY)).includes(messageId));
-    } catch {
-      // Accessing storage can THROW rather than return null (thumbnail capture, a browser
-      // blocking site data). The notice shows, which is the safe direction.
-    }
-  }, [messageId]);
-
-  const dismiss = () => {
-    setDismissed(true);
-    try {
-      const current = parseDismissed(localStorage.getItem(DISMISSED_KEY));
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(nextDismissed(current, messageId)));
-    } catch {
-      // A private window, cleared site data, or a browser set to block storage. The
-      // dismissal still holds for this view; it simply will not survive a reload, which
-      // is the right way for a reading preference to fail.
-    }
-  };
-
-  const undo = async (item: TurnWrite) => {
-    // WHICH ACT this is — a delete or a revert — is decided in `memory-notice.ts`, where it
-    // can be tested: this repo has no React renderer, and the decision is about destroying
-    // a person's data. The same predicate feeds the sentence below.
+  // A latch, not a spinner: a second click while the first is in flight would send a
+  // revert with a revision the first one has already moved, and read back a 409 that
+  // blames the file for changing.
+  const [busy, setBusy] = useState(false);
+  const undo = async () => {
     const { path, method, body } = undoRequest(item);
+    setBusy(true);
     try {
       const res = await fetch(path, {
         method,
         ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
       });
       // 404 is "already gone" — undone in another tab, or deleted from the memory page.
-      // The row is not there either way, so the item leaves the notice: a button that
+      // The row is not there either way, so the item leaves the rail: a button that
       // reports failure for a state the person wanted is a button that looks broken.
       //
       // 409 IS THE OPPOSITE CASE AND MUST NOT BE SWALLOWED WITH IT. A revert answers 409
-      // when the file has been edited since this notice rendered, and then the edit is
-      // still there: removing the item would report success for a change that did not
-      // happen, and take away the only control that could ask again. It says so in its own
-      // words, because "please try again" is false advice here — the request would carry
-      // the same stale revision and fail the same way.
+      // when the file has been edited since this row rendered, and then the edit is still
+      // there: removing the item would report success for a change that did not happen,
+      // and take away the only control that could ask again. It says so in its own words,
+      // because "please try again" is false advice here — the request would carry the same
+      // stale revision and fail the same way.
       if (res.status === 409) {
         toast.error(t("undoMoved"));
         return;
       }
       if (!res.ok && res.status !== 404) throw new Error();
-      setGone((g) => [...g, item.id]);
+      onUndone?.(item.id);
     } catch {
       toast.error(t("undoFailed"));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const shown = writes.filter((w) => !gone.includes(w.id));
-  // TWO SENTENCES, and only the ones with a count: a turn that edited an existing file
-  // saved nothing, and "saved 1 thing" is what made the wrong undo look like the right one.
-  const counts = noticeCounts(shown);
-  // NOTHING AT ALL when there is nothing to say — including after the last item is undone.
-  // An empty frame reading "remembered 0 things" is the shape this rule exists to refuse.
-  if (dismissed || !shown.length) return null;
-
   return (
-    <div className="animate-fade-up [--i:2] mt-3 rounded-xl bg-field px-3.5 py-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          {[
-            counts.saved ? t("saved", { count: counts.saved }) : "",
-            counts.updated ? t("updated", { count: counts.updated }) : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        </p>
+    // Same anatomy as a StepRow — the 20px glyph box, the 32px row, the hairline hung
+    // from the glyph — so the rail stays one line of one kind of thing. Top-aligned
+    // rather than centred because this row's text is a title the person wrote and may
+    // wrap on a phone; the glyph stays on the first line and Undo trails the last word,
+    // dropping to the next line when it must instead of forcing the row wider than the
+    // screen.
+    <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-brand">
+        <BookMarked className="animate-step-in h-4 w-4" />
+      </span>
+      {/* Hung from the ROW, not the glyph as on a StepRow: this row can be three lines
+          tall, and a fixed 16px stub under the glyph left a gap before the next glyph.
+          Starts where the glyph box ends (6px padding + 20px box) and overshoots the
+          row's edge by the same 4px a StepRow's stub does, so the two kinds of row draw
+          one continuous line. */}
+      {connect && <span aria-hidden className="animate-rail-grow absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-[15px] leading-snug">
+        {/* A sensitive statement is not printed here. The memory page has a reveal
+            control and the shoulder-surfing argument that justifies one; a chat
+            transcript scrolls past on its own and has neither, so the row names the
+            CATEGORY and the item is read where it can be read deliberately. */}
+        <span className="min-w-0 [overflow-wrap:anywhere]">
+          {t.rich(edited(item) ? "updated" : "saved", {
+            sensitive: item.sensitive ? "yes" : "no",
+            text: item.text,
+            b: (chunks) => <span className="text-foreground">{chunks}</span>,
+          })}
+        </span>
         <button
           type="button"
-          onClick={dismiss}
-          aria-label={t("dismiss")}
-          className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+          onClick={undo}
+          disabled={busy}
+          className="shrink-0 rounded-md text-[13px] underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 motion-reduce:transition-none"
         >
-          <X aria-hidden className="size-3.5" />
+          {t("undo")}
         </button>
-      </div>
-      <ul className="mt-1.5 space-y-1">
-        {shown.map((item) => (
-          <li key={item.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px] leading-relaxed">
-            {/* A sensitive statement is not printed here. The memory page has a reveal
-                control and the shoulder-surfing argument that justifies one; a chat
-                transcript scrolls past on its own and has neither, so the notice names
-                the CATEGORY and the row is read where it can be read deliberately. */}
-            <span className={item.sensitive ? "text-muted-foreground" : undefined}>
-              {item.sensitive ? t("savedSensitive") : item.text}
-            </span>
-            <button
-              type="button"
-              onClick={() => undo(item)}
-              className="shrink-0 rounded-md text-[12px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-            >
-              {t("undo")}
-            </button>
-          </li>
-        ))}
-      </ul>
+      </span>
     </div>
   );
 }
+
+/** Friendly, role-aware failure notice. Everyone sees `message`; admins can
+ *  expand the raw technical `detail`. */
 
 function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void | Promise<boolean | void> }) {
   const t = useTranslations("chat.tool");
@@ -2387,6 +2374,11 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
   const lastIdx = groups.length - 1;
   const firstActivityIdx = groups.findIndex((g) => g.kind === "activity");
+  const lastActivityIdx = groups.reduce((acc, g, i) => g.kind === "activity" ? i : acc, -1);
+  // What the turn wrote to memory, once the turn is over — rows named mid-stream could
+  // still be superseded by the turn itself. Listed on the LAST rail, the one nearest the
+  // answer, as the turn's closing actions.
+  const memoryWrites = !isStreaming && metadata?.memoryWrites?.length ? metadata.memoryWrites : undefined;
 
   // Every numbered source this turn's search results produced, plus the
   // resolved snapshot finalize persisted (`metadata.citedSources`) — numbers
@@ -2472,6 +2464,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                   // same number down the message. Later runs show their action
                   // count, which is genuinely theirs.
                   timing={gi === firstActivityIdx ? { measuredMs: metadata?.reasoningMs, startedMsAgo: metadata?.runningMs } : undefined}
+                  writes={gi === lastActivityIdx ? memoryWrites : undefined}
                   chatId={chatId}
                   sandboxPending={sandboxPending}
                 />
@@ -2500,14 +2493,13 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             onContinue={onContinue}
           />
         )}
-        {/* AFTER the answer and BEFORE the action row: it is a consequence of the turn,
-            not part of it, and putting it above the reply would make every saved fact
-            interrupt the thing the person actually asked for. Rendered only for a finished
-            turn — a notice that appeared mid-stream would name rows the turn may still
-            supersede. */}
-        {!isStreaming && metadata?.memoryWrites?.length ? (
-          <MemoryNotice messageId={message.id} writes={metadata.memoryWrites} />
-        ) : null}
+        {/* A turn that wrote memory but shows no rail to list it on (its tool parts are
+            not in the transcript) still owes the person the visible half of the write:
+            a rail with no steps, whose header is only the count and which opens onto
+            the rows. */}
+        {memoryWrites && lastActivityIdx < 0 && (
+          <div className="mt-1.5"><ActivityGroup items={[]} writes={memoryWrites} chatId={chatId} /></div>
+        )}
         {!isStreaming && (() => {
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (

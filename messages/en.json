@@ -580,6 +580,8 @@
       "workedFor": "Worked for {duration}",
       "activity": "Activity",
       "stepCount": "{count, plural, one {# action} other {# actions}}",
+      "memoryCount": "{count, plural, one {# item in memory} other {# items in memory}}",
+      "inMemory": "in memory",
       "fork": "Fork into a new chat",
       "actions": "Message actions",
       "viaTelegram": "Sent via Telegram",
@@ -588,13 +590,11 @@
       "versions": "{count, plural, one {# version} other {# versions}}"
     },
     "memory": {
-      "saved": "The assistant saved {count, plural, one {# thing} other {# things}} to memory.",
-      "updated": "The assistant updated {count, plural, one {# file} other {# files}} in memory.",
-      "savedSensitive": "something marked sensitive",
+      "saved": "In memory: {sensitive, select, yes {something marked sensitive} other {<b>“{text}”</b>}}",
+      "updated": "Updated in memory: {sensitive, select, yes {something marked sensitive} other {<b>“{text}”</b>}}",
       "undo": "Undo",
       "undoFailed": "Could not undo that. Please try again.",
-      "undoMoved": "That file changed after this notice appeared, so it was left as it is. Open Memory to see it.",
-      "dismiss": "Hide this notice"
+      "undoMoved": "That file changed after this notice appeared, so it was left as it is. Open Memory to see it."
     },
     "forkFailed": "Could not fork the chat",
     "archived": {

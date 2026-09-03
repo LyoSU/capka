@@ -12,7 +12,7 @@ All notable changes to Capka are documented here. Format follows
 - The worker reports any `note_claims` / `vault_edges` divergence every six hours as a `vault contains parity diverged` warning per space; it never repairs.
 - The assistant edits a memory file in place (replace a passage, insert a paragraph, rename it) instead of rewriting the whole file.
 - Topic sections (You / Topics / Areas / People); the assistant records what it learns as short topic files during the chat.
-- A dismissible "saved to memory" notice after any turn that wrote memory, with one-click undo on each item.
+- A turn that wrote memory lists each saved item on its activity rail with one-click undo, and the rail header shows the count.
 - When a fact the assistant saved contradicts one already stored, the memory page shows both side by side and one click keeps either or both.
 - The assistant can write and update project notes, and link them to each other; links are stored as ids, so renaming a note updates every reference.
 - The assistant can file a saved fact or note under a topic.
