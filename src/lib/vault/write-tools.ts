@@ -114,6 +114,21 @@ export type FactWriteStatus =
  * one-word rephrase has a different `normalized_hash`, can land `user_direct`, and leaves
  * both rows stored.
  */
+/**
+ * ONE SENTENCE FOR ALL THREE WRITERS, chosen at the user-space fence when it was the TURN'S
+ * TAINT that floored the class rather than the model's grounding. `refused_no_project`'s own
+ * sentence names the absent project, and a model handed it for an edit in a bare chat told
+ * the user their chat "is not attached to a project" — true, irrelevant, and the wrong thing
+ * to fix. The status stays (nothing was saved, and there is no project to save to); the
+ * sentence says what would have worked: the user's own words.
+ */
+export const TAINTED_USER_SPACE_SAID =
+  "This turn read outside content (a document, a web page or a connector result), so your own wording cannot go into the user's personal memory. Nothing was saved. Quote the user's own words from this turn in 'grounding' and it can; there is no project memory in this chat to hold it otherwise.";
+
+/** The user-space fence's sentence: the taint's when the taint is what floored the class,
+ *  the status's own otherwise. */
+const noProjectSaid = (ctx: WriteCtx, said: string) => (ctx.taint.seen() ? TAINTED_USER_SPACE_SAID : said);
+
 export const SAID: Record<FactWriteStatus, string> = {
   created: "Saved.",
   known: "Already saved - nothing to do.",
@@ -403,7 +418,7 @@ export async function factWrite(a: {
       // the word the model used to reach it.
       return ctx.projectSpaceId
         ? { status: "refused_scope", said: SAID.refused_scope }
-        : { status: "refused_no_project", said: SAID.refused_no_project };
+        : { status: "refused_no_project", said: noProjectSaid(ctx, SAID.refused_no_project) };
     }
 
     // STEP 4 — an exact `normalized_hash` duplicate in this space. Nothing is written, the
@@ -818,7 +833,7 @@ export async function noteWrite(a: {
     if (verdict.sourceClass === "untrusted_derived" && spaceId === ctx.userSpaceId) {
       return ctx.projectSpaceId
         ? { status: "refused_scope", said: NOTE_SAID.refused_scope }
-        : { status: "refused_no_project", said: NOTE_SAID.refused_no_project };
+        : { status: "refused_no_project", said: noProjectSaid(ctx, NOTE_SAID.refused_no_project) };
     }
 
     // STEP 5 — BOTH conditions, as refusals. See `NOTE_SAID` for why a note has no conflict
@@ -1236,7 +1251,7 @@ export async function noteEdit(a: {
     if (verdict.sourceClass === "untrusted_derived" && spaceId === ctx.userSpaceId) {
       return ctx.projectSpaceId
         ? { status: "refused_scope", said: NOTE_SAID.refused_scope }
-        : { status: "refused_no_project", said: NOTE_SAID.refused_no_project };
+        : { status: "refused_no_project", said: noProjectSaid(ctx, NOTE_SAID.refused_no_project) };
     }
 
     // STEP 5 — BOTH conditions, as refusals, because an edit supersedes a head exactly as a

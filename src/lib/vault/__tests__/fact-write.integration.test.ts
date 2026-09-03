@@ -16,7 +16,7 @@ import { makeTurnTaint } from "@/lib/tasks/turn-taint";
 import { makeVaultBudget } from "../budget";
 import { createClaim, type SourceClass } from "../claims";
 import { makeHandleMap, type HandleMap } from "../handles";
-import { SAID, factWrite, mayOutrank, type WriteCtx } from "../write-tools";
+import { SAID, TAINTED_USER_SPACE_SAID, factWrite, mayOutrank, type WriteCtx } from "../write-tools";
 import { testServerClass } from "./fixtures";
 
 /** Every `SourceClass`, and exhaustive BY CONSTRUCTION rather than by care — written as the
@@ -228,7 +228,11 @@ run("memory_fact_write", () => {
       ctx: tainted({ project: null }),
     });
     expect(r.status).toBe("refused_no_project");
-    expect(r.said).toContain("nowhere to store knowledge taken from documents or web pages");
+    // AND THE SENTENCE NAMES THE TAINT, because that is what floored the class here. The
+    // status's own sentence names the absent project, which a live model relayed to the user
+    // as "this chat is not attached to a project" — true, and not the reason, and not
+    // something the user could act on. What they can act on is saying it in their own words.
+    expect(r.said).toBe(TAINTED_USER_SPACE_SAID);
     // Asserted as a DIFFERENCE, not only as a status: the two sentences are the finding.
     expect(r.said).not.toBe(SAID.refused_scope);
     expect(await claimCount(US)).toBe(0);

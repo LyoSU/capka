@@ -22,7 +22,7 @@ import { createNote, noteHead, revertNote } from "../notes";
 import { memoryOpen } from "../read-tools";
 import { resolveTopic } from "../topics";
 import { readTurnWrites } from "../turn-writes";
-import { memoryLink, noteEdit, noteWrite, type WriteCtx } from "../write-tools";
+import { memoryLink, noteEdit, noteWrite, TAINTED_USER_SPACE_SAID, type WriteCtx } from "../write-tools";
 import { testServerClass } from "./fixtures";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -346,6 +346,10 @@ run("in-place note edits", () => {
       ctx: tainted({ project: null }),
     });
     expect(r.status).toBe("refused_no_project");
+    // THE SENTENCE NAMES THE TAINT, not the absent project. Handed the project sentence, a
+    // live model told the user their chat "is not attached to a project" — which is true,
+    // and not why the edit was refused, and not something the user could fix.
+    expect(r.said).toBe(TAINTED_USER_SPACE_SAID);
     expect(await versionCount(note.id)).toBe(1);
   });
 
