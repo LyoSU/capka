@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The live «Thinking…» row under the activity rail uses the rail's own row anatomy (20px glyph, 15px muted label, same inset), so it no longer sits offset and bold below the steps.
+- A turn that has streamed text and then goes silent (a provider that does not stream tool-call arguments, e.g. Gemini generating a file) shows the «Thinking…» row after 2 s instead of nothing.
+
 ## [0.38.0] - 2026-09-03
 
 ### Added

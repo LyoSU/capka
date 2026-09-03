@@ -986,14 +986,24 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 // and a second copy here would drift out of step with them, whereas
                 // this errs only toward the row keeping its old spacing.
                 const continuesRail = afterTool && tail?.toolName !== "manage" && tail?.toolName !== "ask";
-                return showStatus ? (
+                // The third silent stretch: text has streamed and the last part IS
+                // that text, but nothing has arrived for a while. The rule "once the
+                // first part arrives, the rail takes over" assumes the model's next
+                // move announces itself, and a provider that returns a tool call's
+                // arguments in one piece (Gemini) announces nothing until it has
+                // generated all of them — a whole file's worth, for a write. The row
+                // is mounted whenever the tail is text and decides for itself, by
+                // the silence, whether to show (TaskStatus.quietSince), so an
+                // actively growing paragraph never gets a spinner under it.
+                const quietText = last?.role === "assistant" && tail?.type === "text";
+                return showStatus || quietText ? (
                   // The negative margin cancels the message's own bottom padding, so
                   // the row lands at the rail's rhythm (py-1 to py-1) instead of a
                   // message gap away from it. Only when it continues the rail: at the
                   // start of a turn this row sits under the USER's bubble, where the
                   // distance is correct and hugging would be wrong.
                   <div className={continuesRail ? "-mt-4 px-4 pb-4 md:px-6" : "px-4 py-4 md:px-6"}>
-                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} phase={taskInfo.phase} continuesRail={continuesRail} />
+                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} phase={taskInfo.phase} continuesRail={continuesRail} quietSince={quietText && !showStatus ? taskInfo.lastEventAt : undefined} />
                   </div>
                 ) : null;
               })()}

@@ -47,7 +47,12 @@ export function useBackgroundChat({
   // uniform "Thinking…". "queued" is ours to set (we posted and nothing has come
   // back); "preparing"/"sandbox" are pushed by the runner; null means the turn is
   // in its ordinary streaming life. See TaskStatus for how they're prioritized.
-  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; retrying: { attempt: number; max: number } | null; phase: "queued" | "preparing" | "sandbox" | null }>({ startedAt: 0, currentTool: null, retrying: null, phase: null });
+  // `lastEventAt` is when the last realtime event for the turn landed, whatever
+  // its kind. It lets the status row tell a stream that is quiet from one that is
+  // still writing (see TaskStatus.quietSince): a provider that does not stream a
+  // tool call's arguments goes silent for as long as the model takes to generate
+  // them, and nothing else in the UI moves during that stretch.
+  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; retrying: { attempt: number; max: number } | null; phase: "queued" | "preparing" | "sandbox" | null; lastEventAt: number }>({ startedAt: 0, currentTool: null, retrying: null, phase: null, lastEventAt: 0 });
   // Start the wait clock at the moment WE act, not at the task's own task:start.
   // Between the two sit the POST, the queue, and `prepareRun` (resolving the
   // model, connecting the connectors) — the part of the wait that most needs
@@ -55,7 +60,7 @@ export function useBackgroundChat({
   // it. The server's own measured duration still wins for the finished label, so
   // this only ever governs the live row.
   const startWaiting = useCallback(() => {
-    setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null, phase: "queued" });
+    setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null, phase: "queued", lastEventAt: Date.now() });
   }, []);
   const msgRef = useRef(messages);
   msgRef.current = messages;
@@ -192,6 +197,10 @@ export function useBackgroundChat({
           && !msgRef.current.some((m) => m.id === data.messageId)) {
         return false;
       }
+      // Any event is proof the stream is alive; text deltas are the one kind that
+      // arrives often (coalesced to ~4/s), so this is one extra state write per
+      // batch, not per token.
+      setTaskInfo((prev) => ({ ...prev, lastEventAt: Date.now() }));
       switch (data.type) {
         case "task:start": {
           setStatus("running");
@@ -213,6 +222,7 @@ export function useBackgroundChat({
             currentTool: null,
             retrying: null,
             phase: null,
+            lastEventAt: Date.now(),
           }));
           // Baseline the seq cursor for this reply (task:start is seq 0), so
           // the first delta (seq 1) is the next contiguous one. NEVER lower a
@@ -426,7 +436,7 @@ export function useBackgroundChat({
         case "task:finish": {
           setStatus("idle");
           setTaskId(null);
-          setTaskInfo({ startedAt: 0, currentTool: null, retrying: null, phase: null });
+          setTaskInfo({ startedAt: 0, currentTool: null, retrying: null, phase: null, lastEventAt: 0 });
           // Stop tracking this reply's seq — the turn is done; loadHistory
           // below reloads the final, authoritative content. Drop anything still
           // held for this reply too: with its cursor gone, a later drain would

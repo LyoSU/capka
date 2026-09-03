@@ -8,12 +8,23 @@ import { describeStep } from "./steps";
 
 type Phase = "queued" | "preparing" | "sandbox";
 
+/** How long the stream must stay silent after streamed text before this row says
+ *  "Thinking…" under it. Deltas land every ~250ms while the model writes, so a
+ *  pause this long is not the gap between two batches — it is the model working
+ *  on something the provider does not stream (Gemini returns a tool call's
+ *  arguments in one piece, after generating all of them), and without the row
+ *  the only sign the turn was alive was the Stop button. Longer than the caret's
+ *  600ms on purpose: a caret blinking early is quiet, a row appearing early is a
+ *  twitch. */
+const QUIET_MS = 2000;
+
 export function TaskStatus({
   startedAt,
   currentTool,
   retrying,
   phase,
   continuesRail,
+  quietSince,
 }: {
   startedAt: number;
   currentTool: string | null;
@@ -27,6 +38,11 @@ export function TaskStatus({
   // Purely presentational: it draws the short piece of connecting line that makes
   // the live row the rail's next node instead of a second, unrelated indicator.
   continuesRail?: boolean;
+  // Set when the turn's last part is streamed text: the time the last realtime
+  // event arrived. The row then stays hidden while words are still landing (the
+  // growing text is the signal) and appears only once the stream has been quiet
+  // for QUIET_MS. Undefined means "show at once", the row's other call sites.
+  quietSince?: number;
 }) {
   const [elapsed, setElapsed] = useState(0);
   const tSteps = useTranslations("steps");
@@ -96,29 +112,35 @@ export function TaskStatus({
         : t("thinking");
   const time = formatLiveElapsed(elapsed, tDuration);
 
-  // Mirrors a running rail node (27px circle + spinner) so the live status reads
-  // as the next step still being written, then a soft highlight sweeps the label.
+  // Evaluated on every render, and the elapsed tick above re-renders this row once
+  // a second, so the quiet period is noticed within a second of elapsing. A stall
+  // or a running tool is stronger evidence than silence and is never withheld.
+  if (quietSince != null && !retrying && !currentTool && Date.now() - quietSince < QUIET_MS) return null;
+
+  // Same anatomy as a StepRow on the activity rail (message.tsx): the 20px glyph
+  // box holding the same 14px spinner a running step wears, the 32px row, the
+  // 15px muted label at the same inset — so the live status reads as the rail's
+  // next step still being written, not as a second kind of indicator.
   return (
-    <div role="status" aria-live="polite" className="relative flex animate-in items-center gap-3 py-1 text-sm fade-in duration-300">
-      {/* The last ~10px of the rail's connecting line, drawn from THIS side of the
+    <div role="status" aria-live="polite" className="relative flex min-h-8 animate-in items-center gap-2.5 py-1 text-[15px] leading-snug text-muted-foreground fade-in duration-300">
+      {/* The last piece of the rail's connecting line, drawn from THIS side of the
           seam. The row is deliberately not a node inside the activity spoiler: it
           is mounted once, in one place, so it never remounts and flickers as the
           turn progresses — and putting it in the spoiler would let a reader
           collapse away the only sign the turn is still alive. So the two halves
-          are laid out to meet: the badges are already one column (27px circles at
+          are laid out to meet: the glyphs are already one column (20px boxes at
           the same inset), the call site cancels the message's bottom padding, and
           this segment closes the seam between them. Geometry mirrors the rail's
-          own line: same 13px offset, stopping at the badge's top edge. */}
+          own hairline: centred under the glyph (left 10px), starting where the
+          previous glyph box ends (6px above the seam) and stopping at this glyph
+          box's top edge. */}
       {continuesRail && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute -top-1.5 bottom-[calc(50%+13px)] left-[13px] w-px bg-border"
+          className="pointer-events-none absolute -top-1.5 bottom-[calc(50%+10px)] left-2.5 w-px -translate-x-1/2 bg-border"
         />
       )}
-      <span
-        className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-full border border-border bg-card text-foreground"
-        aria-hidden="true"
-      >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
         <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
       </span>
       {/* Plain text, not `text-shimmer`. The spinner to its left is already a
@@ -130,13 +152,13 @@ export function TaskStatus({
           the gate guarantees each word is up for at least its dwell, and a hard
           swap at that pace still reads as a twitch. The global reduced-motion
           reset in globals.css neutralises this automatically. */}
-      <span key={label} className="animate-in font-medium fade-in duration-200">{label}</span>
+      <span key={label} className="animate-in fade-in duration-200">{label}</span>
       {/* Withheld for the first 5s by `formatLiveElapsed`, on purpose: putting a
           number on a fast operation measures it for the user and thereby makes it
           feel slow. It appears only once the wait is long enough that not knowing
           is worse than knowing. `tabular-nums` stops the row twitching as digits
           change width. */}
-      {time ? <span className="text-muted-foreground tabular-nums">· {time}</span> : null}
+      {time ? <span className="tabular-nums">· {time}</span> : null}
     </div>
   );
 }
