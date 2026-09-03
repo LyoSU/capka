@@ -89,6 +89,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Reverting or editing a memory file the owner already deleted is refused instead of writing a hidden new revision onto it.
+- A `str_replace` whose text overlaps itself in the file is refused as ambiguous instead of editing the leftmost occurrence.
+- `memory_note_write` rejects `topic` on a `str_replace`, `insert` or `rename` instead of silently ignoring it.
 - Reading memory no longer counts as reading outside content: the assistant can edit an existing memory file in a chat that searched memory first.
 - An in-place edit of a memory file can no longer cut a link in half or duplicate one, and a rename onto a topic title that already exists is refused instead of failing the write.
 - Undo in the chat's "saved to memory" notice now reverts an edit the turn made to an existing topic file, instead of deleting the file and its whole history; the notice says how many files were updated apart from what was saved.
@@ -122,6 +125,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Security
 
+- The assistant cannot create a new memory topic in a turn that read a document, a web page or a connector result; the item is filed under General and the assistant is told. Existing topics still take filings.
 - A turn that has read untrusted content (a tool result, a provider-side search, an attachment, or a compaction summary of any of those) can no longer replace a fact the user stated; the correction is recorded as a conflict instead. The mark is stored on `messages.untrusted_ingress` and survives compaction and approval continuations.
 - Forking or cloning a chat now carries each message's untrusted-content mark, and an imported conversation's messages are marked untrusted, so a copied history no longer reads as if the user authored it.
 - A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.

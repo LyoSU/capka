@@ -3,7 +3,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { db, pool } from "@/lib/db";
 import { classify, ownerAuthored } from "../grounding";
 import { listMemoryToolRows } from "../model-view";
-import { createNote, fitNoteTitle, noteHead, reviseNote, NOTE_TITLE_MAX_CHARS } from "../notes";
+import { deleteNode } from "../nodes";
+import { createNote, fitNoteTitle, noteHead, revertNote, reviseNote, NOTE_TITLE_MAX_CHARS } from "../notes";
 import { resolveTopic } from "../topics";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -156,6 +157,22 @@ run("note versions", () => {
     expect(head).toMatchObject({ revision: 2, title: "T2", bodyMarkdown: "two", promptAccess: "manifest" });
     expect(await noteHead(n.id, [other])).toBeNull();
     expect(await noteHead(n.id, [])).toBeNull();
+  });
+
+  it("noteHead returns LIVE notes only, so a deleted note cannot be reverted onto (Codex M1)", async () => {
+    const s = await seed();
+    const n = await createNote({ spaceId: s, title: "T", bodyMarkdown: "one", sourceClass: ownerAuthored(), provenance: {} }, db);
+    await reviseNote({ noteId: n.id, spaceId: s, expectedRevision: 1, title: "T", bodyMarkdown: "two", sourceClass: ownerAuthored(), provenance: {} }, db);
+    expect(await noteHead(n.id, [s])).toMatchObject({ revision: 2 });
+    await deleteNode(n.id, s, db);
+    expect(await noteHead(n.id, [s])).toBeNull();
+    // The revert that used to write revision 3 onto the tombstone — and hand the person
+    // "one" instead of "two" when they later restored the file.
+    expect(
+      await revertNote({ noteId: n.id, spaceId: s, toRevision: 1, expectedRevision: 2, actor: { kind: "user", id: "u" } }, db),
+    ).toEqual({ ok: false, reason: "not_found" });
+    const [row] = (await q(`SELECT current_revision FROM vault_notes WHERE id = $1`, [n.id])).rows;
+    expect(row.current_revision).toBe(2);
   });
 
   it("EVERY note-creating path mints a revision 1 — there are two, and this is the other", async () => {

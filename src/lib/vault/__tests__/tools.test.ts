@@ -673,6 +673,37 @@ describe("the schemas the provider actually sees", () => {
     expect(await accepts({ op: { kind: "rename", note_handle: "n1", expected_revision: 2, title: "" }, grounding: g })).toBe(false);
   });
 
+  it("topic is refused on an edit arm at the schema, not dropped (Codex L3)", async () => {
+    // `topic` lives outside the union, so the arms' own strictness cannot see it; an edit
+    // re-files nothing, and a `topic` sent with one was stripped while the model believed it
+    // had both edited and moved the file.
+    const schema = asSchema((await make()).memory_note_write.inputSchema as never);
+    const accepts = async (v: unknown) => (await schema.validate!(v)).success;
+    const g = { kind: "agent_inference" };
+    const edit = { kind: "str_replace", note_handle: "n1", expected_revision: 2, old_str: "a", new_str: "b" };
+    expect(await accepts({ op: edit, grounding: g })).toBe(true);
+    expect(await accepts({ op: edit, grounding: g, topic: "n2" })).toBe(false);
+    expect(
+      await accepts({ op: { kind: "insert", note_handle: "n1", expected_revision: 2, insert_line: 0, insert_text: "x" }, grounding: g, topic: "n2" }),
+    ).toBe(false);
+    expect(await accepts({ op: { kind: "rename", note_handle: "n1", expected_revision: 2, title: "T" }, grounding: g, topic: "n2" })).toBe(false);
+    // And the two whole-file arms still take it.
+    expect(
+      await accepts({
+        op: { kind: "update", note_handle: "n1", expected_revision: 2, title: "T", content: [{ kind: "markdown", text: "x" }] },
+        grounding: g,
+        topic: "n2",
+      }),
+    ).toBe(true);
+    expect(
+      await accepts({
+        op: { kind: "create", scope: "user", title: "T", content: [{ kind: "markdown", text: "x" }] },
+        grounding: g,
+        topic: "Beans",
+      }),
+    ).toBe(true);
+  });
+
   it("the note description steers a topic FILE per subject, updated rather than duplicated", async () => {
     // The page's top level is a list of files a person opens and reads. A turn that saves
     // everything it learns as one-line claims therefore produces a page of empty headings,

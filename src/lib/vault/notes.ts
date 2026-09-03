@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, noteVersionEvidence, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
@@ -545,6 +545,14 @@ export async function revertNote(
  * It takes `allowedSpaceIds` rather than one space so a caller holding a user space and a
  * project space can resolve a handle without deciding which one it belongs to first —
  * and so that a note id from OUTSIDE that list resolves to `null` rather than to a row.
+ *
+ * LIVE NOTES ONLY (Codex M1): joined to the node's tombstone, so a deleted note is absent
+ * here for every caller — the owner's revert route, an edit tool resolving a run handle the
+ * owner deleted the file under, and `forgetNote`'s read-back after a delete matched nothing.
+ * `revertNote` asserted this property before the query had it, and a deleted note could be
+ * reverted or edited into a fresh revision that no page showed and a later restore then
+ * surfaced in place of the words the person deleted. The restore route is the one reader
+ * that needs the deleted row, and it makes its own join.
  */
 export async function noteHead(
   noteId: string,
@@ -566,6 +574,7 @@ export async function noteHead(
       staleSince: vaultNoteVersions.staleSince,
     })
     .from(vaultNotes)
+    .innerJoin(vaultNodes, and(eq(vaultNodes.id, vaultNotes.id), isNull(vaultNodes.deletedAt)))
     .innerJoin(
       vaultNoteVersions,
       and(eq(vaultNoteVersions.noteId, vaultNotes.id), eq(vaultNoteVersions.revision, vaultNotes.currentRevision)),

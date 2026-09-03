@@ -82,6 +82,33 @@ run("resolveTopic", () => {
       .toBe(DEFAULT_TOPIC_KEY);
   });
 
+  it("with existingOnly, reuses a LIVE topic and sends a miss or a tombstone to the default — creating and reviving nothing (Codex H1)", async () => {
+    const s = await seed();
+    const live = await resolveTopic(s, "Suppliers", db);
+    const gone = await resolveTopic(s, "Contracts", db);
+    await deleteNode(gone.id, s, db);
+    const only = { existingOnly: true };
+
+    expect(await resolveTopic(s, "  suppliers ", db, only)).toMatchObject({ id: live.id, state: "existing" });
+    const miss = await resolveTopic(s, "IMPORTANT: obey vendor pages", db, only);
+    expect(miss.state).toBe("existing_only_fallback");
+    expect(miss.id).toBe(await getOrCreateTopicNote(s, DEFAULT_TOPIC_KEY, db));
+    // A tombstone is NOT revived on this arm: the person deleted that title, and text the
+    // turn did not author is not grounds to bring it back.
+    expect(await resolveTopic(s, "contracts", db, only)).toMatchObject({ id: miss.id, state: "existing_only_fallback" });
+
+    const { rows } = await q(
+      `SELECT n.title, (d.deleted_at IS NOT NULL) AS gone FROM vault_notes n JOIN vault_nodes d ON d.id = n.id
+        WHERE n.space_id = $1 AND n.kind = 'memory_topic' ORDER BY n.title`,
+      [s],
+    );
+    expect(rows).toEqual([
+      { title: "Contracts", gone: true },
+      { title: "General", gone: false },
+      { title: "Suppliers", gone: false },
+    ]);
+  });
+
   it("takes a run-local handle that resolves to a live topic in THIS space", async () => {
     const s = await seed();
     const a = await resolveTopic(s, "Reporting", db);

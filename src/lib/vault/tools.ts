@@ -468,14 +468,23 @@ export async function makeVaultMemoryTools(ctx: {
           .max(TOPIC_TITLE_MAX_CHARS)
           .optional()
           .describe(
-            "The subject in the user's words, or an n-handle of an existing topic. On a create, leave it out to file under General; on an update, leave it out to keep the current filing",
+            "The subject in the user's words, or an n-handle of an existing topic. On a create, leave it out to file under General; on an update, leave it out to keep the current filing. Not accepted on an edit",
           ),
       })
         // STRICT OUT HERE AS WELL AS INSIDE EACH ARM. The arm's own strictness says nothing
         // about the level above it, so a `content` sent BESIDE a `str_replace` rather than
         // inside it was stripped in silence — and a model that put the field in the wrong
         // place was then told its edit succeeded, carrying a body it believes it sent.
-        .strict(),
+        .strict()
+        // `topic` sits OUTSIDE the union because it means one thing on both whole-file arms,
+        // so the arms' strictness cannot refuse it on an edit — and an edit re-files nothing,
+        // so a `topic` sent with one was dropped in silence while the model believed it had
+        // both edited and moved the file (Codex L3). Refused at the schema, like `content`.
+        .superRefine((v, c) => {
+          if (v.topic !== undefined && v.op.kind !== "create" && v.op.kind !== "update") {
+            c.addIssue({ code: "custom", path: ["topic"], message: "topic is accepted on create and update only; an edit does not re-file" });
+          }
+        }),
       execute: async ({ op, grounding, topic, section }) =>
         writeCtx.budget.emit(
           JSON.stringify(

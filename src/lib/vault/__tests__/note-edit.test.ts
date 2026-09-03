@@ -365,6 +365,16 @@ describe("str_replace", () => {
     });
     expect(r).toEqual({ ok: false, reason: "ambiguous_match", lines: [1, 2] });
   });
+
+  it("a self-overlapping old_str is ambiguous, never a leftmost edit (Codex M2)", () => {
+    // "very very" sits at offsets 0 and 5. A non-overlapping scan sees one match and edits
+    // the first, and a model that meant the second is never told.
+    const r = applyStrReplace({ storedBody: "very very very important", edges: [], oldStr: "very very", newStr: "extremely" });
+    expect(r).toEqual({ ok: false, reason: "ambiguous_match", lines: [1] });
+    // The forgiving tier counts the same way.
+    const fuzzy = applyStrReplace({ storedBody: "very  very  very important", edges: [], oldStr: "very very", newStr: "extremely" });
+    expect(fuzzy).toEqual({ ok: false, reason: "ambiguous_match", lines: [1] });
+  });
 });
 
 describe("insert", () => {

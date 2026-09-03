@@ -181,16 +181,17 @@ function orphanTokenCount(body: string): number {
 const cutsAToken = (body: string, start: number, end: number): boolean =>
   tokenSpans(body).some((t) => (start > t.start && start < t.end) || (end > t.start && end < t.end));
 
-/** Every NON-OVERLAPPING occurrence of `needle` in `haystack`, scanning left to right — the
- *  same count Claude's own text editor makes, and the reason a self-overlapping `old_str`
- *  ("ha ha" in "ha ha ha") is one match rather than two. That is a real limit of the
- *  ambiguity check and is stated rather than hidden: a model that sends such a string gets a
- *  replacement at the leftmost position instead of a refusal naming both. It is not worth
- *  closing by scanning every offset, because the strings a model copies off a numbered page
- *  are sentences, and a sentence that overlaps itself is not a case that arises. */
+/** Every occurrence of `needle` in `haystack`, OVERLAPPING ONES INCLUDED, scanning left to
+ *  right. Claude's own text editor counts non-overlapping matches, so "ha ha" in "ha ha ha"
+ *  is one match there and a replacement at the leftmost position; here it is two, and
+ *  therefore `ambiguous_match` naming the line. A first cut copied the reference count and
+ *  called the gap not worth closing because a copied sentence does not overlap itself — but
+ *  the description now asks for the SMALLEST unique span, and "very very" in "very very
+ *  very" is exactly that span (Codex M2). Editing the wrong one of two occurrences in
+ *  silence is the failure the whole ambiguity rule exists to prevent. */
 function occurrences(haystack: string, needle: string): number[] {
   const out: number[] = [];
-  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + needle.length)) out.push(i);
+  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + 1)) out.push(i);
   return out;
 }
 

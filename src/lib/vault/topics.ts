@@ -76,11 +76,14 @@ export function fitTopicTitle(raw: string): string {
  *   5. clamp          — `fitTopicTitle`, 64 chars, single line
  *   6. secret screen  — a manifest-bound title may not look like a credential
  *   7. default        — blank resolves to `DEFAULT_TOPIC_KEY`
- * The eighth obligation somebody adds must be added to this list too.
+ *   8. existing only  — with `existingOnly`, a miss AND a tombstone go to the default
+ *                       instead of creating or reviving: a title that entered the turn
+ *                       from outside may not become manifest text (Codex H1)
+ * The ninth obligation somebody adds must be added to this list too.
  */
 declare const topicId: unique symbol;
 export type TopicId = string & { readonly [topicId]: true };
-export type TopicState = "default" | "existing" | "revived" | "created" | "secret_fallback";
+export type TopicState = "default" | "existing" | "revived" | "created" | "secret_fallback" | "existing_only_fallback";
 
 /**
  * The JS RENDERING of `uniq_vnotes_topic_title`'s expression — for the error message and
@@ -137,7 +140,15 @@ export async function resolveTopic(
   spaceId: string,
   nameOrHandle: string | undefined,
   ex?: Ex,
-  opts?: { resolveHandle?: (h: string) => HandleTarget | null },
+  opts?: {
+    resolveHandle?: (h: string) => HandleTarget | null;
+    /** Reuse a LIVE topic (by handle or by title) and nothing else: a miss or a tombstone
+     *  resolves to the default topic with state `existing_only_fallback`. The callers set it
+     *  from the turn's taint — a topic title is model-authored text that goes into the
+     *  always-on manifest unquoted, and `classify` never measures it, so in a turn that read
+     *  outside content the only titles it may put there are ones that were there already. */
+    existingOnly?: boolean;
+  },
 ): Promise<{ id: TopicId; title: string; state: TopicState }> {
   // FOUR TO FIVE statements now, not one, so without a transaction this is not a move but
   // a handful of autocommits — and `insertNode`'s docstring says a node row "exists only as
@@ -233,6 +244,12 @@ export async function resolveTopic(
     ))
     .limit(1);
   if (hit && !hit.deletedAt) return { id: hit.id as TopicId, title: hit.title, state: "existing" };
+  // (8) existing only. Above the revive arm as well as the create arm: a title the person
+  // deleted is one they chose to be rid of, and bringing it back on the strength of text the
+  // turn did not author is the same act as minting it.
+  if (opts?.existingOnly) {
+    return { ...(await topicByKey(spaceId, DEFAULT_TOPIC_KEY, ex)), state: "existing_only_fallback" };
+  }
   if (hit && hit.deletedAt) {
     // (4) revive, through the ONE inverse of a node delete (`restoreNode`), and not a bare
     // update here. What comes back with the identity is EXACTLY the edges the delete closed:

@@ -66,10 +66,9 @@ export const DELETE = apiHandler(async (_req: Request, ctx: { params: Promise<{ 
  * that reads exactly like a logic bug. One directory, two verbs, one thing addressed.
  *
  * IT CANNOT USE `noteHead`, and that is the whole difference from the delete above:
- * `noteHead` says nothing about the node's tombstone (by design — `memory_open` and the
- * write tools call it for notes that are live by construction), so ownership has to be
- * established against a row that IS deleted. Hence the explicit join here: the note, its
- * space, and that space being one this user owns and has not retired.
+ * `noteHead` returns LIVE notes only (it joins the node's tombstone, since Codex M1), so
+ * ownership has to be established against a row that IS deleted. Hence the explicit join
+ * here: the note, its space, and that space being one this user owns and has not retired.
  *
  * The 404 is one answer for "no such note", "not yours" and "not deleted", exactly as the
  * delete's is — telling them apart would make another user's note ids probeable one at a

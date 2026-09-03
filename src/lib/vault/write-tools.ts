@@ -94,6 +94,7 @@ export type FactWriteStatus =
   | "refused_no_project"
   | "downgraded"
   | "topic_secret_fallback"
+  | "topic_untrusted_fallback"
   | "revision_mismatch"
   | "retired"
   | "bad_handle"
@@ -143,6 +144,8 @@ export const SAID: Record<FactWriteStatus, string> = {
     "This chat is not inside a project, so there is no project memory to save to, and nowhere to store knowledge taken from documents or web pages. Nothing was saved.",
   downgraded: "Saved, but not as something the user stated - recorded as your conclusion.",
   topic_secret_fallback: "The topic name looked like a credential, so it was filed under General instead.",
+  topic_untrusted_fallback:
+    "This turn read a document or a web page, so a new topic could not be created in it; filed under General instead. Use an existing topic's n-handle, or create the topic in a later turn.",
   revision_mismatch: "That fact has moved on. Run memory_search and re-issue against what is there.",
   retired: "This project's memory was deleted. Nothing was saved.",
   bad_handle: "That address is not from this conversation's search results. Run memory_search and use a handle it returned.",
@@ -158,7 +161,7 @@ const CONFLICT_UNTRUSTED_TURN =
 
 export type FactWriteResult =
   | {
-      status: "created" | "downgraded" | "topic_secret_fallback";
+      status: "created" | "downgraded" | "topic_secret_fallback" | "topic_untrusted_fallback";
       handle: string;
       revision: number;
       sourceClass: SourceClass;
@@ -462,7 +465,14 @@ export async function factWrite(a: {
     // STEP 6 — the topic, and the `contains` edge beside it, in THIS transaction. A blank
     // topic resolves to General rather than to nothing: a claim under no topic at all is
     // invisible to the note projection.
-    const topic = await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h) });
+    //
+    // `existingOnly` IS THE FENCE FOR THE ONE FIELD STEP 1 DOES NOT MEASURE (Codex H1). The
+    // class is computed from the statement; the topic is a second model-supplied string, it
+    // is stored `owner_authored`, and the manifest prints it unquoted on every later turn.
+    // So a genuine user quote in a turn that also read a web page earned `user_direct` for
+    // the fact — correctly — and carried an arbitrary topic title past step 3 with it. In a
+    // tainted turn a topic must already exist; anything else files under General and says so.
+    const topic = await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h), existingOnly: ctx.taint.seen() });
 
     // The medium, not the tier. `origin.kind` deliberately does NOT reuse a `source_class`
     // name: `user_direct` being a value of two different enums in one argument list is the
@@ -589,18 +599,29 @@ export async function factWrite(a: {
     // wins over the topic because it is the one the model cannot retry its way out of, and
     // nothing is lost either way: the topic sentence is appended below, and `sourceClass`
     // rides on every one of these returns.
-    const status = verdict.downgraded ? "downgraded" : topic.state === "secret_fallback" ? "topic_secret_fallback" : "created";
+    const status = verdict.downgraded
+      ? "downgraded"
+      : topic.state === "secret_fallback"
+        ? "topic_secret_fallback"
+        : topic.state === "existing_only_fallback"
+          ? "topic_untrusted_fallback"
+          : "created";
     const filed =
       topic.state === "secret_fallback"
         ? SAID.topic_secret_fallback
-        : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
+        : topic.state === "existing_only_fallback"
+          ? SAID.topic_untrusted_fallback
+          : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
     return {
       status,
       handle,
       revision: claim.revision,
       sourceClass: verdict.sourceClass,
       promptAccess: head.promptAccess,
-      said: `${SAID[status]} ${filed}`,
+      // The class sentence, then the filing sentence. A fallback status IS the filing
+      // sentence, so the class half is read off the verdict rather than the status — the
+      // older `SAID[status]` put the fallback sentence in twice.
+      said: `${verdict.downgraded ? SAID.downgraded : SAID.created} ${filed}`,
     };
   });
 }
@@ -614,6 +635,7 @@ export type NoteWriteStatus =
   | "updated"
   | "downgraded"
   | "topic_secret_fallback"
+  | "topic_untrusted_fallback"
   | "revision_mismatch"
   | "refused_scope"
   | "refused_no_project"
@@ -644,6 +666,8 @@ export const NOTE_SAID: Record<NoteWriteStatus, string> = {
   updated: "Updated the note. The previous version is kept as history.",
   downgraded: "Saved, but not as something the user stated - recorded as your conclusion.",
   topic_secret_fallback: "The topic name looked like a credential, so it was filed under General instead.",
+  topic_untrusted_fallback:
+    "This turn read a document or a web page, so a new topic could not be created in it; filed under General instead. Use an existing topic's n-handle, or create the topic in a later turn.",
   revision_mismatch: "That note has moved on. Run memory_search and re-issue against what is there.",
   refused_scope:
     "A note based on a document or a web page cannot be saved as personal memory. Save it to the project, or write it as your own conclusion.",
@@ -673,7 +697,7 @@ const UNTRUSTED_NOTE_NOTICE = "It will not be asserted in future chats on its ow
 
 export type NoteWriteResult =
   | {
-      status: "created" | "updated" | "downgraded" | "topic_secret_fallback";
+      status: "created" | "updated" | "downgraded" | "topic_secret_fallback" | "topic_untrusted_fallback";
       handle: string;
       revision: number;
       /** Edges this write INSERTED. A link the previous revision already carried keeps its
@@ -859,7 +883,7 @@ export async function noteWrite(a: {
     const topic =
       updating && a.topic === undefined
         ? null
-        : await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h) });
+        : await resolveTopic(spaceId, a.topic, tx, { resolveHandle: (h) => ctx.handles.resolve(h), existingOnly: ctx.taint.seen() });
 
     const provenance: Record<string, unknown> = {
       kind: a.grounding.kind,
@@ -975,16 +999,20 @@ export async function noteWrite(a: {
       ? "downgraded"
       : topic?.state === "secret_fallback"
         ? "topic_secret_fallback"
-        : updating
-          ? "updated"
-          : "created";
+        : topic?.state === "existing_only_fallback"
+          ? "topic_untrusted_fallback"
+          : updating
+            ? "updated"
+            : "created";
     // Nothing at all when this write filed nothing: a sentence naming a topic it did not
     // touch would be the tool reporting a move that did not happen.
     const filed = !topic
       ? ""
       : topic.state === "secret_fallback"
         ? NOTE_SAID.topic_secret_fallback
-        : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
+        : topic.state === "existing_only_fallback"
+          ? NOTE_SAID.topic_untrusted_fallback
+          : `Filed under the ${topic.state === "created" ? "NEW" : "existing"} topic «${topic.title}».`;
     const notice = verdict.sourceClass === "untrusted_derived" ? ` ${UNTRUSTED_NOTE_NOTICE}` : "";
     return {
       status,
@@ -994,7 +1022,10 @@ export async function noteWrite(a: {
       ...(topic ? { filedUnder: ctx.handles.mint({ kind: "n", spaceId, nodeId: topic.id }) } : {}),
       sourceClass: verdict.sourceClass,
       promptAccess: written.promptAccess,
-      said: `${NOTE_SAID[status]}${filed ? ` ${filed}` : ""}${notice}`,
+      // The class-or-verb sentence, then the filing one. A fallback status IS the filing
+      // sentence, so the first half is read off the verdict and the arm rather than the
+      // status — the older `NOTE_SAID[status]` put the fallback sentence in twice.
+      said: `${verdict.downgraded ? NOTE_SAID.downgraded : updating ? NOTE_SAID.updated : NOTE_SAID.created}${filed ? ` ${filed}` : ""}${notice}`,
     };
   });
 }
