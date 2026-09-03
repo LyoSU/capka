@@ -89,6 +89,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Reading memory no longer counts as reading outside content: the assistant can edit an existing memory file in a chat that searched memory first.
 - An in-place edit of a memory file can no longer cut a link in half or duplicate one, and a rename onto a topic title that already exists is refused instead of failing the write.
 - Undo in the chat's "saved to memory" notice now reverts an edit the turn made to an existing topic file, instead of deleting the file and its whole history; the notice says how many files were updated apart from what was saved.
 - A fact deleted on the memory page can be put back from the toast, and the per-fact delete no longer asks for confirmation first.

@@ -180,7 +180,7 @@ export async function makeVaultMemoryTools(ctx: {
     actor: { kind: "agent" },
   };
 
-  return {
+  const tools = {
     memory_search: tool({
       description:
         "Search saved memory (facts about the user and this project). Send several wordings of the same question in one call — Ukrainian and English, or a synonym — rather than searching repeatedly. Each result carries a short handle like m1 or n2, which is how you address it in a later call; saved items marked sensitive are never searched and never shown, and 'withheld' counts them, so if one matters tell the user such a record exists — only they can act on it.",
@@ -638,4 +638,35 @@ export async function makeVaultMemoryTools(ctx: {
         ),
     }),
   };
+  return capkaAuthored(tools);
+}
+
+/**
+ * THE MEMORY TOOLS' OUTPUT IS CAPKA'S OWN, AND THE RUNNER HAS TO BE TOLD SO.
+ *
+ * `untrustedOutputOf` in `turn-taint.ts` reads `untrustedOutput` off the registered tool
+ * object and treats an UNSET declaration as untrusted — the fail-closed default a new tool
+ * gets until somebody states otherwise. Until this function existed nobody had stated it
+ * for these seven, so every turn that called `memory_search` or `memory_open` was marked as
+ * having read outside content, the mark rode `messages.untrusted_ingress` into every later
+ * turn of the chat, and `noteWrite`/`noteEdit`'s taint conditions then refused every edit of
+ * an existing file. The manifest tells the model to search first; so in practice no file
+ * could ever be edited. Found in a live chat, not by a test: the acceptance suites seeded the
+ * taint by hand and none asked whether a memory-only turn stays clean (ARM 0 does now).
+ *
+ * WHY `false` IS RIGHT BY CONSTRUCTION rather than by trust in the author: everything these
+ * tools hand back as text goes through the memory-tool CHANNEL of `model-view.ts`
+ * (`prompt_access in ('manifest','memory_search')`), and an `untrusted_derived` row lives on
+ * the evidence channel — `memory_open` answers `off_channel` for it and never renders it. The
+ * one arm that reads outside the channel, `memory_open` on a document handle, marks the
+ * taint itself. Status sentences and edit snippets are Capka's own composition over rows the
+ * same channel admitted.
+ *
+ * `withEffectLedger` spreads the tool object when it wraps `execute`, so the property
+ * survives into the set the SDK receives, and the runner reads the PRE-wrap set anyway.
+ */
+function capkaAuthored<T extends Record<string, object>>(tools: T): { [K in keyof T]: T[K] & { untrustedOutput: false } } {
+  return Object.fromEntries(
+    Object.entries(tools).map(([name, t]) => [name, { ...t, untrustedOutput: false as const }]),
+  ) as { [K in keyof T]: T[K] & { untrustedOutput: false } };
 }

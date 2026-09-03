@@ -38,10 +38,20 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
  * ARM 4 — a chat that read a FILE — lands in slice 3 with the ingestion pipeline. Its
  * absence is dated, not an omission: §13 slice 3's acceptance line is where it is written
  * down, and there is no file ingress to read at this slice.
+ *
+ * ARM 0 — a MEMORY-ONLY turn stays clean — is the arm a live chat found missing after four
+ * reviews of this file. Every arm above seeds or folds a taint that some OTHER tool put
+ * there and asks whether the write respects it; none asked whether the memory tools
+ * themselves put one there. They did: `untrustedOutputOf` reads an undeclared tool as
+ * untrusted, no memory tool declared anything, so `memory_search` marked turn 1, the mark
+ * replayed into turn 2, and turn 2 could not edit the file turn 1 wrote. ARM 0 drives the
+ * REAL tools through the REAL predicate at the runner's mark site and asserts the column
+ * stays `false` — then edits the file a turn later, which is the whole point of slice 2c.
  */
 import { loadActivePath } from "@/lib/chat/tree";
 import { buildModelContext, type ContextRow } from "@/lib/chat/context/build";
-import { foldAssembledRows, makeTurnTaint, type TurnTaint } from "@/lib/tasks/turn-taint";
+import { foldAssembledRows, makeTurnTaint, untrustedOutputOf, type TurnTaint } from "@/lib/tasks/turn-taint";
+import { makeVaultMemoryTools } from "../tools";
 import { readResumeRow } from "@/lib/tasks/run-context";
 import { pool } from "@/lib/db";
 import { makeVaultBudget } from "../budget";
@@ -67,8 +77,17 @@ const C = `${P}chat`;
  *  be identical is the WRITE (same statement, same quote, same target class, same expected
  *  revision) and the user message the quote is located in, and both are. */
 const CLEAN = `${P}chat-clean`;
+/** ARM 0's chat: turn 1 searched memory and wrote a file, turn 2 edits it. Nothing in it
+ *  ever reads outside content, so nothing in it may ever be marked. */
+const MEM = `${P}chat-memory`;
 
 const ids = {
+  /** ARM 0's rows, in order: the request, the turn that searched and wrote, the edit
+   *  request, the turn that edits. */
+  memUser1: `${P}mu1`,
+  memAsst1: `${P}ma1`,
+  memUser2: `${P}mu2`,
+  memTurn2: `${P}mt2`,
   user1: `${P}u1`,
   asst1: `${P}a1`,
   user2: `${P}u2`,
@@ -96,6 +115,14 @@ const ids = {
 const USER_TURN = "I prefer EUR for everything, and please check this for me before Friday.";
 const QUOTE = "I prefer EUR for everything";
 const STATEMENT = "I prefer EUR";
+
+/** ARM 0's two turns. Both writes are made of the user's own words, so both earn
+ *  `user_direct` and the edit's class EQUALS the file's — which leaves the taint as the only
+ *  thing that could refuse it, exactly as in the arms above. */
+const MEM_TURN_1 = "Remember this as its own topic: the release check runs on Friday.";
+const MEM_QUOTE_1 = "the release check runs on Friday";
+const MEM_TURN_2 = "Edit that file: the release check runs on Monday now.";
+const MEM_QUOTE_2 = "the release check runs on Monday";
 
 const q = (t: string, p: unknown[] = []) => pool.query(t, p);
 
@@ -162,11 +189,18 @@ const untrustedColumnOf = async (messageId: string) =>
 
 run("slice 2 acceptance - the taint-domain control", () => {
   beforeAll(async () => {
-    await q(`DELETE FROM messages WHERE chat_id IN ($1,$2)`, [C, CLEAN]);
-    await q(`DELETE FROM chats WHERE id IN ($1,$2)`, [C, CLEAN]);
+    await q(`DELETE FROM messages WHERE chat_id IN ($1,$2,$3)`, [C, CLEAN, MEM]);
+    await q(`DELETE FROM chats WHERE id IN ($1,$2,$3)`, [C, CLEAN, MEM]);
     await q(`DELETE FROM "user" WHERE id = $1`, [U]);
     await q(`INSERT INTO "user" (id, name, email) VALUES ($1,'T','s2acc@test.local')`, [U]);
-    await q(`INSERT INTO chats (id, user_id) VALUES ($1,$2), ($3,$2)`, [C, U, CLEAN]);
+    await q(`INSERT INTO chats (id, user_id) VALUES ($1,$2), ($3,$2), ($4,$2)`, [C, U, CLEAN, MEM]);
+
+    // ARM 0's chat. Every row is inserted CLEAN, and the arm asserts the two assistant rows
+    // are still clean after the memory tools ran on them.
+    await insert({ id: ids.memUser1, chatId: MEM, parentId: null, role: "user", metadata: textParts(MEM_TURN_1), untrusted: false });
+    await insert({ id: ids.memAsst1, chatId: MEM, parentId: ids.memUser1, role: "assistant", metadata: textParts(""), untrusted: false });
+    await insert({ id: ids.memUser2, chatId: MEM, parentId: ids.memAsst1, role: "user", metadata: textParts(MEM_TURN_2), untrusted: false });
+    await insert({ id: ids.memTurn2, chatId: MEM, parentId: ids.memUser2, role: "assistant", metadata: textParts(""), untrusted: false });
 
     // Turn 1 ran a connector tool, so the ASSISTANT row of turn 1 carries the mark. Turn 2
     // constructs nothing untrusted at all: its own row is clean, and everything the fold
@@ -191,8 +225,8 @@ run("slice 2 acceptance - the taint-domain control", () => {
 
   afterAll(async () => {
     await q(`DELETE FROM spaces WHERE id LIKE $1`, [`${P}%`]);
-    await q(`DELETE FROM messages WHERE chat_id IN ($1,$2)`, [C, CLEAN]);
-    await q(`DELETE FROM chats WHERE id IN ($1,$2)`, [C, CLEAN]);
+    await q(`DELETE FROM messages WHERE chat_id IN ($1,$2,$3)`, [C, CLEAN, MEM]);
+    await q(`DELETE FROM chats WHERE id IN ($1,$2,$3)`, [C, CLEAN, MEM]);
     await q(`DELETE FROM "user" WHERE id = $1`, [U]);
   });
 
@@ -322,5 +356,68 @@ run("slice 2 acceptance - the taint-domain control", () => {
     expect(r).toMatchObject({ status: "recorded_conflict", reason: "untrusted_turn" });
     expect(await revisionOf(target.id)).toBe(1);
     expect(await readConflicts(PS)).toHaveLength(1);
+  });
+
+  it("ARM 0 - a MEMORY-ONLY turn stays clean, so the next turn can edit the file it wrote", async () => {
+    // THE REAL TOOLS, THE REAL PREDICATE, THE REAL MARK. `runnerSite` is the one line of the
+    // runner's `tool-result` case this arm is about, composed exactly as `runner.ts:1297`
+    // composes it; the switch around it needs a model to reach. A hand-written `false`
+    // here would test the hand, and it is the declaration on the tool object this arm
+    // exists to witness — delete `untrustedOutput: false` from `capkaAuthored` and the
+    // first `expect(taint1.seen())` below goes red, then the column, then the edit.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const callOpts = { toolCallId: "call-1", messages: [] } as any;
+    const runnerSite = async (
+      tools: Awaited<ReturnType<typeof makeVaultMemoryTools>>,
+      taint: TurnTaint,
+      name: keyof Awaited<ReturnType<typeof makeVaultMemoryTools>>,
+      input: unknown,
+    ) => {
+      const out = (await tools[name].execute!(input as never, callOpts)) as string;
+      if (untrustedOutputOf(tools, name)) await taint.mark("tool_result");
+      return JSON.parse(out) as Record<string, unknown>;
+    };
+    const toolsFor = (messageId: string, taskId: string, userTurnText: string, taint: TurnTaint, map: HandleMap) =>
+      makeVaultMemoryTools({ userId: U, messageId, taskId, userTurnText, handles: map, budget: makeVaultBudget(), taint });
+
+    // TURN 1: search first, as the manifest tells the model to, then write the file.
+    const taint1 = makeTurnTaint({ messageId: ids.memAsst1, seeded: false });
+    const tools1 = await toolsFor(ids.memAsst1, `${P}task-1`, MEM_TURN_1, taint1, handles);
+    const searched = await runnerSite(tools1, taint1, "memory_search", { queries: ["release check"] });
+    expect(searched).toMatchObject({ results: [] });
+    const created = await runnerSite(tools1, taint1, "memory_note_write", {
+      op: { kind: "create", scope: "user", title: "Release check", content: [{ kind: "markdown", text: MEM_QUOTE_1 }] },
+      grounding: { kind: "current_user_quote", quote: MEM_QUOTE_1 },
+      section: "topic",
+    });
+    expect(created).toMatchObject({ status: "created", revision: 1, sourceClass: "user_direct" });
+    // Nothing this turn read came from outside Capka, so nothing marked it.
+    expect(taint1.seen()).toBe(false);
+    expect(await untrustedColumnOf(ids.memAsst1)).toBe(false);
+
+    // TURN 2: the prompt is assembled through the real `buildModelContext` and folded, as
+    // ARM 1 does it — and the fold finds nothing, because turn 1 left nothing to find.
+    const { assembled, taint: taint2 } = await assembledTaint(MEM, ids.memUser2, ids.memTurn2);
+    expect(assembled.map((r) => r.id)).toEqual([ids.memUser1, ids.memAsst1, ids.memUser2]);
+    expect(taint2.seen()).toBe(false);
+
+    // Fresh handles, as a fresh run mints them; the file is found again before it is edited.
+    const tools2 = await toolsFor(ids.memTurn2, `${P}task-2`, MEM_TURN_2, taint2, makeHandleMap());
+    const found = await runnerSite(tools2, taint2, "memory_search", { queries: ["release check"], kinds: ["note"] });
+    const results = found.results as { handle: string; kind: string; title: string | null; sourceClass: string; revision: number }[];
+    // The topic container carries the same title; the FILE is the `user_direct` one.
+    const file = results.find((r) => r.title === "Release check" && r.sourceClass === "user_direct");
+    if (!file) throw new Error(`the file was not found: ${JSON.stringify(results)}`);
+    expect(file.revision).toBe(1);
+
+    const edited = await runnerSite(tools2, taint2, "memory_note_write", {
+      op: { kind: "str_replace", note_handle: file.handle, expected_revision: 1, old_str: "Friday", new_str: "Monday" },
+      grounding: { kind: "current_user_quote", quote: MEM_QUOTE_2 },
+    });
+    // `refused_untrusted_turn` or `refused_no_project` here is the live defect: the turn
+    // that only ever read its own memory being treated as one that read a web page.
+    expect(edited).toMatchObject({ status: "edited", revision: 2, sourceClass: "user_direct" });
+    expect(taint2.seen()).toBe(false);
+    expect(await untrustedColumnOf(ids.memTurn2)).toBe(false);
   });
 });

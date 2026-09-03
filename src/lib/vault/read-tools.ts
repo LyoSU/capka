@@ -214,6 +214,12 @@ export async function memoryOpen(a: {
 
   const out = await openSourceForModel(t.spaceId, t.nodeId);
   if (!out.ok) return { status: out.reason, said: OPEN_SAID[out.reason] };
+  // THE ONE ARM THAT READS OFF THE MEMORY CHANNEL, so it marks the turn itself. The memory
+  // tools are registered `untrustedOutput: false` (see `capkaAuthored` in `tools.ts`) on the
+  // strength of every other arm minting through the memory-tool channel; a document's title
+  // is evidence-channel text a person or an upload supplied, and a turn that read it has
+  // read outside content exactly as a `knowledge_search` turn will have in slice 3.
+  await ctx.taint.mark("tool_result");
   return {
     status: "opened",
     kind: "source",

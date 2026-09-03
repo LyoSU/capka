@@ -52,7 +52,8 @@ vi.mock("../quote-match", () => ({ verifyDirectProvenance }));
 import { makeVaultMemoryTools } from "../tools";
 import { MEMORY_SEARCH_MAX_RESULTS, makeVaultBudget } from "../budget";
 import { HANDLE_RE, makeHandleMap } from "../handles";
-import { makeTurnTaint } from "@/lib/tasks/turn-taint";
+import { makeTurnTaint, untrustedOutputOf } from "@/lib/tasks/turn-taint";
+import { withEffectLedger } from "@/lib/tasks/effect-ledger";
 
 const USER_SPACE = "space-user";
 const PROJECT_SPACE = "space-project";
@@ -691,5 +692,47 @@ describe("the schemas the provider actually sees", () => {
     expect(description).toContain("use update only when most of the file changes");
     // The reference tool's own housekeeping line: files that stay current and few.
     expect(description).toContain("up to date, coherent and organized");
+  });
+});
+
+/**
+ * THE DECLARATION THE RUNNER READS. `untrustedOutputOf` treats an unset `untrustedOutput`
+ * as untrusted, so a memory tool that forgets to say `false` marks every turn that calls it
+ * as having read outside content — and that mark rides `messages.untrusted_ingress` into
+ * every later turn of the chat, where it refuses every edit of an existing file. That is
+ * what shipped for one round and was found in a live chat, not by a suite: the acceptance
+ * arms seeded the taint by hand and never asked whether a memory-only turn stays clean.
+ *
+ * Asserted through the REAL predicate from `turn-taint.ts`, by an EXPLICIT roster: a tool
+ * added to the factory without a decision about its output must fail here, not inherit one.
+ */
+describe("the memory tools declare their output as Capka's own", () => {
+  const ROSTER = [
+    "memory_search",
+    "memory_fact_write",
+    "memory_note_write",
+    "memory_open",
+    "memory_file",
+    "memory_link",
+    "memory_forget",
+  ] as const;
+
+  it("every tool in the roster reads as trusted output through untrustedOutputOf, and the roster is the factory", async () => {
+    const tools = await make();
+    expect(Object.keys(tools).sort()).toEqual([...ROSTER].sort());
+    for (const name of ROSTER) expect(untrustedOutputOf(tools, name)).toBe(false);
+  });
+
+  it("the control: a name the factory does not register still reads as untrusted", async () => {
+    // Without this the loop above passes for a predicate that answers `false` to everything.
+    const tools = await make();
+    expect(untrustedOutputOf(tools, "web_fetch")).toBe(true);
+  });
+
+  it("the declaration survives the effect-ledger wrap the runner applies", async () => {
+    // The runner reads the PRE-wrap set, but the SDK receives the wrapped one; a wrapper
+    // that rebuilt the tool object without the property would leave two answers in play.
+    const wrapped = withEffectLedger(await make(), { messageId: "m1", taskId: "t1" });
+    for (const name of ROSTER) expect(untrustedOutputOf(wrapped, name)).toBe(false);
   });
 });
