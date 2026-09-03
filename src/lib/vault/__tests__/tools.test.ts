@@ -693,6 +693,26 @@ describe("the schemas the provider actually sees", () => {
     // The reference tool's own housekeeping line: files that stay current and few.
     expect(description).toContain("up to date, coherent and organized");
   });
+
+  it("both writers show the exact call shapes, because a live model guessed them five times", async () => {
+    // Gemini 3.7 Flash, in a real chat, sent op as {create:{...}}, grounding as a string,
+    // content as a string, a block kind of "paragraph" and "markdown" for "text" — one
+    // schema error per attempt, each a red row in the user's timeline — before the write was
+    // accepted; then "handle" for "note_handle" on the edit. The JSON schema says all of it
+    // and the model did not read it; a worked example in the description is what it reads.
+    const tools = await make();
+    const note = tools.memory_note_write.description!;
+    expect(note).toContain('{"kind":"create","scope":"user","title":');
+    expect(note).toContain('"content":[{"kind":"markdown","text":');
+    expect(note).toContain('{"kind":"str_replace","note_handle":"n1","expected_revision":1,"old_str":');
+    expect(note).toContain('grounding {"kind":"current_user_quote","quote":');
+    // And the steering the live edit needed: a minimal span keeps the added words the user's.
+    expect(note).toContain("Replace the SMALLEST span that is unique in the file");
+    const fact = tools.memory_fact_write.description!;
+    expect(fact).toContain('{"kind":"create","scope":"user"}');
+    expect(fact).toContain('{"kind":"replace","target_handle":"m1","expected_revision":1}');
+    expect(fact).toContain('{"kind":"agent_inference"}');
+  });
 });
 
 /**
