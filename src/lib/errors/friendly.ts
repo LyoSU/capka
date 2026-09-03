@@ -79,7 +79,9 @@ const RULES: Rule[] = [
   },
   {
     category: "context_too_long",
-    test: /\b(context[_\s-]?length|maximum context|context window|too many tokens|reduce the length|prompt is too long)\b/i,
+    // The last alternative is Google's: "The input token count (N) exceeds the
+    // maximum number of tokens allowed (M)" names neither context nor length.
+    test: /\b(context[_\s-]?length|maximum context|context window|too many tokens|reduce the length|prompt is too long|maximum number of tokens allowed)\b/i,
     userMessage:
       "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
   },
@@ -294,6 +296,38 @@ export function isModalityUnsupportedError(raw: unknown): boolean {
  */
 export function isContextOverflowError(raw: unknown): boolean {
   return classifyLLMError(raw).category === "context_too_long";
+}
+
+/**
+ * The model's real context window, read out of an overflow rejection. No provider
+ * puts it in a structured field — it exists only in the prose — but most name it:
+ * Anthropic "213456 tokens > 200000 maximum", OpenAI/OpenRouter/vLLM "maximum
+ * context length is 128000 tokens", Google "maximum number of tokens allowed
+ * (1048576)", Mistral "model with 32768 maximum context length". Each pattern
+ * anchors on the LIMIT's own wording so the requested size ("resulted in 130250
+ * tokens") is never mistaken for it. Gated on the overflow category first: a rate
+ * limit also quotes a token figure, and learning a window from it would be wrong.
+ * Null when the text carries no usable number (Bedrock, OpenAI Responses) — the
+ * caller then keeps whatever it assumed.
+ */
+const CONTEXT_WINDOW_SHAPES: RegExp[] = [
+  /\d[\d,]*\s*tokens?\s*>\s*(\d[\d,]*)\s*max/i,
+  /maximum context length (?:is|of) (\d[\d,]*)/i,
+  /context (?:length|window) (?:of|is) (\d[\d,]*)/i,
+  /(\d[\d,]*) maximum context/i,
+  /maximum(?: number)? of tokens allowed \((\d[\d,]*)\)/i,
+];
+export function parseContextWindow(raw: unknown): number | null {
+  if (!isContextOverflowError(raw)) return null;
+  const detail = errorText(raw);
+  for (const shape of CONTEXT_WINDOW_SHAPES) {
+    const m = shape.exec(detail);
+    if (!m) continue;
+    const n = parseInt(m[1].replace(/,/g, ""), 10);
+    // Below 1k is not a window anyone serves; above 50M is a parse gone wrong.
+    return n >= 1_000 && n <= 50_000_000 ? n : null;
+  }
+  return null;
 }
 
 /**

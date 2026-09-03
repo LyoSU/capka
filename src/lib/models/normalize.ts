@@ -24,6 +24,12 @@ export interface Capabilities {
    *  them apart is what stops a catalog re-sync from overwriting what we saw the
    *  model actually do. */
   noReasoning?: boolean;
+  /** The context window (tokens) this deployment has SEEN the model enforce, read
+   *  out of an overflow rejection (see rememberModelContextLength). Wins over the
+   *  synced `contextLength` column: a gateway may serve a model with a smaller
+   *  window than the public catalog reports, and an off-catalog model has no
+   *  column at all. Absent until the first overflow. */
+  contextLength?: number;
   /** True when nothing is actually known about this model (an off-catalog id from
    *  a custom endpoint) and these values are the optimistic default. Lets the UI
    *  distinguish "cannot reason" from "we have no idea". */

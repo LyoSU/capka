@@ -35,10 +35,10 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, parseContextWindow, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
-import { rememberModelCannotReason, rememberModelEfforts } from "@/lib/models/catalog";
+import { rememberModelCannotReason, rememberModelContextLength, rememberModelEfforts } from "@/lib/models/catalog";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { repairToolCall } from "./tool-repair";
@@ -1553,6 +1553,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let emergencyTrimmed = false;
     const retryOnContextOverflow = async (err: unknown): Promise<boolean> => {
       if (emergencyTrimmed || !isContextOverflowError(err)) return false;
+      // The rejection usually names the real window. Remember it so this
+      // overflow is paid once per model: the next turn's budget compacts against
+      // the figure the provider just enforced instead of the catalog's (or the
+      // default's) guess. Fire and forget, like the reasoning-effort memo above.
+      const realWindow = parseContextWindow(err);
+      if (realWindow && realWindow !== contextLength) {
+        tlog.info("context overflow named the model's window — remembering it", { realWindow, assumed: contextLength });
+        void rememberModelContextLength(modelId, provider, realWindow).catch((e) =>
+          tlog.warn("could not persist learned context window", { error: errMsg(e) }),
+        );
+      }
       tlog.info("context overflow — emergency trim + retry", { keepRecent: EMERGENCY_KEEP_RECENT });
       emergencyTrimmed = true;
       streamError = undefined;

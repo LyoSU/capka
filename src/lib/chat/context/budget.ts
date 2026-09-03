@@ -7,16 +7,19 @@
 export const COMPACT_THRESHOLD = 0.75;
 
 /**
- * Conservative window assumed when the catalog reports no `contextLength` for a
- * model (a custom/local backend). Genuinely pessimistic: an unknown model is far
- * more likely a small local one (8k–32k) than a frontier 128k+ window, and the
- * old 128k default meant the proactive gate NEVER fired for a small model — it
- * silently overran until the reactive `context_too_long` retry caught it. 32k
- * compacts a little early for an unknown-but-large model (harmless) while
- * actually protecting the common small-model case. The reactive retry remains
- * the safety net behind this guess.
+ * Window assumed when neither the catalog nor an earlier overflow has told us a
+ * model's `contextLength` (a custom/local backend on its first turns). A guess,
+ * and deliberately a one-shot one: the first overflow teaches the real figure
+ * (parseContextWindow → rememberModelContextLength) and this stops applying.
+ * 128k is where today's off-catalog models cluster; a larger model compacts a
+ * little early until it overflows once (harmless), a smaller one pays a single
+ * emergency-trimmed turn before its window is known. The previous 32k protected
+ * that smaller case at the cost of compacting every unknown 200k+ model at 24k,
+ * forever — and it never protected the truly small case anyway: Ollama's default
+ * 4k window truncates the prompt silently rather than rejecting it, which no
+ * default and no retry can see.
  */
-export const DEFAULT_CONTEXT_LENGTH = 32_000;
+export const DEFAULT_CONTEXT_LENGTH = 128_000;
 
 export interface ContextBudget {
   /** Tokens we actually plan against: min(model window, admin cap), or the default. */

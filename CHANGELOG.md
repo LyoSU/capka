@@ -6,7 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A model the catalog does not know is assumed to have a 128k context window (was 32k), and the first `context_too_long` rejection that names the real window records it per model, so later turns compact against that figure. The learned value survives catalog re-syncs.
+
 ### Fixed
+
+- A Gemini context overflow («exceeds the maximum number of tokens allowed») is now recognised as one, so it gets the emergency trim and retry instead of a generic error.
 
 - The live «Thinking…» row under the activity rail uses the rail's own row anatomy (20px glyph, 15px muted label, same inset), so it no longer sits offset and bold below the steps.
 - A turn that has streamed text and then goes silent (a provider that does not stream tool-call arguments, e.g. Gemini generating a file) shows the «Thinking…» row after 2 s instead of nothing.

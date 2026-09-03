@@ -5,7 +5,7 @@ import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
 import { assertSafeUrl, guardedFetchOnce } from "@/lib/net/ssrf";
-import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
+import { parseOpenRouterModels, learnedContextLength, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
 import { PROVIDER_META, normalizeAzureBaseUrl, azureDeploymentSuggestions, parseBedrockEndpoint, type ProviderName, type Modality } from "./registry";
 
 /**
@@ -207,7 +207,7 @@ function toModelInfo(
     id,
     name: canon?.displayName ?? name,
     provider: group ?? "",
-    context: c?.contextLength ?? 0,
+    context: learnedContextLength(c?.capabilities) ?? c?.contextLength ?? 0,
     cutoff: c?.cutoff ?? null,
     pricing: { prompt: perMillion(c?.inputPrice), completion: perMillion(c?.outputPrice) },
     group,
@@ -228,7 +228,7 @@ async function listOpenRouter(): Promise<ModelInfo[]> {
     id: m.id,
     name: m.displayName,
     provider: m.id.split("/")[0] || "unknown",
-    context: m.contextLength ?? 0,
+    context: learnedContextLength(m.capabilities) ?? m.contextLength ?? 0,
     cutoff: m.cutoff ?? null,
     pricing: { prompt: perMillion(m.inputPrice), completion: perMillion(m.outputPrice) },
     group: m.group,

@@ -16,9 +16,11 @@ describe("contextBudget", () => {
     expect(b.shouldCompact).toBe(false); // 25% — plenty of room
   });
 
-  it("falls back to a conservative default when the catalog reports no window", () => {
+  it("falls back to the default when neither the catalog nor an overflow has named a window", () => {
     const b = contextBudget({ usedTokens: 10_000, modelContextLength: null, adminCap: null });
     expect(b.effectiveLimit).toBe(DEFAULT_CONTEXT_LENGTH);
+    // Where today's off-catalog models cluster; the first overflow corrects it.
+    expect(DEFAULT_CONTEXT_LENGTH).toBe(128_000);
   });
 
   it("never exceeds the model window even if the admin cap is larger", () => {

@@ -277,7 +277,8 @@ async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?:
     // `{}` and keeps `excluded.capabilities` verbatim.
     capabilities: sql`coalesce(excluded.capabilities, '{}'::jsonb) || coalesce(jsonb_strip_nulls(jsonb_build_object(
       'efforts', ${models.capabilities} -> 'efforts',
-      'noReasoning', ${models.capabilities} -> 'noReasoning'
+      'noReasoning', ${models.capabilities} -> 'noReasoning',
+      'contextLength', ${models.capabilities} -> 'contextLength'
     )), '{}'::jsonb)`,
     updatedAt: sql`excluded.updated_at`,
   };
@@ -449,26 +450,70 @@ export async function getLiveModelPrice(modelId: string): Promise<ModelPrice | n
 
 const contextCache = new Map<string, CacheEntry<number | null>>();
 
+/** The window this deployment has seen the model enforce, if any (see
+ *  rememberModelContextLength). Read from the `capabilities` jsonb rather than the
+ *  synced column so a re-sync cannot overwrite it. */
+export function learnedContextLength(capabilities: unknown): number | null {
+  const v = (capabilities as { contextLength?: unknown } | null)?.contextLength;
+  return typeof v === "number" && v > 0 ? v : null;
+}
+
 /**
- * The model's context window (tokens) from the synced catalog, or null when the
- * catalog doesn't know it (a custom/local backend) — in which case the budget
- * falls back to a conservative default. Same id-matching as getModelPrice (exact,
- * then provider-stripped). Cached in-process.
+ * The model's context window (tokens): what an overflow has TAUGHT us if anything
+ * has, else the synced catalog's figure, else null (a custom/local backend the
+ * catalog never heard of) — in which case the budget falls back to a default and
+ * the first overflow teaches the real number. Same id-matching as getModelPrice
+ * (exact, then provider-stripped). Cached in-process.
  */
 export async function getModelContextLength(modelId: string): Promise<number | null> {
   const cached = cacheGet(contextCache, modelId);
   if (cached.hit) return cached.v;
-  const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   const rows = await db
-    .select({ id: models.id, contextLength: models.contextLength })
+    .select({ id: models.id, contextLength: models.contextLength, capabilities: models.capabilities })
     .from(models)
-    .where(or(eq(models.id, modelId), eq(models.id, stripped), like(models.id, `%/${stripped}`)))
+    .where(idMatch(modelId))
     .limit(5);
 
-  const exact = rows.find((r) => r.id === modelId) ?? rows.find((r) => r.contextLength != null);
-  const ctx = exact?.contextLength ?? null;
+  const exact = rows.find((r) => r.id === modelId);
+  const ctx =
+    learnedContextLength(exact?.capabilities) ??
+    rows.map((r) => learnedContextLength(r.capabilities)).find((v) => v !== null) ??
+    exact?.contextLength ??
+    rows.find((r) => r.contextLength != null)?.contextLength ??
+    null;
   cacheSet(contextCache, modelId, ctx, ctx === null);
   return ctx;
+}
+
+/**
+ * Remember the window a model just enforced, so the overflow that revealed it is
+ * paid ONCE per model: from the next turn the budget compacts against the real
+ * figure instead of the catalog's (or the default's) guess. Same shape and
+ * bargain as rememberModelEfforts — merged into `capabilities`, preserved across
+ * a re-sync by the merge in upsertModels, and a minimal disabled row is inserted
+ * for an off-catalog model so it stops re-learning.
+ */
+export async function rememberModelContextLength(modelId: string, source: string, contextLength: number): Promise<void> {
+  const merge = sql`coalesce(${models.capabilities}, '{}'::jsonb) || ${JSON.stringify({ contextLength })}::jsonb`;
+  const updated = await db
+    .update(models)
+    .set({ capabilities: merge, updatedAt: new Date() })
+    .where(idMatch(modelId))
+    .returning({ id: models.id });
+  if (!updated.length) {
+    await db
+      .insert(models)
+      .values({
+        id: modelId,
+        source,
+        displayName: modelId,
+        contextLength,
+        capabilities: { vision: false, tools: true, reasoning: false, contextLength },
+        enabled: false,
+      })
+      .onConflictDoNothing();
+  }
+  contextCache.delete(modelId);
 }
 
 // ── Learned reasoning-effort enums ───────────────────────────
