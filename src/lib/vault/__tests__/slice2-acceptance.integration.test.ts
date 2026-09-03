@@ -100,8 +100,7 @@ const ids = {
   resume: `${P}resume`,
   cleanUser1: `${P}cu1`,
   /** The clean chat's CURRENT user message: `role: "user"`, carrying `USER_TURN`, and the
-   *  leaf the control assembles at. It was named `cleanAsst1` for one round while being a
-   *  user row throughout. */
+   *  leaf the control assembles at. */
   cleanUserTurn: `${P}cu2`,
   cleanTurn: `${P}clean-turn`,
 };
@@ -217,7 +216,9 @@ run("slice 2 acceptance - the taint-domain control", () => {
     // The suspended half of an `ask`: half 1 read untrusted content and stopped to ask.
     await insert({ id: ids.resume, chatId: C, parentId: ids.checkpoint, role: "assistant", metadata: textParts("waiting"), untrusted: true });
 
-    // The same shape with nothing marked anywhere.
+    // ARM 1 CONTROL's chat: two USER rows and the turn, nothing marked — the current user
+    // message carries `USER_TURN`, and there is no assistant row between them because the
+    // untrusted turn never happened here. ARM 2 is the arm seeded from the column.
     await insert({ id: ids.cleanUser1, chatId: CLEAN, parentId: null, role: "user", metadata: textParts("plan my week"), untrusted: false });
     await insert({ id: ids.cleanUserTurn, chatId: CLEAN, parentId: ids.cleanUser1, role: "user", metadata: textParts(USER_TURN), untrusted: false });
     await insert({ id: ids.cleanTurn, chatId: CLEAN, parentId: ids.cleanUserTurn, role: "assistant", metadata: textParts(""), untrusted: false });
