@@ -130,19 +130,13 @@ export function pageLines(body: string, cursor: string | undefined, maxBytes: nu
       next = cursorAt(line, byte);
       break;
     }
-    let end = Math.max(room, 0);
-    while (end > 0 && midSequence(rest, end)) end -= 1;
-    if (end === 0 && rest.length > 0) {
-      // A budget smaller than one character of the first line. Emitting an empty page would
-      // hand back a cursor identical to the one that produced it, which is a loop; one
-      // character over budget is the honest way out and cannot recur.
-      end = 1;
-      while (end < rest.length && midSequence(rest, end)) end += 1;
-    }
-    if (end === 0) {
-      next = cursorAt(line, byte);
-      break;
-    }
+    // `room` is at least 9 here: this is the page's first piece (no joining newline), the
+    // prefix is at most 11 bytes for any line count a note can reach, and the budget is
+    // floored at 16 above. A UTF-8 sequence is at most 4 bytes, so backing off a cut that
+    // landed mid-character always leaves at least one whole character — the page is never
+    // empty, and the cursor it hands back is always ahead of the one that produced it.
+    let end = room;
+    while (midSequence(rest, end)) end -= 1;
     parts.push(prefix + rest.subarray(0, end).toString("utf8"));
     to = line + 1;
     next = cursorAt(line, byte + end);

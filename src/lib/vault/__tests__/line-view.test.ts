@@ -129,11 +129,12 @@ describe("pageLines", () => {
   });
 
   it("a budget below one prefix still advances rather than looping", () => {
-    // PINNED BECAUSE IT IS NOT OBVIOUS. `pageLines` floors the budget at 16 bytes and, when
-    // even the first character will not fit, emits one character over budget. Both exist so
-    // the returned cursor is always ahead of the one that produced it — an empty page with an
-    // unchanged cursor is a caller that never terminates. No real caller is near this: the
-    // smallest budget in the codebase is 2,000.
+    // PINNED BECAUSE IT IS NOT OBVIOUS. `pageLines` floors the budget at 16 bytes, which is
+    // what leaves room for one prefix and at least one whole character on every page — so
+    // the returned cursor is always ahead of the one that produced it, and an empty page with
+    // an unchanged cursor (a caller that never terminates) cannot happen. The nine characters
+    // below are the floor at work: 16 minus the 7-byte prefix. No real caller is near this;
+    // the smallest budget in the codebase is 2,000.
     const p = pageLines("alpha", undefined, 1);
     if (!p) throw new Error("unexpected bad cursor");
     expect(p.text).toBe("     1\talpha");
