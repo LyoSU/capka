@@ -270,8 +270,24 @@ describe("str_replace", () => {
     if (!back.ok) throw new Error(`expected ok, got ${back.reason}`);
     expect(back.body).toBe(`Intro ${edgeToken(E1)} outro. gone.`);
     // THE EDGE IS UNTOUCHED. A raw `[[Title]]` and a stored `[[capka-edge:<id>]]` share no
-    // bytes, so a span found on the raw tier can never overlap a token.
+    // bytes, so a raw span never cuts INTO a token.
     expect(back.linksRemoved).toEqual([]);
+  });
+
+  it("a raw old_str that spells a token OUT covers it, and that is a reported removal, not an accident", () => {
+    // The bound on the claim above, measured: the raw needle cannot cut a token, but an
+    // `old_str` carrying a canonical token verbatim COVERS it whole, and replacing it closes
+    // the edge exactly as a mapped `old_str` naming the title would. `droppedLinks` reports it.
+    const stored = `X ${edgeToken(E1)} beta [[Reporting]] Y`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: `${edgeToken(E1)} beta [[Reporting]]`,
+      newStr: "",
+    });
+    if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
+    expect(r.body).toBe("X  Y");
+    expect(r.linksRemoved).toEqual([E1]);
   });
 
   it("the raw tier mints no token either — a title it names stays text", () => {
@@ -287,11 +303,25 @@ describe("str_replace", () => {
     expect(r.body.match(/capka-edge:/g)).toHaveLength(1);
   });
 
-  it("the MAPPED tier wins when both could match, and the literal is left alone", () => {
-    // The raw tier runs only when the mapped one found NOTHING, so a file holding both forms
-    // is edited where the model's rendered text actually pointed — at the link. Answering
-    // `ambiguous_match` here would be wrong: the mapped tier matched exactly once.
-    const stored = `Intro ${edgeToken(E1)} outro. Also [[Reporting]] here.`;
+  it("a file holding BOTH forms is ambiguous when old_str matches each, and names both lines", () => {
+    // The two forms render identically on the page the model read, so to the model this is
+    // the same text twice. A first cut let the mapped needle win silently — editing the link
+    // occurrence and leaving the literal — on a distinction the model cannot see. The
+    // witness: the raw needle matches here too (line 3), and the answer is the refusal.
+    const stored = `Intro ${edgeToken(E1)} outro.\nMiddle.\nIntro [[Reporting]] outro.`;
+    const r = applyStrReplace({
+      storedBody: stored,
+      edges: [live(E1, "Reporting")],
+      oldStr: "Intro [[Reporting]] outro.",
+      newStr: "Intro [[Reporting]] changed.",
+    });
+    expect(r).toEqual({ ok: false, reason: "ambiguous_match", lines: [1, 3] });
+  });
+
+  it("with only one form present, old_str naming the title edits the LINK occurrence", () => {
+    // The control on the case above: the raw needle matches nothing, the mapped one matches
+    // once, and the edit lands on the token and carries it across.
+    const stored = `Intro ${edgeToken(E1)} outro. Also mentioned here.`;
     const r = applyStrReplace({
       storedBody: stored,
       edges: [live(E1, "Reporting")],
@@ -299,7 +329,7 @@ describe("str_replace", () => {
       newStr: "Intro [[Reporting]] changed.",
     });
     if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
-    expect(r.body).toBe(`Intro ${edgeToken(E1)} changed. Also [[Reporting]] here.`);
+    expect(r.body).toBe(`Intro ${edgeToken(E1)} changed. Also mentioned here.`);
     expect(r.linksRemoved).toEqual([]);
   });
 

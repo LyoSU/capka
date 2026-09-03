@@ -295,39 +295,32 @@ export function applyStrReplace(a: {
   // what it had just done. A fragment nothing can address is a loop the model cannot argue
   // its way out of.
   //
-  // So when the MAPPED needle finds nothing in either tier, the RAW one is tried. It cannot
-  // touch a link by accident: a raw `[[Title]]` and a stored `[[capka-edge:<id>]]` share no
-  // bytes, so a span found this way never overlaps a token and `droppedLinks` sees the same
-  // tokens on both sides of the edit. And the raw tier carries its OWN allowance — the tokens
-  // the raw string itself names, which the check above has already validated — so a title the
-  // raw text mentions stays text on the way out too.
-  const tiers: { needle: string; carried: Set<string> }[] = [
-    { needle: mappedOld.text, carried: new Set(edgeIdsIn(mappedOld.text)) },
+  // So BOTH needles are searched, and their matches are ONE set. The two forms render
+  // identically on the page the model read, so a body holding both is, to the model, a body
+  // holding the same text twice — and two matches is `ambiguous_match` naming both lines,
+  // never a choice made for it. (A first cut ran the raw needle only when the mapped one
+  // found nothing; that picked the link occurrence over the literal one silently, on a
+  // distinction the model cannot see.)
+  //
+  // A raw span never CUTS INTO a token: a raw `[[Title]]` and a stored `[[capka-edge:<id>]]`
+  // share no bytes. It can COVER one — an `old_str` that spells a canonical token out
+  // carries that token by the check at the top, and replacing it is an ordinary removal
+  // `droppedLinks` reports. Each needle carries its own allowance, the tokens it itself
+  // names, so a title the raw text mentions stays text on the way out too.
+  const needles: { text: string; carried: Set<string> }[] = [
+    { text: mappedOld.text, carried: new Set(edgeIdsIn(mappedOld.text)) },
   ];
-  if (a.oldStr !== mappedOld.text) tiers.push({ needle: a.oldStr, carried: new Set(edgeIdsIn(a.oldStr)) });
+  if (a.oldStr !== mappedOld.text) needles.push({ text: a.oldStr, carried: new Set(edgeIdsIn(a.oldStr)) });
 
-  let fuzzy = false;
-  let spans: { start: number; end: number }[] = [];
-  let carried = tiers[0].carried;
-  for (const tier of tiers) {
-    let found = occurrences(a.storedBody, tier.needle).map((i) => ({
-      start: i,
-      end: i + tier.needle.length,
-    }));
-    let wasFuzzy = false;
-    if (found.length === 0) {
-      found = fuzzySpans(a.storedBody, tier.needle);
-      wasFuzzy = found.length > 0;
-    }
-    // AMBIGUITY STOPS THE SEARCH. Two matches on the mapped needle is an answer — "say which
-    // one" — and falling through to the raw tier would replace it with a different question.
-    if (found.length) {
-      spans = found;
-      fuzzy = wasFuzzy;
-      carried = tier.carried;
-      break;
-    }
-  }
+  // EXACT ACROSS BOTH NEEDLES FIRST, then the whitespace-tolerant tier across both: a
+  // transcription slip is forgiven only when nothing matched byte for byte.
+  const exact = needles.flatMap((n) =>
+    occurrences(a.storedBody, n.text).map((i) => ({ start: i, end: i + n.text.length, carried: n.carried })),
+  );
+  const fuzzy = exact.length === 0;
+  const spans = fuzzy
+    ? needles.flatMap((n) => fuzzySpans(a.storedBody, n.text).map((s) => ({ ...s, carried: n.carried })))
+    : exact;
   if (spans.length === 0) return { ok: false, reason: "no_match" };
   if (spans.length > 1) {
     return {
@@ -337,12 +330,11 @@ export function applyStrReplace(a: {
     };
   }
 
-  // AFTER the tier is chosen, because which links this edit may write depends on which text
+  // AFTER the span is chosen, because which links this edit may write depends on which text
   // it is replacing: exactly the ones that text already held.
-  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges, carried);
-  if (!mappedNew.ok) return mappedNew;
-
   const [span] = spans;
+  const mappedNew = mapRenderedToStored(a.newStr, a.storedBody, a.edges, span.carried);
+  if (!mappedNew.ok) return mappedNew;
   // TOKEN-ATOMIC, and checked on the SPAN before the splice rather than on the result alone:
   // `droppedLinks` reads a severed token as an absent one and the writer would then close a
   // live edge the person never asked to remove, so the refusal has to come first.
