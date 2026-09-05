@@ -136,6 +136,22 @@ export const POST = apiHandler(async (req: Request) => {
     });
   }
 
+  // What the user chose for THIS turn. These belong to the turn, not to the user
+  // message — a regenerate sends no text (it re-runs the same prompt) and so never
+  // entered the `if (text)` block below, which is where they used to be written.
+  // The turn still RAN on the newly-picked model (`effectiveModel` above is
+  // computed outside that gate), so the chat row was left describing a different
+  // model than the reply above it: the picker snapped back to the old one on
+  // reload, and "the model a new chat opens with" was whatever you last *typed*
+  // to rather than what you last *ran*.
+  const turnSettings = {
+    // Persist an explicit model switch so it sticks to this chat.
+    ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
+    // Same for thinking depth — the worker reads it off the chat row, not the
+    // payload, so it must land before the task is enqueued below.
+    ...(thinkAmount && thinkAmount !== existingChat?.thinkAmount ? { thinkAmount } : {}),
+  };
+
   // Save user message + update chat title
   const text = userMessage || "";
   if (text) {
@@ -180,16 +196,18 @@ export const POST = apiHandler(async (req: Request) => {
     }).onConflictDoNothing();
     await db.update(chats).set({
       ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-      // Persist an explicit model switch so it sticks to this chat.
-      ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
-      // Same for thinking depth — the worker reads it off the chat row, not the
-      // payload, so it must land before the task is enqueued below.
-      ...(thinkAmount && thinkAmount !== existingChat?.thinkAmount ? { thinkAmount } : {}),
+      ...turnSettings,
       // Point the chat at the new message so a reload mid-flight shows this
       // branch; the worker then advances it to the assistant reply.
       activeLeafId: newUserId,
       updatedAt: new Date(),
     }).where(eq(chats.id, chatId));
+  } else if (existingChat) {
+    // A regenerate. `updatedAt` is bumped unconditionally, not only when a setting
+    // changed: it is what orders the sidebar and what `resolveInitialModel` reads
+    // to answer "the model you last used", so a re-run that left it alone was an
+    // act of work the whole app treated as if it had never happened.
+    await db.update(chats).set({ ...turnSettings, updatedAt: new Date() }).where(eq(chats.id, chatId));
   }
 
   // Enqueue a durable task. The worker rebuilds model/tools/prompt from this

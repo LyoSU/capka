@@ -20,6 +20,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Regenerating a reply after switching models now persists that model (and thinking depth) on the chat, so the picker, the model a new chat opens with, and the sidebar order all reflect the re-run.
 - A Gemini context overflow («exceeds the maximum number of tokens allowed») is now recognised as one, so it gets the emergency trim and retry instead of a generic error.
 
 - The live «Thinking…» row under the activity rail uses the rail's own row anatomy (20px glyph, 15px muted label, same inset), so it no longer sits offset and bold below the steps.
