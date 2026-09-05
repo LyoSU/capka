@@ -191,6 +191,26 @@ export async function getMaxContextTokens(): Promise<number> {
  * self-hosted LiteLLM/Ollama on private/loopback addresses work out of the box;
  * when on, those ranges are blocked too (link-local/metadata is always blocked).
  */
+/**
+ * The model that BACKGROUND passes run on — chat titles and the per-turn memory
+ * sweep — as a `${configId}:${modelId}` ref, or null for "whatever the conversation
+ * is using".
+ *
+ * Worth its own knob because those two passes are mechanical: naming a chat and
+ * pulling facts out of a turn do not need the model someone chose for the actual
+ * work, and on a shared key they are pure overhead priced at the frontier rate.
+ *
+ * Compaction deliberately does NOT read this. It is the one pass that reuses the
+ * turn's own hot prefix (buildCompactionMessages), so it pays cache-read for a
+ * whole conversation; sending that prefix to a different model pays full price for
+ * every token of it, and a cheap model can easily cost MORE than the expensive one
+ * did. The knob would look like a saving and be a loss.
+ */
+export async function getAuxModelRef(): Promise<string | null> {
+  const v = (await getSetting("aux_model"))?.trim();
+  return v ? v : null;
+}
+
 export async function getBlockPrivateProviderUrls(): Promise<boolean> {
   return (await getSetting("block_private_provider_urls")) === "true";
 }

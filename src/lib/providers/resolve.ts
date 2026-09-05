@@ -1,11 +1,13 @@
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
-import { getMasterKey, sharedKeyEnabled, getModelMaxPrice, getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getMasterKey, sharedKeyEnabled, getModelMaxPrice, getBlockPrivateProviderUrls, getAuxModelRef } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName, type ApiStyle } from "@/lib/providers";
 import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
+import { log } from "@/lib/log";
+import type { LanguageModel } from "ai";
 
 type ProviderConfigRow = typeof providerConfigs.$inferSelect;
 
@@ -115,6 +117,37 @@ export async function resolveConfigById(userId: string, configId: string) {
     .where(and(eq(providerConfigs.id, configId), eq(users.role, "admin"), eq(providerConfigs.shared, true)))
     .limit(1);
   return shared ? { ...shared.config, isShared: true } : null;
+}
+
+/**
+ * Where the background passes should run: the org's dedicated model if one is set
+ * and still resolvable, otherwise the turn's own — handed in by the caller, so this
+ * never has to re-resolve what the run already holds.
+ *
+ * FALLS BACK SILENTLY, on purpose. A setting pointing at a disconnected provider or
+ * a model that left the catalog must not cost anyone their chat title; the pass
+ * simply runs where the conversation runs, which is exactly what it did before this
+ * setting existed. The admin sees the stale value in the picker, which is where it
+ * is fixable.
+ */
+export async function resolveAuxTarget<T extends { model: LanguageModel; provider: string; modelId: string; configId: string; isShared: boolean }>(
+  userId: string,
+  turn: T,
+): Promise<Pick<T, "model" | "provider" | "modelId" | "configId" | "isShared">> {
+  const ref = await getAuxModelRef().catch(() => null);
+  if (!ref) return turn;
+  const resolved = await resolveUserModelInfo(userId, ref).catch(() => null);
+  if (!resolved) {
+    log.warn("background-work model is set but did not resolve; using the conversation's model", { ref });
+    return turn;
+  }
+  return {
+    model: resolved.model,
+    provider: resolved.provider,
+    modelId: resolved.modelId,
+    configId: resolved.configId,
+    isShared: resolved.isShared,
+  };
 }
 
 /**

@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ConnectionRow, type ProviderConfig } from "@/components/settings/connection-row";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
+import { ModelPicker } from "@/components/chat/model-picker";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
@@ -30,6 +31,7 @@ export default function ConnectionsPage() {
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const maxPrice = useSetting("model_max_price", "0");
   const maxCtxTokens = useSetting("max_context_tokens", "0");
+  const auxModel = useSetting("aux_model", "");
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -259,6 +261,15 @@ export default function ConnectionsPage() {
     if (ok) toast.success(tc("saved"));
     else toast.error(t("maxContextTokensSaveFailed"));
   };
+  // Saved on pick rather than behind a Save button: a picker's selection IS the
+  // commit, and the number fields above only need one because typing "1" on the way
+  // to "100000" must not be persisted.
+  const saveAuxModel = async (ref: string) => {
+    auxModel.update(ref);
+    const ok = await auxModel.persist(ref);
+    if (ok) toast.success(tc("saved"));
+    else toast.error(t("auxModelSaveFailed"));
+  };
   const handleResync = async () => {
     setResyncing(true);
     try {
@@ -362,6 +373,26 @@ export default function ConnectionsPage() {
                 </div>
               </SettingsRow>
             ))}
+
+            {/* Which model does the housekeeping. Its own row rather than a fourth
+                number above, because the answer is a model, and because an empty
+                value is meaningful here — "the same one the conversation uses",
+                which is what `clearable` restores. */}
+            <SettingsRow
+              id="aux-model"
+              title={t("auxModel")}
+              hint={t("auxModelHint")}
+              control={
+                <ModelPicker
+                  variant="field"
+                  className="w-56"
+                  value={auxModel.value}
+                  onChange={saveAuxModel}
+                  placeholder={t("auxModelSame")}
+                  clearable
+                />
+              }
+            />
 
             <SettingsRow
               title={t("resyncModels")}

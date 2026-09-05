@@ -1278,7 +1278,11 @@
       "noModel": "no model set",
       "defaultModelHint": "New chats open with this model. Drag another connection to the top to change it.",
       "reorderError": "Couldn't save the order",
-      "changeIcon": "Change icon"
+      "changeIcon": "Change icon",
+      "auxModel": "Model for background work",
+      "auxModelHint": "Used to name chats and pull facts into memory. A cheaper model here does not affect the quality of replies.",
+      "auxModelSame": "Same as the conversation",
+      "auxModelSaveFailed": "Could not save the background-work model"
     },
     "usage": {
       "title": "Analytics",

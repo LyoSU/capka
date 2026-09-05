@@ -30,6 +30,7 @@ import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoun
   MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
+import { resolveAuxTarget } from "@/lib/providers/resolve";
 import { auxGenerate } from "@/lib/chat/context/aux";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
@@ -400,12 +401,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A factory rather than one callback: the three passes are dispatched together
     // and each has to label its own row, so the purpose is bound at the call site
     // that knows it rather than inferred downstream.
-    const auxUsageRecorder = (purpose: AuxRecord["purpose"], auxModelId = modelId) =>
+    const auxUsageRecorder = (
+      purpose: AuxRecord["purpose"],
+      on: { provider: string; modelId: string; configId: string; isShared: boolean } =
+        { provider, modelId, configId, isShared },
+    ) =>
       (u: TokenUsage) =>
         void recordAuxSpend({
-          taskId, messageId: msgId, userId, provider, configId,
-          model: auxModelId, turnModel: modelId, onSharedKey: isShared, purpose, usage: u,
+          taskId, messageId: msgId, userId,
+          provider: on.provider, configId: on.configId, model: on.modelId,
+          turnModel: modelId, onSharedKey: on.isShared, purpose, usage: u,
         });
+
+    // Where the title and memory passes run. Resolved ONCE and lazily: most installs
+    // leave it unset, and a turn that spawns no background work should not pay a
+    // settings read plus a provider resolve to discover that. Compaction is absent
+    // by design — it rides the turn's own cached prefix, and moving it elsewhere
+    // pays full price for the whole conversation (see getAuxModelRef).
+    let auxTargetMemo: Promise<Awaited<ReturnType<typeof resolveAuxTarget>>> | undefined;
+    const auxTarget = () =>
+      (auxTargetMemo ??= resolveAuxTarget(userId, { model, provider, modelId, configId, isShared }));
 
     // Prompt caching, three tiers of system messages (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
@@ -2142,9 +2157,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // model/provider and billing the spend to this turn's key is the call site's
         // job. Labelled "memory" so the aux span says which pass it was.
         generate: async (args) => {
-          const { text, finishReason, usage } = await auxGenerate(model, provider, args, "memory");
+          const on = await auxTarget();
+          const { text, finishReason, usage } = await auxGenerate(on.model, on.provider, args, "memory");
           const billable = toTokenUsage(usage);
-          if (billable) auxUsageRecorder("memory")(billable);
+          if (billable) auxUsageRecorder("memory", on)(billable);
           return { text, finishReason };
         },
       })
@@ -2192,7 +2208,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             .limit(1);
           const openingText = opening?.content?.trim();
           if (!openingText) return;
-          const title = await generateChatTitle(model, provider, openingText, getFullText(), auxUsageRecorder("title"));
+          const on = await auxTarget();
+          const title = await generateChatTitle(on.model, on.provider, openingText, getFullText(), auxUsageRecorder("title", on));
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });

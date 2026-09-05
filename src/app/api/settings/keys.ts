@@ -7,6 +7,7 @@
 // opaque JSON string with no server-side shape checking.
 export const READABLE_KEYS = [
   "platform_name", "telegram_bot_token", "model_min_context", "model_max_price", "max_context_tokens",
+  "aux_model",
   "sandbox_network", "registration_enabled", "block_private_provider_urls", "share_admin_providers",
   "members_can_install_plugins", "update_check_enabled", "agent_autonomy", "host_folder_access",
   "pc_folder_access", "agent_instructions",
