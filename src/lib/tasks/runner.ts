@@ -2116,7 +2116,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // gate the capability check does — but both are stated, because the space is
     // what the write actually needs and a widened capability must not silently
     // start writing into a space nobody resolved.
-    if (profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && userTurnText.trim()) {
+    // `background.factExtraction` sits INSIDE the memory capability, not beside it:
+    // the capability decides whether this run has memory at all, the pass decides
+    // whether a finished turn is swept for what the agent didn't deliberately save.
+    // An operator who wants memory but not a request per turn turns off the pass.
+    if (profile.background.factExtraction && profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && userTurnText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
       void trackAux(extractFacts({
@@ -2170,7 +2174,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // replaces it with only the most recent turns, which reads as a first turn in a
     // conversation of any depth.
     const isFirstTurn = !uiMessages.some((m) => m.role === "assistant" && m.id !== resumeMessageId);
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn) {
+    if (profile.background.autoTitle && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn) {
       void trackAux(
         (async () => {
           // The chat's OWN opening message, not `userTurnText`. These are different
@@ -2203,7 +2207,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the final user turn — see buildCompactionMessages). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
+    if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
       void trackAux(
         // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
         // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above

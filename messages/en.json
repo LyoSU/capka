@@ -791,7 +791,16 @@
         "hintOrg": "The instance-wide ceiling. A project can ask for less, never more — and this also covers chats that belong to no project.",
         "advancedNoteOrg": "Switching a capability off here removes it from every chat, whatever an individual project is set to.",
         "cappedByAdmin": "Some capabilities are limited instance-wide by an administrator and can't be enabled here.",
-        "rawEmptyOrg": "Chats with no instructions of their own will get no instructions at all."
+        "rawEmptyOrg": "Chats with no instructions of their own will get no instructions at all.",
+        "background": {
+          "title": "Background work after a reply",
+          "autoTitle": "Name chats automatically",
+          "autoTitleHint": "One request at the start of a new chat. Off leaves the opening message's first line as the name.",
+          "factExtraction": "Remember from every turn",
+          "factExtractionHint": "A request after every reply. Off means the agent saves only what it decides to save itself.",
+          "compaction": "Summarize long conversations",
+          "compactionHint": "A request once a chat fills 75% of the window. Off drops the oldest turns instead of summarizing them."
+        }
       },
       "systemPromptHint": "How the assistant should work in this project: tone, what to always include, what to avoid."
     },

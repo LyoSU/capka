@@ -22,6 +22,18 @@ export const CAPABILITY_GROUPS = ["sandbox", "connectors", "skills", "manage", "
 export type CapabilityGroup = (typeof CAPABILITY_GROUPS)[number];
 
 /**
+ * The passes that run AFTER a turn's reply is delivered, each costing its own
+ * request to the provider.
+ *
+ * Deliberately NOT capability groups. A group owns tools plus the prompt text that
+ * teaches them (see above), and these own neither — they are housekeeping the
+ * server does on its own, invisible to the model. Folding them into
+ * `capabilities` would make that carefully load-bearing invariant a coincidence.
+ */
+export const BACKGROUND_PASSES = ["autoTitle", "factExtraction", "compaction"] as const;
+export type BackgroundPass = (typeof BACKGROUND_PASSES)[number];
+
+/**
  * Every field carries a default, deliberately: `parseAgentProfile` on ANY stored
  * shape — null, `{}`, a row written before a group existed, or one from a newer
  * version carrying keys this build doesn't know — yields a COMPLETE profile. That
@@ -73,6 +85,30 @@ export const agentProfileSchema = z.object({
    *  Off gives the model no identity and no date — correct for raw prompting,
    *  where the operator supplies whatever context they want in the text itself. */
   sessionContext: z.boolean().default(true),
+  /** What the server does on its own once a reply has shipped. Each pass is a whole
+   *  extra request, so this is where an operator decides how much a single typed
+   *  message is allowed to cost. */
+  background: z
+    .object({
+      /** Name a new chat from its opening turn. Runs once per chat, on its first
+       *  completed turn; off leaves the placeholder /api/chat wrote (a slice of the
+       *  opening message) standing until someone renames it by hand. */
+      autoTitle: z.boolean().default(true),
+      /** Mine each finished turn for durable facts. Runs on EVERY turn, so it is the
+       *  costliest of the three by a wide margin. Off does not take memory away: the
+       *  agent's own `memory_fact_write` still saves what it decides to save — what
+       *  stops is the after-the-fact sweep for what it didn't think to. Already
+       *  bounded by the `memory` capability above, which turns off memory entirely. */
+      factExtraction: z.boolean().default(true),
+      /** Summarize a conversation that has filled 75% of the window, so the next
+       *  turn starts from the summary. Off does NOT let a chat overflow: the
+       *  reactive emergency trim still catches it — the conversation is cut back to
+       *  its most recent turns instead of being summarized, which is cheaper and
+       *  loses more. */
+      compaction: z.boolean().default(true),
+    })
+    // `.prefault` for the same reason as `capabilities` — see the note there.
+    .prefault({}),
 });
 
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
@@ -85,6 +121,9 @@ export const RAW_PROFILE: AgentProfile = agentProfileSchema.parse({
   capabilities: { sandbox: false, connectors: false, skills: false, manage: false, memory: false },
   persona: "replace",
   sessionContext: false,
+  // Nothing between the operator and the model means nothing AFTER it either: a raw
+  // run makes exactly the calls the conversation asks for.
+  background: { autoTitle: false, factExtraction: false, compaction: false },
 });
 
 /** Parse whatever sits in the jsonb column. Never throws: a corrupt or
@@ -111,6 +150,11 @@ export function capProfile(a: AgentProfile, b: AgentProfile): AgentProfile {
     ) as AgentProfile["capabilities"],
     persona: a.persona === "replace" || b.persona === "replace" ? "replace" : "append",
     sessionContext: a.sessionContext && b.sessionContext,
+    // Fewer background calls is the more restrictive side, exactly as for a
+    // capability: the ceiling can forbid a pass, never impose one.
+    background: Object.fromEntries(
+      BACKGROUND_PASSES.map((k) => [k, a.background[k] && b.background[k]]),
+    ) as AgentProfile["background"],
   };
 }
 
@@ -140,7 +184,8 @@ export function profilesEqual(a: AgentProfile, b: AgentProfile): boolean {
   return (
     a.persona === b.persona &&
     a.sessionContext === b.sessionContext &&
-    CAPABILITY_GROUPS.every((g) => a.capabilities[g] === b.capabilities[g])
+    CAPABILITY_GROUPS.every((g) => a.capabilities[g] === b.capabilities[g]) &&
+    BACKGROUND_PASSES.every((k) => a.background[k] === b.background[k])
   );
 }
 

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Segmented } from "@/components/settings/segmented";
 import {
-  ASSISTANT_PROFILE, RAW_PROFILE, CAPABILITY_GROUPS, presetOf, type AgentProfile,
+  ASSISTANT_PROFILE, RAW_PROFILE, CAPABILITY_GROUPS, BACKGROUND_PASSES, presetOf, type AgentProfile,
 } from "@/lib/agents/profile";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +48,7 @@ export function AgentModeSection({
   // A group is locked when the ceiling forbids it; the same for the two prompt
   // switches, where "restrictive" means replace / no session context.
   const lockedGroup = (g: (typeof CAPABILITY_GROUPS)[number]) => ceiling ? !ceiling.capabilities[g] : false;
+  const lockedPass = (k: (typeof BACKGROUND_PASSES)[number]) => ceiling ? !ceiling.background[k] : false;
   const personaLocked = ceiling?.persona === "replace";
   const sessionLocked = ceiling ? !ceiling.sessionContext : false;
   const anyLocked = CAPABILITY_GROUPS.some(lockedGroup) || personaLocked || sessionLocked;
@@ -120,6 +121,28 @@ export function AgentModeSection({
                   />
                 </label>
               ))}
+              {/* What the server does on its own after a reply ships. Its own section
+                  because these are not capabilities: they add no tools and no prompt
+                  text, they add REQUESTS — which is the thing an operator watching a
+                  shared key actually wants a lever on. */}
+              <div className="space-y-2.5 border-t pt-2.5">
+                <div className="text-xs text-muted-foreground">{t("background.title")}</div>
+                {BACKGROUND_PASSES.map((k) => (
+                  <label key={k} className={cn("flex items-start justify-between gap-3 text-sm", lockedPass(k) && "text-muted-foreground")}>
+                    <span className="space-y-0.5">
+                      <span className="block">{t(`background.${k}`)}</span>
+                      <span className="block text-xs text-muted-foreground">{t(`background.${k}Hint`)}</span>
+                    </span>
+                    <Switch
+                      checked={profile.background[k] && !lockedPass(k)}
+                      disabled={lockedPass(k)}
+                      onCheckedChange={(v) =>
+                        onChange({ ...profile, background: { ...profile.background, [k]: v } })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
               <div className="space-y-2.5 border-t pt-2.5">
                 <label className={cn("flex items-center justify-between gap-3 text-sm", personaLocked && "text-muted-foreground")}>
                   <span>{t("persona")}</span>

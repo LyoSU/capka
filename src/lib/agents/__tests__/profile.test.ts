@@ -3,6 +3,7 @@ import {
   ASSISTANT_PROFILE,
   RAW_PROFILE,
   CAPABILITY_GROUPS,
+  BACKGROUND_PASSES,
   agentProfileSchema,
   capProfile,
   parseAgentProfile,
@@ -141,6 +142,47 @@ describe("presets", () => {
     for (const g of CAPABILITY_GROUPS) expect(RAW_PROFILE.capabilities[g]).toBe(false);
     expect(RAW_PROFILE.persona).toBe("replace");
     expect(RAW_PROFILE.sessionContext).toBe(false);
+  });
+});
+
+describe("background passes", () => {
+  // The `.prefault` regression, on the second nested object that can suffer it: a
+  // `.default({})` here would read every pass as undefined — falsy — and silently
+  // turn off titles, memory extraction and compaction on every project at once.
+  it("defaults every pass on when nothing is stored", () => {
+    for (const k of BACKGROUND_PASSES) {
+      expect(ASSISTANT_PROFILE.background[k], `pass ${k} must default to enabled`).toBe(true);
+    }
+  });
+
+  it("fills in only the passes a partial row is missing", () => {
+    const p = parseAgentProfile({ background: { factExtraction: false } });
+    expect(p.background.factExtraction).toBe(false);
+    expect(p.background.autoTitle).toBe(true);
+    expect(p.background.compaction).toBe(true);
+  });
+
+  it("makes a raw run do no background work at all", () => {
+    for (const k of BACKGROUND_PASSES) expect(RAW_PROFILE.background[k]).toBe(false);
+  });
+
+  it("lets the ceiling forbid a pass but never impose one", () => {
+    const ceiling = agentProfileSchema.parse({ background: { factExtraction: false } });
+    const project = agentProfileSchema.parse({ background: { autoTitle: false } });
+
+    const resolved = resolveAgentProfile(project, ceiling);
+    expect(resolved.background.factExtraction).toBe(false); // the ceiling's veto
+    expect(resolved.background.autoTitle).toBe(false); // the project's own choice
+    expect(resolved.background.compaction).toBe(true);
+
+    // And the fold stays commutative, like every other field.
+    expect(capProfile(project, ceiling)).toEqual(capProfile(ceiling, project));
+  });
+
+  it("counts a changed pass as a custom profile, not the assistant preset", () => {
+    const p = parseAgentProfile({ background: { factExtraction: false } });
+    expect(profilesEqual(p, ASSISTANT_PROFILE)).toBe(false);
+    expect(presetOf(p)).toBe("custom");
   });
 });
 
