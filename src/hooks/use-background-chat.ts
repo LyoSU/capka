@@ -625,7 +625,12 @@ export function useBackgroundChat({
       if (sseHealthyRef.current && ticks % 7 !== 0) return;
 
       fetch(`/api/tasks?chatId=${chatId}`)
-        .then((r) => (r.ok ? r.json() : null))
+        // A failed REQUEST is not an answer. `!r.ok -> null` used to read as "no
+        // task is running", so one 500 or 429 from this insurance poll dropped the
+        // UI to idle, cleared taskId and killed the stop button while the turn was
+        // still going. Reject instead, and let the catch below ignore it — the next
+        // tick asks again.
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`tasks ${r.status}`))))
         .then((task) => {
           if (!task || task.status !== "running") {
             setStatus("idle");
