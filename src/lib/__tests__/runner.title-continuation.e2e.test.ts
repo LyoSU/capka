@@ -50,6 +50,11 @@ vi.mock("@/lib/providers/resolve", () => ({
     provider: "mock",
     modelId: "mock-model",
   }),
+  // The runner asks the same module which model runs its background passes. With no
+  // `aux_model` set the answer is the turn's own target, which is what this returns —
+  // leaving it out of the mock is not "no aux model", it is a throw inside the title
+  // pass, which is caught and logged and leaves the placeholder standing.
+  resolveAuxTarget: async (_userId: string, turn: unknown) => turn,
 }));
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
