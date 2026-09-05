@@ -6,8 +6,17 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Highlight a passage of a reply and a small bar offers Explain / Simpler / Shorter / Ask; each puts the passage, quoted, into the composer for you to send. Pointer devices only.
+- File tiles under a reply show `+added −removed` lines for files the turn wrote. `write_file`/`str_replace` now report sizes, so it appears for turns run after this deploy.
+
 ### Changed
 
+- A code block that is still streaming is not syntax-highlighted until its fence closes; finished blocks are unaffected.
+- The sources under a reply are a stack of source marks and a count that opens the list, instead of a grid of tiles.
+- Switching theme freezes transitions for the flip, so it lands as one repaint instead of hundreds of colour fades.
+- Reply paragraphs use `text-wrap: pretty`.
 - Each streamed word fades in on its own on top of the client-side pacing, so the leading edge of a reply reads as a soft gradient rather than a hard front; code blocks are not animated.
 - While a reply is inside a code block the client releases it in fewer, larger pieces (tick ≥150 ms), so the syntax highlighter re-runs a third as often on a growing block.
 - Files staged in the composer enter with the same staggered pop as a finished turn's file tiles.

@@ -634,9 +634,20 @@
       "offline": "No connection. Check your internet and try again."
     },
     "citations": {
-      "sources": "Sources",
       "openSource": "Source {n}: {title}",
-      "more": "{n, plural, one {# more source} other {# more sources}}"
+      "count": "{n, plural, one {# source} other {# sources}}"
+    },
+    "selection": {
+      "label": "Actions for the selection",
+      "explain": "Explain",
+      "simplify": "Simpler",
+      "shorten": "Shorter",
+      "ask": "Ask",
+      "prompt": {
+        "explain": "Explain this part of the answer in more detail:",
+        "simplify": "Rewrite this part in simpler words:",
+        "shorten": "Shorten this part, keeping the point:"
+      }
     },
     "approval": {
       "title": "Permission needed",

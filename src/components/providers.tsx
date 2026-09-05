@@ -27,6 +27,19 @@ function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", resolved === "dark");
 }
 
+/** A theme flip swaps every colour token at once. Each surface carries a
+ *  transition on its colours for hover and press, so without this the whole page
+ *  shimmers through hundreds of mismatched fades on different clocks for a few
+ *  hundred milliseconds. Freeze transitions for the frames the flip takes (the
+ *  rule lives in globals.css) so it lands as one clean repaint. Two frames, not
+ *  one: the class must outlive the style recalculation the toggle triggers. */
+function withFrozenTransitions(flip: () => void) {
+  const root = document.documentElement;
+  root.classList.add("theme-switching");
+  flip();
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   // Read the stored preference in the lazy initializer instead of calling
   // setState inside an effect (which would render twice and trip react-hooks).
@@ -45,7 +58,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       if ((localStorage.getItem("theme") || "system") === "system") {
-        applyTheme("system");
+        withFrozenTransitions(() => applyTheme("system"));
       }
     };
     mq.addEventListener("change", handler);
@@ -55,7 +68,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   function setTheme(t: Theme) {
     setThemeState(t);
     localStorage.setItem("theme", t);
-    applyTheme(t);
+    withFrozenTransitions(() => applyTheme(t));
   }
 
   return (

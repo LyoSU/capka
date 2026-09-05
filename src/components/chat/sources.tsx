@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslations } from "next-intl";
-import { Globe } from "lucide-react";
+import { Globe, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
@@ -19,12 +19,12 @@ export function hostOf(u: string): string | null {
  *  third parties, which a self-hosted product exists to avoid. A host whose
  *  first character carries no meaning as a letter (an IP, punycode) falls back
  *  to a neutral globe. */
-function Monogram({ host }: { host: string }) {
+function Monogram({ host, className = "" }: { host: string; className?: string }) {
   const letter = /\p{L}/u.test(host[0] ?? "") ? host[0] : null;
   return (
     <span
       aria-hidden
-      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[9px] font-semibold uppercase leading-none text-muted-foreground"
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[9px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
     >
       {letter ?? <Globe className="h-2.5 w-2.5" />}
     </span>
@@ -79,17 +79,20 @@ export function CitationChip({ n, source }: { n: number; source: NumberedSource 
   );
 }
 
-/** How many tiles a long list shows before the rest waits behind "N more". */
-const COLLAPSED_TILES = 5;
+/** How many marks the closed row stacks before the count carries the rest. */
+const STACKED_MARKS = 4;
 
-/** The sources a reply actually cited, as tiles under the answer — only the
- *  cited ones (the full result lists already live in the step panels), in
- *  first-use order, one tile per URL: branch-global numbering can hand the
- *  same page two numbers across searches, and two tiles for one page would
- *  read as two sources. */
+/** The sources a reply actually cited, under the answer: a stack of their marks
+ *  and a count that opens the full list. Closed by default — the [N] chips in the
+ *  text already open each source where it is used, so the list is for the reader
+ *  who wants the whole set at once, not a second grid competing with the answer.
+ *  Only the cited ones (the full result lists already live in the step panels),
+ *  in first-use order, one row per URL: branch-global numbering can hand the same
+ *  page two numbers across searches, and two rows for one page would read as two
+ *  sources. */
 export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
   const t = useTranslations("chat.citations");
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const byUrl = new Map<string, { ns: number[]; source: NumberedSource }>();
   for (const s of list) {
@@ -97,53 +100,68 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
     if (g) g.ns.push(s.n);
     else byUrl.set(s.url, { ns: [s.n], source: s });
   }
-  const tiles = [...byUrl.values()];
-  // Collapse only when it saves more than one row's worth — a "1 more" button
-  // occupying the slot the tile itself would have used helps nobody.
-  const collapsed = !expanded && tiles.length > COLLAPSED_TILES + 1;
-  const shown = collapsed ? tiles.slice(0, COLLAPSED_TILES) : tiles;
+  const rows = [...byUrl.values()];
 
   return (
-    <div className="animate-message-in mt-3 border-t border-border pt-2.5">
-      <div className="mb-1.5 text-xs font-medium text-muted-foreground">{t("sources")}</div>
-      <ul className="grid list-none grid-cols-1 gap-1.5 p-0 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map(({ ns, source: s }) => {
-          const host = hostOf(s.url);
-          return (
-            <li key={s.url} className="min-w-0">
-              <a
-                href={s.url}
-                target="_blank"
-                rel="noopener noreferrer nofollow"
-                title={s.url}
-                className="flex h-full flex-col gap-1 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-2 no-underline transition-colors hover:border-primary/40 hover:bg-hover"
-              >
-                <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-none text-muted-foreground">
-                  {host && <Monogram host={host} />}
-                  <span className="truncate">{host ?? s.url}</span>
-                  <span className="ml-auto flex shrink-0 gap-1">
-                    {ns.map((n) => (
-                      <span key={n} className={`${NUMBER_PILL} h-4 min-w-4 bg-background px-1 text-[10px]`}>{n}</span>
-                    ))}
-                  </span>
-                </span>
-                <span className="line-clamp-2 text-xs leading-snug text-foreground">{s.title}</span>
-              </a>
-            </li>
-          );
-        })}
-        {collapsed && (
-          <li className="min-w-0">
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              className="flex h-full w-full items-center justify-center rounded-lg border border-dashed border-border/70 px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-hover hover:text-foreground"
-            >
-              {t("more", { n: tiles.length - COLLAPSED_TILES })}
-            </button>
-          </li>
-        )}
-      </ul>
+    <div className="animate-message-in mt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-micro hover:bg-hover hover:text-foreground"
+      >
+        <span className="flex -space-x-1">
+          {rows.slice(0, STACKED_MARKS).map(({ source: s }) => (
+            // The ring is the page colour, so overlapping marks read as a stack of
+            // discs rather than one blob.
+            <Monogram key={s.url} host={hostOf(s.url) ?? ""} className="ring-2 ring-background" />
+          ))}
+        </span>
+        <span>{t("count", { n: rows.length })}</span>
+        <ChevronDown
+          className="h-3 w-3 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+          style={{ transform: open ? "rotate(180deg)" : undefined }}
+          aria-hidden="true"
+        />
+      </button>
+
+      {/* Opens by growing out of the row (0fr → 1fr) instead of appearing, the same
+          grammar as every spoiler here; no height is measured. `inert` keeps the
+          closed list's links out of the tab order and off the accessibility tree. */}
+      <div
+        className="grid transition-[grid-template-rows,opacity] duration-300 [transition-timing-function:var(--ease-strong)]"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
+      >
+        <div className="overflow-hidden" inert={!open}>
+          <ul className="mt-1.5 flex list-none flex-col gap-px rounded-lg bg-muted/40 p-1 shadow-hairline">
+            {rows.map(({ ns, source: s }, i) => {
+              const host = hostOf(s.url);
+              return (
+                // The class is applied only while open, so the rows cascade in on
+                // every opening rather than once on mount behind a closed lid.
+                <li key={s.url} className={`min-w-0 ${open ? "animate-fade-up" : ""}`} style={{ "--i": i } as CSSProperties}>
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    title={s.url}
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs no-underline transition-micro hover:bg-hover"
+                  >
+                    <Monogram host={host ?? ""} />
+                    <span className="min-w-0 flex-1 truncate text-foreground">{s.title}</span>
+                    <span className="flex shrink-0 gap-1">
+                      {ns.map((n) => (
+                        <span key={n} className={`${NUMBER_PILL} h-4 min-w-4 bg-background px-1 text-[10px]`}>{n}</span>
+                      ))}
+                    </span>
+                    <span className="hidden shrink-0 font-mono text-[10.5px] text-muted-foreground sm:inline">{host ?? s.url}</span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifacts";
+import { editStatsFromParts, editKey, type EditStat } from "@/lib/chat/edit-stats";
 import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
@@ -855,7 +856,7 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
 }
 
 
-function TextContent({ text, isStreaming, chatId, touched, sources }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[]; sources?: NumberedSource[] }) {
+function TextContent({ text, isStreaming, chatId, touched, sources, editStats }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[]; sources?: NumberedSource[]; editStats?: Map<string, EditStat> }) {
   // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
   // answers stay in the comfortable reading band; code blocks and tables are
   // exempt and keep the full column width. 16px (text-base) is the readable
@@ -863,11 +864,26 @@ function TextContent({ text, isStreaming, chatId, touched, sources }: { text: st
   // No caret and no tail treatment while streaming: the deltas are paced word by
   // word on the client (delta-pacer.ts), so the growing text is its own write
   // head, and the step rail already says when the model has parked.
+  // `data-answer` marks this as text a reader may highlight and hand to the agent
+  // (selection-actions.tsx) — a reply's prose, never a user message or tool output.
   return (
-    <div className="chat-prose text-base leading-relaxed">
+    <div className="chat-prose text-base leading-relaxed" data-answer="">
       <Markdown isStreaming={isStreaming} chatId={chatId} sources={sources}>{text}</Markdown>
-      {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} touched={touched} />}
+      {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} touched={touched} stats={editStats} />}
     </div>
+  );
+}
+
+/** `+74 −41` under a written file's tile — the size of the change, in the
+ *  vocabulary every code review uses. Nothing for a file the turn only read, and
+ *  nothing for turns from before the file tools reported sizes. */
+function EditStatMeta({ stat }: { stat?: EditStat }) {
+  if (!stat || (stat.added === 0 && stat.removed === 0)) return null;
+  return (
+    <span className="mt-0.5 flex justify-center gap-1.5 font-mono text-[10px] leading-none tabular-nums">
+      <span className="text-success">+{stat.added}</span>
+      {stat.removed > 0 && <span className="text-destructive">−{stat.removed}</span>}
+    </span>
   );
 }
 
@@ -919,7 +935,7 @@ function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
  * sight. A folded row would technically fix it while still hiding the answer, so
  * the rule is "show the best evidence available", not "only ever show named".
  */
-function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId: string; live?: boolean; touched?: string[] }) {
+function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; chatId: string; live?: boolean; touched?: string[]; stats?: Map<string, EditStat> }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
   // Re-scanning the message text on every render is wasteful; the artifact
@@ -981,7 +997,13 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
           // is just late. A turn that produced twelve files should not make the
           // twelfth wait most of a second.
           <div key={p} className="animate-pop-in" style={{ animationDelay: `${Math.min(i, 4) * 60}ms` }}>
-            <SandboxFileTile file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} verify live={live} />
+            <SandboxFileTile
+              file={{ path: p, name: p.split("/").pop() || p, chatId }}
+              viewable={viewable}
+              verify
+              live={live}
+              meta={<EditStatMeta stat={stats?.get(editKey(p))} />}
+            />
           </div>
         ))}
       </div>
@@ -2351,6 +2373,11 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const isTelegram = metadata?.platform === "telegram";
   const siblingIndex = metadata?.siblingIndex ?? 0;
   const siblingCount = metadata?.siblingCount ?? 1;
+  // Lines written per file, from the file tools' results — the `+N −M` under the
+  // artifact tiles. Keyed on the parts array, which the presenter rebuilds only
+  // when the message changes. Above the user-bubble return: hooks run on every
+  // path, and a user message simply has no tool parts to fold.
+  const edits = useMemo(() => editStatsFromParts(message.parts.filter(isToolPart)), [message.parts]);
 
   if (isUser) {
     const text = message.parts
@@ -2505,6 +2532,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                     isStreaming={isStreaming && gi === lastTextIdx}
                     chatId={chatId}
                     touched={gi === lastTextIdx ? metadata?.touchedFiles : undefined}
+                    editStats={gi === lastTextIdx ? edits : undefined}
                     sources={turnSources.length ? turnSources : undefined}
                   />
                 </div>

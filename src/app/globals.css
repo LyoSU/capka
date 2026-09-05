@@ -734,6 +734,15 @@
   max-width: 70ch;
 }
 
+/* The line breaker may look a few lines ahead in flowing text, so a paragraph
+   does not end on a one-word line and the ragged edge stays even. Prose only:
+   headings already balance, and code/tables never wrap here. */
+.chat-prose > p,
+.chat-prose li,
+.chat-prose > blockquote {
+  text-wrap: pretty;
+}
+
 /* Reasoning rows render markdown too — models put `**bold**` pseudo-headings,
    lists and fenced code in their thoughts, and unparsed markers are noise. But a
    thought is an aside on the step rail, not an answer: Streamdown types headings
@@ -748,6 +757,16 @@
   margin-bottom: 0.125rem;
   font-size: inherit;
   line-height: inherit;
+}
+
+/* A theme flip swaps every colour token at once. Every hover/press transition on
+   the page would otherwise fire together on mismatched clocks and the whole
+   surface shimmers for a few hundred milliseconds. The theme provider holds this
+   class on <html> for the frames the flip takes, so it lands as one repaint. */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
 }
 
 /* Respect the OS "reduce motion" setting. Single source of truth for the whole

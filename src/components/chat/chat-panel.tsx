@@ -41,6 +41,7 @@ import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
+import { SelectionActions } from "@/components/chat/selection-actions";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -1132,6 +1133,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   </div>
                 </div>
               )}
+              {/* Highlight a passage of a reply → a bar that quotes it into the
+                  composer. Mounted once for the whole transcript; it finds the
+                  answers by `data-answer`. Not in a shared, read-only view — there
+                  is no composer to fill. */}
+              {!readOnly && <SelectionActions onPrompt={fillFromStarter} />}
               {importCardEl}
               {inputEl}
             </div>

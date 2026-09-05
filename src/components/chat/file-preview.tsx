@@ -1065,13 +1065,16 @@ function CopyButton({ text }: { text: string }) {
  * or a local object-URL preview (for files not yet uploaded).
  */
 export function FileTile({
-  thumb, name, onClick, href, download, overlay, className,
+  thumb, name, onClick, href, download, overlay, meta, className,
 }: {
   thumb: React.ReactNode;
   name: string;
   onClick?: () => void;
   href?: string;
   download?: string;
+  /** One short line under the name (the `+N −M` of a written file). Part of the
+   *  control, so it is announced with the tile. */
+  meta?: React.ReactNode;
   /** Corner action over the thumbnail (e.g. a remove button in the composer).
    *  Stays OUTSIDE the tile's own control — it is usually a button itself, and a
    *  button inside a button is invalid and unreachable by keyboard. */
@@ -1097,6 +1100,7 @@ export function FileTile({
       <span className="mt-1 line-clamp-2 break-words text-center text-[11px] leading-tight text-muted-foreground">
         {name}
       </span>
+      {meta}
     </>
   );
   const control = "flex w-full flex-col rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
@@ -1121,12 +1125,14 @@ export function FileTile({
  * addressable on the controller by chatId + path.
  */
 export function SandboxFileTile({
-  file, viewable, overlay, verify, live, className,
+  file, viewable, overlay, meta, verify, live, className,
 }: {
   file: PreviewFile;
   /** The set to page through with ←/→. Need not contain `file` — see below. */
   viewable: PreviewFile[];
   overlay?: React.ReactNode;
+  /** Forwarded to FileTile: the line under the name. */
+  meta?: React.ReactNode;
   /** Forwarded to FileTile: `w-full` inside a grid, otherwise the fixed square. */
   className?: string;
   /** Probe existence and grey the tile out if the file isn't there — for the
@@ -1165,6 +1171,7 @@ export function SandboxFileTile({
       thumb={<FileThumb file={file} className="h-full w-full" />}
       name={file.name}
       overlay={overlay}
+      meta={meta}
       className={className}
       onClick={() => open(at >= 0 ? viewable : [file], Math.max(at, 0))}
     />

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type Components, type PluginConfig, type UrlTransform } from "streamdown";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type CodeHighlighterPlugin, type Components, type PluginConfig, type UrlTransform } from "streamdown";
 import "streamdown/styles.css";
 // KaTeX ships its own stylesheet (fonts + layout). Without it the math plugin
 // renders raw, unstyled spans instead of typeset formulas — Streamdown does not
@@ -9,6 +9,7 @@ import "streamdown/styles.css";
 import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents, LiveContext } from "./workspace-path";
 import { remarkCitations } from "@/lib/chat/citations";
+import { openFenceBody, deferLiveHighlight } from "@/lib/chat/live-code";
 import type { Pluggable } from "unified";
 import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
@@ -126,15 +127,33 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
     return () => { alive = false; };
   }, [need]);
 
+  // The code block still being written is not highlighted until its fence closes
+  // (see live-code.ts): shiki would re-tokenize the whole block on every paced
+  // word, and that is the one render cost here that grows with the reply. The
+  // ref carries the CURRENT live body so the plugin below can compare without
+  // changing identity per token; only crossing a fence boundary flips `inFence`.
+  const liveCode = isStreaming ? openFenceBody(children) : null;
+  const liveRef = useRef(liveCode);
+  liveRef.current = liveCode;
+  const inFence = liveCode !== null;
+
   // Keyed on `ready` (a value, not a reference) so this object's identity changes
   // only when a plugin actually lands. Streamdown memoizes on it, and a fresh object
   // per render would re-parse and re-highlight the whole message on every token.
+  // `inFence` is the one other key, on purpose: leaving a fence hands Streamdown a
+  // new plugin object, which is what makes every code block's highlighter effect
+  // run again — the block that just closed tokenizes once, the earlier ones hit
+  // shiki's content cache. Without it the closed block would stay plain, because
+  // its code text did not change when the fence did.
   const plugins = useMemo<PluginConfig | undefined>(() => {
     if (!ready) return undefined;
     const out: Record<string, unknown> = {};
     for (const name of ready.split(" ")) out[name] = loaded[name];
+    if (inFence && out.code) {
+      out.code = deferLiveHighlight(out.code as CodeHighlighterPlugin, (code) => code === liveRef.current);
+    }
     return out as PluginConfig;
-  }, [ready]);
+  }, [ready, inFence]);
 
   // The sources array is rebuilt by the message on every render, so the memos
   // below key on its CONTENT — a fresh array each render would defeat

@@ -44,6 +44,15 @@ describe("live text", () => {
     expect(animated).not.toMatch(/blur/i);
   });
 
+  it("defers highlighting of the code block still being streamed, keyed on the fence, not the token", () => {
+    // The highlighter re-tokenizes a block on every render of it; the growing
+    // block is handed back plain until its fence closes. The plugin object's
+    // identity must flip only on the fence boundary — per token would re-run every
+    // block's highlighter effect on every word.
+    expect(markdown).toMatch(/deferLiveHighlight\(/);
+    expect(markdown).toMatch(/\}, \[ready, inFence\]\);/);
+  });
+
   it("draws no caret on the streaming answer", () => {
     expect(css).not.toMatch(/data-streaming/);
     expect(css).not.toMatch(/caret-blink/);

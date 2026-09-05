@@ -3,6 +3,7 @@ import { z } from "zod";
 import { execCommand, deleteFile, deleteSharedFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
+import { lineCount } from "@/lib/chat/edit-stats";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
  *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
@@ -397,7 +398,8 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         const cmd = `mkdir -p "$(dirname '${safePath}')" && echo '${encoded}' | base64 -d > '${safePath}'`;
         const result = await run(cmd, undefined, abortSignal);
         if (result.exitCode !== 0) return { error: result.stderr || "Write failed", success: false };
-        return { success: true, path };
+        // The size of the change, for the `+N` under the file's tile in the reply.
+        return { success: true, path, lines: lineCount(content) };
       },
     }),
 
@@ -436,7 +438,8 @@ print('OK')`;
             : friendlyFsError(result.stderr, path);
           return { error, success: false };
         }
-        return { success: true, path };
+        // Lines replaced, as a diff would count them: the `+N −M` under the tile.
+        return { success: true, path, added: lineCount(new_str), removed: lineCount(old_str) };
       },
     }),
 
