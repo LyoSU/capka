@@ -507,9 +507,9 @@ function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
 }
 
 /** The left (desktop) / top (mobile) tab strip that drives the right pane.
- *  `labeled` mode names each tab — used when tabs are connections, since two
- *  configs of the same provider share a glyph and need their label to differ;
- *  otherwise it's a compact glyph-only strip of brands. */
+ *  Every tab carries its name: a glyph alone names Anthropic or OpenAI to an
+ *  engineer and nobody else, and two connections of one provider share a glyph
+ *  outright. */
 function ProviderRail({
   groups,
   hasRecent,
@@ -519,7 +519,6 @@ function ProviderRail({
   active,
   onSelect,
   orientation,
-  labeled,
 }: {
   groups: GroupEntry[];
   hasRecent: boolean;
@@ -529,46 +528,30 @@ function ProviderRail({
   active: string | null;
   onSelect: (tab: string) => void;
   orientation: "vertical" | "horizontal";
-  labeled: boolean;
 }) {
   const t = useTranslations("chat.model");
   const vertical = orientation === "vertical";
 
   // Each tab is a tooltip trigger — our own instant tooltip (the native `title`
-  // takes ~700ms to appear, too slow for a glyph-only rail where the name is the
-  // only label). Glyph-only rails always need it; labeled tabs use it as a
-  // fallback when the name is truncated.
+  // takes ~700ms to appear) — as the fallback for a name the rail truncates.
   const item = (key: string, title: string, glyph: React.ReactNode) => {
     const isActive = active === key;
     const activeCls = isActive
       ? "bg-background text-foreground shadow-btn"
       : "text-muted-foreground hover:bg-hover hover:text-foreground";
-    const btn = labeled ? (
-      <button
-        type="button"
-        aria-label={title}
-        aria-pressed={isActive}
-        onClick={() => onSelect(key)}
-        className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
-          vertical ? "w-full" : ""
-        }`}
-      >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
-        <span className="truncate">{title}</span>
-      </button>
-    ) : (
-      <button
-        type="button"
-        aria-pressed={isActive}
-        onClick={() => onSelect(key)}
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${activeCls}`}
-      >
-        {glyph}
-      </button>
-    );
     return (
       <Hint key={key} label={title} side={vertical ? "right" : "bottom"}>
-        {btn}
+        <button
+          type="button"
+          aria-pressed={isActive}
+          onClick={() => onSelect(key)}
+          className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
+            vertical ? "w-full" : ""
+          }`}
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
+          <span className="truncate">{title}</span>
+        </button>
       </Hint>
     );
   };
@@ -577,7 +560,7 @@ function ProviderRail({
     <div
       className={`flex shrink-0 gap-1 ${
         vertical
-          ? `flex-col overflow-y-auto overflow-x-hidden overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
+          ? "w-40 flex-col items-stretch overflow-y-auto overflow-x-hidden overscroll-contain border-r p-2"
           : "flex-row items-center overflow-x-auto border-b p-2"
       }`}
     >
@@ -586,7 +569,7 @@ function ProviderRail({
       {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
       {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
       {(hasRecent || hasNew || hasAll || hasFeatured) && (
-        <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
+        <span className={vertical ? "my-1 h-px w-full bg-border" : "mx-1 h-6 w-px bg-border"} />
       )}
       {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
     </div>
@@ -1068,7 +1051,6 @@ function ModelList({
           active={searching ? null : activeBrand}
           onSelect={pickBrand}
           orientation={orientation}
-          labeled={false}
         />
       )}
       {right}
@@ -1089,7 +1071,6 @@ function ModelList({
         active={searching ? null : activeConn}
         onSelect={pickConn}
         orientation="horizontal"
-        labeled
       />
       {body}
     </div>
