@@ -30,6 +30,7 @@ All notable changes to Capka are documented here. Format follows
 - Brand glyphs are drawn from path data in the repo and `@lobehub/icons` is gone: the chat's largest chunk drops from 836 KB, and the lockfile loses 243 packages (antd, @lobehub/ui, emoji-mart and their trees) with no other version changed.
 - The dashboard validates the session once per request instead of once in the layout and again in the page, and `setup_complete` is read until it is true rather than on every render.
 - Each route group serializes only the message namespaces it renders: a signed-out page now ships 6% of the catalog and a chat page 51%, while settings pages ship ~14% more because they nest inside the dashboard scope.
+- A tab holds one `/api/events` stream instead of two: the sidebar and the chat panel share it, halving the Postgres `LISTEN` subscriptions and heartbeat timers an open tab costs, and moving between chats no longer reconnects.
 
 ### Fixed
 

@@ -51,6 +51,7 @@ import {
 import { ClawMark } from "@/components/brand/claw-mark";
 import { useTheme } from "@/components/providers";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
+import { subscribeEvents } from "@/lib/event-stream";
 import { ProjectsNav } from "@/components/projects/projects-nav";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
@@ -555,59 +556,44 @@ export function AppSidebar() {
   // a task finishes. Subscribe to the same task event stream the chat panel uses
   // and refetch (debounced) when a chat appears, finishes, or arrives externally.
   useEffect(() => {
-    let es: EventSource | null = null;
-    let reconnect: ReturnType<typeof setTimeout>;
     let debounce: ReturnType<typeof setTimeout>;
-    let delay = 1000;
     const refresh = () => {
       clearTimeout(debounce);
       debounce = setTimeout(() => refreshHeadRef.current(), 400);
     };
-    const connect = () => {
-      es = new EventSource("/api/events");
-      es.onopen = () => { delay = 1000; };
-      es.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data) as { type?: string; chatId?: string; title?: string };
-          // A generated title arrives once, after a new chat's first turn. Swap it
-          // in place (ChatTitle animates the change) instead of a full refetch —
-          // no flicker, and it lands even if the chat isn't in the fetched window.
-          if (d.type === "chat:title" && d.chatId && d.title) {
-            const { chatId: cid, title } = d;
-            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, title } : c)));
-          } else if (d.type === "task:start" && d.chatId) {
-            // Flip the spinner on instantly; the debounced merge-refresh then
-            // surfaces brand-new chats and reconciles ordering authoritatively.
-            const cid = d.chatId;
-            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: true } : c)));
-            refresh();
-          } else if (d.type === "task:finish" && d.chatId) {
-            // Reply done: drop the spinner now. The merge-refresh brings the
-            // fresh unread flag (set when the chat isn't the one being viewed).
-            const cid = d.chatId;
-            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false } : c)));
-            // If you're watching this chat, the reply you just saw complete is
-            // read — re-stamp lastReadAt (the open-time stamp predates the reply)
-            // so it doesn't resurface as unread the moment you navigate away.
-            if (cid === activeChatIdRef.current) markReadRef.current(cid);
-            refresh();
-          } else if (d.type === "new_message") {
-            refresh();
-          }
-        } catch { /* ignore parse errors */ }
-      };
-      es.onerror = () => {
-        es?.close();
-        clearTimeout(reconnect);
-        reconnect = setTimeout(connect, delay);
-        delay = Math.min(delay * 2, 30000);
-      };
-    };
-    connect();
+    const unsubscribe = subscribeEvents({
+      onMessage: (event) => {
+        const d = event as { type?: string; chatId?: string; title?: string };
+        // A generated title arrives once, after a new chat's first turn. Swap it
+        // in place (ChatTitle animates the change) instead of a full refetch —
+        // no flicker, and it lands even if the chat isn't in the fetched window.
+        if (d.type === "chat:title" && d.chatId && d.title) {
+          const { chatId: cid, title } = d;
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, title } : c)));
+        } else if (d.type === "task:start" && d.chatId) {
+          // Flip the spinner on instantly; the debounced merge-refresh then
+          // surfaces brand-new chats and reconciles ordering authoritatively.
+          const cid = d.chatId;
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: true } : c)));
+          refresh();
+        } else if (d.type === "task:finish" && d.chatId) {
+          // Reply done: drop the spinner now. The merge-refresh brings the
+          // fresh unread flag (set when the chat isn't the one being viewed).
+          const cid = d.chatId;
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false } : c)));
+          // If you're watching this chat, the reply you just saw complete is
+          // read — re-stamp lastReadAt (the open-time stamp predates the reply)
+          // so it doesn't resurface as unread the moment you navigate away.
+          if (cid === activeChatIdRef.current) markReadRef.current(cid);
+          refresh();
+        } else if (d.type === "new_message") {
+          refresh();
+        }
+      },
+    });
     return () => {
-      clearTimeout(reconnect);
       clearTimeout(debounce);
-      es?.close();
+      unsubscribe();
     };
   }, []);
 

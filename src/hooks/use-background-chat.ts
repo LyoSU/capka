@@ -9,6 +9,7 @@ import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic
 import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
 import { createStreamRecovery } from "@/lib/chat/stream-recovery";
 import { createDeltaPacer } from "@/lib/chat/delta-pacer";
+import { subscribeEvents } from "@/lib/event-stream";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -169,9 +170,6 @@ export function useBackgroundChat({
 
   // ── SSE listener ───────────────────────────────────────────
   useEffect(() => {
-    let es: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    let retryDelay = 1000; // exponential backoff: 1s, 2s, 4s, 8s, max 30s
 
     // Streaming events that mutate the reply and carry a per-message seq — gated
     // through classifyStreamEvent so a resumed stream reconciles instead of
@@ -539,76 +537,64 @@ export function useBackgroundChat({
       if (!applyEvent(event)) recovery.hold(event as GapEvent);
     });
 
-    const connect = () => {
-      es = new EventSource("/api/events");
+    // One connection per tab, shared with the sidebar — reconnect and backoff
+    // live in the stream module, not here.
+    const unsubscribe = subscribeEvents({
+      onOpen: () => { sseHealthyRef.current = true; },
+      onError: () => { sseHealthyRef.current = false; },
+      onMessage: (event) => {
+        const data = event as TaskEvent;
 
-      es.onopen = () => { retryDelay = 1000; sseHealthyRef.current = true; }; // reset backoff on success
+        // Only handle events for this chat
+        if ("chatId" in data && data.chatId !== chatId) return;
 
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as TaskEvent;
+        // A NOTIFY payload too big for Postgres (e.g. an oversized text burst)
+        // arrives as a stripped marker carrying only `_truncated: true` plus the
+        // ids — its body (delta/result) is gone. Honour the contract the realtime
+        // layer promises and re-read this message from the DB, which holds the
+        // full part. Deliberately leaves the cursor where it is: this seq was
+        // never applied, so the events after it read as gapped and buffer
+        // themselves until a snapshot covers the hole. (Big tool results are
+        // already capped server-side, so this is a rare safety net.)
+        if ((data as { _truncated?: boolean })._truncated) {
+          recovery.reconcile();
+          return;
+        }
 
-          // Only handle events for this chat
-          if ("chatId" in data && data.chatId !== chatId) return;
+        // Reconcile gate: for seq-stamped streaming events, decide whether this
+        // delta is already covered by our snapshot (ignore), the next one
+        // (apply), or past a gap (reconcile from the DB). A delta with no seq
+        // (legacy publisher) always applies, so nothing else regresses.
+        if (GATED.has(data.type) && "messageId" in data) {
+          const mid = data.messageId as string;
+          const seq = (data as { seq?: number }).seq;
+          const action = classifyStreamEvent(appliedSeqRef.current.get(mid) ?? -1, seq);
+          if (action === "ignore") return;
+          // Past a gap: hold the event instead of dropping it, so the reload's
+          // snapshot can be topped up with everything it doesn't cover.
+          if (action === "reconcile") { recovery.hold(data as GapEvent); return; }
+          // action === "apply": advance the cursor, then run the handler below.
+          // (The cursor advances at receive time even for buffered deltas —
+          // classification is about arrival order, not paint time.)
+          if (typeof seq === "number") appliedSeqRef.current.set(mid, seq);
+          // Content is flowing again — clear any "retrying" notice from a stall.
+          setTaskInfo((prev) => (prev.retrying ? { ...prev, retrying: null } : prev));
+        }
 
-          // A NOTIFY payload too big for Postgres (e.g. an oversized text burst)
-          // arrives as a stripped marker carrying only `_truncated: true` plus the
-          // ids — its body (delta/result) is gone. Honour the contract the realtime
-          // layer promises and re-read this message from the DB, which holds the
-          // full part. Deliberately leaves the cursor where it is: this seq was
-          // never applied, so the events after it read as gapped and buffer
-          // themselves until a snapshot covers the hole. (Big tool results are
-          // already capped server-side, so this is a rare safety net.)
-          if ((data as { _truncated?: boolean })._truncated) {
-            recovery.reconcile();
-            return;
-          }
+        if (data.type === "task:text-delta" || data.type === "task:reasoning-delta") {
+          pacer.enqueue(data);
+          return;
+        }
+        pacer.flush();
+        if (!applyEvent(data)) recovery.hold(data as GapEvent);
+      },
+    });
 
-          // Reconcile gate: for seq-stamped streaming events, decide whether this
-          // delta is already covered by our snapshot (ignore), the next one
-          // (apply), or past a gap (reconcile from the DB). A delta with no seq
-          // (legacy publisher) always applies, so nothing else regresses.
-          if (GATED.has(data.type) && "messageId" in data) {
-            const mid = data.messageId as string;
-            const seq = (data as { seq?: number }).seq;
-            const action = classifyStreamEvent(appliedSeqRef.current.get(mid) ?? -1, seq);
-            if (action === "ignore") return;
-            // Past a gap: hold the event instead of dropping it, so the reload's
-            // snapshot can be topped up with everything it doesn't cover.
-            if (action === "reconcile") { recovery.hold(data as GapEvent); return; }
-            // action === "apply": advance the cursor, then run the handler below.
-            // (The cursor advances at receive time even for buffered deltas —
-            // classification is about arrival order, not paint time.)
-            if (typeof seq === "number") appliedSeqRef.current.set(mid, seq);
-            // Content is flowing again — clear any "retrying" notice from a stall.
-            setTaskInfo((prev) => (prev.retrying ? { ...prev, retrying: null } : prev));
-          }
-
-          if (data.type === "task:text-delta" || data.type === "task:reasoning-delta") {
-            pacer.enqueue(data);
-            return;
-          }
-          pacer.flush();
-          if (!applyEvent(data)) recovery.hold(data as GapEvent);
-        } catch { /* ignore parse errors */ }
-      };
-
-      es.onerror = () => {
-        sseHealthyRef.current = false;
-        es?.close();
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, 30000);
-      };
-    };
-
-    connect();
     return () => {
       sseHealthyRef.current = false;
-      clearTimeout(reconnectTimer);
       recovery.dispose();
       pacer.dispose();
-      es?.close();
+      unsubscribe();
     };
   }, [chatId, loadHistory]);
 
