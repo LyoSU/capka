@@ -30,12 +30,27 @@ const STREAMDOWN_CONTROLS = {
   table: { copy: true, download: true, fullscreen: true },
 };
 
-// Streamed text gets no per-word animation. It used to: Streamdown's animate
-// plugin faded in the words each ~250ms batch mounted, which read as a slab
-// flashing in four times a second. The deltas are now paced word by word on the
-// client (src/lib/chat/delta-pacer.ts), so the words simply appear where the
-// next one lands — the same treatment beautifului's streaming text uses — and a
-// finished message carries no extra spans.
+// Each streamed word fades in once, on its own. The fade was removed for a while
+// because it sat on top of ~250ms server slabs: twenty words flashing in from
+// transparent together, four times a second, read as blinking. The slabs are gone
+// — deltas are paced word by word on the client (src/lib/chat/delta-pacer.ts) —
+// and a fade on each paced word is a different thing: the leading edge of the
+// text becomes a soft gradient (the newest word lightest) instead of a hard
+// front, which is what a smooth token stream looks like on a 120Hz display.
+// Streamdown animates only the words past the previous render's length, skips
+// `code`/`pre`/`math`, and drops the spans when `isAnimating` goes false, so a
+// finished message carries no extra markup. `stagger: 0` is load-bearing: the
+// plugin cascades per BLOCK, so any stagger restarts the tail in every paragraph
+// and a reply grows two fronts at once. `--ease-out` is the app's one entrance
+// curve; its literal value goes here because the memo compares this object by
+// reference and it must be module-level.
+const ANIMATED = {
+  animation: "fadeIn",
+  duration: 220,
+  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+  sep: "word",
+  stagger: 0,
+} as const;
 
 // Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy —
 // load them off the critical path so the chat bundle stays small. Markdown
@@ -112,6 +127,8 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
       <Streamdown
         key={citeKey}
         parseIncompleteMarkdown={isStreaming}
+        isAnimating={isStreaming}
+        animated={ANIMATED}
         controls={STREAMDOWN_CONTROLS}
         plugins={plugins}
         remarkPlugins={remarkPlugins}

@@ -57,12 +57,22 @@ export function AttachmentTray({
   return (
     // Wraps and scrolls, so many files never push the message body off-screen.
     <div className={`flex max-h-44 flex-wrap gap-3 overflow-y-auto scrollbar-thin ${className ?? ""}`}>
-      {files.map((af) => {
+      {files.map((af, i) => {
+        // A staged file arrives with the same pop the finished turn's artifact
+        // tiles use, staggered per tile and capped at four steps, so a dropped
+        // folder reads as files landing rather than a row blinking into place.
+        // The wrapper is keyed on the file id and stays mounted through
+        // uploading → ready, so the tile changing state does not re-enter.
+        const enter = { animationDelay: `${Math.min(i, 4) * 60}ms` };
         // Ready & in the sandbox → real thumbnail tile (works for restored chips
         // too, whose bytes are no longer in memory).
         if (af.status === "ready" && af.ref) {
           const pf: PreviewFile = { path: af.ref.name, name: af.ref.name, chatId };
-          return <SandboxFileTile key={af.id} file={pf} viewable={[pf]} overlay={removeButton(af)} />;
+          return (
+            <div key={af.id} className="animate-pop-in" style={enter}>
+              <SandboxFileTile file={pf} viewable={[pf]} overlay={removeButton(af)} />
+            </div>
+          );
         }
 
         const preview = previews.get(af.id);
@@ -100,7 +110,11 @@ export function AttachmentTray({
             </>
           );
 
-        return <FileTile key={af.id} thumb={thumb} name={af.name} overlay={overlay} />;
+        return (
+          <div key={af.id} className="animate-pop-in" style={enter}>
+            <FileTile thumb={thumb} name={af.name} overlay={overlay} />
+          </div>
+        );
       })}
     </div>
   );

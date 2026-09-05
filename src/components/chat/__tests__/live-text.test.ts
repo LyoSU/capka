@@ -2,16 +2,16 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * A streamed answer reads as live text because the DELTAS are paced, not because
- * the words are animated.
+ * A streamed answer reads as live text because the DELTAS are paced; the per-word
+ * fade sits on top of that pacing and must never stand in for it.
  *
  * The runner flushes every ~100ms; shown as they land, a paragraph grows in slabs
- * of twenty-odd tokens. The old cure was a per-word fade on each slab plus a caret
- * that blinked on pauses — which is exactly what read as «блимає»: four slabs a
- * second, each flashing in from transparent, and a bar flickering between them.
- * Now `delta-pacer.ts` releases whole words at a steady cadence upstream of the
- * renderer, and the text itself gets no treatment at all: no fade, no blur, no
- * caret. These facts are invisible to types and lint, so they are pinned here.
+ * of twenty-odd tokens. A fade on each slab is what once read as «блимає»: four
+ * slabs a second, each flashing in from transparent, plus a caret flickering
+ * between them. `delta-pacer.ts` now releases whole words at a steady cadence
+ * upstream of the renderer, and a fade on each PACED word turns the leading edge
+ * into a soft gradient rather than a hard front. The caret stays gone. These
+ * facts are invisible to types and lint, so they are pinned here.
  */
 const CSS = "src/app/globals.css";
 const MARKDOWN = "src/components/chat/markdown.tsx";
@@ -29,11 +29,19 @@ describe("live text", () => {
     expect(hook).not.toMatch(/createDeltaCoalescer/);
   });
 
-  it("does not animate words: a paced word needs no entrance", () => {
-    // Streamdown's animate plugin wraps every word in a span and fades each
-    // batch in from transparent — the flash the pacer exists to remove.
-    expect(markdown).not.toMatch(/animated=/);
-    expect(markdown).not.toMatch(/isAnimating=/);
+  it("fades each paced word in once, with no per-block cascade", () => {
+    // Streamdown animates only the words past the previous render's length and
+    // skips code/pre/math, so with paced deltas each new word fades in alone. The
+    // plugin staggers per BLOCK, so any stagger > 0 restarts the cascade in every
+    // paragraph and a reply grows two fronts at once — it must stay at 0.
+    expect(markdown).toMatch(/isAnimating=\{isStreaming\}/);
+    expect(markdown).toMatch(/animated=\{ANIMATED\}/);
+    const animated = markdown.slice(markdown.indexOf("const ANIMATED = {"), markdown.indexOf("} as const;"));
+    expect(animated).toMatch(/animation: "fadeIn"/);
+    expect(animated).toMatch(/sep: "word"/);
+    expect(animated).toMatch(/stagger: 0\b/);
+    // Only the words animate. No blur, no mask — see streamed-text-legibility.
+    expect(animated).not.toMatch(/blur/i);
   });
 
   it("draws no caret on the streaming answer", () => {

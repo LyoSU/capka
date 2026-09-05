@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Each streamed word fades in on its own on top of the client-side pacing, so the leading edge of a reply reads as a soft gradient rather than a hard front; code blocks are not animated.
+- While a reply is inside a code block the client releases it in fewer, larger pieces (tick ≥150 ms), so the syntax highlighter re-runs a third as often on a growing block.
+- Files staged in the composer enter with the same staggered pop as a finished turn's file tiles.
+
 ## [0.39.0] - 2026-09-05
 
 ### Added

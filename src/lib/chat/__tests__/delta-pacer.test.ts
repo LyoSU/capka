@@ -169,6 +169,37 @@ describe("createDeltaPacer", () => {
     expect(applied.length).toBeLessThanOrEqual(5);
   });
 
+  it("ticks less often inside an open code fence, and returns to prose cadence once it closes", () => {
+    const applied: string[] = [];
+    const p = createDeltaPacer((e: Ev) => applied.push(e.delta));
+    // Prose cadence, measured over one second of a short message.
+    p.enqueue(text(words(200)));
+    vi.advanceTimersByTime(1_000);
+    const proseTicks = applied.length;
+    expect(proseTicks).toBeGreaterThan(10);
+    // The fence opens across a server-batch seam ("``" then "`\n"): still counted.
+    // Small enough that the whole message stays under the length threshold, so
+    // the only thing changing the tick here is the fence.
+    applied.length = 0;
+    p.enqueue(text("``"));
+    p.enqueue(text("`js\n" + Array.from({ length: 60 }, (_, i) => `const line${i} = ${i};`).join("\n") + "\n"));
+    vi.advanceTimersByTime(1_000);
+    const codeTicks = applied.length;
+    expect(codeTicks).toBeGreaterThan(0);
+    expect(codeTicks).toBeLessThan(proseTicks / 2);
+    // Drain the code, close the fence, and the tick is back at prose cadence:
+    // counted over the first 200ms, because after a fast drain the rate term
+    // empties a short paragraph in a handful of ticks and a one-second count
+    // would measure catch-up, not cadence.
+    vi.advanceTimersByTime(30_000);
+    p.enqueue(text("```\n"));
+    vi.advanceTimersByTime(1_000);
+    applied.length = 0;
+    p.enqueue(text(words(100)));
+    vi.advanceTimersByTime(200);
+    expect(applied.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("flush() applies the whole backlog at once and cancels the tick", () => {
     const applied: string[] = [];
     const p = createDeltaPacer((e: Ev) => applied.push(e.delta));

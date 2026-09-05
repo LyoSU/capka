@@ -25,6 +25,13 @@ const CATCH_UP_MS = 400;       // backlog is drained within about this long
 const MAX_WORD_EXTEND = 24;    // finish the word at the cut, unless it's not a word (CJK, base64)
 const TICK_MIN_MS = 50;        // 20 fps while the message is short
 const TICK_MAX_MS = 250;       // the old coalescer's cadence, once it is long
+// Inside an open ``` fence the tick never drops below this. Every render of a
+// streaming code block re-tokenizes the whole block for syntax highlighting —
+// the one part of a reply whose cost per render grows with the block and is not
+// memoized away, and the case where a streaming renderer visibly stalls. Code is
+// not read word by word, so releasing it in fewer, larger pieces costs nothing
+// legible and cuts the highlighter's work per second by ~3× while it is short.
+const CODE_TICK_MS = 150;
 const SHORT_CHARS = 4_000;     // tick stays at the minimum up to here…
 const LONG_CHARS = 20_000;     // …and reaches the maximum here
 
@@ -48,11 +55,14 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
   let lastTickAt = 0;
   let held = false;              // the queue holds only a word stub waiting for its tail
   let runSinceWs = 0;            // chars shown since the last whitespace (is the stub a word?)
+  let inFence = false;           // the shown text ends inside an open ``` fence
+  let fenceTail = "";            // last two shown chars, so a ``` split across parts still counts
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const tickMs = () => {
     const t = Math.min(1, Math.max(0, (shown - SHORT_CHARS) / (LONG_CHARS - SHORT_CHARS)));
-    return TICK_MIN_MS + t * (TICK_MAX_MS - TICK_MIN_MS);
+    const ms = TICK_MIN_MS + t * (TICK_MAX_MS - TICK_MIN_MS);
+    return inFence ? Math.max(ms, CODE_TICK_MS) : ms;
   };
 
   const note = (part: string) => {
@@ -60,6 +70,13 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
     shown += part.length;
     const ws = part.search(/\s\S*$/);
     runSinceWs = ws >= 0 ? part.length - ws - 1 : runSinceWs + part.length;
+    // Every ``` toggles the fence. Counted over the previous two chars plus this
+    // part: a marker cannot fit inside two chars, so nothing is counted twice, and
+    // one that straddles the seam is still seen. The odd cases (a four-backtick
+    // fence, ``` inside inline code) cost a coarser or finer tick, nothing worse.
+    const marks = (fenceTail + part).match(/```/g);
+    if (marks && marks.length % 2) inFence = !inFence;
+    fenceTail = (fenceTail + part).slice(-2);
   };
 
   const release = (chars: number) => {
@@ -129,6 +146,8 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
       if (event.messageId !== lastMessageId) {
         lastMessageId = event.messageId;
         shown = 0;
+        inFence = false;
+        fenceTail = "";
       }
       // Measure the model's rate from arrival to arrival; a long gap (a tool
       // call, a thought) is a pause, not a slower model, so it is not counted.
