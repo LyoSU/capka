@@ -1115,21 +1115,19 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             {/* The composer and error banner are the genuinely interactive part
                 of this otherwise click-through block. */}
             <div className="pointer-events-auto">
+              {/* A load failure is a calm sentence with the way out beside it, not
+                  a red plate across the column: nothing of the user's is lost, and
+                  the fix is one click. The same raised pill as the "scroll down"
+                  jump, so it reads as the panel speaking, not the page failing. */}
               {error && !lastFailed && (
-                <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
-                  <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span className="flex-1">{error}</span>
-                    <Hint label={t("panel.retry")}>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-destructive hover:text-destructive"
-                        onClick={reload}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                    </Hint>
+                <div className="mx-auto flex max-w-3xl justify-center px-4 pb-2 md:px-6 lg:max-w-4xl">
+                  <div role="alert" className="animate-pop-in flex max-w-full items-center gap-2 rounded-full bg-card py-1 pl-3 pr-1 text-sm text-foreground shadow-raised">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 truncate">{error}</span>
+                    <Button variant="ghost" size="sm" className="shrink-0 rounded-full text-muted-foreground hover:text-foreground" onClick={reload}>
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t("panel.retry")}
+                    </Button>
                   </div>
                 </div>
               )}

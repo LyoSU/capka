@@ -844,7 +844,9 @@ function ModelList({
             ) : state.needsKey ? (
               <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />{t("needKey")}</span>
             ) : state.error ? (
-              <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
+              // The mark carries the colour; the sentence stays readable ink, like
+              // every other failure notice in the chat.
+              <span className="flex flex-col items-center gap-1.5 text-foreground"><AlertCircle className="h-4 w-4 text-destructive" aria-hidden="true" />{state.error}</span>
             ) : searching ? (
               <span className="flex flex-col items-center gap-1.5">
                 {t("noneFound")}

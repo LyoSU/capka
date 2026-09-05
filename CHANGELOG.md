@@ -13,6 +13,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Failure notices in the chat are calmer: the «could not load messages» banner is a raised pill with a «Try again» button instead of a red plate across the column, a failed tool's output keeps its own text colour on a lightly tinted surface, and the model picker's error keeps its sentence in ink.
 - The (i) popover on a reply opens on the plain facts (model, time, work time, steps); token counts, request breakdown and the admin's cost/routing rows sit behind one «Details» disclosure.
 - A code block that is still streaming is not syntax-highlighted until its fence closes; finished blocks are unaffected.
 - The sources under a reply are a stack of source marks and a count that opens the list, instead of a grid of tiles.

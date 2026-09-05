@@ -474,8 +474,11 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
       {/* A quiet tinted surface, nothing more. It used to carry a 2px left rule,
           but an edge butted against a rounded corner reads as a printing defect,
           not a device — the label above already says "this came back", and the
-          tint alone separates it from the page. */}
-      <div className={`rounded-lg px-2.5 py-1.5 ${isError ? "bg-destructive/10" : "bg-muted/50"}`}>
+          tint alone separates it from the page. A failure warms the tint by a
+          shade and leaves the text in its own colour: a stack trace set entirely
+          in red was the loudest thing in the transcript, on a surface that is
+          usually just "grep found nothing". */}
+      <div className={`rounded-lg px-2.5 py-1.5 ${isError ? "bg-destructive/5" : "bg-muted/50"}`}>
         {/* tabIndex on a scrollable region: without it a keyboard user cannot reach
             the part of a long output that is scrolled out of view (WCAG 2.1 AA). */}
         {/* A tool that answered in a sentence gets the body face at reading size,
@@ -487,7 +490,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
           tabIndex={0}
           className={`max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
             mono || pretty ? "font-mono text-[11px] text-muted-foreground" : "font-sans text-sm text-foreground"
-          } ${isError ? "text-destructive" : ""}`}
+          }`}
         >
           {preBody}
         </pre>
@@ -2303,9 +2306,12 @@ function MessageDetails({
               <div className="space-y-1 pt-0.5">
                 <span className="text-muted-foreground">{t("backgroundWork")}</span>
                 {aux.map((a, i) => (
-                  <div key={`${a.purpose}-${i}`} className="flex items-baseline justify-between gap-6 pl-2">
-                    <span className="truncate">{t(PURPOSE_LABEL[a.purpose])}</span>
-                    <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">
+                  // The label keeps its full word; when the value does not fit
+                  // beside it, the value drops to its own line, right-aligned,
+                  // instead of the label being cut to «Запам'ятовуван…».
+                  <div key={`${a.purpose}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-0.5 pl-2">
+                    <span className="shrink-0">{t(PURPOSE_LABEL[a.purpose])}</span>
+                    <span className="ml-auto whitespace-nowrap tabular-nums text-muted-foreground">
                       {/* The model only when it ISN'T the turn's — that is the whole
                           reason the field is stored, and the row above already names
                           the turn's model. */}
@@ -2324,9 +2330,9 @@ function MessageDetails({
               <div className="space-y-1 pt-0.5">
                 <span className="text-muted-foreground">{t("route")}</span>
                 {chain.map((c, i) => (
-                  <div key={i} className="flex items-baseline justify-between gap-6 pl-2">
-                    <span>{c.provider}</span>
-                    <span className="tabular-nums text-muted-foreground">
+                  <div key={i} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-0.5 pl-2">
+                    <span className="shrink-0">{c.provider}</span>
+                    <span className="ml-auto whitespace-nowrap tabular-nums text-muted-foreground">
                       {c.latencyMs != null ? ms(c.latencyMs) : ""}
                       {c.status != null && c.status !== 200 ? ` · ${c.status}` : ""}
                     </span>
