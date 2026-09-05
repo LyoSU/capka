@@ -29,6 +29,7 @@ import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
+import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { auxGenerate } from "@/lib/chat/context/aux";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
@@ -44,7 +45,7 @@ import { StallWatchdog } from "./stall-watchdog";
 import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
-import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
+import type { StoredPart, MessageMeta, AuxRecord } from "@/lib/chat/contracts";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
@@ -390,11 +391,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
 
 
-    // Record an auxiliary (title/memory) LLM call's spend against the same key
-    // and budget as the main turn. These fire-and-forget calls used to go
-    // entirely unbilled, so cost analytics under-reported every turn.
-    const recordAuxUsage = (u: TokenUsage) =>
-      void recordUsage({ taskId, messageId: msgId, userId, provider, configId, model: modelId, onSharedKey: isShared, usage: u });
+    // Record a background LLM call's spend against the same key and budget as the
+    // main turn, AND name what it bought — on the ledger row and on the message the
+    // user is looking at. These fire-and-forget calls used to go entirely unbilled
+    // (cost analytics under-reported every turn); now they are also the answer to
+    // "why did one message make three requests", which nothing could give before.
+    //
+    // A factory rather than one callback: the three passes are dispatched together
+    // and each has to label its own row, so the purpose is bound at the call site
+    // that knows it rather than inferred downstream.
+    const auxUsageRecorder = (purpose: AuxRecord["purpose"], auxModelId = modelId) =>
+      (u: TokenUsage) =>
+        void recordAuxSpend({
+          taskId, messageId: msgId, userId, provider, configId,
+          model: auxModelId, turnModel: modelId, onSharedKey: isShared, purpose, usage: u,
+        });
 
     // Prompt caching, three tiers of system messages (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
@@ -2129,7 +2140,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         generate: async (args) => {
           const { text, finishReason, usage } = await auxGenerate(model, provider, args, "memory");
           const billable = toTokenUsage(usage);
-          if (billable) recordAuxUsage(billable);
+          if (billable) auxUsageRecorder("memory")(billable);
           return { text, finishReason };
         },
       })
@@ -2177,7 +2188,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             .limit(1);
           const openingText = opening?.content?.trim();
           if (!openingText) return;
-          const title = await generateChatTitle(model, provider, openingText, getFullText(), recordAuxUsage);
+          const title = await generateChatTitle(model, provider, openingText, getFullText(), auxUsageRecorder("title"));
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
@@ -2199,7 +2210,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // and is not in scope here. It is already the fold over exactly those rows plus
         // this turn's own marks, and it over-approximates in the safe direction: the
         // summary covers this turn too.
-        compactConversation(model, systemMessages, modelMessages, taint.seen(), recordAuxUsage)
+        compactConversation(model, systemMessages, modelMessages, taint.seen(), auxUsageRecorder("compaction"))
           .then(async (result) => {
             if (!result) return;
             const summary = result.text;

@@ -498,6 +498,13 @@
       "when": 1788358900000,
       "tag": "0070_drop_chats_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788602524321,
+      "tag": "0071_mixed_bromley",
+      "breakpoints": true
     }
   ]
 }

@@ -144,6 +144,7 @@ export const GET = apiHandler(async (req: Request) => {
     series,
     byModel,
     byUser,
+    byPurpose,
     recent,
     byProject,
     byConnection,
@@ -188,6 +189,16 @@ export const GET = apiHandler(async (req: Request) => {
       .groupBy(usage.userId, users.name, users.email)
       .orderBy(desc(cost))
       .limit(50),
+    // What the spend BOUGHT: the replies people asked for, versus the background
+    // passes a finished turn spawns (title, memory, compaction). Four buckets at
+    // most, so no limit. A null purpose is its own row rather than folded into
+    // "turn" — those rows predate the column and nothing can tell which they were.
+    db
+      .select({ purpose: usage.purpose, cost, calls, inputTokens: inTok, cachedInputTokens: cachedTok, outputTokens: outTok })
+      .from(usage)
+      .where(inWindow)
+      .groupBy(usage.purpose)
+      .orderBy(desc(cost)),
     db
       .select({
         id: usage.id,
@@ -351,6 +362,7 @@ export const GET = apiHandler(async (req: Request) => {
     series,
     byModel,
     byUser,
+    byPurpose,
     recent,
     byProject,
     byConnection,

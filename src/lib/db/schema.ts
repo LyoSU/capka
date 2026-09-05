@@ -358,6 +358,12 @@ export const usage = pgTable("usage", {
   // shared-key spend counts against a user's budget — own-key users pay their
   // own provider directly, so they're never throttled.
   onSharedKey: boolean("on_shared_key").default(false),
+  // WHAT this spend bought: "turn" is the reply the user asked for, the rest are the
+  // background calls a finished turn spawns (chat title, memory extraction, context
+  // compaction). Nullable on purpose — rows written before this column existed came
+  // from both kinds and nothing can tell them apart now, so they stay honestly
+  // unattributed rather than being back-filled as turns they may not have been.
+  purpose: text("purpose"),
   // A "hold": an estimated reservation written at the budget gate BEFORE a turn
   // runs, then reconciled to the real cost (pending=false) at finalize, or
   // released if the turn never runs. Pending rows count toward the budget so

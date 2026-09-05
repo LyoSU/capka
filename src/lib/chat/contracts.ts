@@ -57,6 +57,28 @@ export const storedPartSchema = z.discriminatedUnion("type", [
 ]);
 export type StoredPart = z.infer<typeof storedPartSchema>;
 
+/**
+ * What an LLM call bought. "turn" is the reply the user asked for; the other three
+ * are the background passes a finished turn spawns. The `usage` ledger stores this
+ * verbatim in its `purpose` column, so cost analytics can separate "what the chat
+ * cost" from "what the housekeeping cost" without guessing from the model id.
+ */
+export type LlmPurpose = "turn" | "title" | "memory" | "compaction";
+
+/** One background call's own accounting, denormalized onto the message row so the
+ *  (i) popover needs no JOIN — the same bargain `usage`/`costUsd` make. */
+export interface AuxRecord {
+  purpose: Exclude<LlmPurpose, "turn">;
+  input: number;
+  output: number;
+  cached?: number;
+  costUsd?: number;
+  /** The model that served it — worth storing because an admin may point background
+   *  work at a cheaper model than the conversation's, and then this differs from
+   *  `model` below. Omitted when it is the same as the turn's. */
+  model?: string;
+}
+
 export type MessageMeta = {
   taskId?: string;
   status?: string;
@@ -94,6 +116,17 @@ export type MessageMeta = {
   // Both are present only when non-zero, and are captured generically from the AI
   // SDK's normalized usage, so they work for every provider, not just OpenRouter.
   usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number };
+  // The BACKGROUND calls this turn spawned after its reply was already delivered:
+  // the chat title, the memory sweep, the compaction summary. One entry per call
+  // that actually ran, so "your message cost three requests" is answerable from the
+  // row instead of being folded invisibly into `usage` above.
+  //
+  // Appended AFTER `commitTurnOutcome` has already written this metadata (these
+  // calls outlive the turn — see trackAux), so it is never part of `outcomeMeta`
+  // and `foldTurnHalves` must not learn about it: a suspended first half cannot
+  // produce any of these (all three are gated on `!awaitingApproval &&
+  // !awaitingAnswer`), so there is no earlier half's array to fold in.
+  aux?: AuxRecord[];
   costUsd?: number;
   // Where `costUsd` came from: "provider" = the gateway's real billed charge
   // (authoritative, may legitimately be 0 for a free/subscription model),
