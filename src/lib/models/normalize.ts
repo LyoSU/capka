@@ -136,25 +136,55 @@ const DATE_SUFFIX = /[-@:](20\d{2}-\d{2}-\d{2}|20\d{6}|20\d{2}|\d{4}|latest|prev
 /**
  * Turn a raw model id into a human label when no nice name is supplied.
  * "claude-3-5-haiku-20241022" → "Claude 3 5 Haiku".
- * Version dots are preserved: "glm-5.2" → "Glm 5.2", "gpt-4.1" → "Gpt 4.1".
+ * Version dots are preserved: "glm-5.2" → "GLM 5.2", "gpt-4.1" → "GPT 4.1".
  */
 export function prettyName(id: string, rawName?: string | null): string {
-  if (rawName && rawName.trim() && rawName !== id) return rawName.trim();
+  // Some aggregators suffix a wildcard ("… Thinking *") onto the names they
+  // relay; it means nothing to the person picking a model.
+  const clean = rawName?.replace(/\s*\*+\s*$/, "").trim();
+  if (clean && clean !== id) return clean;
   let slug = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
   slug = slug.replace(DATE_SUFFIX, "");
   const spaced = slug
     .replace(/[-_]+/g, " ")
     // Dots become spaces unless they sit between digits (version numbers).
-    .replace(/(?<!\d)\.|\.(?!\d)/g, " ");
+    .replace(/(?<!\d)\.|\.(?!\d)/g, " ")
+    // A version the id spells with dashes: "opus-4-8" → "Opus 4.8",
+    // "3-5-haiku" → "3.5 Haiku". Only short numbers join — a four-digit tail
+    // is a build or a date, not a minor version.
+    .replace(/(?<![\w.])(\d{1,2})((?: \d{1,2})+)(?![\w.])/g, (_, a: string, rest: string) => a + rest.replace(/ /g, "."));
   return titleCase(spaced.trim());
 }
+
+// Words the Title-case pass would otherwise mangle ("Gpt", "Tts"): the id is
+// lowercase, so the casing has to be restored by name.
+const ACRONYMS: Record<string, string> = { gpt: "GPT", chatgpt: "ChatGPT", tts: "TTS", stt: "STT", glm: "GLM", hd: "HD", vl: "VL" };
 
 export function titleCase(s: string): string {
   return s
     .split(/\s+/)
     .filter(Boolean)
-    .map((w) => (/^[a-z]/.test(w) ? w[0].toUpperCase() + w.slice(1) : w))
+    .map((w) => ACRONYMS[w.toLowerCase()] ?? (/^[a-z]/.test(w) ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
+}
+
+// Not a chat model: speech, transcription, embeddings, image/video generation,
+// moderation, reranking, safety classifiers and the pre-chat completion line.
+// A provider's `/models` lists all of these alongside the chat models, and the
+// catalog often knows nothing about them, so the picker cannot tell them apart
+// by capabilities alone. Judged by id segments (split on - _ / : .), digits
+// stripped, so "audio1" and "dall-e" both register.
+const AUXILIARY_SEGMENTS = new Set([
+  "tts", "stt", "whisper", "transcribe", "transcription", "speech", "voice", "audio", "realtime",
+  "embed", "embedding", "embeddings", "rerank", "moderation", "guard",
+  "dall", "dalle", "image", "imagen", "veo", "sora",
+  "davinci", "babbage", "curie", "ada",
+]);
+
+export function isAuxiliaryModel(id: string): boolean {
+  return id
+    .split(/[-_/:.]+/)
+    .some((seg) => AUXILIARY_SEGMENTS.has(seg.replace(/\d+$/, "").toLowerCase()));
 }
 
 export function isDatedSlug(id: string): boolean {

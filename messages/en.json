@@ -346,9 +346,22 @@
         "reasoning": "Reasoning",
         "free": "Free"
       },
+      "variants": "{count, plural, one {# version} other {# versions}}",
+      "aux": {
+        "more": "{count, plural, one {# more auxiliary model} other {# more auxiliary models}}",
+        "hint": "speech, transcription, embeddings, images",
+        "hide": "Hide auxiliary models"
+      },
       "price": {
         "label": "Approx. cost",
         "free": "free",
+        "unknown": "Price unknown",
+        "tier": {
+          "budget": "Budget",
+          "moderate": "Moderate",
+          "premium": "Premium",
+          "top": "Very expensive"
+        },
         "io": "in {in} / out {out} per 1M tokens"
       }
     },

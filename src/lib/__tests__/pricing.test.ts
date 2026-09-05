@@ -98,7 +98,7 @@ describe("normalize", () => {
   });
 
   it("prettifies code ids into human names", () => {
-    expect(prettyName("anthropic/claude-3-5-haiku-20241022")).toBe("Claude 3 5 Haiku");
+    expect(prettyName("anthropic/claude-3-5-haiku-20241022")).toBe("Claude 3.5 Haiku");
     expect(prettyName("x", "Anthropic: Claude Opus 4.1")).toBe("Anthropic: Claude Opus 4.1");
   });
 

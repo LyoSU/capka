@@ -10,6 +10,8 @@ import { Hint } from "@/components/ui/tooltip";
 import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 import { customModelOption } from "@/lib/providers/custom-model";
+import { arrangeModels, type ModelRow } from "@/lib/models/arrange";
+import { isAuxiliaryModel } from "@/lib/models/normalize";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -146,8 +148,20 @@ function PriceMeter({ model }: { model: ModelInfo }) {
     );
   }
 
-  const label = `${"$".repeat(filled)}${tier >= 4 ? "+" : ""}`;
-  const title = `${label} · ${t("price.io", {
+  // No price at all: a bare dash, not three empty slots — a row-end "···" reads
+  // as an overflow menu, and the meter's empties mean "cheaper", not "unknown".
+  if (tier === 0) {
+    return (
+      <Hint label={t("price.unknown")}>
+        <span className="inline-flex w-[3ch] shrink-0 justify-end text-muted-foreground/60 leading-none" aria-label={t("price.unknown")}>—</span>
+      </Hint>
+    );
+  }
+
+  // The tooltip leads with the word — "Premium" means more to most people than
+  // a per-million-tokens figure — and keeps the figures after it.
+  const word = t(`price.tier.${(["budget", "moderate", "premium", "top"] as const)[tier - 1]}`);
+  const title = `${word} · ${t("price.io", {
     in: formatPrice(pricing?.prompt ?? 0),
     out: formatPrice(pricing?.completion ?? 0),
   })}`;
@@ -432,15 +446,28 @@ interface GroupEntry {
   /** Display label (header + rail). */
   group: string;
   icon?: string | null;
+  /** Every model in the section, in row order (a head, then its variants). */
   models: ModelInfo[];
+  /** The section as rows: one per title, snapshots folded under their alias. */
+  rows: ModelRow<ModelInfo>[];
 }
 
-const sortFeaturedFirst = (a: ModelInfo, b: ModelInfo) =>
-  Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name);
+/** Arrange a section: order by family/version/tier and fold same-title
+ *  snapshots (see `arrangeModels`). */
+function entry(key: string, group: string, icon: string | null | undefined, models: ModelInfo[]): GroupEntry {
+  const rows = arrangeModels(models);
+  return { key, group, icon, rows, models: rows.flatMap((r) => [r.model, ...r.variants.map((v) => v.model)]) };
+}
+
+/** A section whose order is the information (recency) — rows stay as given. */
+function flatEntry(key: string, models: ModelInfo[]): GroupEntry {
+  return { key, group: "", icon: null, models, rows: models.map((model) => ({ model, variants: [] })) };
+}
 
 /** Group a flat model list by brand (company), ordered by GROUP_PRIORITY then
- *  alphabetically, each sorted featured-first. Used for the single-connection
- *  rail and for the brand sub-headers inside a connection's pane. */
+ *  alphabetically, each arranged featured-first, newest version first. Used for
+ *  the single-connection rail and for the brand sub-headers inside a
+ *  connection's pane. */
 function buildGroups(list: ModelInfo[]): GroupEntry[] {
   const map = new Map<string, ModelInfo[]>();
   for (const m of list) {
@@ -449,7 +476,6 @@ function buildGroups(list: ModelInfo[]): GroupEntry[] {
     arr.push(m);
     map.set(g, arr);
   }
-  for (const arr of map.values()) arr.sort(sortFeaturedFirst);
   return [...map.entries()]
     .sort(([a], [b]) => {
       const ai = GROUP_PRIORITY.indexOf(a);
@@ -459,7 +485,7 @@ function buildGroups(list: ModelInfo[]): GroupEntry[] {
       if (bi !== -1) return 1;
       return a.localeCompare(b);
     })
-    .map(([group, models]) => ({ key: group, group, icon: models[0]?.icon, models }));
+    .map(([group, models]) => entry(group, group, models[0]?.icon, models));
 }
 
 /** Group by owning connection (provider config), preserving the order configs
@@ -474,10 +500,9 @@ function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
     if (!map.has(key)) { map.set(key, []); order.push(key); }
     map.get(key)!.push(m);
   }
-  for (const arr of map.values()) arr.sort(sortFeaturedFirst);
   return order.map((key) => {
     const models = map.get(key)!;
-    return { key, group: models[0]?.configLabel ?? key, icon: models[0]?.configIcon ?? null, models };
+    return entry(key, models[0]?.configLabel ?? key, models[0]?.configIcon ?? null, models);
   });
 }
 
@@ -677,10 +702,11 @@ function ModelList({
 
   // Search is global — across every connection — so a model is findable no
   // matter which tab is open. Results are a single flat list (each row carries
-  // its connection chip), sorted featured-first, and narrowed by any active
-  // capability filters.
-  const searchResults = useMemo(() => {
-    if (!searching) return [];
+  // its connection chip), arranged like a brand pane, and narrowed by any active
+  // capability filters. A typed off-catalog id rides along separately so it
+  // always closes the list instead of being sorted into it.
+  const searchResults = useMemo<{ matched: ModelInfo[]; custom: ModelInfo | null }>(() => {
+    if (!searching) return { matched: [], custom: null };
     const q = search.trim().toLowerCase();
     const matched = models
       .filter(
@@ -690,8 +716,7 @@ function ModelList({
             m.name.toLowerCase().includes(q) ||
             groupOf(m).toLowerCase().includes(q) ||
             (m.configLabel ?? "").toLowerCase().includes(q)),
-      )
-      .sort(sortFeaturedFirst);
+      );
     // A fully-qualified id the catalog doesn't list (stealth/alpha model, or one
     // newer than the last sync) is still runnable — the id passes straight through
     // to the provider. Offer it as a custom option bound to the active connection
@@ -721,10 +746,9 @@ function ModelList({
               configProvider: "azure",
             } satisfies ModelInfo)
           : undefined);
-      const custom = customModelOption(search, sample);
-      if (custom) return [...matched, custom];
+      return { matched, custom: customModelOption(search, sample) };
     }
-    return matched;
+    return { matched, custom: null };
   }, [models, search, searching, passesFilter, activeConn, credentialsProvider]);
 
   // Which brand fills the pane. Until the user clicks the rail it falls back to
@@ -744,26 +768,65 @@ function ModelList({
   // Pane: search is one flat list (per-row connection chips disambiguate); the
   // Featured tab and a picked brand scope to the active connection, both narrowed
   // by the active capability filters.
-  const sections = useMemo<GroupEntry[]>(() => {
-    if (searching) return [{ key: "search", group: "", icon: null, models: searchResults }];
+  // Speech, transcription, embedding and image models ride along in every
+  // provider's list and are not chat models. Browsing a brand or "All" folds them
+  // behind one row at the foot of the list; search and the curated tabs show
+  // everything, and the model in use is never hidden from itself.
+  const [showAux, setShowAux] = useState(false);
+  const { sections, hiddenAux, auxTotal } = useMemo<{ sections: GroupEntry[]; hiddenAux: number; auxTotal: number }>(() => {
+    const none = { hiddenAux: 0, auxTotal: 0 };
+    if (searching) {
+      const sec = entry("search", "", null, searchResults.matched);
+      if (searchResults.custom) {
+        sec.rows.push({ model: searchResults.custom, variants: [] });
+        sec.models.push(searchResults.custom);
+      }
+      return { sections: [sec], ...none };
+    }
     // One flat section: the order IS the information, so it must not be regrouped
     // by brand the way every other tab is.
-    if (activeBrand === RECENT_TAB) return [{ key: "recent", group: "", icon: null, models: recentModels.filter(passesFilter) }];
+    if (activeBrand === RECENT_TAB) return { sections: [flatEntry("recent", recentModels.filter(passesFilter))], ...none };
     // Grouped by brand like Featured: "what arrived lately" is browsed by company,
     // and the flag carries no date to sort by — only whether it is inside the window.
-    if (activeBrand === NEW_TAB) return buildGroups(scoped.filter((m) => m.isNew && passesFilter(m)));
-    if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured && passesFilter(m)));
-    if (activeBrand === ALL_TAB) return buildGroups(scoped.filter((m) => passesFilter(m)));
-    return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand && passesFilter(m)));
-  }, [searching, searchResults, scoped, activeBrand, passesFilter, recentModels]);
+    if (activeBrand === NEW_TAB) return { sections: buildGroups(scoped.filter((m) => m.isNew && passesFilter(m))), ...none };
+    if (activeBrand === FEATURED_TAB) return { sections: buildGroups(scoped.filter((m) => m.featured && passesFilter(m))), ...none };
+    const browse = scoped.filter((m) => passesFilter(m) && (activeBrand === ALL_TAB || groupOf(m) === activeBrand));
+    const aux = browse.filter((m) => isAuxiliaryModel(m.id) && refOf(m) !== currentRef);
+    const shown = showAux || aux.length === 0 ? browse : browse.filter((m) => !aux.includes(m));
+    return { sections: buildGroups(shown), hiddenAux: showAux ? 0 : aux.length, auxTotal: aux.length };
+  }, [searching, searchResults, scoped, activeBrand, passesFilter, recentModels, showAux, currentRef]);
+
+  // Which folded rows are open. Search shows every variant (a typed "0125" must
+  // find its row), and the row holding the current model opens itself.
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
+  const rowByRef = useMemo(() => new Map(sections.flatMap((s) => s.rows).map((r) => [refOf(r.model), r])), [sections]);
+  const isOpen = useCallback(
+    (row: ModelRow<ModelInfo>) =>
+      row.variants.length > 0 &&
+      (searching || openRows.has(refOf(row.model)) || row.variants.some((v) => refOf(v.model) === currentRef)),
+    [searching, openRows, currentRef],
+  );
 
   // Multi-brand panes (Featured, All) need sticky brand headers; search is a flat
   // list with per-row chips and a single brand's pane names itself.
   const showHeaders = !searching && (activeBrand === FEATURED_TAB || activeBrand === ALL_TAB || activeBrand === NEW_TAB);
 
   // Flatten the visible models for keyboard navigation + active-index math.
-  const visible = useMemo(() => sections.flatMap((s) => s.models), [sections]);
+  const visible = useMemo(
+    () => sections.flatMap((s) => s.rows.flatMap((r) => (isOpen(r) ? [r.model, ...r.variants.map((v) => v.model)] : [r.model]))),
+    [sections, isOpen],
+  );
   const indexMap = useMemo(() => new Map(visible.map((m, i) => [refOf(m), i])), [visible]);
+  const toggleRow = (ref: string) => {
+    setOpenRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(ref)) next.delete(ref); else next.add(ref);
+      return next;
+    });
+    // Land on the head either way — closing must not strand focus on a row
+    // that just vanished.
+    onActiveIndex(indexMap.get(ref) ?? 0);
+  };
 
   // Switching connection resets the brand to that connection's default.
   const pickConn = (next: string) => { onSearch(""); onActiveIndex(0); setConnTab(next); setBrandTab(null); };
@@ -798,6 +861,11 @@ function ModelList({
             if (e.key === "ArrowDown") { e.preventDefault(); onActiveIndex(Math.min(activeIndex + 1, visible.length - 1)); }
             else if (e.key === "ArrowUp") { e.preventDefault(); onActiveIndex(Math.max(activeIndex - 1, 0)); }
             else if (e.key === "Enter" && visible[activeIndex]) { e.preventDefault(); onSelect(visible[activeIndex]); }
+            else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && visible[activeIndex]) {
+              // Tree-view convention: right opens the row's snapshots, left closes them.
+              const row = rowByRef.get(refOf(visible[activeIndex]));
+              if (row && row.variants.length > 0 && !searching && (e.key === "ArrowRight") !== isOpen(row)) { e.preventDefault(); toggleRow(refOf(row.model)); }
+            }
             else if (e.key === "Escape") { onClose(); }
           }}
           placeholder={t("search")}
@@ -862,7 +930,7 @@ function ModelList({
           </div>
         )}
 
-        {sections.map(({ key, group, icon, models: groupModels }) => (
+        {sections.map(({ key, group, icon, rows: groupModels }) => (
           <div key={key}>
             {showHeaders && (
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border">
@@ -872,64 +940,109 @@ function ModelList({
               </div>
             )}
 
-            {groupModels.map((model) => {
-              const ref = refOf(model);
-              const globalIdx = indexMap.get(ref) ?? -1;
-              const isActive = globalIdx === activeIndex;
-              const isCurrent = ref === currentRef;
-              return (
-                <button
-                  key={ref}
-                  id={optionId(globalIdx)}
-                  role="option"
-                  aria-selected={isActive}
-                  data-index={globalIdx}
-                  onClick={() => onSelect(model)}
-                  onMouseEnter={() => onActiveIndex(globalIdx)}
-                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${isActive ? "bg-hover-strong" : ""} ${isCurrent ? "bg-hover" : ""}`}
-                >
-                  {searching ? (
-                    <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />
-                  ) : (
-                    model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
-                  )}
-                  <span className="min-w-0 truncate text-sm">{stripGroup(model.name, group)}</span>
-                  {/* Passive discovery: the tab is a place to LOOK for new models,
-                      this is how one is met without looking. Sits next to the name
-                      rather than in the right-hand meta cluster, which reveals on
-                      hover — a badge you have to hover to see announces nothing. */}
-                  {model.isNew && (
-                    <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide text-foreground">
-                      {t("newBadge")}
-                    </span>
-                  )}
-                  {/* Right meta cluster, pinned to the row's right edge so the
-                      connection tag and price line up in tidy columns regardless of
-                      name length. Context + capabilities reveal on hover / keyboard
-                      focus (the funnel filters cover "only models that hear audio");
-                      the price sits last and stays put whether or not caps show. */}
-                  <span className="ml-auto flex shrink-0 items-center gap-3">
-                    <span
-                      className={`flex items-center gap-2 text-[11px] text-muted-foreground transition-opacity duration-150 group-hover/row:opacity-100 ${
-                        isActive ? "opacity-100" : "opacity-0"
-                      }`}
-                    >
-                      {model.context > 0 && (
-                        <Hint label={t("context")}><span className="tabular-nums">{formatContext(model.context)}</span></Hint>
-                      )}
-                      <Caps model={model} />
-                    </span>
-                    {showConnChip && <ConnChip icon={model.configIcon} label={model.configLabel} />}
-                    {isCurrent && (
-                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+            {groupModels.map((row) => {
+              const open = isOpen(row);
+              // A head with folded snapshots and, when open, each snapshot under
+              // it. One option element per model — the snapshot chip lives inside
+              // the head's button and is told apart by the click target.
+              const option = (model: ModelInfo, variant: string | null) => {
+                const ref = refOf(model);
+                const globalIdx = indexMap.get(ref) ?? -1;
+                const isActive = globalIdx === activeIndex;
+                const isCurrent = ref === currentRef;
+                const folded = variant === null && row.variants.length > 0;
+                return (
+                  <button
+                    key={ref}
+                    id={optionId(globalIdx)}
+                    role="option"
+                    aria-selected={isActive}
+                    data-open={folded ? open : undefined}
+                    data-index={globalIdx}
+                    onClick={(e) => {
+                      if (folded && (e.target as HTMLElement).closest("[data-variants]")) { toggleRow(ref); return; }
+                      onSelect(model);
+                    }}
+                    onMouseEnter={() => onActiveIndex(globalIdx)}
+                    className={`group/row flex w-full items-center gap-2 py-2.5 pr-3 text-left transition-colors active:bg-accent [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${
+                      variant === null ? "pl-3" : "pl-8"
+                    } ${isActive ? "bg-hover-strong" : ""} ${isCurrent ? "bg-hover" : ""}`}
+                  >
+                    {variant === null && (searching ? (
+                      <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />
+                    ) : (
+                      model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
+                    ))}
+                    {variant === null ? (
+                      <span className="min-w-0 truncate text-sm">{stripGroup(model.name, group)}</span>
+                    ) : (
+                      // The snapshot's own bit is what tells it apart, so it carries
+                      // the ink; the repeated title steps back.
+                      <span className="min-w-0 truncate text-sm">
+                        <span className="text-muted-foreground">{stripGroup(model.name, group)}</span>{" "}
+                        <span className="tabular-nums">{variant}</span>
+                      </span>
                     )}
-                    <PriceMeter model={model} />
-                  </span>
-                </button>
-              );
+                    {/* Passive discovery: the tab is a place to LOOK for new models,
+                        this is how one is met without looking. Sits next to the name
+                        rather than in the right-hand meta cluster, which reveals on
+                        hover — a badge you have to hover to see announces nothing. */}
+                    {model.isNew && (
+                      <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide text-foreground">
+                        {t("newBadge")}
+                      </span>
+                    )}
+                    {folded && (
+                      <span
+                        data-variants
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                      >
+                        {t("variants", { count: row.variants.length })}
+                        <ChevronDown className={`h-3 w-3 transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+                      </span>
+                    )}
+                    {/* Right meta cluster, pinned to the row's right edge so the
+                        connection tag and price line up in tidy columns regardless of
+                        name length. Context + capabilities sit quietly until hover /
+                        keyboard focus lifts them; the price sits last and stays put
+                        whether or not caps show. */}
+                    <span className="ml-auto flex shrink-0 items-center gap-3">
+                      <span
+                        className={`flex items-center gap-2 text-[11px] text-muted-foreground transition-opacity duration-150 group-hover/row:opacity-100 ${
+                          isActive ? "opacity-100" : "opacity-60"
+                        }`}
+                      >
+                        {model.context > 0 && (
+                          <Hint label={t("context")}><span className="tabular-nums">{formatContext(model.context)}</span></Hint>
+                        )}
+                        <Caps model={model} />
+                      </span>
+                      {showConnChip && <ConnChip icon={model.configIcon} label={model.configLabel} />}
+                      {isCurrent && (
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+                      )}
+                      <PriceMeter model={model} />
+                    </span>
+                  </button>
+                );
+              };
+              return [option(row.model, null), ...(open ? row.variants.map((v) => option(v.model, v.label)) : [])];
             })}
           </div>
         ))}
+
+        {/* The fold of auxiliary models — one calm row at the foot, never a
+            surprise deletion: the count says how many, the hint says what kind. */}
+        {!state.loading && !searching && auxTotal > 0 && (
+          <button
+            type="button"
+            onClick={() => { setShowAux((v) => !v); onActiveIndex(0); }}
+            className="flex w-full flex-wrap items-baseline gap-x-1.5 border-t border-border px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          >
+            <span className="font-medium">{showAux ? t("aux.hide") : t("aux.more", { count: hiddenAux })}</span>
+            {!showAux && <span className="text-muted-foreground/70">{t("aux.hint")}</span>}
+          </button>
+        )}
       </div>
     </div>
   );
