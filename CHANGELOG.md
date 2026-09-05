@@ -22,6 +22,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Regenerating a reply after switching models now persists that model (and thinking depth) on the chat, so the picker, the model a new chat opens with, and the sidebar order all reflect the re-run.
 - A Gemini context overflow («exceeds the maximum number of tokens allowed») is now recognised as one, so it gets the emergency trim and retry instead of a generic error.
+- An empty reply between two tool calls no longer draws a blank ruled block in the transcript, and the steps around it stay on one activity rail instead of splitting in two.
 
 - The live «Thinking…» row under the activity rail uses the rail's own row anatomy (20px glyph, 15px muted label, same inset), so it no longer sits offset and bold below the steps.
 - A turn that has streamed text and then goes silent (a provider that does not stream tool-call arguments, e.g. Gemini generating a file) shows the «Thinking…» row after 2 s instead of nothing.

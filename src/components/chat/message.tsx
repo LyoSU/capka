@@ -2434,7 +2434,17 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
     }
     if (part.type === "text") {
       const text = (part as { text: string }).text;
-      if (text) groups.push({ kind: "text", text });
+      // The same asymmetry the reasoning branch below documents, one part type
+      // over: a model that has nothing to say between two tool calls still emits
+      // a text part, and a bare "\n\n" is truthy. The block built for it draws a
+      // rule and a gap with nothing under them — and, worse, it SPLITS the rail,
+      // so one run of work reads as two spoilers with a hole between them. Ask
+      // what the markdown will actually render, the way `hasContent` in the
+      // runner and `msgText` in the panel already do.
+      // No continuation case to protect here, unlike reasoning: the runner folds
+      // a whole text run into ONE part, and two text groups render as separate
+      // blocks regardless, so a skipped break joins nothing that was apart.
+      if (text.trim()) groups.push({ kind: "text", text });
     } else if (part.type === "reasoning") {
       const text = (part as { text: string }).text;
       if (!text) continue;
