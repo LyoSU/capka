@@ -46,7 +46,7 @@ actually want to use.
 There is a longer walkthrough on the [website](https://capka.app/), or you
 can [try the live demo](https://demo.capka.app/) and hand it a real task right now.
 
-![Capka turning uploaded files into a PDF report and Excel workbook](./docs/assets/demo.webp)
+![Capka merging five messy sales exports into a PDF report and an Excel workbook](./docs/assets/demo.webp)
 
 ## At a glance
 
