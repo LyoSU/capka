@@ -151,9 +151,17 @@ export async function assertMasterKeyConsistent(): Promise<void> {
   );
 }
 
+// Latches once true and never re-reads. The flag is one-way: /api/setup writes it
+// exactly once, and it sits in BLOCKED_KEYS so the settings API cannot write it at
+// all, so a cached true can never be stale. A false is still read every time, which
+// is what keeps the setup wizard live. Worth latching because the dashboard layout
+// calls this on every render, where it was a database round-trip per navigation.
+let setupCompleted = false;
+
 export async function isSetupComplete(): Promise<boolean> {
-  const val = await getSetting("setup_complete");
-  return val === "true";
+  if (setupCompleted) return true;
+  setupCompleted = (await getSetting("setup_complete")) === "true";
+  return setupCompleted;
 }
 
 /**

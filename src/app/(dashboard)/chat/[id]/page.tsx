@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { eq, and } from "drizzle-orm";
 
-import { getAuth } from "@/lib/auth";
+import { currentSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats, users } from "@/lib/db/schema";
 import { resolveInitialModel } from "@/lib/providers/default-model";
@@ -18,8 +17,7 @@ export default async function ChatIdPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ projectId?: string }>;
 }) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await currentSession();
   if (!session) redirect("/login");
 
   const { id: chatId } = await params;

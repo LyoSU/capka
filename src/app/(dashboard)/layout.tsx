@@ -9,9 +9,8 @@ import { UpdateBanner } from "@/components/layout/update-banner";
 import { OrgChangeBanner } from "@/components/layout/org-change-banner";
 import { TimezoneSync } from "@/components/layout/timezone-sync";
 import { isSetupComplete } from "@/lib/settings";
-import { getAuth } from "@/lib/auth";
+import { currentSession } from "@/lib/auth";
 import { IsAdminProvider } from "@/hooks/use-is-admin";
-import { headers } from "next/headers";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Setup must finish before any dashboard route is usable. Guarding here (not
@@ -23,8 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // Approval-gated registration: a signed-in but not-yet-approved account can't
   // reach the app (which would spend the shared key) — park it on /pending.
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
+  const session = await currentSession().catch(() => null);
   const status = session ? (session.user as Record<string, unknown>).status : null;
   // Same session read, so role-gated UI costs nothing extra here — and arrives in
   // the first HTML instead of popping in after a client probe (see useIsAdmin).

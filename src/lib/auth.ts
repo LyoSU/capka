@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -338,6 +339,19 @@ export function normalizeAccountStatus(raw: unknown): AccountStatus {
   return raw === "active" || raw === "pending" || raw === "suspended" ? raw : "rejected";
 }
 
+/** This request's session, read once.
+ *
+ *  `cache` memoizes for the duration of a single request and nothing beyond it, so two
+ *  readers in one render pass share one token validation and two different requests
+ *  never share anything. That matters because the dashboard layout and the page beneath
+ *  it each need the session: every navigation into a chat validated the same token
+ *  against the database twice. */
+export const currentSession = cache(async () => {
+  const { headers } = await import("next/headers");
+  const auth = await getAuth();
+  return auth.api.getSession({ headers: await headers() });
+});
+
 /** Require an authenticated, ACTIVE session — throws UnauthorizedError when there is no
  *  session, ForbiddenError when the account is pending/suspended/rejected. */
 export async function requireSession(): Promise<{
@@ -349,11 +363,9 @@ export async function requireSession(): Promise<{
   status: "active";
   session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>>;
 }> {
-  const { headers } = await import("next/headers");
-  const auth = await getAuth();
   let session;
   try {
-    session = await auth.api.getSession({ headers: await headers() });
+    session = await currentSession();
   } catch (e) {
     console.error("[auth] getSession threw:", e);
     throw new UnauthorizedError();

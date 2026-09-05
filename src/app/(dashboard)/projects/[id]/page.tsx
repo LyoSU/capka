@@ -1,8 +1,7 @@
 import { redirect, notFound } from "next/navigation";
-import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 
-import { getAuth } from "@/lib/auth";
+import { currentSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { models, projects, users } from "@/lib/db/schema";
 import { splitModelRef } from "@/lib/providers/registry";
@@ -19,8 +18,7 @@ export default async function ProjectHubPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await currentSession();
   if (!session) redirect("/login");
 
   const { id } = await params;
