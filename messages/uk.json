@@ -330,6 +330,8 @@
       },
       "close": "Закрити",
       "recent": "Останні",
+      "newlyAdded": "Нові",
+      "newBadge": "Нове",
       "featured": "Рекомендовані",
       "all": "Усі",
       "filter": {

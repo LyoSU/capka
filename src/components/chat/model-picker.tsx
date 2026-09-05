@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 import { createPortal } from "react-dom";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
-import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers, History } from "lucide-react";
+import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers, History, BadgePlus } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { Hint } from "@/components/ui/tooltip";
 import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
@@ -414,6 +414,13 @@ const ALL_TAB = "__all__";
 // shows a dead entry.
 const RECENT_TAB = "__recent__";
 
+// "New" — models the catalog first saw inside the badge window. Like Recent it
+// exists only while it has content, which for this one is the point: a permanent
+// "New" tab standing empty for weeks is worse than no tab, and the flag it reads
+// is knowable only for catalogued models, so an uncatalogued live row is left
+// unlabelled rather than guessed at.
+const NEW_TAB = "__new__";
+
 interface GroupEntry {
   /** Stable identity used for the active-tab match. */
   key: string;
@@ -476,6 +483,7 @@ function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
 function ProviderRail({
   groups,
   hasRecent,
+  hasNew,
   hasFeatured,
   hasAll,
   active,
@@ -485,6 +493,7 @@ function ProviderRail({
 }: {
   groups: GroupEntry[];
   hasRecent: boolean;
+  hasNew: boolean;
   hasFeatured: boolean;
   hasAll?: boolean;
   active: string | null;
@@ -543,9 +552,10 @@ function ProviderRail({
       }`}
     >
       {hasRecent && item(RECENT_TAB, t("recent"), <History className="h-4 w-4" />)}
+      {hasNew && item(NEW_TAB, t("newlyAdded"), <BadgePlus className="h-4 w-4" />)}
       {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
       {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-      {(hasRecent || hasAll || hasFeatured) && (
+      {(hasRecent || hasNew || hasAll || hasFeatured) && (
         <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
       )}
       {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
@@ -658,6 +668,7 @@ function ModelList({
     return state.recent.map((ref) => byRef.get(ref)).filter((m): m is ModelInfo => !!m);
   }, [state.recent, scoped]);
   const hasRecent = recentModels.length > 0;
+  const hasNew = useMemo(() => scoped.some((m) => m.isNew), [scoped]);
 
   // Search is global — across every connection — so a model is findable no
   // matter which tab is open. Results are a single flat list (each row carries
@@ -733,6 +744,9 @@ function ModelList({
     // One flat section: the order IS the information, so it must not be regrouped
     // by brand the way every other tab is.
     if (activeBrand === RECENT_TAB) return [{ key: "recent", group: "", icon: null, models: recentModels.filter(passesFilter) }];
+    // Grouped by brand like Featured: "what arrived lately" is browsed by company,
+    // and the flag carries no date to sort by — only whether it is inside the window.
+    if (activeBrand === NEW_TAB) return buildGroups(scoped.filter((m) => m.isNew && passesFilter(m)));
     if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured && passesFilter(m)));
     if (activeBrand === ALL_TAB) return buildGroups(scoped.filter((m) => passesFilter(m)));
     return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand && passesFilter(m)));
@@ -740,7 +754,7 @@ function ModelList({
 
   // Multi-brand panes (Featured, All) need sticky brand headers; search is a flat
   // list with per-row chips and a single brand's pane names itself.
-  const showHeaders = !searching && (activeBrand === FEATURED_TAB || activeBrand === ALL_TAB);
+  const showHeaders = !searching && (activeBrand === FEATURED_TAB || activeBrand === ALL_TAB || activeBrand === NEW_TAB);
 
   // Flatten the visible models for keyboard navigation + active-index math.
   const visible = useMemo(() => sections.flatMap((s) => s.models), [sections]);
@@ -872,7 +886,16 @@ function ModelList({
                   ) : (
                     model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
                   )}
-                  <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
+                  <span className="min-w-0 truncate text-sm">{stripGroup(model.name, group)}</span>
+                  {/* Passive discovery: the tab is a place to LOOK for new models,
+                      this is how one is met without looking. Sits next to the name
+                      rather than in the right-hand meta cluster, which reveals on
+                      hover — a badge you have to hover to see announces nothing. */}
+                  {model.isNew && (
+                    <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide text-foreground">
+                      {t("newBadge")}
+                    </span>
+                  )}
                   {/* Right meta cluster, pinned to the row's right edge so the
                       connection tag and price line up in tidy columns regardless of
                       name length. Context + capabilities reveal on hover / keyboard
@@ -907,7 +930,7 @@ function ModelList({
   // No companies to choose between (loading, error, single provider) → skip the
   // rail entirely and let the list use the full width.
   const showConnStrip = byConnection && connTabs.length > 1;
-  const showBrandRail = brandGroups.length > 1 || hasFeatured || hasRecent;
+  const showBrandRail = brandGroups.length > 1 || hasFeatured || hasRecent || hasNew;
 
   // Nothing to choose between (loading, error, a lone brand on a lone
   // connection) → just the list at full width.
@@ -919,6 +942,7 @@ function ModelList({
         <ProviderRail
           groups={brandGroups}
           hasRecent={hasRecent}
+          hasNew={hasNew}
           hasFeatured={hasFeatured}
           hasAll={brandGroups.length > 1}
           active={searching ? null : activeBrand}
@@ -939,6 +963,7 @@ function ModelList({
       <ProviderRail
         groups={connTabs}
         hasRecent={false}
+        hasNew={false}
         hasFeatured={false}
         hasAll
         active={searching ? null : activeConn}

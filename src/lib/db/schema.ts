@@ -423,6 +423,14 @@ export const models = pgTable("models", {
   openWeights: boolean("open_weights"), // open-weights model? (from Models.dev)
   enabled: boolean("enabled").default(false), // visible in picker (curated)
   featured: boolean("featured").default(false), // pinned to the top
+  // When this model FIRST entered the catalog — the only column that can answer
+  // "what is new here". `updatedAt` cannot: the sync rewrites it on every pass,
+  // so it dates the sync, not the model. Written by the column default on insert
+  // and never listed in the sync's `set`, so a resync leaves it alone (the same
+  // enumerate-by-name upsert that preserves admin curation). Nullable because
+  // rows that predate the column are honestly unknown rather than back-dated to
+  // a day they were not seen — the picker treats unknown as "not new".
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => [
   index("idx_models_group").on(t.group),

@@ -33,6 +33,10 @@ export interface ModelInfo {
     assumed?: boolean;
   } | null;
   featured?: boolean;
+  /** First appeared in the catalog within the "new" window. Knowable only for
+   *  models the catalog holds — a provider's live list carries no history — so an
+   *  absent flag means "we don't know", never "old". */
+  isNew?: boolean;
   // When the picker aggregates several enabled provider configs, each model is
   // tagged with the config it came from: `configId` routes the selection (the
   // same model id can exist in two configs), `configLabel` names the connection
@@ -216,6 +220,17 @@ function toModelInfo(
   };
 }
 
+/** How long a model wears the "new" badge after the catalog first saw it. Long
+ *  enough that someone who opens the picker weekly still meets it, short enough
+ *  that the badge stays worth reading. */
+const NEW_FOR_DAYS = 14;
+
+/** Null = the row predates the column: unknown, which reads as not new. */
+function isRecentlyAdded(firstSeenAt: Date | null): boolean {
+  if (!firstSeenAt) return false;
+  return Date.now() - firstSeenAt.getTime() < NEW_FOR_DAYS * 24 * 60 * 60 * 1000;
+}
+
 /** OpenRouter: the curated, synced catalog straight from Postgres. */
 async function listOpenRouter(): Promise<ModelInfo[]> {
   const rows = await db
@@ -235,6 +250,7 @@ async function listOpenRouter(): Promise<ModelInfo[]> {
     icon: m.icon,
     capabilities: (m.capabilities as ModelInfo["capabilities"]) ?? null,
     featured: m.featured ?? false,
+    isNew: isRecentlyAdded(m.firstSeenAt),
   }));
 }
 
@@ -617,7 +633,10 @@ async function listProviderModelsLive(opts: {
       const meta = new Map(curated.map((m) => [m.id, m]));
       return live.map((m) => {
         const c = meta.get(m.id);
-        return c ? { ...m, featured: c.featured, cutoff: c.cutoff ?? m.cutoff } : m;
+        // A live row the catalog has never seen carries no first-seen date, so it
+        // gets no badge: it may well be the newest thing on the list, but the
+        // honest answer until the next sync records it is "unknown".
+        return c ? { ...m, featured: c.featured, cutoff: c.cutoff ?? m.cutoff, isNew: c.isNew } : m;
       });
     }
     case "litellm":

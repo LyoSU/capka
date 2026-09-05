@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Models added to the catalog in the last 14 days carry a «New» badge in the picker, with a «New» tab that appears only while there are any. Adds `models.first_seen_at`; the migration leaves pre-existing rows unmarked, so nothing on an existing instance reads as new.
 - The model picker has a «Recent» tab: the models you last ran turns on, newest first, read from the spend ledger (settled turns only, 30-day window). It is not rendered at all until there is history to show.
 - The (i) popover on a reply lists every request the message caused, grouped by what each bought (reply, chat title, remembering); admins also see the tokens and cost of each background pass.
 - Auto-titling, per-turn memory extraction and compaction are three switches under Agent mode; a raw profile now does no background work at all.

@@ -330,6 +330,8 @@
       },
       "close": "Close",
       "recent": "Recent",
+      "newlyAdded": "New",
+      "newBadge": "New",
       "featured": "Featured",
       "all": "All",
       "filter": {
