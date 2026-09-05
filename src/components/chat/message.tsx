@@ -1997,9 +1997,6 @@ function UserBubble({
             </div>
           )}
           <div className="mt-1 flex items-center gap-1">
-            {onSwitchBranch && (
-              <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
-            )}
             {/* Inline icons are the desktop (hover) affordance; touch uses the
                 long-press menu instead, so these stay hover-only. */}
             {text && (
@@ -2027,6 +2024,12 @@ function UserBubble({
               </span>
             )}
             <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
+            {/* Last in the row, so on a right-aligned bubble the switcher sits
+                flush with its edge — the only control visible at rest, it would
+                otherwise float mid-row with nothing beside it. */}
+            {onSwitchBranch && (
+              <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
+            )}
           </div>
         </div>
       </ActionMenu>
