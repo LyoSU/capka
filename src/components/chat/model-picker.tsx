@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 import { createPortal } from "react-dom";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
-import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers } from "lucide-react";
+import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers, History } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { Hint } from "@/components/ui/tooltip";
 import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
@@ -261,6 +261,10 @@ type Source =
 
 interface ModelsState {
   models: ModelInfo[];
+  // Config-scoped refs of the models this user last ran turns on, newest first.
+  // Server-supplied and only in "active" mode — the settings dialogs list models
+  // for one connection, where "what you last used across all of them" is noise.
+  recent: string[];
   loading: boolean;
   error: string | null;
   isShared: boolean;
@@ -275,11 +279,12 @@ interface ModelsState {
 // navigation between chats) shows models instantly and revalidates quietly,
 // instead of flashing a spinner and re-probing the provider each time.
 const CLIENT_MODELS_TTL_MS = 5 * 60_000;
-const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean }>();
+const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] }>();
 
 function useModels(source: Source, fallbackValue: string, loadErrorMsg: string): ModelsState {
   const [state, setState] = useState<ModelsState>({
     models: [],
+    recent: [],
     loading: true,
     error: null,
     isShared: false,
@@ -302,7 +307,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     // Credentials mode for a key-requiring provider with no key yet: don't
     // call the API — just prompt for the key.
     if (source.mode === "credentials" && PROVIDER_META[source.provider]?.requiresKey && !source.apiKey) {
-      setState({ models: [], loading: false, error: null, isShared: false, needsKey: true, syncing: false });
+      setState({ models: [], recent: [], loading: false, error: null, isShared: false, needsKey: true, syncing: false });
       return;
     }
 
@@ -310,7 +315,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     if (cached && Date.now() - cached.at < CLIENT_MODELS_TTL_MS) {
       // Serve from cache immediately; the fetch below revalidates in the
       // background without flipping back to a loading state.
-      setState({ models: cached.models, loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
+      setState({ models: cached.models, recent: cached.recent, loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
     } else {
       setState((s) => ({ ...s, loading: true, error: null, needsKey: false, syncing: false }));
     }
@@ -331,11 +336,13 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         }
         const data = res.ok ? await res.json() : { models: [] };
         if (cancelled) return;
+        const recent: string[] = Array.isArray(data.recent) ? data.recent : [];
         if (res.ok && Array.isArray(data.models) && data.models.length > 0) {
-          clientModelsCache.set(key, { at: Date.now(), models: data.models, isShared: !!data.isShared });
+          clientModelsCache.set(key, { at: Date.now(), models: data.models, isShared: !!data.isShared, recent });
         }
         setState({
           models: data.models ?? [],
+          recent,
           loading: false,
           // The server's error is a locale-less constant — treat it as a flag
           // and render the localized message.
@@ -399,6 +406,14 @@ const FEATURED_TAB = "__featured__";
 // searching; rows then carry connection chips so nothing is ambiguous.
 const ALL_TAB = "__all__";
 
+// "Recent" — the models this user actually ran turns on, newest first, straight
+// from the spend ledger. Deliberately NOT the pane the picker opens on: it is a
+// shortcut for people who rotate between a few models, not a new front door, and
+// the picker still opens on whatever is currently selected. Like "Featured", the
+// tab does not exist at all when it would be empty, so a fresh instance never
+// shows a dead entry.
+const RECENT_TAB = "__recent__";
+
 interface GroupEntry {
   /** Stable identity used for the active-tab match. */
   key: string;
@@ -460,6 +475,7 @@ function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
  *  otherwise it's a compact glyph-only strip of brands. */
 function ProviderRail({
   groups,
+  hasRecent,
   hasFeatured,
   hasAll,
   active,
@@ -468,6 +484,7 @@ function ProviderRail({
   labeled,
 }: {
   groups: GroupEntry[];
+  hasRecent: boolean;
   hasFeatured: boolean;
   hasAll?: boolean;
   active: string | null;
@@ -525,9 +542,10 @@ function ProviderRail({
           : "flex-row items-center overflow-x-auto border-b p-2"
       }`}
     >
+      {hasRecent && item(RECENT_TAB, t("recent"), <History className="h-4 w-4" />)}
       {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
       {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-      {(hasAll || hasFeatured) && (
+      {(hasRecent || hasAll || hasFeatured) && (
         <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
       )}
       {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
@@ -628,6 +646,19 @@ function ModelList({
   const brandGroups = useMemo(() => buildGroups(scoped), [scoped]);
   const hasFeatured = useMemo(() => scoped.some((m) => m.featured), [scoped]);
 
+  // The ledger's refs resolved against what is actually listed right now, IN THE
+  // LEDGER'S ORDER — recency is the whole content of this tab, so it is built by
+  // walking the refs rather than by filtering the model list (which would hand
+  // back catalog order and quietly turn "recent" into "some models"). A ref that
+  // resolves to nothing — connection disconnected, model dropped from the
+  // catalogue — is skipped, which is also what makes the tab self-hiding.
+  const recentModels = useMemo(() => {
+    if (!state.recent.length) return [];
+    const byRef = new Map(scoped.map((m) => [refOf(m), m]));
+    return state.recent.map((ref) => byRef.get(ref)).filter((m): m is ModelInfo => !!m);
+  }, [state.recent, scoped]);
+  const hasRecent = recentModels.length > 0;
+
   // Search is global — across every connection — so a model is findable no
   // matter which tab is open. Results are a single flat list (each row carries
   // its connection chip), sorted featured-first, and narrowed by any active
@@ -699,10 +730,13 @@ function ModelList({
   // by the active capability filters.
   const sections = useMemo<GroupEntry[]>(() => {
     if (searching) return [{ key: "search", group: "", icon: null, models: searchResults }];
+    // One flat section: the order IS the information, so it must not be regrouped
+    // by brand the way every other tab is.
+    if (activeBrand === RECENT_TAB) return [{ key: "recent", group: "", icon: null, models: recentModels.filter(passesFilter) }];
     if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured && passesFilter(m)));
     if (activeBrand === ALL_TAB) return buildGroups(scoped.filter((m) => passesFilter(m)));
     return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand && passesFilter(m)));
-  }, [searching, searchResults, scoped, activeBrand, passesFilter]);
+  }, [searching, searchResults, scoped, activeBrand, passesFilter, recentModels]);
 
   // Multi-brand panes (Featured, All) need sticky brand headers; search is a flat
   // list with per-row chips and a single brand's pane names itself.
@@ -719,7 +753,7 @@ function ModelList({
   // When a single company fills the pane (no per-group sticky headers), name it
   // up top so the user always knows which provider they're looking at. Search is
   // a cross-provider flat list, so it gets no single heading (rows carry chips).
-  const paneHeading = !showHeaders && !searching ? sections[0] : null;
+  const paneHeading = !showHeaders && !searching && activeBrand !== RECENT_TAB ? sections[0] : null;
 
   const right = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -873,7 +907,7 @@ function ModelList({
   // No companies to choose between (loading, error, single provider) → skip the
   // rail entirely and let the list use the full width.
   const showConnStrip = byConnection && connTabs.length > 1;
-  const showBrandRail = brandGroups.length > 1 || hasFeatured;
+  const showBrandRail = brandGroups.length > 1 || hasFeatured || hasRecent;
 
   // Nothing to choose between (loading, error, a lone brand on a lone
   // connection) → just the list at full width.
@@ -884,6 +918,7 @@ function ModelList({
       {showBrandRail && (
         <ProviderRail
           groups={brandGroups}
+          hasRecent={hasRecent}
           hasFeatured={hasFeatured}
           hasAll={brandGroups.length > 1}
           active={searching ? null : activeBrand}
@@ -903,6 +938,7 @@ function ModelList({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ProviderRail
         groups={connTabs}
+        hasRecent={false}
         hasFeatured={false}
         hasAll
         active={searching ? null : activeConn}

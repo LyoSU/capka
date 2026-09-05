@@ -8,6 +8,7 @@ import { resolveEnabledConfigs, labelEnabledConfigs } from "@/lib/providers/reso
 import { listProviderModels, applySharedGovernance, type ModelInfo } from "@/lib/providers/list-models";
 import { isProviderName, PROVIDER_META } from "@/lib/providers/registry";
 import { syncModelCatalog } from "@/lib/models/catalog";
+import { recentModelRefs } from "@/lib/providers/recent-models";
 import { classifyLLMError } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 
@@ -69,10 +70,15 @@ async function respond(provider: string, apiKey: string | undefined, baseUrl: st
  * back at all.
  */
 async function respondAggregated(
+  userId: string,
   configs: Awaited<ReturnType<typeof resolveEnabledConfigs>>,
   mode: Awaited<ReturnType<typeof getProviderKeyMode>>,
 ): Promise<Response> {
   const labels = labelEnabledConfigs(configs);
+
+  // The ledger read rides alongside the provider calls, and a failure degrades to
+  // "no recents" rather than to no picker: this is an ordering hint, not content.
+  const recentPromise = recentModelRefs(userId).catch(() => [] as string[]);
 
   const results = await Promise.all(
     configs.map(async (c) => {
@@ -117,6 +123,11 @@ async function respondAggregated(
     provider: null,
     isShared,
     syncing,
+    // Config-scoped refs of the models this user last ran turns on, newest first.
+    // Sent as refs rather than filtered rows so the picker keeps ONE list to
+    // render and merely reorders it — a recent model that has since been removed
+    // from the catalog simply matches nothing.
+    recent: await recentPromise,
     ...(error ? { error } : {}),
   });
 }
@@ -144,7 +155,7 @@ export const GET = apiHandler(async (req: Request) => {
   // The set may mix the user's own configs with the admin's shared ones; the
   // badge logic (whole offering shared vs. per-model) lives in respondAggregated.
   const mode = await getProviderKeyMode();
-  return respondAggregated(configs, mode);
+  return respondAggregated(userId, configs, mode);
 });
 
 /**
