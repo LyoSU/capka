@@ -30,28 +30,12 @@ const STREAMDOWN_CONTROLS = {
   table: { copy: true, download: true, fullscreen: true },
 };
 
-// How a streamed answer becomes live text rather than text arriving in slabs. The
-// runner flushes every ~100ms and the client coalesces deltas into ~250ms batches,
-// so a paragraph would otherwise grow in jumps of twenty-odd tokens four times a
-// second. Streamdown animates only the words the latest batch mounted, so the new
-// text of each batch fades in as one soft tail while everything before it stands
-// still. NO stagger, deliberately: Streamdown runs its animate plugin per BLOCK,
-// so a cascade restarts from zero in every paragraph, and a batch that closes one
-// paragraph and opens the next showed two tails unrolling side by side instead of
-// one write head. With every new word on the same clock the tail is shared across
-// block boundaries. Opacity only: blur or motion on every word of every reply is
-// exactly the per-token treatment the step rail refuses. `--ease-out` is the app's
-// one entrance curve, so its literal value goes here rather than a second opinion.
-// When `isAnimating` goes false the plugin leaves the pipeline, so a finished
-// message carries no extra spans. Module-level because the memo compares it by
-// reference.
-const ANIMATED = {
-  animation: "fadeIn",
-  duration: 220,
-  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-  sep: "word",
-  stagger: 0,
-} as const;
+// Streamed text gets no per-word animation. It used to: Streamdown's animate
+// plugin faded in the words each ~250ms batch mounted, which read as a slab
+// flashing in four times a second. The deltas are now paced word by word on the
+// client (src/lib/chat/delta-pacer.ts), so the words simply appear where the
+// next one lands — the same treatment beautifului's streaming text uses — and a
+// finished message carries no extra spans.
 
 // Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy —
 // load them off the critical path so the chat bundle stays small. Markdown
@@ -122,15 +106,12 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
     // date). The key deliberately does NOT include the streaming state: that
     // flipped once per reply, at the end, and remounted the whole tree — a full
     // re-parse and re-highlight — at the very moment the eye is on the last line.
-    // `isAnimating` reaches Streamdown as a compared prop, and the file chips read
-    // the same flag from `LiveContext`, so the end of a turn is now a re-render of
-    // the blocks that changed, not a teardown.
+    // The file chips read the streaming flag from `LiveContext`, so the end of a
+    // turn is a re-render of the blocks that changed, not a teardown.
     <LiveContext.Provider value={!!isStreaming}>
       <Streamdown
         key={citeKey}
         parseIncompleteMarkdown={isStreaming}
-        isAnimating={isStreaming}
-        animated={ANIMATED}
         controls={STREAMDOWN_CONTROLS}
         plugins={plugins}
         remarkPlugins={remarkPlugins}

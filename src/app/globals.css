@@ -636,47 +636,6 @@
   animation: text-shimmer 1.4s linear infinite;
 }
 
-/* --- Streaming answer -----------------------------------------------------
-   A block caret is the ONLY treatment streamed text gets — never a dim, mask or
-   blur, because text the reader can't read yet is worse than text that simply
-   appears (the ticking duration and the step spinner already say "working").
-
-   It exists only while `data-streaming` is set, i.e. only while text is actually
-   arriving, so it does NOT blink: a bar that flickers under text that is already
-   visibly growing reads as a glitch, and the blink would be carrying no
-   information the movement isn't already carrying. It simply marks where the next
-   word lands, then goes.
-
-   Only on a trailing paragraph. When the answer currently ends in a code block,
-   table or list, a caret welded to that block's edge reads as a rendering
-   artefact — and the status line above already says we're working, so nothing is
-   lost by omitting it there. */
-.chat-prose[data-streaming] > p:last-child::after {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-left: 2px;
-  translate: 0 -0.5px;
-  border-radius: 1px;
-  vertical-align: text-bottom;
-  background: var(--foreground);
-  opacity: 0.55;
-}
-/* …until the words PAUSE. A tool call, the model thinking, a slow provider: the
-   text has stopped growing and nothing on the line says whether it will resume.
-   That is the one moment a blink carries information ("still here, waiting on the
-   next word"), so it is gated on `data-paused`, which the message sets after a
-   short quiet gap and clears on the next delta. `step-end` because a cursor
-   blinks, it does not fade; the global reduced-motion block freezes it. */
-.chat-prose[data-streaming][data-paused] > p:last-child::after {
-  animation: caret-blink 1s step-end infinite;
-}
-@keyframes caret-blink {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 0; }
-}
-
 /* Citation chips are React components (components/chat/sources.tsx), not CSS
    over the markdown anchor: Streamdown sanitizes the hast with rehype-sanitize's
    default schema, which strips the data-* attribute a selector here would need. */

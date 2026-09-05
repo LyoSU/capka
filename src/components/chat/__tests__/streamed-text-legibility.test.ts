@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
  * swallowed a whole extra line whenever the tail contained a newline (reasoning is
  * `whitespace-pre-wrap`), and since a reasoning part carries no streaming/done
  * state (`contracts.ts`) the blur was driven by position in the rail and sat frozen
- * over final text. Liveness belongs to the caret, the ticking duration and the step
+ * over final text. Liveness belongs to the pacing of the deltas, the ticking duration and the step
  * spinner — never to degrading the text. Invisible to types and lint, so checked
  * here.
  */
@@ -24,13 +24,12 @@ describe("streamed text", () => {
     expect(message).not.toMatch(/\bstream-tail\b/);
   });
 
-  it("marks the write head with the caret only — no filter on the streaming surface", () => {
-    // The one treatment allowed on live text, and it must stay conditional on
-    // `data-streaming` so it disappears the moment text stops arriving.
-    expect(css).toContain(".chat-prose[data-streaming] > p:last-child::after");
-    const caret = css.slice(css.indexOf(".chat-prose[data-streaming]"));
-    const block = caret.slice(0, caret.indexOf("}"));
-    expect(block).not.toMatch(/filter|mask-image|opacity:\s*0(\.0*)?[;\s]/);
+  it("puts no filter, mask or caret on the streaming surface", () => {
+    // Liveness is carried by the pacing of the deltas (delta-pacer.ts), the
+    // ticking duration and the step spinner — the text itself is left alone.
+    expect(css).not.toMatch(/\.chat-prose\[data-streaming\]/);
+    const prose = css.slice(css.indexOf(".chat-prose"));
+    expect(prose.slice(0, prose.indexOf("}"))).not.toMatch(/filter|mask-image|opacity:\s*0(\.0*)?[;\s]/);
   });
 
   it("renders reasoning whole, not as a per-character split", () => {

@@ -16,6 +16,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Streamed replies are paced on the client: words appear at a steady, readable cadence instead of ~250 ms slabs, and the per-word fade-in and the blinking caret are gone.
 - Usage rows record what the spend bought (`usage.purpose`), and the admin usage API returns a `byPurpose` breakdown. Existing rows stay unattributed; no back-fill.
 
 - A model the catalog does not know is assumed to have a 128k context window (was 32k), and the first `context_too_long` rejection that names the real window records it per model, so later turns compact against that figure. The learned value survives catalog re-syncs.

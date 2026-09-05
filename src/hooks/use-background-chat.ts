@@ -8,7 +8,7 @@ import type { TaskEvent } from "@/lib/tasks/events";
 import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
 import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
 import { createStreamRecovery } from "@/lib/chat/stream-recovery";
-import { createDeltaCoalescer } from "@/lib/chat/delta-coalesce";
+import { createDeltaPacer } from "@/lib/chat/delta-pacer";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -182,7 +182,7 @@ export function useBackgroundChat({
     ]);
 
     // The full per-event state application, shared by the immediate path and
-    // the coalescer's deferred flush. Returns false when the event could NOT be
+    // the pacer's deferred release. Returns false when the event could NOT be
     // applied, so the caller holds it for the reconcile path instead of letting
     // it vanish.
     const applyEvent = (data: TaskEvent): boolean => {
@@ -525,16 +525,17 @@ export function useBackgroundChat({
       cursors: appliedSeqRef.current,
     });
 
-    // Text/reasoning deltas arrive ~10/s and each applied one re-renders the
-    // whole streaming message at O(its full length) — on long replies that
-    // saturates a phone's main thread (dead taps, stuttering scroll). Coalesce
-    // them into one burst ≤4/s; React batches the burst into a single render.
+    // Text/reasoning deltas arrive in ~100ms server batches. Shown as they land
+    // they read as slabs, so the pacer releases them word by word at a steady
+    // cadence (see delta-pacer.ts); it also lengthens its tick on long replies,
+    // since each applied delta re-renders the whole streaming message at O(its
+    // full length) and 20 renders/s of that saturates a phone's main thread.
     // All other events are rare but order-sensitive relative to the deltas, so
-    // they flush the buffer first and apply immediately.
+    // they flush the backlog first and apply immediately.
     // A delta held here is applied a beat after it arrived, so the reply row can
     // disappear underneath it (a reload landing in between) — hold those for the
     // reconcile path rather than dropping them.
-    const coalescer = createDeltaCoalescer((event: TaskEvent) => {
+    const pacer = createDeltaPacer((event: TaskEvent & { delta: string }) => {
       if (!applyEvent(event)) recovery.hold(event as GapEvent);
     });
 
@@ -584,10 +585,10 @@ export function useBackgroundChat({
           }
 
           if (data.type === "task:text-delta" || data.type === "task:reasoning-delta") {
-            coalescer.enqueue(data);
+            pacer.enqueue(data);
             return;
           }
-          coalescer.flush();
+          pacer.flush();
           if (!applyEvent(data)) recovery.hold(data as GapEvent);
         } catch { /* ignore parse errors */ }
       };
@@ -606,7 +607,7 @@ export function useBackgroundChat({
       sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
       recovery.dispose();
-      coalescer.dispose();
+      pacer.dispose();
       es?.close();
     };
   }, [chatId, loadHistory]);
