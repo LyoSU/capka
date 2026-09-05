@@ -21,6 +21,15 @@ All notable changes to Capka are documented here. Format follows
 - Each streamed word fades in on its own on top of the client-side pacing, so the leading edge of a reply reads as a soft gradient rather than a hard front; code blocks are not animated.
 - While a reply is inside a code block the client releases it in fewer, larger pieces (tick ≥150 ms), so the syntax highlighter re-runs a third as often on a growing block.
 - Files staged in the composer enter with the same staggered pop as a finished turn's file tiles.
+- Markdown downloads syntax highlighting, maths and diagram support only when a message actually contains code, a formula or a mermaid fence, instead of all three on the first message rendered.
+- Brand glyphs are drawn from path data in the repo and `@lobehub/icons` is gone: the chat's largest chunk drops from 836 KB, and the lockfile loses 243 packages (antd, @lobehub/ui, emoji-mart and their trees) with no other version changed.
+- The dashboard validates the session once per request instead of once in the layout and again in the page, and `setup_complete` is read until it is true rather than on every render.
+
+### Fixed
+
+- A client that disconnects while `/api/events` is still subscribing no longer leaks its Postgres LISTEN callback and heartbeat timer; each such disconnect left a dead callback that every later NOTIFY for that user fanned out to.
+- A failed status poll is no longer read as a finished turn: a 500 or 429 from `/api/tasks` dropped a streaming reply to idle and removed the stop button.
+- One markdown plugin chunk failing to download no longer leaves the whole transcript unhighlighted, with no retry until a reload.
 
 ## [0.39.0] - 2026-09-05
 
