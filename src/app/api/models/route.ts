@@ -94,7 +94,11 @@ async function respondAggregated(
         return { models: tagged, provider: c.provider };
       } catch (e) {
         recordModelLoadFailure(c.provider, e);
-        return { models: [] as ModelInfo[], error: MODEL_LOAD_ERROR };
+        // Name the config that failed, not just the fact that one did. A caller
+        // that only learns "some models are missing" cannot tell a connection
+        // that timed out from a model the admin retired, and the picker was
+        // reporting the first as the second.
+        return { models: [] as ModelInfo[], error: MODEL_LOAD_ERROR, failedConfigId: c.id };
       }
     }),
   );
@@ -123,6 +127,12 @@ async function respondAggregated(
     provider: null,
     isShared,
     syncing,
+    // Connections whose catalog did not load THIS time. Distinct from `error`,
+    // which speaks only for the all-or-nothing case: with three connections and
+    // one dead the response is a success carrying two thirds of the offering, and
+    // without this the missing third is indistinguishable from models that no
+    // longer exist. A transient failure must not read as a permanent one.
+    failedConfigs: results.map((r) => r.failedConfigId).filter((id): id is string => !!id),
     // Config-scoped refs of the models this user last ran turns on, newest first.
     // Sent as refs rather than filtered rows so the picker keeps ONE list to
     // render and merely reorders it — a recent model that has since been removed

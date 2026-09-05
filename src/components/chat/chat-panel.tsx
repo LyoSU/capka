@@ -157,6 +157,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const [modelStatus, setModelStatus] = useState<{
     settled: boolean;
     available: boolean;
+    connectionDown?: boolean;
+    retry?: () => void;
     provider?: string;
     inputModalities?: Modality[] | null;
     reasoning?: boolean | null;
@@ -166,6 +168,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     (s: {
       settled: boolean;
       available: boolean;
+      connectionDown?: boolean;
+      retry?: () => void;
       provider?: string;
       inputModalities?: Modality[] | null;
       reasoning?: boolean | null;
@@ -593,6 +597,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // to continue right here (or start fresh). Held off while a turn is still
   // running so the composer keeps its stop button.
   const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
+  // Same block, different sentence and different remedy: the model is fine, its
+  // connection did not answer. Telling someone their model was removed when the
+  // endpoint is merely down sends them to re-pick a model they already have, and
+  // the one action that would actually help — asking again — was not offered.
+  const connectionDown = modelGone && !!modelStatus.connectionDown;
 
   // Rides in the same pill shell as the model picker, and renders itself away
   // when the resolved model has no reasoning levels worth offering. Hidden on a
@@ -696,15 +705,26 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <AlertCircle className="h-4 w-4 shrink-0" />
-          {t("panel.modelGoneBody")}
+          {connectionDown ? t("panel.connectionDownBody") : t("panel.modelGoneBody")}
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
-        >
-          {t("panel.modelGoneNew")}
-        </Button>
+        {connectionDown ? (
+          <Button variant="outline" size="sm" onClick={() => modelStatus.retry?.()}>
+            {t("panel.connectionDownRetry")}
+          </Button>
+        ) : (
+          // "Start a new chat" is only an alternative when this one has something
+          // in it. Offered on an empty chat it pointed at the state the user was
+          // already in, which reads as the app not knowing where it is.
+          messages.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
+            >
+              {t("panel.modelGoneNew")}
+            </Button>
+          )
+        )}
       </div>
     </div>
   ) : (

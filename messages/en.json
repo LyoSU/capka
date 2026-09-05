@@ -251,6 +251,8 @@
       "contextTokens": "{used} / {total} tokens",
       "modelGoneBody": "This model isn't available anymore — pick another model to keep chatting",
       "modelGoneNew": "New chat",
+      "connectionDownBody": "This model's connection isn't responding right now — try again, or pick another model",
+      "connectionDownRetry": "Try again",
       "contextHint": "When it fills up, I'll summarize the earlier part so we can keep going."
     },
     "menu": {

@@ -265,6 +265,9 @@ interface ModelsState {
   // Server-supplied and only in "active" mode — the settings dialogs list models
   // for one connection, where "what you last used across all of them" is noise.
   recent: string[];
+  /** Connections whose catalog failed to load on this attempt. A model belonging
+   *  to one of them is absent from `models` without having gone anywhere. */
+  failedConfigs: string[];
   loading: boolean;
   error: string | null;
   isShared: boolean;
@@ -281,10 +284,11 @@ interface ModelsState {
 const CLIENT_MODELS_TTL_MS = 5 * 60_000;
 const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] }>();
 
-function useModels(source: Source, fallbackValue: string, loadErrorMsg: string): ModelsState {
+function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, nonce = 0): ModelsState {
   const [state, setState] = useState<ModelsState>({
     models: [],
     recent: [],
+    failedConfigs: [],
     loading: true,
     error: null,
     isShared: false,
@@ -307,15 +311,15 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     // Credentials mode for a key-requiring provider with no key yet: don't
     // call the API — just prompt for the key.
     if (source.mode === "credentials" && PROVIDER_META[source.provider]?.requiresKey && !source.apiKey) {
-      setState({ models: [], recent: [], loading: false, error: null, isShared: false, needsKey: true, syncing: false });
+      setState({ models: [], recent: [], failedConfigs: [], loading: false, error: null, isShared: false, needsKey: true, syncing: false });
       return;
     }
 
-    const cached = clientModelsCache.get(key);
+    const cached = nonce > 0 ? undefined : clientModelsCache.get(key);
     if (cached && Date.now() - cached.at < CLIENT_MODELS_TTL_MS) {
       // Serve from cache immediately; the fetch below revalidates in the
       // background without flipping back to a loading state.
-      setState({ models: cached.models, recent: cached.recent, loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
+      setState({ models: cached.models, recent: cached.recent, failedConfigs: [], loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
     } else {
       setState((s) => ({ ...s, loading: true, error: null, needsKey: false, syncing: false }));
     }
@@ -343,6 +347,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         setState({
           models: data.models ?? [],
           recent,
+          failedConfigs: Array.isArray(data.failedConfigs) ? data.failedConfigs : [],
           loading: false,
           // The server's error is a locale-less constant — treat it as a flag
           // and render the localized message.
@@ -388,7 +393,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
       if (retry) clearTimeout(retry);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the inputs; fallbackValue is only a last-resort label
-  }, [key]);
+  }, [key, nonce]);
 
   return state;
 }
@@ -1031,6 +1036,11 @@ interface ModelPickerProps {
   onResolved?: (status: {
     settled: boolean;
     available: boolean;
+    /** The model is fine; the connection serving it did not answer this time.
+     *  A different sentence and a different remedy from `available: false`. */
+    connectionDown?: boolean;
+    /** Re-list, ignoring the client cache. Stable across renders. */
+    retry?: () => void;
     provider?: string;
     inputModalities?: Modality[] | null;
     /** null = unknown (an off-catalog id whose caps are assumed, not known). */
@@ -1097,7 +1107,11 @@ export function ModelPicker({
       ? { mode: "config", configId }
       : { mode: "active" };
 
-  const state = useModels(source, value, t("loadError"));
+  // Bumped by `retry` below to force a refetch that ignores the client cache —
+  // the only way back from a connection that was down a moment ago.
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const retry = useCallback(() => setReloadNonce((n) => n + 1), []);
+  const state = useModels(source, value, t("loadError"), reloadNonce);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
@@ -1256,7 +1270,18 @@ export function ModelPicker({
   // false-flags a model as gone. On a fetch error useModels injects a fallback
   // entry for `value`, so currentModel still resolves and this stays false.
   const settled = !state.loading && !state.syncing && !state.needsKey;
-  const modelMissing = settled && !state.error && state.models.length > 0 && !!value && !currentModel;
+
+  // Our model's OWN connection is one of the ones that failed to answer. It has
+  // not gone anywhere; it is behind an endpoint that is down right now. This case
+  // used to fall between two rules and be reported as the other one: "nothing
+  // loaded" was guarded (state.error), "the model is absent" was claimed, and
+  // "two of three connections answered and the third holds your model" matched
+  // neither guard — so a dead tunnel read as a retired model, permanently, with
+  // no retry offered.
+  const currentConfigId = value ? splitModelRef(value).configId : null;
+  const connectionDown = settled && !currentModel && !!currentConfigId && state.failedConfigs.includes(currentConfigId);
+
+  const modelMissing = settled && !state.error && state.models.length > 0 && !!value && !currentModel && !connectionDown;
 
   const resolvedProvider = currentModel?.configProvider;
   const resolvedInput = currentModel?.capabilities?.input ?? null;
@@ -1271,13 +1296,15 @@ export function ModelPicker({
   useEffect(() => {
     onResolved?.({
       settled,
-      available: !modelMissing,
+      available: !modelMissing && !connectionDown,
+      connectionDown,
+      retry,
       provider: resolvedProvider,
       inputModalities: resolvedInput,
       reasoning: resolvedReasoning,
       efforts: resolvedEfforts,
     });
-  }, [settled, modelMissing, resolvedProvider, resolvedInput, resolvedReasoning, resolvedEfforts, onResolved]);
+  }, [settled, modelMissing, connectionDown, retry, resolvedProvider, resolvedInput, resolvedReasoning, resolvedEfforts, onResolved]);
 
   const renderList = (orientation: "vertical" | "horizontal") => (
     <ModelList

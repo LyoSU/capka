@@ -22,6 +22,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- One unreachable connection no longer empties the model picker or reports its models as removed: the other connections still load, and the chat says the connection is not responding and offers a retry instead of «this model is no longer available».
 - Regenerating a reply after switching models now persists that model (and thinking depth) on the chat, so the picker, the model a new chat opens with, and the sidebar order all reflect the re-run.
 - A Gemini context overflow («exceeds the maximum number of tokens allowed») is now recognised as one, so it gets the emergency trim and retry instead of a generic error.
 - An empty reply between two tool calls no longer draws a blank ruled block in the transcript, and the steps around it stay on one activity rail instead of splitting in two.
