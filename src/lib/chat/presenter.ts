@@ -175,6 +175,11 @@ export function toUIMessages(rows: {
         reasoningMs: meta?.reasoningMs,
         model: meta?.model,
         usage: meta?.usage,
+        // The background calls this turn made after its reply landed. Forwarded so
+        // the popover can account for every request the message caused, not just the
+        // one that wrote the text — `usage` above deliberately excludes them (they
+        // are billed as their own ledger rows).
+        aux: meta?.aux?.length ? meta.aux : undefined,
         costUsd: meta?.costUsd,
         costSource: meta?.costSource,
         upstreamProvider: meta?.upstreamProvider,

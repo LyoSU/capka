@@ -36,6 +36,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { hostOf, CitedSourcesFooter } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
+import type { AuxRecord } from "@/lib/chat/contracts";
 import { edited, undoRequest } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
@@ -2053,6 +2054,14 @@ function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram
   );
 }
 
+/** i18n key per background pass. A map rather than a switch so an added purpose is
+ *  a type error here (Record over the union) instead of an unlabeled row. */
+const PURPOSE_LABEL: Record<AuxRecord["purpose"], "purposeTitle" | "purposeMemory" | "purposeCompaction"> = {
+  title: "purposeTitle",
+  memory: "purposeMemory",
+  compaction: "purposeCompaction",
+};
+
 /** Token/timing/cost numbers an assistant turn carries. All optional — the (i)
  *  affordance only appears when at least one of these is present (so messages
  *  predating this feature stay clean). */
@@ -2060,6 +2069,10 @@ type TechDetails = {
   durationMs?: number;
   model?: string;
   usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number };
+  /** The background calls this turn spawned AFTER its reply landed — the chat title,
+   *  the memory sweep, the compaction summary. Each is its own request to the
+   *  provider, which is what makes one typed message cost more than one call. */
+  aux?: AuxRecord[];
   costUsd?: number;
   /** Whether costUsd is the provider's billed charge or our catalog estimate. */
   costSource?: "provider" | "catalog";
@@ -2115,7 +2128,7 @@ function MessageDetails({
 }) {
   const t = useTranslations("chat.details");
   const locale = useLocale();
-  const { durationMs, model, usage, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
+  const { durationMs, model, usage, aux, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
 
   // Latency + provider chain ride a separate, on-demand fetch (see the route):
   // only kicked off the first time the popover actually opens.
@@ -2144,9 +2157,34 @@ function MessageDetails({
   if (durationMs == null && model == null && usage == null) return null;
 
   const nf = new Intl.NumberFormat(locale);
+  const usd = new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
   const exactTime = new Intl.DateTimeFormat(locale, {
     dateStyle: "medium", timeStyle: "short",
   }).format(new Date(createdAt));
+  // Every provider call this message caused, grouped by what it bought. `steps` is
+  // the reply's own count — the AI SDK makes one request per step, so a turn that
+  // called tools already cost more than one — and each background pass adds one.
+  //
+  // Null when there is nothing to explain: a turn with no background work and a
+  // single step made exactly one request, and saying "requests: 1" under "steps: 1"
+  // is noise. The breakdown earns its place only when the total differs from what
+  // the rows above already imply.
+  const auxCounts = (aux ?? []).reduce<Partial<Record<AuxRecord["purpose"], number>>>(
+    (acc, a) => ({ ...acc, [a.purpose]: (acc[a.purpose] ?? 0) + 1 }), {},
+  );
+  const replyCalls = steps && steps > 0 ? steps : 1;
+  const total = replyCalls + (aux?.length ?? 0);
+  const requests = total > 1
+    ? {
+        total,
+        rows: [
+          { labelKey: "purposeTurn" as const, n: replyCalls },
+          ...(Object.keys(PURPOSE_LABEL) as AuxRecord["purpose"][])
+            .filter((k) => auxCounts[k])
+            .map((k) => ({ labelKey: PURPOSE_LABEL[k], n: auxCounts[k] as number })),
+        ],
+      }
+    : null;
   // Output throughput — derived, only meaningful with both numbers and a turn
   // long enough that the rate isn't noise.
   const tokensPerSec =
@@ -2169,6 +2207,22 @@ function MessageDetails({
             as developer plumbing (cf. PRODUCT.md "hide the machinery"). */}
         {model && <DetailRow label={t("model")} value={model} />}
         {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
+        {/* Why one typed message can cost several calls. Shown to everyone, not just
+            admins: it answers a question people actually ask, and answering it needs
+            no numbers — the counts are the answer, and what each pass SPENT stays in
+            the admin block below. */}
+        {requests && (
+          <div className="space-y-1 pt-0.5">
+            <DetailRow label={t("requests")} value={nf.format(requests.total)} />
+            <div className="space-y-0.5 pl-2">
+              {requests.rows.map((r) => (
+                <div key={r.labelKey} className="text-muted-foreground">
+                  {r.n > 1 ? t("purposeCount", { label: t(r.labelKey), n: r.n }) : t(r.labelKey)}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {usage && <DetailRow label={t("inputTokens")} value={nf.format(usage.input)} />}
         {usage && <DetailRow label={t("outputTokens")} value={nf.format(usage.output)} />}
         {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t)} />}
@@ -2195,6 +2249,24 @@ function MessageDetails({
             {usage && usage.reasoning != null && usage.reasoning > 0 && <DetailRow label={t("reasoningTokens")} value={nf.format(usage.reasoning)} />}
             {usage && usage.cached > 0 && <DetailRow label={t("cache")} value={nf.format(usage.cached)} />}
             {usage && usage.cacheWrite != null && usage.cacheWrite > 0 && <DetailRow label={t("cacheWrite")} value={nf.format(usage.cacheWrite)} />}
+            {/* What the background passes cost. They are billed as their own ledger
+                rows and are deliberately absent from `usage` above, so without this
+                an admin reading a turn's numbers reads only part of what the message
+                spent. */}
+            {aux?.length ? (
+              <div className="space-y-1 pt-0.5">
+                <span className="text-muted-foreground">{t("backgroundWork")}</span>
+                {aux.map((a, i) => (
+                  <div key={`${a.purpose}-${i}`} className="flex items-baseline justify-between gap-6 pl-2">
+                    <span className="font-medium">{t(PURPOSE_LABEL[a.purpose])}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {t("auxTokens", { input: nf.format(a.input), output: nf.format(a.output) })}
+                      {a.costUsd != null ? ` \u00b7 ${usd.format(a.costUsd)}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {loadingGen && !gen && <div className="text-muted-foreground">{t("loadingRoute")}</div>}
             {gen?.latencyMs != null && <DetailRow label={t("latency")} value={ms(gen.latencyMs)} />}
             {gen?.generationMs != null && <DetailRow label={t("generationTime")} value={ms(gen.generationMs)} />}
@@ -2284,7 +2356,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2532,7 +2604,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               )}
               {onFork && <ForkButton messageId={message.id} onFork={onFork} disabled={actionsDisabled} />}
               <MessageDetails
-                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
+                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, aux: metadata?.aux, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
                 createdAt={createdAt}
                 isAdmin={isAdmin}
                 steps={parts.filter(isToolPart).length}

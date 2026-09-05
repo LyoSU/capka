@@ -563,7 +563,16 @@
       "loadingRoute": "Loading…",
       "durationSec": "{s}s",
       "durationMin": "{m}m {s}s",
-      "sentAt": "Sent"
+      "sentAt": "Sent",
+      "requests": "Model requests",
+      "requestsHint": "One message can cost several requests: the reply, then the background work after it.",
+      "purposeTurn": "Reply",
+      "purposeTitle": "Chat title",
+      "purposeMemory": "Remembering",
+      "purposeCompaction": "Conversation summary",
+      "purposeCount": "{label} ×{n}",
+      "backgroundWork": "Background work",
+      "auxTokens": "{input} / {output} tok."
     },
     "message": {
       "cancelled": "Response was cancelled",

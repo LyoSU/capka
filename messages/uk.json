@@ -563,7 +563,16 @@
       "loadingRoute": "Завантаження…",
       "durationSec": "{s} с",
       "durationMin": "{m} хв {s} с",
-      "sentAt": "Надіслано"
+      "sentAt": "Надіслано",
+      "requests": "Запитів до моделі",
+      "requestsHint": "Одне повідомлення може коштувати кількох запитів: відповідь, а після неї — фонова робота.",
+      "purposeTurn": "Відповідь",
+      "purposeTitle": "Назва чату",
+      "purposeMemory": "Запам'ятовування",
+      "purposeCompaction": "Стиснення розмови",
+      "purposeCount": "{label} ×{n}",
+      "backgroundWork": "Фонова робота",
+      "auxTokens": "{input} / {output} ток."
     },
     "message": {
       "cancelled": "Відповідь скасовано",
