@@ -3,6 +3,7 @@ import { GeistMono } from "geist/font/mono";
 import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
+import { clientMessages } from "@/i18n/messages";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
@@ -111,7 +112,9 @@ export default async function RootLayout({
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
-        <NextIntlClientProvider>
+        {/* Scoped, not the whole catalog: this provider serves the signed-out
+            surfaces, and /login has no use for the chat or settings namespaces. */}
+        <NextIntlClientProvider messages={await clientMessages()}>
           <Providers>
             {children}
             <Toaster />

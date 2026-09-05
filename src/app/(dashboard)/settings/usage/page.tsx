@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { Segmented } from "@/components/settings/segmented";
-import { SettingsPage, SettingsEmpty, ShowMore, useShowMore } from "@/components/settings/shell";
+import { SettingsPage, SettingsEmpty } from "@/components/settings/shell";
+import { ShowMore, useShowMore } from "@/components/settings/show-more";
 import { ChartTooltip } from "@/components/shared/chart-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";

@@ -12,7 +12,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { SettingsEmpty, SettingsError, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsError, SettingsSkeleton } from "@/components/settings/shell";
+import { ShowMore, useShowMore } from "@/components/settings/show-more";
 import { UserDialog, type AdminUser, type Tier } from "./user-dialog";
 import { money, relTime } from "./format";
 

@@ -13,6 +13,10 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Model picker: a brand's models are ordered newest version first, flagship tier first (Gemini 2.5 Pro, 2.5 Flash, 2.5 Flash Lite, 2.0 Flash…), and dated snapshots of one model fold into a single row with a «N versions» chip; search shows every snapshot with its own tail (`2024-08-06`, `thinking`).
+- Model picker: speech, transcription, embedding, image and other non-chat models sit behind one «N more auxiliary models» row at the foot of a brand's list; search still finds them.
+- Model names derived from ids keep acronyms (`GPT 4.1`, `ChatGPT 4o`, `TTS 1 HD`) and re-join dashed versions (`Claude Opus 4.8`, `Claude 3.5 Haiku`); a trailing `*` some aggregators append is dropped.
+- Model picker rows show context size and capability marks at rest (dimmed, full on hover) instead of only on hover; an unknown price is a dash with a «Price unknown» hint rather than three dots, and the price tooltip leads with a word (Budget / Moderate / Premium / Very expensive).
 - Failure notices in the chat are calmer: the «could not load messages» banner is a raised pill with a «Try again» button instead of a red plate across the column, a failed tool's output keeps its own text colour on a lightly tinted surface, and the model picker's error keeps its sentence in ink.
 - The (i) popover on a reply opens on the plain facts (model, time, work time, steps); token counts, request breakdown and the admin's cost/routing rows sit behind one «Details» disclosure.
 - A code block that is still streaming is not syntax-highlighted until its fence closes; finished blocks are unaffected.
@@ -25,6 +29,7 @@ All notable changes to Capka are documented here. Format follows
 - Markdown downloads syntax highlighting, maths and diagram support only when a message actually contains code, a formula or a mermaid fence, instead of all three on the first message rendered.
 - Brand glyphs are drawn from path data in the repo and `@lobehub/icons` is gone: the chat's largest chunk drops from 836 KB, and the lockfile loses 243 packages (antd, @lobehub/ui, emoji-mart and their trees) with no other version changed.
 - The dashboard validates the session once per request instead of once in the layout and again in the page, and `setup_complete` is read until it is true rather than on every render.
+- Each route group serializes only the message namespaces it renders: a signed-out page now ships 6% of the catalog and a chat page 51%, while settings pages ship ~14% more because they nest inside the dashboard scope.
 
 ### Fixed
 

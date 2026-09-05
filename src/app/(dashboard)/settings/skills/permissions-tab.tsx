@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SettingsEmpty, SettingsGroup, SettingsNote, SettingsSection, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsGroup, SettingsNote, SettingsSection, SettingsSkeleton } from "@/components/settings/shell";
+import { ShowMore, useShowMore } from "@/components/settings/show-more";
 import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
