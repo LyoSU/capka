@@ -2,10 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { AlertCircle, ArrowRight, Download, Loader2 } from "lucide-react";
-import Claude from "@lobehub/icons/es/Claude";
-import OpenAI from "@lobehub/icons/es/OpenAI";
-import Gemini from "@lobehub/icons/es/Gemini";
-import Grok from "@lobehub/icons/es/Grok";
+import { BrandGlyph } from "@/components/chat/provider-icons";
 import { Button } from "@/components/ui/button";
 import { sourceLabel } from "@/lib/import/detect";
 import type { DetectedShareLink, ImportSource } from "@/lib/import/types";
@@ -13,12 +10,16 @@ import type { ImportPhase } from "./use-share-import";
 
 /** The source's monochrome brand mark (Claude's, the OpenAI/ChatGPT blossom that
  *  the two share, Gemini's, or Grok's), tinted to the surrounding text color with
- *  no badge/background. Static component refs, so no "component created during
- *  render" lint. */
+ *  no badge/background. */
+const SOURCE_GLYPH: Record<ImportSource, string> = {
+  claude: "Claude",
+  chatgpt: "OpenAI",
+  gemini: "Gemini",
+  grok: "Grok",
+};
+
 export function SourceGlyph({ source, size = 18, className }: { source: ImportSource; size?: number; className?: string }) {
-  const cls = `text-muted-foreground ${className ?? ""}`;
-  const Glyph = source === "claude" ? Claude : source === "chatgpt" ? OpenAI : source === "gemini" ? Gemini : Grok;
-  return <Glyph size={size} className={cls} />;
+  return <BrandGlyph name={SOURCE_GLYPH[source]} size={size} className={`text-muted-foreground ${className ?? ""}`} />;
 }
 
 /**

@@ -106,6 +106,13 @@ export function iconForSlug(slug?: string | null): IconComponent {
   return (slug && ICONS[slug]) || Sparkles;
 }
 
+/** Brand glyph by its icon NAME rather than a catalog slug — for the few marks the
+ *  slug map deliberately doesn't carry, because they are not providers: Claude's
+ *  starburst is not Anthropic's wordmark, and Grok's is not xAI's. */
+export function BrandGlyph({ name, size, className }: { name: string; size?: number; className?: string }) {
+  return createElement(BY_NAME[name] ?? Sparkles, { size, className });
+}
+
 /** Brand glyph — resolves a slug to its (stable) icon component and renders it.
  *  Use this instead of `const Icon = iconForSlug(...)` + `<Icon/>`, which the
  *  static-components lint flags as creating a component during render. */
