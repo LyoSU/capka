@@ -52,34 +52,89 @@ const ANIMATED = {
   stagger: 0,
 } as const;
 
-// Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy —
-// load them off the critical path so the chat bundle stays small. Markdown
-// renders immediately; code/math/diagrams upgrade in once the chunk arrives.
-// One shared promise so all messages reuse a single import.
-let pluginsPromise: Promise<PluginConfig> | null = null;
-function loadPlugins(): Promise<PluginConfig> {
-  pluginsPromise ??= Promise.all([
-    import("@streamdown/code"),
-    import("@streamdown/math"),
-    import("@streamdown/mermaid"),
-  ]).then(([code, math, mermaid]) => ({
-    code: code.createCodePlugin({ themes: ["github-light", "github-dark"] }),
-    math: math.math,
-    mermaid: mermaid.mermaid,
-  }));
-  return pluginsPromise;
+// Syntax highlighting (shiki), math (katex) and diagrams (mermaid) are heavy — each
+// is megabytes of chunk, and mermaid alone drags in d3 and cytoscape. They load per
+// PLUGIN, and only when the text being rendered actually asks for one, so a chat of
+// ordinary prose never pays for any of them. A reply that grows a fence mid-stream
+// picks its plugin up on the next render.
+//
+// Independent, NOT one Promise.all: a single failed chunk used to take the other two
+// down with it, and the rejected promise stayed cached forever, so nothing retried —
+// one flaky download left the whole transcript unhighlighted until a reload. Each
+// loader clears its own slot on failure instead, so the next render tries again.
+const LOADERS = {
+  code: () => import("@streamdown/code").then((m) => m.createCodePlugin({ themes: ["github-light", "github-dark"] })),
+  math: () => import("@streamdown/math").then((m) => m.math),
+  mermaid: () => import("@streamdown/mermaid").then((m) => m.mermaid),
+};
+type PluginName = keyof typeof LOADERS;
+
+// Shared across every message: one download serves the whole transcript.
+const loaded: Record<string, unknown> = {};
+const inFlight = new Map<PluginName, Promise<unknown>>();
+
+function load(name: PluginName): Promise<unknown> {
+  let p = inFlight.get(name);
+  if (!p) {
+    p = LOADERS[name]().then(
+      (plugin) => { loaded[name] = plugin; },
+      (err) => { inFlight.delete(name); throw err; },
+    );
+    inFlight.set(name, p);
+  }
+  return p;
+}
+
+/** Which plugins this text asks for, as a stable space-joined key.
+ *
+ *  Over-matching only costs a chunk that wasn't needed; under-matching leaves code
+ *  unhighlighted or a formula raw. So each test is the LOOSE side of what the
+ *  plugin's own parser accepts: the dollar-delimited test fires on "I paid $5 and
+ *  $10" exactly as remark-math itself does, which is the point — a detector pickier
+ *  than the plugin it gates would hide output the plugin would have rendered.
+ *
+ *  Indented (four-space) code blocks are deliberately NOT detected: nothing tells
+ *  them apart from an ordinary nested list, so the test would load shiki for most
+ *  replies. Models emit fences; an indented block still renders as monospace, just
+ *  uncoloured. */
+function neededPlugins(text: string): string {
+  const need: PluginName[] = [];
+  if (text.includes("```") || text.includes("~~~")) need.push("code");
+  if (/\$\$|\\\(|\\\[|\$[^\s$][^$\n]{0,200}\$/.test(text)) need.push("math");
+  if (/```[ \t]*mermaid/i.test(text)) need.push("mermaid");
+  return need.join(" ");
+}
+
+/** The subset of `need` whose chunks have already landed. */
+function readyOf(need: string): string {
+  return need ? need.split(" ").filter((n) => n in loaded).join(" ") : "";
 }
 
 export function Markdown({ children, isStreaming, chatId, sources }: { children: string; isStreaming?: boolean; chatId?: string; sources?: NumberedSource[] }) {
-  const [plugins, setPlugins] = useState<PluginConfig | undefined>(undefined);
+  const need = neededPlugins(children);
+  // Seeded from what is already downloaded, so scrolling back to an old code block
+  // paints it highlighted instead of flashing plain first.
+  const [ready, setReady] = useState(() => readyOf(need));
 
   useEffect(() => {
+    if (!need) return;
     let alive = true;
-    loadPlugins().then((p) => alive && setPlugins(p));
-    return () => {
-      alive = false;
-    };
-  }, []);
+    for (const name of need.split(" ") as PluginName[]) {
+      if (name in loaded) continue;
+      load(name).then(() => alive && setReady(readyOf(need))).catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [need]);
+
+  // Keyed on `ready` (a value, not a reference) so this object's identity changes
+  // only when a plugin actually lands. Streamdown memoizes on it, and a fresh object
+  // per render would re-parse and re-highlight the whole message on every token.
+  const plugins = useMemo<PluginConfig | undefined>(() => {
+    if (!ready) return undefined;
+    const out: Record<string, unknown> = {};
+    for (const name of ready.split(" ")) out[name] = loaded[name];
+    return out as PluginConfig;
+  }, [ready]);
 
   // The sources array is rebuilt by the message on every render, so the memos
   // below key on its CONTENT — a fresh array each render would defeat
