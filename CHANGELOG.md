@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-05
+
 ### Added
 
 - Models added to the catalog in the last 14 days carry a «New» badge in the picker, with a «New» tab that appears only while there are any. Adds `models.first_seen_at`; the migration leaves pre-existing rows unmarked, so nothing on an existing instance reads as new.
