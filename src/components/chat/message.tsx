@@ -2073,6 +2073,10 @@ type TechDetails = {
    *  the memory sweep, the compaction summary. Each is its own request to the
    *  provider, which is what makes one typed message cost more than one call. */
   aux?: AuxRecord[];
+  /** Requests the reply itself took (one per step of the SDK's tool loop, retried
+   *  attempts included). NOT `steps` below, which counts tool-call parts: two tools
+   *  in one step are two parts and one request. */
+  llmCalls?: number;
   costUsd?: number;
   /** Whether costUsd is the provider's billed charge or our catalog estimate. */
   costSource?: "provider" | "catalog";
@@ -2128,7 +2132,7 @@ function MessageDetails({
 }) {
   const t = useTranslations("chat.details");
   const locale = useLocale();
-  const { durationMs, model, usage, aux, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
+  const { durationMs, model, usage, aux, llmCalls, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
 
   // Latency + provider chain ride a separate, on-demand fetch (see the route):
   // only kicked off the first time the popover actually opens.
@@ -2172,9 +2176,13 @@ function MessageDetails({
   const auxCounts = (aux ?? []).reduce<Partial<Record<AuxRecord["purpose"], number>>>(
     (acc, a) => ({ ...acc, [a.purpose]: (acc[a.purpose] ?? 0) + 1 }), {},
   );
-  const replyCalls = steps && steps > 0 ? steps : 1;
+  // `llmCalls`, never `steps`: the latter counts tool-call PARTS, and two tools
+  // called in one step are two parts and one request. A turn from before this field
+  // existed has no count to show, so the breakdown stays hidden rather than
+  // inventing one from the part count.
+  const replyCalls = llmCalls ?? 0;
   const total = replyCalls + (aux?.length ?? 0);
-  const requests = total > 1
+  const requests = replyCalls > 0 && total > 1
     ? {
         total,
         rows: [
@@ -2232,7 +2240,7 @@ function MessageDetails({
         {/* Admin technical block: the routing/cost/cache internals an operator
             cares about, walled off behind a labelled divider so the surface stays
             two clear sections rather than one undifferentiated dump. */}
-        {isAdmin && (upstreamProvider || costUsd != null || (usage && (usage.reasoning || usage.cached || usage.cacheWrite)) || (hasGeneration && (loadingGen || gen))) && (
+        {isAdmin && (upstreamProvider || costUsd != null || aux?.length || (usage && (usage.reasoning || usage.cached || usage.cacheWrite)) || (hasGeneration && (loadingGen || gen))) && (
           <div className="mt-2 space-y-1.5 border-t pt-2">
             <div className="text-[0.6875rem] font-medium text-muted-foreground">{t("technical")}</div>
             {upstreamProvider && <DetailRow label={t("provider")} value={upstreamProvider} />}
@@ -2260,6 +2268,10 @@ function MessageDetails({
                   <div key={`${a.purpose}-${i}`} className="flex items-baseline justify-between gap-6 pl-2">
                     <span className="font-medium">{t(PURPOSE_LABEL[a.purpose])}</span>
                     <span className="tabular-nums text-muted-foreground">
+                      {/* The model only when it ISN'T the turn's — that is the whole
+                          reason the field is stored, and the row above already names
+                          the turn's model. */}
+                      {a.model ? `${a.model} \u00b7 ` : ""}
                       {t("auxTokens", { input: nf.format(a.input), output: nf.format(a.output) })}
                       {a.costUsd != null ? ` \u00b7 ${usd.format(a.costUsd)}` : ""}
                     </span>
@@ -2356,7 +2368,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2604,7 +2616,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               )}
               {onFork && <ForkButton messageId={message.id} onFork={onFork} disabled={actionsDisabled} />}
               <MessageDetails
-                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, aux: metadata?.aux, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
+                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, aux: metadata?.aux, llmCalls: metadata?.llmCalls, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
                 createdAt={createdAt}
                 isAdmin={isAdmin}
                 steps={parts.filter(isToolPart).length}

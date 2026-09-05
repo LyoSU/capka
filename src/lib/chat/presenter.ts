@@ -180,6 +180,9 @@ export function toUIMessages(rows: {
         // one that wrote the text — `usage` above deliberately excludes them (they
         // are billed as their own ledger rows).
         aux: meta?.aux?.length ? meta.aux : undefined,
+        // The reply's own request count. Distinct from the tool-call parts the
+        // popover's "steps" row counts — see contracts.ts.
+        llmCalls: meta?.llmCalls,
         costUsd: meta?.costUsd,
         costSource: meta?.costSource,
         upstreamProvider: meta?.upstreamProvider,

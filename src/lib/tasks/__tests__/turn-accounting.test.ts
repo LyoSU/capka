@@ -81,4 +81,19 @@ describe("foldTurnHalves", () => {
   it("never carries contextTokens, which is a last-call snapshot rather than a total", () => {
     expect(foldTurnHalves(run, { usage: run.usage, durationMs: 1 })).not.toHaveProperty("contextTokens");
   });
+
+  it("sums the request counts, because the popover answers for the MESSAGE", () => {
+    // An approval continuation asks the provider again on the same message row, so
+    // the count the reader sees has to cover both halves — the same reason the
+    // tokens are summed and `contextTokens` is not.
+    const folded = foldTurnHalves(
+      { llmCalls: 2, usage: { input: 10, output: 5, cached: 0 } },
+      { llmCalls: 3, usage: { input: 1, output: 1, cached: 0 } },
+    );
+    expect(folded.llmCalls).toBe(5);
+  });
+
+  it("keeps a lone half's count untouched", () => {
+    expect(foldTurnHalves({ llmCalls: 4 }, {}).llmCalls).toBe(4);
+  });
 });

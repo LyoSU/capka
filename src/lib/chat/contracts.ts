@@ -127,6 +127,21 @@ export type MessageMeta = {
   // produce any of these (all three are gated on `!awaitingApproval &&
   // !awaitingAnswer`), so there is no earlier half's array to fold in.
   aux?: AuxRecord[];
+  // How many requests the REPLY itself took: the AI SDK issues one per step of its
+  // tool loop, and a retried attempt's steps count too (the counter is never reset).
+  //
+  // Not the same thing as the tool-call parts the transcript shows, which is what
+  // the popover's "steps" row has always been: two tools called in ONE step are two
+  // parts and one request, and a plain answer is no parts and one request. Reading
+  // that number as a request count is what this field exists to stop.
+  //
+  // A FLOOR, not a total. Three kinds of request never reach a finish-step and so
+  // are not here: an attempt that died mid-request (a hung gateway, a rejected
+  // parameter, a cancel), the AI SDK's own transport retries (maxRetries defaults to
+  // 2 and is not surfaced per attempt), and a background pass that failed or
+  // reported no usage. Left as a floor rather than corrected by adding `recoveries`,
+  // which would double-count every attempt that DID report steps before failing.
+  llmCalls?: number;
   costUsd?: number;
   // Where `costUsd` came from: "provider" = the gateway's real billed charge
   // (authoritative, may legitimately be 0 for a free/subscription model),

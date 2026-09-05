@@ -14,6 +14,10 @@ export interface TurnHalf {
   costSource?: MessageMeta["costSource"];
   durationMs?: number;
   reasoningMs?: number;
+  /** Requests the reply took. Summed like the tokens and for the same reason: an
+   *  approval continuation asks the provider again, and the popover is answering
+   *  "what did this MESSAGE cost", not "what did this run cost". */
+  llmCalls?: number;
 }
 
 /**
@@ -33,7 +37,7 @@ export interface TurnHalf {
 export function foldTurnHalves(run: TurnHalf, prior: TurnHalf): TurnHalf {
   // No earlier half (the overwhelming majority of turns): hand back the run
   // untouched, so an ordinary turn's metadata is byte-for-byte what it was.
-  if (!prior.usage && prior.costUsd == null && prior.durationMs == null && prior.reasoningMs == null) return run;
+  if (!prior.usage && prior.costUsd == null && prior.durationMs == null && prior.reasoningMs == null && prior.llmCalls == null) return run;
 
   const usage = run.usage && prior.usage
     ? {
@@ -67,6 +71,7 @@ export function foldTurnHalves(run: TurnHalf, prior: TurnHalf): TurnHalf {
         : "catalog",
     durationMs: sumDefined(run.durationMs, prior.durationMs),
     reasoningMs: sumDefined(run.reasoningMs, prior.reasoningMs),
+    llmCalls: sumDefined(run.llmCalls, prior.llmCalls),
   };
 }
 

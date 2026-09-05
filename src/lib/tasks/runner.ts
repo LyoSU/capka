@@ -401,17 +401,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A factory rather than one callback: the three passes are dispatched together
     // and each has to label its own row, so the purpose is bound at the call site
     // that knows it rather than inferred downstream.
+    // Kept per purpose so a caller can WAIT for its own accounting before telling
+    // the client to re-read the row (the title pass does; see below). A bare `void`
+    // was the first shape here and it was wrong twice over: the write is not covered
+    // by `trackAux`, so a shutdown drain reads zero in-flight work and can kill it
+    // mid-insert, and nothing downstream can tell whether the row is written yet.
+    const auxWrites = new Map<AuxRecord["purpose"], Promise<void>>();
     const auxUsageRecorder = (
       purpose: AuxRecord["purpose"],
       on: { provider: string; modelId: string; configId: string; isShared: boolean } =
         { provider, modelId, configId, isShared },
     ) =>
-      (u: TokenUsage) =>
-        void recordAuxSpend({
+      (u: TokenUsage) => {
+        auxWrites.set(purpose, trackAux(recordAuxSpend({
           taskId, messageId: msgId, userId,
           provider: on.provider, configId: on.configId, model: on.modelId,
           turnModel: modelId, onSharedKey: on.isShared, purpose, usage: u,
-        });
+        })));
+      };
 
     // Where the title and memory passes run. Resolved ONCE and lazily: most installs
     // leave it unset, and a turn that spawns no background work should not pay a
@@ -489,6 +496,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       prior.costSource = meta.costSource;
       prior.durationMs = meta.durationMs;
       prior.reasoningMs = meta.reasoningMs;
+      prior.llmCalls = meta.llmCalls;
       replyParentId = resumeMessageId;
       messageInserted = true;
     } else {
@@ -1832,7 +1840,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // point that reports per-RUN facts — the `usage` ledger, the turn span, the log
     // line, the channel footer — deliberately keeps using the un-folded figures.
     const turn = foldTurnHalves(
-      { usage: usageMeta, costUsd: costMeta ?? undefined, costSource, durationMs: Date.now() - startedAt, reasoningMs },
+      { usage: usageMeta, costUsd: costMeta ?? undefined, costSource, durationMs: Date.now() - startedAt, reasoningMs, llmCalls: stepCount },
       prior,
     );
 
@@ -1878,6 +1886,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // the ErrorNotice instead, so it stays excluded.
         ...(finalStatus === "completed" || finalStatus === "cancelled" ? {
           durationMs: turn.durationMs,
+          // The reply's own request count, so the popover can account for every call
+          // the message caused. Inside the completed/cancelled branch with the rest
+          // of the (i) figures: a failed turn owns the ErrorNotice instead.
+          ...(turn.llmCalls ? { llmCalls: turn.llmCalls } : {}),
           // The model of the LAST half. One field can't describe two halves that
           // resolved different models, and the later one is what produced the text
           // the user is reading; the cost above is still the sum of both halves,
@@ -2210,6 +2222,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           if (!openingText) return;
           const on = await auxTarget();
           const title = await generateChatTitle(on.model, on.provider, openingText, getFullText(), auxUsageRecorder("title", on));
+          // Settle this pass's accounting BEFORE the event that makes the client
+          // re-read the row. `chat:title` is the only signal that a titled turn's
+          // background work is done, so publishing ahead of the append means the
+          // client fetches the row without it and nothing later corrects that.
+          // `allSettled` semantics by hand: a failed write must not skip the title.
+          await auxWrites.get("title")?.catch(() => {});
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });

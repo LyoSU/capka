@@ -10,7 +10,7 @@ All notable changes to Capka are documented here. Format follows
 
 - The (i) popover on a reply lists every request the message caused, grouped by what each bought (reply, chat title, remembering); admins also see the tokens and cost of each background pass.
 - Auto-titling, per-turn memory extraction and compaction are three switches under Agent mode; a raw profile now does no background work at all.
-- `aux_model` (Settings → Connections) runs chat titles and memory extraction on a cheaper model than the conversation; empty keeps today's behaviour. Compaction ignores it by design — it reuses the turn's cached prefix.
+- `aux_model` (Settings → Connections) runs chat titles and memory extraction on a cheaper model than the conversation; empty keeps today's behaviour. It is declined when it sits on a different key pool than the turn (shared vs own), and compaction ignores it by design — it reuses the turn's cached prefix.
 
 ### Changed
 

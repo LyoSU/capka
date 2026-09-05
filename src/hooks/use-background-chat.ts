@@ -493,6 +493,16 @@ export function useBackgroundChat({
           break;
         }
 
+        case "chat:title": {
+          // The sidebar swaps the name in on its own; this reload is for the TURN.
+          // Titling is a background LLM call, and its accounting is appended to the
+          // message row after `task:finish` has already reloaded — so without this
+          // the (i) popover's request breakdown is short by one until the next
+          // visit. Same shape as memory_saved below, and for the same reason.
+          loadHistory();
+          break;
+        }
+
         case "chat:memory_saved": {
           // The post-turn extraction finished and saved something. It runs after
           // task:finish, so the reload that finish triggered ran too early to see it —

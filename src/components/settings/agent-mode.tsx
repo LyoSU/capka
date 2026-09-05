@@ -51,7 +51,11 @@ export function AgentModeSection({
   const lockedPass = (k: (typeof BACKGROUND_PASSES)[number]) => ceiling ? !ceiling.background[k] : false;
   const personaLocked = ceiling?.persona === "replace";
   const sessionLocked = ceiling ? !ceiling.sessionContext : false;
-  const anyLocked = CAPABILITY_GROUPS.some(lockedGroup) || personaLocked || sessionLocked;
+  // Every switch the ceiling can disable feeds this, background passes included —
+  // otherwise a project whose ONLY capped control is a background pass shows a
+  // disabled switch with nothing saying who disabled it.
+  const anyLocked =
+    CAPABILITY_GROUPS.some(lockedGroup) || BACKGROUND_PASSES.some(lockedPass) || personaLocked || sessionLocked;
 
   return (
     // Flat, like every SettingsGroup around it: the settings pages draw rows on

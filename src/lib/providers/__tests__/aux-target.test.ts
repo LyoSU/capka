@@ -28,7 +28,7 @@ vi.mock("@/lib/db", () => ({
   db: { select: () => { throw new Error("connection is gone"); } },
 }));
 
-import { resolveAuxTarget } from "../resolve";
+import { resolveAuxTarget, pickAuxTarget, type AuxTarget } from "../resolve";
 
 const turn = {
   model: { modelId: "claude-opus-5" } as never,
@@ -62,5 +62,43 @@ describe("resolveAuxTarget", () => {
     getAuxModelRef.mockRejectedValue(new Error("settings table is locked"));
 
     await expect(resolveAuxTarget("user-1", turn)).resolves.toBe(turn);
+  });
+});
+
+/**
+ * The key-pool rule, on its own because it is a SECURITY property rather than a
+ * robustness one, and tested through the pure half (`pickAuxTarget`) for the same
+ * reason the compaction/title modules split their assembly from their I/O.
+ */
+describe("pickAuxTarget", () => {
+  const aux = (isShared: boolean): AuxTarget => ({
+    model: { modelId: "cheap-model" } as never,
+    provider: "openai",
+    modelId: "cheap-model",
+    configId: "cfg-aux",
+    isShared,
+  });
+
+  it("uses the background model when it sits on the same key pool", () => {
+    expect(pickAuxTarget({ ...turn, isShared: true }, aux(true))).toEqual({ target: aux(true) });
+    expect(pickAuxTarget({ ...turn, isShared: false }, aux(false))).toEqual({ target: aux(false) });
+  });
+
+  it("declines a shared-key background model for an own-key turn", () => {
+    // The dangerous direction: own-key turns are never budget-gated, so honouring
+    // this would spend the admin's key with no hold and past every cap.
+    const { target, declined } = pickAuxTarget({ ...turn, isShared: false }, aux(true));
+    expect(target.modelId).toBe("claude-opus-5");
+    expect(declined).toBe("other_key_pool");
+  });
+
+  it("declines an own-key background model for a shared-key turn", () => {
+    const { target, declined } = pickAuxTarget({ ...turn, isShared: true }, aux(false));
+    expect(target.modelId).toBe("claude-opus-5");
+    expect(declined).toBe("other_key_pool");
+  });
+
+  it("declines a model that did not resolve at all", () => {
+    expect(pickAuxTarget(turn, null)).toEqual({ target: turn, declined: "unresolved" });
   });
 });

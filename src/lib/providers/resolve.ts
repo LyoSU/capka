@@ -130,24 +130,44 @@ export async function resolveConfigById(userId: string, configId: string) {
  * setting existed. The admin sees the stale value in the picker, which is where it
  * is fixable.
  */
-export async function resolveAuxTarget<T extends { model: LanguageModel; provider: string; modelId: string; configId: string; isShared: boolean }>(
-  userId: string,
-  turn: T,
-): Promise<Pick<T, "model" | "provider" | "modelId" | "configId" | "isShared">> {
+export type AuxTarget = { model: LanguageModel; provider: string; modelId: string; configId: string; isShared: boolean };
+
+/**
+ * Whether a resolved background model may actually be used, given the turn's own.
+ *
+ * Split out from the I/O below so the RULE can be tested — the same seam
+ * `compactConversation` and `generateChatTitle` use. It is the half worth a test:
+ * the key-pool clause is a security property, not a convenience.
+ *
+ * A pass may not move spend between key POOLS. The budget gate reserves once, up
+ * front, against the key the CONVERSATION resolved (chat/route.ts), and own-key
+ * turns are never gated at all — so a background model on a shared connection would
+ * let an own-key user spend the admin's key with no hold, past every cap, after the
+ * reply has shipped and nothing is left to refuse. The reverse is wrong in the other
+ * direction: billing someone's own key for the instance's housekeeping. Neither is
+ * what an admin picking a cheaper model asked for, so a mismatch declines the
+ * setting rather than honouring it.
+ */
+export function pickAuxTarget(turn: AuxTarget, resolved: AuxTarget | null): { target: AuxTarget; declined?: "unresolved" | "other_key_pool" } {
+  if (!resolved) return { target: turn, declined: "unresolved" };
+  if (resolved.isShared !== turn.isShared) return { target: turn, declined: "other_key_pool" };
+  return { target: resolved };
+}
+
+export async function resolveAuxTarget(userId: string, turn: AuxTarget): Promise<AuxTarget> {
   const ref = await getAuxModelRef().catch(() => null);
   if (!ref) return turn;
   const resolved = await resolveUserModelInfo(userId, ref).catch(() => null);
-  if (!resolved) {
-    log.warn("background-work model is set but did not resolve; using the conversation's model", { ref });
-    return turn;
+  const { target, declined } = pickAuxTarget(turn, resolved);
+  if (declined) {
+    log.warn(
+      declined === "unresolved"
+        ? "background-work model is set but did not resolve; using the conversation's model"
+        : "background-work model sits on a different key pool than the turn; using the conversation's model",
+      { ref, turnShared: turn.isShared, ...(resolved ? { auxShared: resolved.isShared } : {}) },
+    );
   }
-  return {
-    model: resolved.model,
-    provider: resolved.provider,
-    modelId: resolved.modelId,
-    configId: resolved.configId,
-    isShared: resolved.isShared,
-  };
+  return target;
 }
 
 /**
