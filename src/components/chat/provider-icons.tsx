@@ -1,126 +1,105 @@
 import { createElement, type ComponentType } from "react";
 import { Sparkles } from "lucide-react";
-import OpenAI from "@lobehub/icons/es/OpenAI";
-import Anthropic from "@lobehub/icons/es/Anthropic";
-import Gemini from "@lobehub/icons/es/Gemini";
-import Meta from "@lobehub/icons/es/Meta";
-import Mistral from "@lobehub/icons/es/Mistral";
-import DeepSeek from "@lobehub/icons/es/DeepSeek";
-import XAI from "@lobehub/icons/es/XAI";
-import Qwen from "@lobehub/icons/es/Qwen";
-import Minimax from "@lobehub/icons/es/Minimax";
-import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
-import Nvidia from "@lobehub/icons/es/Nvidia";
-import Cohere from "@lobehub/icons/es/Cohere";
-import Perplexity from "@lobehub/icons/es/Perplexity";
-import Microsoft from "@lobehub/icons/es/Microsoft";
-import Bedrock from "@lobehub/icons/es/Bedrock";
-import Ai21 from "@lobehub/icons/es/Ai21";
-import Zhipu from "@lobehub/icons/es/Zhipu";
-import Moonshot from "@lobehub/icons/es/Moonshot";
-import Hunyuan from "@lobehub/icons/es/Hunyuan";
-import Doubao from "@lobehub/icons/es/Doubao";
-import Baidu from "@lobehub/icons/es/Baidu";
-import Dbrx from "@lobehub/icons/es/Dbrx";
-import InternLM from "@lobehub/icons/es/InternLM";
-import Baichuan from "@lobehub/icons/es/Baichuan";
-import Stepfun from "@lobehub/icons/es/Stepfun";
-import LongCat from "@lobehub/icons/es/LongCat";
-import Yi from "@lobehub/icons/es/Yi";
-import Upstage from "@lobehub/icons/es/Upstage";
-import NousResearch from "@lobehub/icons/es/NousResearch";
-import Liquid from "@lobehub/icons/es/Liquid";
-import Ollama from "@lobehub/icons/es/Ollama";
-import OpenRouter from "@lobehub/icons/es/OpenRouter";
-import Groq from "@lobehub/icons/es/Groq";
-import Cerebras from "@lobehub/icons/es/Cerebras";
-import Together from "@lobehub/icons/es/Together";
-import Fireworks from "@lobehub/icons/es/Fireworks";
-import SambaNova from "@lobehub/icons/es/SambaNova";
-import DeepInfra from "@lobehub/icons/es/DeepInfra";
-import Novita from "@lobehub/icons/es/Novita";
-import Hyperbolic from "@lobehub/icons/es/Hyperbolic";
-import SiliconCloud from "@lobehub/icons/es/SiliconCloud";
-import Nebius from "@lobehub/icons/es/Nebius";
-import Baseten from "@lobehub/icons/es/Baseten";
-import Vllm from "@lobehub/icons/es/Vllm";
-import LmStudio from "@lobehub/icons/es/LmStudio";
-import Azure from "@lobehub/icons/es/Azure";
-import VertexAI from "@lobehub/icons/es/VertexAI";
-import HuggingFace from "@lobehub/icons/es/HuggingFace";
-import Cloudflare from "@lobehub/icons/es/Cloudflare";
-import Github from "@lobehub/icons/es/Github";
-import OpenCode from "@lobehub/icons/es/OpenCode";
-import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
-import OpenHands from "@lobehub/icons/es/OpenHands";
-import Cursor from "@lobehub/icons/es/Cursor";
+import { BRAND_ICONS } from "./brand-icons";
 
 export type IconComponent = ComponentType<{ size?: number; className?: string }>;
+
+// One renderer for every brand: the same 24x24 box in currentColor, with the
+// geometry read from brand-icons.ts. Built once per brand at module load, so each
+// slug keeps a stable component identity — building one during render is what the
+// static-components lint forbids, and it would remount every glyph on each keystroke
+// in the model picker.
+function brandIcon(name: string): IconComponent {
+  const { title, paths } = BRAND_ICONS[name];
+  const Icon = ({ size = 24, className }: { size?: number; className?: string }) => (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      style={{ flex: "none", lineHeight: 1 }}
+    >
+      <title>{title}</title>
+      {paths.map(([d, fillOpacity], i) => (
+        <path key={i} d={d} fillOpacity={fillOpacity} />
+      ))}
+    </svg>
+  );
+  Icon.displayName = name;
+  return Icon;
+}
+
+const BY_NAME: Record<string, IconComponent> = Object.fromEntries(
+  Object.keys(BRAND_ICONS).map((name) => [name, brandIcon(name)]),
+);
 
 // Maps the catalog `icon` slug (from src/lib/models/normalize.ts) to a brand
 // icon component. Falls back to a neutral sparkle for unknown integrations.
 const ICONS: Record<string, IconComponent> = {
-  anthropic: Anthropic,
-  openai: OpenAI,
-  google: Gemini,
-  meta: Meta,
-  mistral: Mistral,
-  deepseek: DeepSeek,
-  xai: XAI,
-  qwen: Qwen,
-  minimax: Minimax,
-  xiaomi: XiaomiMiMo,
-  nvidia: Nvidia,
-  cohere: Cohere,
-  perplexity: Perplexity,
-  microsoft: Microsoft,
-  amazon: Bedrock,
-  bedrock: Bedrock,
-  vertexai: VertexAI,
-  ai21: Ai21,
-  zhipu: Zhipu,
-  moonshot: Moonshot,
-  hunyuan: Hunyuan,
-  doubao: Doubao,
-  baidu: Baidu,
-  dbrx: Dbrx,
-  internlm: InternLM,
-  baichuan: Baichuan,
-  stepfun: Stepfun,
-  longcat: LongCat,
-  yi: Yi,
-  upstage: Upstage,
-  nousresearch: NousResearch,
-  liquid: Liquid,
-  ollama: Ollama,
+  anthropic: BY_NAME.Anthropic,
+  openai: BY_NAME.OpenAI,
+  google: BY_NAME.Gemini,
+  meta: BY_NAME.Meta,
+  mistral: BY_NAME.Mistral,
+  deepseek: BY_NAME.DeepSeek,
+  xai: BY_NAME.XAI,
+  qwen: BY_NAME.Qwen,
+  minimax: BY_NAME.Minimax,
+  xiaomi: BY_NAME.XiaomiMiMo,
+  nvidia: BY_NAME.Nvidia,
+  cohere: BY_NAME.Cohere,
+  perplexity: BY_NAME.Perplexity,
+  microsoft: BY_NAME.Microsoft,
+  amazon: BY_NAME.Bedrock,
+  bedrock: BY_NAME.Bedrock,
+  vertexai: BY_NAME.VertexAI,
+  ai21: BY_NAME.Ai21,
+  zhipu: BY_NAME.Zhipu,
+  moonshot: BY_NAME.Moonshot,
+  hunyuan: BY_NAME.Hunyuan,
+  doubao: BY_NAME.Doubao,
+  baidu: BY_NAME.Baidu,
+  dbrx: BY_NAME.Dbrx,
+  internlm: BY_NAME.InternLM,
+  baichuan: BY_NAME.Baichuan,
+  stepfun: BY_NAME.Stepfun,
+  longcat: BY_NAME.LongCat,
+  yi: BY_NAME.Yi,
+  upstage: BY_NAME.Upstage,
+  nousresearch: BY_NAME.NousResearch,
+  liquid: BY_NAME.Liquid,
+  ollama: BY_NAME.Ollama,
   // Routers/gateways (route to many upstreams — distinct from the inference
   // providers below, which host models on their own hardware).
-  openrouter: OpenRouter,
+  openrouter: BY_NAME.OpenRouter,
   // Inference providers: OpenAI-compatible /v1 endpoints that serve open-weight
   // models. No ICON_RULES entry (a model's *group* is its creator, e.g. Llama),
   // just a glyph so a custom "OpenAI-compatible" connection can be branded.
-  groq: Groq,
-  cerebras: Cerebras,
-  together: Together,
-  fireworks: Fireworks,
-  sambanova: SambaNova,
-  deepinfra: DeepInfra,
-  novita: Novita,
-  hyperbolic: Hyperbolic,
-  siliconflow: SiliconCloud,
-  nebius: Nebius,
-  baseten: Baseten,
-  vllm: Vllm,
-  lmstudio: LmStudio,
-  azure: Azure,
-  huggingface: HuggingFace,
-  cloudflare: Cloudflare,
-  github: Github,
+  groq: BY_NAME.Groq,
+  cerebras: BY_NAME.Cerebras,
+  together: BY_NAME.Together,
+  fireworks: BY_NAME.Fireworks,
+  sambanova: BY_NAME.SambaNova,
+  deepinfra: BY_NAME.DeepInfra,
+  novita: BY_NAME.Novita,
+  hyperbolic: BY_NAME.Hyperbolic,
+  siliconflow: BY_NAME.SiliconCloud,
+  nebius: BY_NAME.Nebius,
+  baseten: BY_NAME.Baseten,
+  vllm: BY_NAME.Vllm,
+  lmstudio: BY_NAME.LmStudio,
+  azure: BY_NAME.Azure,
+  huggingface: BY_NAME.HuggingFace,
+  cloudflare: BY_NAME.Cloudflare,
+  github: BY_NAME.Github,
   // Agent tools (offered as connection glyphs only, never model-creator icons).
-  opencode: OpenCode,
-  claudecode: ClaudeCode,
-  openhands: OpenHands,
-  cursor: Cursor,
+  opencode: BY_NAME.OpenCode,
+  claudecode: BY_NAME.ClaudeCode,
+  openhands: BY_NAME.OpenHands,
+  cursor: BY_NAME.Cursor,
 };
 
 export function iconForSlug(slug?: string | null): IconComponent {
