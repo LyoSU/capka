@@ -25,10 +25,13 @@ export async function GET(req: Request) {
   // the heartbeat interval AND the Postgres LISTEN callback forever (every NOTIFY
   // then fans out to a growing set of dead closures).
   const teardown = () => {
-    if (torndown) return;
     torndown = true;
-    if (heartbeat) clearInterval(heartbeat);
-    if (unsubscribe) unsubscribe();
+    // Release-and-null, NOT an early return on `torndown`. Both resources below are
+    // assigned after an abort can already have run this once, so a flag-guarded
+    // return would skip exactly the subscription and timer it exists to free.
+    // Nulling is what keeps a second call harmless.
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   };
   req.signal.addEventListener("abort", teardown);
 
@@ -66,9 +69,16 @@ export async function GET(req: Request) {
           send(`data: ${JSON.stringify(data)}\n\n`);
         },
       );
-      // If the request already aborted during the await above, tear down now —
-      // the abort listener may have fired before `unsubscribe` was assigned.
-      if (req.signal.aborted) teardown();
+      // The abort can land DURING the await above, while there is still nothing to
+      // free — teardown then ran against two nulls, and this subscription would
+      // outlive the request, taking every NOTIFY for that user forever. Assign
+      // first, then tear down what now exists, and never arm a heartbeat for a
+      // connection that is already gone.
+      if (torndown || req.signal.aborted) {
+        teardown();
+        try { controller.close(); } catch { /* already closed */ }
+        return;
+      }
 
       // Heartbeat every 30s
       heartbeat = setInterval(() => {
