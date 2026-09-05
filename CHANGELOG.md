@@ -6,7 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- The (i) popover on a reply lists every request the message caused, grouped by what each bought (reply, chat title, remembering); admins also see the tokens and cost of each background pass.
+- Auto-titling, per-turn memory extraction and compaction are three switches under Agent mode; a raw profile now does no background work at all.
+- `aux_model` (Settings → Connections) runs chat titles and memory extraction on a cheaper model than the conversation; empty keeps today's behaviour. Compaction ignores it by design — it reuses the turn's cached prefix.
+
 ### Changed
+
+- Usage rows record what the spend bought (`usage.purpose`), and the admin usage API returns a `byPurpose` breakdown. Existing rows stay unattributed; no back-fill.
 
 - A model the catalog does not know is assumed to have a 128k context window (was 32k), and the first `context_too_long` rejection that names the real window records it per model, so later turns compact against that figure. The learned value survives catalog re-syncs.
 

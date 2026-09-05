@@ -565,7 +565,6 @@
       "durationMin": "{m}m {s}s",
       "sentAt": "Sent",
       "requests": "Model requests",
-      "requestsHint": "One message can cost several requests: the reply, then the background work after it.",
       "purposeTurn": "Reply",
       "purposeTitle": "Chat title",
       "purposeMemory": "Remembering",

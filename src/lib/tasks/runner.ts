@@ -32,7 +32,7 @@ import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { resolveAuxTarget } from "@/lib/providers/resolve";
 import { auxGenerate } from "@/lib/chat/context/aux";
-import { recordUsage, reconcileUsage } from "@/lib/usage";
+import { reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";

@@ -11,11 +11,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * reads.
  */
 const { execute, recordUsage, resolveCost } = vi.hoisted(() => ({
-  // Typed parameters, not bare `async () => {}`: an argument-less mock makes
-  // `mock.calls[0][0]` a zero-length tuple, which every assertion below reads.
-  execute: vi.fn(async (_query: unknown) => ({ rows: [] })),
-  recordUsage: vi.fn(async (_input: Record<string, unknown>) => {}),
-  resolveCost: vi.fn(async (_model: string, _usage: unknown) => 0.004 as number | null),
+  // The signature is given as a type argument rather than as unused parameters on
+  // the implementation: an argument-less mock makes `mock.calls[0][0]` a zero-length
+  // tuple, which every assertion below reads.
+  execute: vi.fn<(query: unknown) => Promise<{ rows: never[] }>>(async () => ({ rows: [] })),
+  recordUsage: vi.fn<(input: Record<string, unknown>) => Promise<void>>(async () => {}),
+  resolveCost: vi.fn<(model: string, usage: unknown) => Promise<number | null>>(async () => 0.004),
 }));
 
 vi.mock("@/lib/db", () => ({ db: { execute } }));

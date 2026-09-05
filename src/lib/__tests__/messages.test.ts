@@ -72,6 +72,7 @@ const KEY_SOURCE_ROOTS = ["src"];
 const DYNAMIC_KEY_PREFIXES: { prefix: string; builtBy: string }[] = [
   { prefix: "settings.automations.weekday.", builtBy: "settings/automations/automation-editor.tsx — t(`weekday.w${i}`)" },
   { prefix: "settings.security.folder_", builtBy: "settings/security/page.tsx — t(`folder_${opt}`)" },
+  { prefix: "projects.form.agent.background.", builtBy: "settings/agent-mode.tsx — t(`background.${k}`) over BACKGROUND_PASSES" },
 ];
 
 /**
