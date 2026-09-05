@@ -550,7 +550,7 @@
     "details": {
       "show": "Message details",
       "model": "Model",
-      "technical": "Technical",
+      "more": "Details",
       "provider": "Provider",
       "steps": "Steps",
       "inputTokens": "Input tokens",
@@ -568,7 +568,6 @@
       "loadingRoute": "Loading…",
       "durationSec": "{s}s",
       "durationMin": "{m}m {s}s",
-      "sentAt": "Sent",
       "requests": "Model requests",
       "purposeTurn": "Reply",
       "purposeTitle": "Chat title",

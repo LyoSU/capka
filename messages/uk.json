@@ -550,7 +550,7 @@
     "details": {
       "show": "Деталі повідомлення",
       "model": "Модель",
-      "technical": "Технічні деталі",
+      "more": "Детальніше",
       "provider": "Провайдер",
       "steps": "Кроки",
       "inputTokens": "Вхідні токени",
@@ -568,7 +568,6 @@
       "loadingRoute": "Завантаження…",
       "durationSec": "{s} с",
       "durationMin": "{m} хв {s} с",
-      "sentAt": "Надіслано",
       "requests": "Запитів до моделі",
       "purposeTurn": "Відповідь",
       "purposeTitle": "Назва чату",

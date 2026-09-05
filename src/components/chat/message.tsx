@@ -20,6 +20,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifacts";
 import { editStatsFromParts, editKey, type EditStat } from "@/lib/chat/edit-stats";
+import { displayModelName } from "@/lib/providers/registry";
 import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
@@ -2098,9 +2099,10 @@ type GenStats = {
 };
 
 /** Render the AI work time as "12.3s" under a minute, "1m 3s" beyond it. */
-function formatDuration(ms: number, t: TimeTranslator): string {
+function formatDuration(ms: number, t: TimeTranslator, locale: string): string {
   const sec = ms / 1000;
-  if (sec < 60) return t("durationSec", { s: sec.toFixed(1) });
+  // One decimal in the reader's own notation ("18,6 с", not "18.6 с").
+  if (sec < 60) return t("durationSec", { s: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(sec) });
   return t("durationMin", { m: Math.floor(sec / 60), s: Math.round(sec % 60) });
 }
 
@@ -2108,8 +2110,8 @@ function formatDuration(ms: number, t: TimeTranslator): string {
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-6">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="tabular-nums font-medium">{value}</span>
+      <span className="truncate text-muted-foreground">{label}</span>
+      <span className="shrink-0 whitespace-nowrap tabular-nums font-medium">{value}</span>
     </div>
   );
 }
@@ -2135,6 +2137,8 @@ function MessageDetails({
   // only kicked off the first time the popover actually opens.
   const [gen, setGen] = useState<GenStats | null>(null);
   const [loadingGen, setLoadingGen] = useState(false);
+  // The "Details" disclosure under the plain facts (see the render).
+  const [more, setMore] = useState(false);
   const fetchedRef = useRef(false);
   const loadGen = () => {
     // Latency + routing are admin-only plumbing (see the grouped block below), so
@@ -2200,46 +2204,83 @@ function MessageDetails({
   // A fallback happened if OpenRouter tried more than one upstream this turn.
   const chain = gen?.chain?.filter((c) => c.provider) ?? [];
 
+  // The admin's routing/cost/cache internals. Behind the same disclosure as the
+  // counts, so the surface stays two clear layers rather than one long dump.
+  const adminBlock = !!isAdmin && !!(upstreamProvider || costUsd != null || aux?.length || (usage && (usage.reasoning || usage.cached || usage.cacheWrite)) || hasGeneration);
+  const hasMore = !!(requests || usage || tokensPerSec != null || adminBlock);
+  const toggleMore = () => {
+    if (!more) loadGen();
+    setMore((v) => !v);
+  };
+
   return (
-    <Popover onOpenChange={(open) => open && loadGen()}>
+    // Reopening starts folded: the disclosure is a per-visit "show me the numbers",
+    // not a setting.
+    <Popover onOpenChange={(open) => !open && setMore(false)}>
       <Hint label={t("show")}>
         <PopoverTrigger className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground">
           <Info className="h-3.5 w-3.5" />
         </PopoverTrigger>
       </Hint>
-      <PopoverContent className="min-w-60 space-y-1.5 text-xs" side="top" align="start">
-        {/* Everyone's view: plain, calm facts about the reply — nothing that reads
-            as developer plumbing (cf. PRODUCT.md "hide the machinery"). */}
-        {model && <DetailRow label={t("model")} value={model} />}
-        {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
-        {/* Why one typed message can cost several calls. Shown to everyone, not just
-            admins: it answers a question people actually ask, and answering it needs
-            no numbers — the counts are the answer, and what each pass SPENT stays in
-            the admin block below. */}
-        {requests && (
-          <div className="space-y-1 pt-0.5">
-            <DetailRow label={t("requests")} value={nf.format(requests.total)} />
-            <div className="space-y-0.5 pl-2">
-              {requests.rows.map((r) => (
-                <div key={r.labelKey} className="text-muted-foreground">
-                  {r.n > 1 ? t("purposeCount", { label: t(r.labelKey), n: r.n }) : t(r.labelKey)}
-                </div>
-              ))}
-            </div>
+      {/* Wide enough that the longest admin row (a background pass with its
+          tokens and cost) stays on one line; values never wrap. */}
+      <PopoverContent className="w-80 text-xs" side="top" align="start">
+        {/* Everyone's view, and all of it at a glance: which model answered, when,
+            how long it worked, how many steps. Nothing here is a count of tokens or
+            a price — an office user opening this is not asking for the machinery
+            (PRODUCT.md), and the few who are get it one click below. */}
+        {model && (
+          <div className="truncate text-sm font-medium text-foreground" title={model}>
+            {displayModelName(model)}
           </div>
         )}
-        {usage && <DetailRow label={t("inputTokens")} value={nf.format(usage.input)} />}
-        {usage && <DetailRow label={t("outputTokens")} value={nf.format(usage.output)} />}
-        {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t)} />}
-        {tokensPerSec != null && <DetailRow label={t("speed")} value={t("speedValue", { n: nf.format(tokensPerSec) })} />}
-        <DetailRow label={t("sentAt")} value={exactTime} />
+        <div className="text-muted-foreground">{exactTime}</div>
+        {(durationMs != null || (steps != null && steps > 0)) && (
+          <div className="mt-2.5 space-y-1.5 border-t pt-2.5">
+            {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t, locale)} />}
+            {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
+          </div>
+        )}
 
-        {/* Admin technical block: the routing/cost/cache internals an operator
-            cares about, walled off behind a labelled divider so the surface stays
-            two clear sections rather than one undifferentiated dump. */}
-        {isAdmin && (upstreamProvider || costUsd != null || aux?.length || (usage && (usage.reasoning || usage.cached || usage.cacheWrite)) || (hasGeneration && (loadingGen || gen))) && (
+        {hasMore && (
+          <div className="mt-2.5 border-t pt-1.5">
+            <button
+              type="button"
+              aria-expanded={more}
+              onClick={toggleMore}
+              className="-mx-1.5 flex w-[calc(100%+0.75rem)] items-center justify-between rounded-md px-1.5 py-1 text-muted-foreground transition-micro hover:bg-hover hover:text-foreground"
+            >
+              <span>{t("more")}</span>
+              <ChevronDown
+                className="h-3.5 w-3.5 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+                style={{ transform: more ? "rotate(180deg)" : undefined }}
+                aria-hidden="true"
+              />
+            </button>
+            {/* Grows out of the row (0fr → 1fr), the app's one spoiler grammar; the
+                closed half is `inert` so its text is neither read nor tabbed into. */}
+            <div
+              className="grid transition-[grid-template-rows,opacity] duration-300 [transition-timing-function:var(--ease-strong)]"
+              style={{ gridTemplateRows: more ? "1fr" : "0fr", opacity: more ? 1 : 0 }}
+            >
+              <div className="overflow-hidden" inert={!more}>
+                <div className="space-y-1.5 pt-1.5">
+                  {/* Why one typed message can cost several calls — the counts are the
+                      answer; what each pass SPENT stays in the admin rows below. */}
+                  {requests && (
+                    <>
+                      <DetailRow label={t("requests")} value={nf.format(requests.total)} />
+                      <div className="text-muted-foreground">
+                        {requests.rows.map((r) => (r.n > 1 ? t("purposeCount", { label: t(r.labelKey), n: r.n }) : t(r.labelKey))).join(" · ")}
+                      </div>
+                    </>
+                  )}
+                  {usage && <DetailRow label={t("inputTokens")} value={nf.format(usage.input)} />}
+                  {usage && <DetailRow label={t("outputTokens")} value={nf.format(usage.output)} />}
+                  {tokensPerSec != null && <DetailRow label={t("speed")} value={t("speedValue", { n: nf.format(tokensPerSec) })} />}
+
+        {adminBlock && (
           <div className="mt-2 space-y-1.5 border-t pt-2">
-            <div className="text-[0.6875rem] font-medium text-muted-foreground">{t("technical")}</div>
             {upstreamProvider && <DetailRow label={t("provider")} value={upstreamProvider} />}
             {costUsd != null && (
               <DetailRow
@@ -2263,8 +2304,8 @@ function MessageDetails({
                 <span className="text-muted-foreground">{t("backgroundWork")}</span>
                 {aux.map((a, i) => (
                   <div key={`${a.purpose}-${i}`} className="flex items-baseline justify-between gap-6 pl-2">
-                    <span className="font-medium">{t(PURPOSE_LABEL[a.purpose])}</span>
-                    <span className="tabular-nums text-muted-foreground">
+                    <span className="truncate">{t(PURPOSE_LABEL[a.purpose])}</span>
+                    <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">
                       {/* The model only when it ISN'T the turn's — that is the whole
                           reason the field is stored, and the row above already names
                           the turn's model. */}
@@ -2284,7 +2325,7 @@ function MessageDetails({
                 <span className="text-muted-foreground">{t("route")}</span>
                 {chain.map((c, i) => (
                   <div key={i} className="flex items-baseline justify-between gap-6 pl-2">
-                    <span className="font-medium">{c.provider}</span>
+                    <span>{c.provider}</span>
                     <span className="tabular-nums text-muted-foreground">
                       {c.latencyMs != null ? ms(c.latencyMs) : ""}
                       {c.status != null && c.status !== 200 ? ` · ${c.status}` : ""}
@@ -2293,6 +2334,11 @@ function MessageDetails({
                 ))}
               </div>
             )}
+          </div>
+        )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </PopoverContent>
