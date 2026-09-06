@@ -69,10 +69,17 @@ export function mcpToolName(server: string, tool: string): string {
  * gateways (OpenAI-style) ignore it, but Google AI Studio rejects the WHOLE
  * request ("GenerateContentRequest.tools[…].parameters.required[N]: property is
  * not defined"), which silently blocks every Google model for a user with many
- * tools. This is schema hygiene at the single trust boundary where untrusted
- * tool schemas enter the model call — not a per-provider workaround. Recurses
- * into nested object properties, array `items`, and anyOf/oneOf/allOf branches.
- * Returns a new value; never mutates the caller's schema.
+ * tools. Also drops `propertyNames`: Zod 4 emits it for every `z.record(...)`,
+ * so any MCP server built on it ships the keyword, and Gemini rejects the
+ * request outright ("Unknown name \"propertyNames\""). For a string-keyed
+ * record it constrains nothing (JSON keys are strings); `additionalProperties`
+ * still carries the value shape. The AI SDK's native Google provider already
+ * whitelists keywords, but an OpenAI-compatible relay (LiteLLM, OpenRouter)
+ * forwards the schema verbatim, so it has to be clean at the source. This is
+ * schema hygiene at the single trust boundary where untrusted tool schemas
+ * enter the model call — not a per-provider workaround. Recurses into nested
+ * object properties, array `items`, and anyOf/oneOf/allOf branches. Returns a
+ * new value; never mutates the caller's schema.
  */
 export function sanitizeToolSchema<T>(schema: T): T {
   if (Array.isArray(schema)) return schema.map(sanitizeToolSchema) as T;
@@ -80,6 +87,7 @@ export function sanitizeToolSchema<T>(schema: T): T {
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(schema)) out[k] = sanitizeToolSchema(v);
+  delete out.propertyNames;
 
   const props = out.properties;
   if (Array.isArray(out.required) && props !== null && typeof props === "object") {

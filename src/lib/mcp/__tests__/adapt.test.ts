@@ -56,6 +56,27 @@ describe("sanitizeToolSchema", () => {
     });
   });
 
+  it("drops propertyNames (Zod 4 emits it for z.record; Gemini rejects the whole request with 'Unknown name propertyNames')", () => {
+    const dirty = {
+      type: "object",
+      properties: {
+        q: { type: "string" },
+        headers: { type: "object", propertyNames: { type: "string" }, additionalProperties: { type: "string" } },
+        nested: { type: "object", properties: { meta: { type: "object", propertyNames: { type: "string" }, additionalProperties: {} } } },
+      },
+      required: ["q"],
+    };
+    expect(sanitizeToolSchema(dirty)).toEqual({
+      type: "object",
+      properties: {
+        q: { type: "string" },
+        headers: { type: "object", additionalProperties: { type: "string" } },
+        nested: { type: "object", properties: { meta: { type: "object", additionalProperties: {} } } },
+      },
+      required: ["q"],
+    });
+  });
+
   it("leaves a valid schema untouched", () => {
     const clean = { type: "object", properties: { q: { type: "string" } }, required: ["q"] };
     expect(sanitizeToolSchema(clean)).toEqual(clean);

@@ -35,6 +35,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- MCP tool schemas that carry `propertyNames` (Zod 4 emits it for `z.record`) no longer make Gemini reject the whole request through LiteLLM/OpenRouter; the keyword is stripped where MCP schemas enter the model call.
 - A client that disconnects while `/api/events` is still subscribing no longer leaks its Postgres LISTEN callback and heartbeat timer; each such disconnect left a dead callback that every later NOTIFY for that user fanned out to.
 - A failed status poll is no longer read as a finished turn: a 500 or 429 from `/api/tasks` dropped a streaming reply to idle and removed the stop button.
 - One markdown plugin chunk failing to download no longer leaves the whole transcript unhighlighted, with no retry until a reload.
