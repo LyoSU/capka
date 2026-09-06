@@ -119,6 +119,11 @@ export async function setSetting(key: string, value: string, encrypted = false):
       target: settings.key,
       set: { value: storedValue, isEncrypted: encrypted, updatedAt: new Date() },
     });
+
+  // Keep the setup latch below honest. It may outlive a read only because this
+  // function is the one place the flag is written, so this is where it stays
+  // true — not in a comment asserting the flag never goes back.
+  if (key === "setup_complete") setupCompleted = value === "true";
 }
 
 /**
@@ -151,11 +156,16 @@ export async function assertMasterKeyConsistent(): Promise<void> {
   );
 }
 
-// Latches once true and never re-reads. The flag is one-way: /api/setup writes it
-// exactly once, and it sits in BLOCKED_KEYS so the settings API cannot write it at
-// all, so a cached true can never be stale. A false is still read every time, which
-// is what keeps the setup wizard live. Worth latching because the dashboard layout
+// Latches once true and never re-reads; a false is still read every time, which is
+// what keeps the setup wizard live. Worth latching because the dashboard layout
 // calls this on every render, where it was a database round-trip per navigation.
+//
+// The first version justified the latch by asserting the flag is one-way — written
+// once by /api/setup, and in BLOCKED_KEYS so the settings API cannot touch it. Both
+// facts are true and neither makes a cached `true` safe, because `setSetting` can
+// still write "false" and did: the Telegram provisioning suite flips it back to
+// prove that an incomplete setup refuses a signup, and got a stale `true`. What
+// actually makes the latch safe is that setSetting updates it, above.
 let setupCompleted = false;
 
 export async function isSetupComplete(): Promise<boolean> {
