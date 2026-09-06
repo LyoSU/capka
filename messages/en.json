@@ -78,6 +78,12 @@
     "expandSidebar": "Expand sidebar",
     "unreadReply": "Unread reply",
     "working": "Generating…",
+    "needsAttention": "Needs you",
+    "attention": {
+      "approval": "Waiting for your confirmation since {when}",
+      "ask": "Waiting for your answer since {when}",
+      "failed": "The reply failed at {when}"
+    },
     "pinned": "Pinned",
     "telegram": "Telegram",
     "showMore": "Show {count} more",

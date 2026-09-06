@@ -17,6 +17,14 @@ const createChatSchema = z.object({
 // once" list is replaced by pages the sidebar pulls in on scroll.
 const PAGE_SIZE = 30;
 
+// Cap for the unpaginated `attention=true` bucket. A person with 50 chats each
+// stopped on a question is already past the point where a list helps, so the
+// cap is a bound on the query, not a page the caller is meant to walk.
+const ATTENTION_LIMIT = 50;
+
+// Why a chat is stopped waiting for a person, derived from its last message.
+type AttentionKind = "approval" | "ask" | "failed";
+
 // The keyset cursor is the last row's (pinned, ts, id) — the exact tuple the
 // list is ordered by — so the next page resumes right after it with no offset
 // drift when chats are inserted/reordered between pages. `ts` is the DB's own
@@ -49,6 +57,37 @@ export const GET = apiHandler(async (req: Request) => {
   const archived = searchParams.get("archived");
   const pinned = searchParams.get("pinned");
   const projectId = searchParams.get("projectId");
+  // The sidebar's "needs you" group asks for the whole set in one go: the list
+  // is paginated, so a chat that stopped for a person can sit pages down and
+  // would simply never be seen. Unpaginated and capped instead.
+  const attentionOnly = searchParams.get("attention") === "true";
+
+  // The chat's LAST message, which is where "this chat is waiting for a person"
+  // is read from. Derived, never stored: the moment the user answers, their
+  // message is the last one and the state clears itself with no write anywhere.
+  //
+  // A LEFT JOIN LATERAL rather than a per-row lookup — one backwards scan of the
+  // messages(chat_id, created_at) index per chat, no N+1. Built with the query
+  // builder for the same reason as `unread` below: `eq(messages.chatId,
+  // chats.id)` emits a qualified `"chats"."id"` that correlates to the outer
+  // row, where a raw sql`${chats.id}` would render bare and silently bind to the
+  // subquery's own column.
+  const lastMessage = db
+    .select({
+      attentionKind: sql<AttentionKind | null>`case when ${messages.role} = 'assistant' then
+          case ${messages.metadata}->>'status'
+            when 'awaiting_approval' then 'approval'
+            when 'awaiting_answer' then 'ask'
+            when 'failed' then 'failed'
+          end
+        end`.as("attention_kind"),
+      attentionSince: messages.createdAt,
+    })
+    .from(messages)
+    .where(eq(messages.chatId, chats.id))
+    .orderBy(desc(messages.createdAt))
+    .limit(1)
+    .as("last_message");
 
   const conditions: SQL[] = [eq(chats.userId, userId)];
 
@@ -60,12 +99,15 @@ export const GET = apiHandler(async (req: Request) => {
   if (projectId === "none") conditions.push(isNull(chats.projectId));
   else if (projectId) conditions.push(eq(chats.projectId, projectId));
 
+  if (attentionOnly) conditions.push(sql`${lastMessage.attentionKind} is not null`);
+
   // Keyset pagination on the (pinned DESC, updatedAt DESC, id DESC) ordering.
   // Postgres row-comparison does lexicographic ordering, so "rows after the
   // cursor" in a fully-DESC ordering is exactly the tuple being strictly less
   // than the cursor's. COALESCE guards the nullable pinned/updatedAt columns so
-  // a null can't break the comparison.
-  const cursor = decodeCursor(searchParams.get("cursor") ?? "");
+  // a null can't break the comparison. The bucket is a whole set rather than a
+  // page, so it ignores the cursor entirely.
+  const cursor = attentionOnly ? null : decodeCursor(searchParams.get("cursor") ?? "");
   if (cursor) {
     conditions.push(
       sql`(coalesce(${chats.pinned}, false), ${tsExpr}, ${chats.id}) < (${cursor.pinned}::boolean, ${cursor.ts}::text, ${cursor.id}::text)`,
@@ -117,6 +159,9 @@ export const GET = apiHandler(async (req: Request) => {
           .from(tasks)
           .where(and(eq(tasks.chatId, chats.id), inArray(tasks.status, ["queued", "running"]))),
       ),
+      // Folded into the `attention` object below.
+      attentionKind: lastMessage.attentionKind,
+      attentionSince: lastMessage.attentionSince,
       // Internal: the canonical updatedAt string the cursor is built from.
       // Stripped from the response body below — never shipped to the client.
       cursorTs: tsExpr,
@@ -125,24 +170,31 @@ export const GET = apiHandler(async (req: Request) => {
     // Tombstoned projects are excluded from the join, so a chat mid-deletion of its
     // project shows no (stale) badge — it reads as project-less until teardown resets it.
     .leftJoin(projects, and(eq(chats.projectId, projects.id), projectNotDeleted))
+    .leftJoinLateral(lastMessage, sql`true`)
     .where(and(...conditions))
     .orderBy(desc(chats.pinned), desc(chats.updatedAt), desc(chats.id))
-    .limit(PAGE_SIZE);
+    .limit(attentionOnly ? ATTENTION_LIMIT : PAGE_SIZE);
 
   // A full page implies there may be more; hand back the cursor for the next.
   // The bare array body stays backward-compatible for non-paginating callers
   // (recent-chats, archived) — only the sidebar reads the header.
   const last = rows[rows.length - 1];
   const nextCursor =
-    rows.length === PAGE_SIZE && last
+    !attentionOnly && rows.length === PAGE_SIZE && last
       ? encodeCursor({ pinned: last.pinned ?? false, ts: last.cursorTs, id: last.id })
       : null;
 
   // Drop the internal cursor field from each row before responding.
   const body = rows.map((row) => {
-    const { cursorTs, ...rest } = row;
+    const { cursorTs, attentionKind, attentionSince, ...rest } = row;
     void cursorTs; // internal pagination field — never shipped to the client
-    return rest;
+    return {
+      ...rest,
+      attention:
+        attentionKind && attentionSince
+          ? { kind: attentionKind, since: attentionSince.toISOString() }
+          : null,
+    };
   });
 
   return Response.json(body, {

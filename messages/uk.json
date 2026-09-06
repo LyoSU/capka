@@ -78,6 +78,12 @@
     "expandSidebar": "Розгорнути панель",
     "unreadReply": "Непрочитана відповідь",
     "working": "Генерує…",
+    "needsAttention": "Потребують уваги",
+    "attention": {
+      "approval": "Чекає на Ваше підтвердження з {when}",
+      "ask": "Чекає на Вашу відповідь з {when}",
+      "failed": "Відповідь не вдалася о {when}"
+    },
     "pinned": "Закріплені",
     "telegram": "Telegram",
     "showMore": "Ще {count}",

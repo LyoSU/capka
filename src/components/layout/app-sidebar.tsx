@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Plus,
   Settings,
@@ -17,6 +17,9 @@ import {
   Sun,
   Moon,
   Loader2,
+  ShieldQuestionMark,
+  MessageCircleQuestionMark,
+  CircleAlert,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -59,6 +62,11 @@ import { useLongPress } from "@/hooks/use-long-press";
 import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { haptic } from "@/lib/haptics";
 
+/** Why a chat is stopped waiting for a person, derived server-side from its last
+ *  message (GET /api/chats). Nothing is stored: the user's next message becomes
+ *  the last message, so answering is what clears it. */
+type Attention = { kind: "approval" | "ask" | "failed"; since: string };
+
 type ChatItem = {
   id: string;
   title: string | null;
@@ -78,7 +86,28 @@ type ChatItem = {
   // A task is queued/generating for this chat right now. Seeded by the API,
   // kept live by SSE task:start/task:finish; drives the working spinner.
   running?: boolean;
+  // The chat is stopped on an approval card, a question, or a failure and only a
+  // person can move it. Distinct from `unread`: unread is "there is something new
+  // to read", this is "nothing happens until you act", so it survives opening the
+  // chat and it collects the row into its own group.
+  attention?: Attention | null;
 };
+
+/**
+ * Split the loaded list into the "needs you" bucket and everything else.
+ *
+ * A running chat is never in the bucket: the model is working on it, so there is
+ * nothing for a person to do yet even if the last persisted message still says
+ * the previous turn suspended. And the bucket's ids are removed from `rest`, so
+ * a chat that is waiting appears exactly once in the panel instead of twice.
+ */
+export function splitAttention(list: ChatItem[]): { attention: ChatItem[]; rest: ChatItem[] } {
+  const attention = list
+    .filter((c) => c.attention && !c.running && !c.archived)
+    .sort((a, b) => (b.updatedAt ? Date.parse(b.updatedAt) : 0) - (a.updatedAt ? Date.parse(a.updatedAt) : 0));
+  const ids = new Set(attention.map((c) => c.id));
+  return { attention, rest: list.filter((c) => !ids.has(c.id)) };
+}
 
 // Mirror the server's ORDER BY (pinned DESC, updatedAt DESC, id DESC) so the
 // client-side merge keeps pages in the same order the cursor paginates by —
@@ -198,20 +227,49 @@ function ChatTitle({ title, fallback }: { title: string | null; fallback: string
   return <span key={display} className="min-w-0 flex-1 truncate animate-title-swap">{display}</span>;
 }
 
+/** `attention` reads as a sentence ("Waiting for your answer since 14:05"), so
+ *  the time has to be formatted where the locale is available — the parent builds
+ *  it once and every row reuses it. */
+type StatusLabels = { unread: string; working: string; attention: (a: Attention) => string };
+
+/** The mark a waiting chat wears. A quiet icon rather than a second dot: this is
+ *  a different sentence from "unread", and two dots in the same slot would only
+ *  differ by colour. Each kind keeps an existing semantic token — nothing here
+ *  introduces a colour the theme doesn't already own. */
+const ATTENTION_MARK = {
+  approval: { Icon: ShieldQuestionMark, className: "text-warning-text" },
+  ask: { Icon: MessageCircleQuestionMark, className: "text-brand" },
+  failed: { Icon: CircleAlert, className: "text-destructive-text" },
+} as const;
+
 /** Trailing status affordance on a chat row. "Working" (a task is generating)
- *  outranks "unread" — a running chat is by definition the freshest, so the
- *  spinner subsumes the dot until the reply lands and it flips to unread. */
+ *  outranks everything — a running chat is by definition the freshest, so the
+ *  spinner subsumes the rest until the reply lands. "Waiting for you" outranks
+ *  "unread": it is the stronger claim on the person, and unlike unread it is NOT
+ *  suppressed on the open chat, because opening a chat does not answer it. */
 function ChatStatusDot({
   unread,
   running,
+  attention,
   labels,
 }: {
   unread?: boolean;
   running?: boolean;
-  labels: { unread: string; working: string };
+  attention?: Attention | null;
+  labels: StatusLabels;
 }) {
   if (running) {
     return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label={labels.working} />;
+  }
+  if (attention) {
+    const { Icon, className } = ATTENTION_MARK[attention.kind];
+    // Hint supplies the accessible name as well as the tooltip, so the row's
+    // link announces what it is waiting for and since when.
+    return (
+      <Hint label={labels.attention(attention)} side="right">
+        <Icon role="img" className={cn("size-3.5 shrink-0", className)} />
+      </Hint>
+    );
   }
   if (unread) {
     return <span className="size-2 shrink-0 rounded-full bg-brand" role="status" aria-label={labels.unread} />;
@@ -233,7 +291,7 @@ function ChatRow({
   chat: ChatItem;
   active: boolean;
   entering: boolean;
-  statusLabels: { unread: string; working: string };
+  statusLabels: StatusLabels;
   fallback: string;
   onUpdate: () => void;
 }) {
@@ -270,6 +328,7 @@ function ChatRow({
           <ChatStatusDot
             unread={!!chat.unread && !active}
             running={chat.running}
+            attention={chat.attention}
             labels={statusLabels}
           />
           {/* No project marker on the row itself — a chat that belongs to one is
@@ -344,7 +403,7 @@ function ChatList({
   chats: ChatItem[];
   activeChatId: string | null;
   enteringIds: Set<string>;
-  statusLabels: { unread: string; working: string };
+  statusLabels: StatusLabels;
   fallback: string;
   onUpdate: () => void;
   children?: React.ReactNode;
@@ -385,6 +444,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const t = useTranslations("nav");
+  const locale = useLocale();
   const tTheme = useTranslations("theme");
   const { toggleSidebar, state: sidebarState, setOpenMobile, openMobile, isMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
@@ -430,6 +490,19 @@ export function AppSidebar() {
     return rows.map((r) => (pending.has(r.id) && r.unread ? { ...r, unread: false } : r));
   }, []);
 
+  // The "needs you" bucket, fetched separately because the list is paginated and
+  // a chat that stopped for a person can sit pages down — the group has to show
+  // all of them or it is lying. Purely ADDITIVE: nothing here clears a stale
+  // attention flag, because nothing has to. Resolving one writes a message, which
+  // bumps the chat's updatedAt onto the first page where the head refresh is
+  // authoritative — and the SSE task:start below clears it the same second.
+  const refreshAttention = useCallback(() => {
+    fetch("/api/chats?attention=true")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: ChatItem[]) => setChats((prev) => mergeChats(prev, reconcileReads(rows))))
+      .catch(() => {});
+  }, [reconcileReads]);
+
   // Reset: replace the list with a fresh first page. For a changed filter set
   // (project/search) or a context-menu action (pin/archive/delete) where stale
   // rows must drop out — merging can't remove rows the server no longer returns.
@@ -446,8 +519,13 @@ export function AppSidebar() {
         setNextCursor(cursor);
       })
       .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, [baseParams, reconcileReads]);
+      .finally(() => {
+        setLoaded(true);
+        // After the reset, not before: a reset REPLACES the list, so a bucket
+        // response that arrived first would be discarded by it.
+        refreshAttention();
+      });
+  }, [baseParams, reconcileReads, refreshAttention]);
 
   // Head refresh: re-fetch the first page and MERGE it in — picks up new chats,
   // reordering, and fresh unread/running/title while keeping already-loaded
@@ -555,32 +633,57 @@ export function AppSidebar() {
   // is sent (no route change fires then), and titles are generated a moment after
   // a task finishes. Subscribe to the same task event stream the chat panel uses
   // and refetch (debounced) when a chat appears, finishes, or arrives externally.
+  const refreshAttentionRef = useRef(refreshAttention);
+  useEffect(() => { refreshAttentionRef.current = refreshAttention; }, [refreshAttention]);
   useEffect(() => {
     let debounce: ReturnType<typeof setTimeout>;
     const refresh = () => {
       clearTimeout(debounce);
-      debounce = setTimeout(() => refreshHeadRef.current(), 400);
+      debounce = setTimeout(() => {
+        refreshHeadRef.current();
+        // The bucket too: an optimistic flip below only covers rows already
+        // loaded, and the server stays the source of truth for the rest.
+        refreshAttentionRef.current();
+      }, 400);
     };
     const unsubscribe = subscribeEvents({
       onMessage: (event) => {
-        const d = event as { type?: string; chatId?: string; title?: string };
+        const d = event as { type?: string; chatId?: string; title?: string; status?: string };
         // A generated title arrives once, after a new chat's first turn. Swap it
         // in place (ChatTitle animates the change) instead of a full refetch —
         // no flicker, and it lands even if the chat isn't in the fetched window.
         if (d.type === "chat:title" && d.chatId && d.title) {
           const { chatId: cid, title } = d;
           setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, title } : c)));
+        } else if ((d.type === "task:tool-approval" || d.type === "task:ask") && d.chatId) {
+          // The turn just suspended on a card only a person can clear. Flip the
+          // mark on now — this is the whole point of the feature, and waiting a
+          // debounce for it is what "nobody noticed" looks like.
+          const cid = d.chatId;
+          const attention: Attention = {
+            kind: d.type === "task:ask" ? "ask" : "approval",
+            since: new Date().toISOString(),
+          };
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, attention } : c)));
+          refresh();
         } else if (d.type === "task:start" && d.chatId) {
           // Flip the spinner on instantly; the debounced merge-refresh then
           // surfaces brand-new chats and reconciles ordering authoritatively.
+          // A started task also means the person has answered whatever was
+          // waiting — this is what makes the mark go out when they do.
           const cid = d.chatId;
-          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: true } : c)));
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: true, attention: null } : c)));
           refresh();
         } else if (d.type === "task:finish" && d.chatId) {
           // Reply done: drop the spinner now. The merge-refresh brings the
           // fresh unread flag (set when the chat isn't the one being viewed).
+          // A failure is the third thing only a person can clear, so it joins the
+          // bucket; any other outcome leaves `attention` alone, because a turn
+          // that suspended for an approval finishes normally and its mark was
+          // already set above.
           const cid = d.chatId;
-          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false } : c)));
+          const failed = d.status === "failed" ? { attention: { kind: "failed" as const, since: new Date().toISOString() } } : {};
+          setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false, ...failed } : c)));
           // If you're watching this chat, the reply you just saw complete is
           // read — re-stamp lastReadAt (the open-time stamp predates the reply)
           // so it doesn't resurface as unread the moment you navigate away.
@@ -658,14 +761,46 @@ export function AppSidebar() {
   // Telegram chats are a distinct kind — read-only in the web UI — so they get
   // their own section instead of mixing into the date-grouped web chats.
   const TELEGRAM_COLLAPSED = 5;
-  const telegramChats = chats.filter((c) => c.source === "telegram" && !c.archived);
+  // The bucket is carved out FIRST, and every section below reads `rest` — a chat
+  // that is waiting belongs to the group at the top and nowhere else.
+  const { attention: attentionChats, rest } = splitAttention(chats);
+  const telegramChats = rest.filter((c) => c.source === "telegram" && !c.archived);
   const visibleTelegramChats = showAllTelegram ? telegramChats : telegramChats.slice(0, TELEGRAM_COLLAPSED);
   const hiddenTelegramCount = telegramChats.length - visibleTelegramChats.length;
-  const webChats = chats.filter((c) => c.source !== "telegram" && !c.archived);
+  const webChats = rest.filter((c) => c.source !== "telegram" && !c.archived);
   const pinnedChats = webChats.filter((c) => c.pinned);
   const regularChats = webChats.filter((c) => !c.pinned);
   const groups = groupByDate(regularChats);
-  const statusLabels = { unread: t("unreadReply"), working: t("working") };
+  const statusLabels: StatusLabels = {
+    unread: t("unreadReply"),
+    working: t("working"),
+    attention: ({ kind, since }) => {
+      const at = new Date(since);
+      const sameDay = at.toDateString() === new Date().toDateString();
+      const when = new Intl.DateTimeFormat(
+        locale,
+        sameDay
+          ? { hour: "numeric", minute: "2-digit" }
+          : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" },
+      ).format(at);
+      return kind === "approval"
+        ? t("attention.approval", { when })
+        : kind === "ask"
+          ? t("attention.ask", { when })
+          : t("attention.failed", { when });
+    },
+  };
+
+  // A count in the tab title is the only way to notice a waiting chat from another
+  // tab. Only the prefix is ours — the rest of the title belongs to Next's
+  // metadata — so we strip a prefix we wrote before, write the current one, and
+  // hand the bare title back on cleanup.
+  const attentionCount = attentionChats.length;
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\) /, "");
+    document.title = attentionCount > 0 ? `(${attentionCount}) ${base}` : base;
+    return () => { document.title = document.title.replace(/^\(\d+\) /, ""); };
+  }, [attentionCount]);
 
   // A new chat from the sidebar is always project-less — a chat joins a project
   // only via its hub's "New chat" or the "Move to project" action.
@@ -754,6 +889,24 @@ export function AppSidebar() {
               />
             ))}
           </div>
+        )}
+
+        {/* Above everything, and gone the moment it empties: the group is a
+            to-do list, and a permanently-present empty one is noise. */}
+        {attentionChats.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>{t("needsAttention")}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <ChatList
+                chats={attentionChats}
+                activeChatId={activeChatId}
+                enteringIds={enteringIds}
+                statusLabels={statusLabels}
+                fallback={t("newChat")}
+                onUpdate={fetchReset}
+              />
+            </SidebarGroupContent>
+          </SidebarGroup>
         )}
 
         {telegramChats.length > 0 && (
