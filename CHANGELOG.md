@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-06
+
 ### Added
 
 - Highlight a passage of a reply and a small bar offers Explain / Simpler / Shorter / Ask; each puts the passage, quoted, into the composer for you to send. Pointer devices only.
