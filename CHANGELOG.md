@@ -11,6 +11,10 @@ All notable changes to Capka are documented here. Format follows
 - Steer a running reply: Alt+Enter in the composer (or the new action on a queued message) folds your text into the turn already in progress at its next step, without stopping it. Capped at 10 steers of 4000 characters per turn; a turn that finishes first falls back to sending the message normally.
 - Chats waiting on the user (approval card, agent question, failed reply) are grouped at the top of the sidebar with their own marker and a count in the tab title. Derived from each chat's last message, so answering clears it.
 
+### Security
+
+- The automation scheduler re-checks the owner on every run: automations of suspended accounts, deleted projects, or users out of budget are switched off with a visible reason instead of spending the shared key. `automations_enabled` now also stops the scheduler tick, not only new automations.
+
 ## [0.40.0] - 2026-09-06
 
 ### Added

@@ -1,0 +1,1 @@
+ALTER TABLE "automations" ADD COLUMN "disabled_reason" text;

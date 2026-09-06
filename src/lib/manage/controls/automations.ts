@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { getSetting } from "@/lib/settings";
 import { isValidTimezone } from "@/lib/timezone";
 import { nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
+import type { AutomationDisabledReason } from "@/lib/automations/runs";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
@@ -59,6 +60,15 @@ export function humanizeSchedule(trigger: AutomationTrigger, locale: string | un
     : nextOccurrences(trigger, 200, after).filter((d) => d.getTime() - after.getTime() < 30 * 86_400_000).length;
   return { nextDates, perMonth: inMonth };
 }
+
+/** Plain-language counterpart of the `disabled_reason` column — what the person
+ *  who owns the automation needs to know, and what to do about it. English lives
+ *  here as the source of truth; `messages/*.json` translations are additive. */
+const DISABLED_REASON_HINT: Record<AutomationDisabledReason, string> = {
+  owner_suspended: "Turned off because this account is no longer active. Ask your administrator, then switch it back on yourself — it does not resume by itself.",
+  project_deleted: "Turned off because the project it belonged to was deleted. Switch it back on to run it outside that project.",
+  budget_exhausted: "Turned off after repeatedly running out of spending allowance. Switch it back on once there is room in the budget.",
+};
 
 async function mustOwn(ctx: ManageContext, itemId: string) {
   const [row] = await db.select().from(automations)
@@ -163,8 +173,13 @@ export const automationCollection: Collection = {
     await db.update(automations).set({
       enabled,
       // Re-enabling recomputes the horizon from now (no backfill) and clears the
-      // failure streak — the user explicitly said "try again".
-      ...(enabled ? { nextRunAt: nextOccurrenceAfter(row.trigger as AutomationTrigger, new Date()), consecutiveFailures: 0 } : {}),
+      // failure streak — the user explicitly said "try again". It also clears the
+      // platform's explanation for the stop: this is the acknowledgement it was
+      // written for (nothing else re-enables an automation — the scheduler never
+      // does, not even when the account is reactivated).
+      ...(enabled
+        ? { nextRunAt: nextOccurrenceAfter(row.trigger as AutomationTrigger, new Date()), consecutiveFailures: 0, disabledReason: null }
+        : {}),
       updatedAt: new Date(),
     }).where(eq(automations.id, itemId));
     return { itemTitle: row.title };
@@ -174,6 +189,7 @@ export const automationCollection: Collection = {
     const t = manageT(ctx.locale);
     const { nextDates } = humanizeSchedule(row.trigger as AutomationTrigger, ctx.locale);
     const stateKey = !row.enabled ? "disabled" : row.consecutiveFailures > 0 ? "failing" : "ok";
+    const reasonHint = DISABLED_REASON_HINT[row.disabledReason as AutomationDisabledReason];
     // Real average cost per run (spec §4.6 — the honest counterpart of the
     // creation-time frequency forecast). pending=false only: holds are estimates.
     const { rows: [cost] } = await (await import("@/lib/db")).pool.query<{ avg: string | null; runs: string }>(
@@ -196,9 +212,15 @@ export const automationCollection: Collection = {
           : undefined,
         row.consecutiveFailures ? loc(t, "automation.failures", `Consecutive failures: ${row.consecutiveFailures}`, { n: row.consecutiveFailures }) : undefined,
       ].filter(Boolean).join(" · "),
-      hint: stateKey === "disabled" && row.consecutiveFailures >= 3
-        ? loc(t, "automation.autoPausedHint", "Auto-paused after repeated failures. Check the last run's chat, then enable it again.")
-        : undefined,
+      // Why it stopped, when the platform stopped it rather than the user. A
+      // recorded reason wins over the failure-streak wording: the streak is how
+      // budget_exhausted disables too, so inferring from it would tell someone
+      // over their limit to go read a chat that never ran.
+      hint: reasonHint
+        ? loc(t, `automation.disabledReason.${row.disabledReason}`, reasonHint)
+        : stateKey === "disabled" && row.consecutiveFailures >= 3
+          ? loc(t, "automation.autoPausedHint", "Auto-paused after repeated failures. Check the last run's chat, then enable it again.")
+          : undefined,
     };
   },
 };

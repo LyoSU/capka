@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { pool } from "../../db";
@@ -114,5 +114,38 @@ run("fireAutomation / recordAutomationOutcome", () => {
     await db.update(messages).set({ metadata: { status: "completed" } }).where(eq(messages.id, replyId));
     const [unblockedRow] = await db.select().from(automations).where(eq(automations.id, id));
     expect((await fireAutomation(unblockedRow)).fired).toBe(true); // free to run again
+  });
+
+  it("a refused budget skips the run, leaves no chat behind, and counts toward the auto-disable", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations, chats } = await import("@/lib/db/schema");
+    const limits = await import("@/lib/billing/limits");
+    const { fireAutomation, MAX_CONSECUTIVE_FAILURES } = await import("../runs");
+
+    // One short of the threshold, so this refusal is the strike that trips it.
+    const priorFailures = MAX_CONSECUTIVE_FAILURES - 1;
+    const budgetId = nanoid();
+    await db.insert(automations).values({
+      id: budgetId, userId: U, title: "Over the limit", prompt: "spend",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      consecutiveFailures: priorFailures,
+    });
+    const before = (await db.select().from(chats).where(eq(chats.userId, U))).length;
+    const spy = vi.spyOn(limits, "reserveBudget").mockResolvedValue({ allowed: false, window: "m1", reason: "budget" });
+    try {
+      const [row] = await db.select().from(automations).where(eq(automations.id, budgetId));
+      expect((await fireAutomation(row)).fired).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    // The gate is BEFORE any write: a refused run must not leave an orphan chat
+    // holding a question nobody will answer.
+    expect((await db.select().from(chats).where(eq(chats.userId, U))).length).toBe(before);
+    const [after] = await db.select().from(automations).where(eq(automations.id, budgetId));
+    expect(after.consecutiveFailures).toBe(MAX_CONSECUTIVE_FAILURES);
+    // Third strike — the same mechanism a broken automation trips, but the reason
+    // recorded says budget, not "go read the last run's chat" (there isn't one).
+    expect(after.enabled).toBe(false);
+    expect(after.disabledReason).toBe("budget_exhausted");
   });
 });

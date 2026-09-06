@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { automations, chats, messages, telegramLinks, users, tasks } from "@/lib/db/schema";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { loadActivePath } from "@/lib/chat/tree";
 import { getTranslator } from "@/lib/i18n/translator";
@@ -16,6 +18,10 @@ export type AutomationRow = typeof automations.$inferSelect;
  *  tells the user — a silent failure loop burning budget is the #1 complaint
  *  about every competitor's scheduled tasks. */
 export const MAX_CONSECUTIVE_FAILURES = 3;
+
+/** Why the platform (not the user) switched an automation off — see the
+ *  `disabled_reason` column. The scheduler writes the first two in SQL. */
+export type AutomationDisabledReason = "owner_suspended" | "project_deleted" | "budget_exhausted";
 
 /**
  * Materialize one firing: a NEW ordinary chat holding one user message (the
@@ -49,25 +55,46 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
     }
   }
 
+  // Budget gate, same one the web and Telegram sends pass through: an unattended
+  // run is exactly the turn a spend limit exists for, and it was the only entry
+  // point that skipped it — an over-limit user's schedule kept drawing on the
+  // shared key and was only noticed after the fact, per turn, by the reconciler.
+  // Reserved BEFORE anything is written so a refusal leaves no orphan chat.
+  const taskId = nanoid();
+  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(a.userId, a.model ?? undefined);
+  const reservation = await reserveBudget({ userId: a.userId, taskId, onSharedKey: isShared, modelId, provider, configId });
+  if (!reservation.allowed) {
+    // A refusal is a run that did not happen, so it counts toward the same streak
+    // a broken automation does: three of them disable it and tell the user, rather
+    // than re-attempting every hour until the window rolls over.
+    log.info("automation skipped: budget exhausted", { automationId: a.id, window: reservation.window });
+    await recordAutomationOutcome(a.id, "failed", "budget_exhausted");
+    return { fired: false };
+  }
+
   const [user] = await db.select({ locale: users.locale }).from(users).where(eq(users.id, a.userId));
   const locale = user?.locale ?? "en";
   const chatId = nanoid();
   const runDate = new Intl.DateTimeFormat(locale === "uk" ? "uk-UA" : "en-US", { day: "numeric", month: "short" }).format(new Date());
-  await db.insert(chats).values({
-    id: chatId,
-    userId: a.userId,
-    projectId: a.projectId,
-    title: `${a.title} — ${runDate}`,
-    model: a.model,
-    source: "web", // fully interactive in the web UI — the user can follow up
-  });
 
   // Everything past this point can fail independently (no shared transaction —
   // enqueueTask issues its own raw-SQL round-trip). A failure here would otherwise
   // strand a chat with an unanswered user message and silently drop the occurrence
   // (the scheduler already advanced next_run_at before calling us), so clean up
-  // the orphan chat on any failure — messages cascade-delete with it.
+  // the orphan chat on any failure — messages cascade-delete with it. The hold
+  // reserved above belongs to whoever ends up answering, so it is released on
+  // every path that does NOT hand it to a live turn; leaking it would inflate the
+  // user's budget forever, with no task row for the zombie reconciler to find.
+  let handedOff = false;
   try {
+    await db.insert(chats).values({
+      id: chatId,
+      userId: a.userId,
+      projectId: a.projectId,
+      title: `${a.title} — ${runDate}`,
+      model: a.model,
+      source: "web", // fully interactive in the web UI — the user can follow up
+    });
     const msgId = nanoid();
     await db.insert(messages).values({
       id: msgId,
@@ -91,10 +118,14 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
       automationId: a.id,
       ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
     };
-    const taskId = nanoid();
-    await enqueueTask({ id: taskId, chatId, userId: a.userId, payload });
+    // A created turn OWNS the hold and reconciles it to the real cost at finalize;
+    // a folded one (created=false — this chat is brand new, so only a race) does
+    // not, and the finally cancels ours. `lastTaskId` follows the turn that will
+    // actually answer, so the overlap guard watches a live row either way.
+    const { id: turnId, created } = await enqueueTask({ id: taskId, chatId, userId: a.userId, payload });
+    handedOff = created;
     await db.update(automations)
-      .set({ lastTaskId: taskId, lastRunAt: new Date(), updatedAt: new Date() })
+      .set({ lastTaskId: turnId, lastRunAt: new Date(), updatedAt: new Date() })
       .where(eq(automations.id, a.id));
     // The chat id goes back to the caller so a manual run can drop the user
     // straight into the conversation it just opened.
@@ -102,6 +133,8 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
   } catch (e) {
     await db.delete(chats).where(eq(chats.id, chatId)).catch(() => {});
     throw e;
+  } finally {
+    if (!handedOff) await releaseHold(taskId);
   }
 }
 
@@ -110,7 +143,14 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
  * the third consecutive failure disables the automation and tells the user in
  * Telegram (the failed turns themselves are already visible in their chats).
  */
-export async function recordAutomationOutcome(automationId: string, status: string): Promise<void> {
+export async function recordAutomationOutcome(
+  automationId: string,
+  status: string,
+  /** Recorded on the row if THIS failure is the one that trips the auto-disable.
+   *  Omitted (null) for an ordinary broken run — "repeated failures" is already
+   *  what the streak itself says. */
+  reason?: AutomationDisabledReason,
+): Promise<void> {
   // A suspended run (awaiting approval/answer) is neither success nor failure: it
   // didn't finish its work, so the streak must NOT reset — but it also isn't a
   // failure to count toward auto-disable. Leave the streak untouched.
@@ -127,7 +167,9 @@ export async function recordAutomationOutcome(automationId: string, status: stri
     .where(eq(automations.id, automationId))
     .returning();
   if (!row || row.consecutiveFailures < MAX_CONSECUTIVE_FAILURES || !row.enabled) return;
-  await db.update(automations).set({ enabled: false, updatedAt: new Date() }).where(eq(automations.id, automationId));
+  await db.update(automations)
+    .set({ enabled: false, disabledReason: reason ?? null, updatedAt: new Date() })
+    .where(eq(automations.id, automationId));
   const [link] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, row.userId));
   if (link) {
     try {

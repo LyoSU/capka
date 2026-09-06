@@ -519,6 +519,13 @@
       "when": 1788724399742,
       "tag": "0073_same_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788729533279,
+      "tag": "0074_flashy_king_cobra",
+      "breakpoints": true
     }
   ]
 }

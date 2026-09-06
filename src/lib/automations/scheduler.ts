@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { automations } from "@/lib/db/schema";
+import { getSetting } from "@/lib/settings";
 import { nextOccurrenceAfter, type AutomationTrigger } from "./schedule";
 import { fireAutomation, MAX_CONSECUTIVE_FAILURES, type AutomationRow } from "./runs";
 import { log } from "@/lib/log";
@@ -14,6 +15,12 @@ import { log } from "@/lib/log";
  * (self-hosted boxes sleep): next_run_at is always computed from `now`.
  */
 export async function schedulerTick(now: Date = new Date()): Promise<void> {
+  // The admin's global switch has to be read HERE, not only at creation time: it
+  // was gating `add` alone, so turning automations off left every existing one
+  // firing on the shared key. It is a temporary platform-wide stop, so rows are
+  // left enabled and simply not claimed — flipping it back on resumes them.
+  if (((await getSetting("automations_enabled")) ?? "true") !== "true") return;
+
   const client = await pool.connect();
   // Each claimed row is tagged with the exact updated_at this tick stamped on it,
   // so the error-recovery below can tell "nobody touched it" from "the user paused
@@ -23,12 +30,43 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
   const tickTs = new Date();
   try {
     await client.query("BEGIN");
+    // Ownership is re-checked on EVERY firing, not just at creation: an automation
+    // outlives the account that made it and the project it belongs to, and neither
+    // revocation reaches back to it. `requireActive` only gates HTTP routes, so a
+    // suspended user's schedule kept spending the admin's shared key with nobody
+    // in session at all. Rows that fail the check are switched OFF here, in their
+    // own statement, WITH the reason — a silent skip would look identical to a
+    // scheduler that had stopped working, and would resume the moment nobody was
+    // watching. next_run_at is deliberately untouched: the row is off, and its due
+    // time is recomputed from `now` if a human ever enables it again. Reactivation
+    // does NOT re-arm it — the person sees the reason and decides.
+    await client.query(
+      `UPDATE automations a
+          SET enabled = false,
+              disabled_reason = CASE WHEN u.status <> 'active' THEN 'owner_suspended' ELSE 'project_deleted' END,
+              updated_at = $2
+         FROM "user" u
+        WHERE u.id = a.user_id
+          AND a.enabled = true AND a.next_run_at <= $1
+          AND (u.status <> 'active'
+               OR (a.project_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = a.project_id AND p.deleted_at IS NULL)))`,
+      [now, tickTs],
+    );
+    // The claim is the enforcement, the UPDATE above is only the explanation: an
+    // ineligible row must not be claimable even if that statement failed to match
+    // it. FOR UPDATE OF a — a LEFT-JOINed table cannot be locked, and only the
+    // automation row is being claimed anyway.
     const { rows } = await client.query(
-      `SELECT * FROM automations
-        WHERE enabled = true AND next_run_at <= $1
-        ORDER BY next_run_at
+      `SELECT a.* FROM automations a
+         JOIN "user" u ON u.id = a.user_id
+         LEFT JOIN projects p ON p.id = a.project_id AND p.deleted_at IS NULL
+        WHERE a.enabled = true AND a.next_run_at <= $1
+          AND u.status = 'active'
+          AND (a.project_id IS NULL OR p.id IS NOT NULL)
+        ORDER BY a.next_run_at
         LIMIT 20
-        FOR UPDATE SKIP LOCKED`,
+        FOR UPDATE OF a SKIP LOCKED`,
       [now],
     );
     for (const raw of rows) {

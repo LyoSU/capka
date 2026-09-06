@@ -503,6 +503,15 @@ export const automations = pgTable("automations", {
   // still queued/running) + "open last run" links in settings/debug.
   lastTaskId: text("last_task_id"),
   consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  // Why the platform switched this off when the user didn't: "owner_suspended"
+  // (the account is no longer active), "project_deleted" (its project is being
+  // torn down), "budget_exhausted" (the spend gate refused it MAX_CONSECUTIVE_
+  // FAILURES times). Null for a manual pause or a plain repeated-failure
+  // auto-disable. Persisted rather than inferred because the condition that
+  // caused it can be gone by the time anyone looks — a reactivated account must
+  // still be told WHY its automation is off, and re-enable it deliberately (the
+  // scheduler never turns one back on by itself).
+  disabledReason: text("disabled_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

@@ -7,23 +7,38 @@ import { pool } from "../../db";
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
 const U = "atest-scheduler-user";
+// A second owner, suspended: the eligibility re-check is about the account, so it
+// cannot be exercised on the user every other test here needs active.
+const SUSPENDED = "atest-scheduler-suspended";
+const TOMBSTONED_PROJECT = "atest-scheduler-dead-project";
 
 run("schedulerTick", () => {
   beforeAll(async () => {
     await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'A','a-scheduler@test.local') ON CONFLICT (id) DO NOTHING`, [U]);
-    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U]);
+    await pool.query(
+      `INSERT INTO "user" (id, name, email, status) VALUES ($1,'S','s-scheduler@test.local','suspended')
+         ON CONFLICT (id) DO UPDATE SET status = 'suspended'`,
+      [SUSPENDED],
+    );
+    await pool.query(
+      `INSERT INTO projects (id, user_id, name, deleted_at) VALUES ($1,$2,'Dead',now())
+         ON CONFLICT (id) DO UPDATE SET deleted_at = now()`,
+      [TOMBSTONED_PROJECT, U],
+    );
+    await pool.query(`DELETE FROM automations WHERE user_id = ANY($1)`, [[U, SUSPENDED]]);
   });
   afterAll(async () => {
     const { rows } = await pool.query<{ chat_id: string }>(
-      `SELECT chat_id FROM tasks WHERE user_id = $1`,
-      [U],
+      `SELECT chat_id FROM tasks WHERE user_id = ANY($1)`,
+      [[U, SUSPENDED]],
     );
-    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [U]);
-    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U]);
+    await pool.query(`DELETE FROM tasks WHERE user_id = ANY($1)`, [[U, SUSPENDED]]);
+    await pool.query(`DELETE FROM automations WHERE user_id = ANY($1)`, [[U, SUSPENDED]]);
     for (const { chat_id } of rows) {
       await pool.query(`DELETE FROM chats WHERE id = $1`, [chat_id]);
     }
-    await pool.query(`DELETE FROM "user" WHERE id = $1`, [U]);
+    await pool.query(`DELETE FROM projects WHERE id = $1`, [TOMBSTONED_PROJECT]);
+    await pool.query(`DELETE FROM "user" WHERE id = ANY($1)`, [[U, SUSPENDED]]);
   });
 
   it("claims a due automation, fires it, and advances next_run_at", async () => {
@@ -164,5 +179,89 @@ run("schedulerTick", () => {
     const [disabled] = await db.select().from(automations).where(eq(automations.id, disabledId));
     expect(future.lastTaskId).toBeNull();
     expect(disabled.lastTaskId).toBeNull();
+  });
+
+  it("a suspended owner's due automation is not claimed — it is switched off with the reason, due time untouched", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: SUSPENDED, title: "Owned by a suspended account", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    await schedulerTick();
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.lastTaskId).toBeNull(); // never fired
+    expect(row.enabled).toBe(false);
+    expect(row.disabledReason).toBe("owner_suspended");
+    // Not claimed means not advanced: a skipped occurrence must not silently
+    // consume the schedule the way a fired one does.
+    expect(row.nextRunAt!.getTime()).toBe(due.getTime());
+
+    // Reactivating the account does NOT resume unattended spending on its own —
+    // the person reads the reason and switches it back on deliberately.
+    await pool.query(`UPDATE "user" SET status = 'active' WHERE id = $1`, [SUSPENDED]);
+    try {
+      await schedulerTick();
+      const [afterReactivation] = await db.select().from(automations).where(eq(automations.id, id));
+      expect(afterReactivation.enabled).toBe(false);
+      expect(afterReactivation.lastTaskId).toBeNull();
+      expect(afterReactivation.disabledReason).toBe("owner_suspended");
+    } finally {
+      await pool.query(`UPDATE "user" SET status = 'suspended' WHERE id = $1`, [SUSPENDED]);
+    }
+  });
+
+  it("an automation whose project is tombstoned is not claimed — switched off as project_deleted", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: U, projectId: TOMBSTONED_PROJECT, title: "Project being deleted", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    await schedulerTick();
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.lastTaskId).toBeNull();
+    expect(row.enabled).toBe(false);
+    expect(row.disabledReason).toBe("project_deleted");
+    expect(row.nextRunAt!.getTime()).toBe(due.getTime());
+  });
+
+  it("the platform switch off stops the tick without disabling anything (it is temporary)", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { getSetting, setSetting } = await import("@/lib/settings");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: U, title: "Due while the platform switch is off", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    // Restore the row to whatever it was — this is a shared dev database and an
+    // absent key is not the same state as an explicit "true".
+    const prior = await getSetting("automations_enabled");
+    await setSetting("automations_enabled", "false");
+    try {
+      await schedulerTick();
+    } finally {
+      if (prior === null) await pool.query(`DELETE FROM settings WHERE key = 'automations_enabled'`);
+      else await setSetting("automations_enabled", prior);
+    }
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.lastTaskId).toBeNull(); // did not run
+    expect(row.nextRunAt!.getTime()).toBe(due.getTime()); // did not advance
+    // Still armed: the switch is the admin pausing the platform, not a verdict on
+    // this automation, so flipping it back on must resume it with no user action.
+    expect(row.enabled).toBe(true);
+    expect(row.disabledReason).toBeNull();
   });
 });
