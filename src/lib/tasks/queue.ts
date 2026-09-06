@@ -382,6 +382,60 @@ export async function requestCancel(id: string): Promise<void> {
   );
 }
 
+/** Longest single steer we accept. Generous for a sentence or two of correction,
+ *  short enough that it can't become a second brief spliced into a running turn. */
+export const STEER_MAX_CHARS = 4000;
+/** How many steers one turn will take. The array is re-read and re-injected on
+ *  EVERY step, so its cost is paid per step, not once — an unbounded column would
+ *  let a fast typist grow every remaining prompt of the turn without limit. */
+export const STEER_MAX_PER_TURN = 10;
+
+/**
+ * Append one steer to a RUNNING turn.
+ *
+ * The whole decision is the one UPDATE: `status = 'running'` and the length check
+ * are in its WHERE, so a turn that finishes (or fills up) between the client's
+ * check and this write simply matches no row — there is no window in which a
+ * steer lands on a turn that will never read it. `steers || $1::jsonb` is an
+ * atomic append, so two tabs steering at once cannot clobber each other the way a
+ * read-modify-write would.
+ *
+ * "tooLate" is the outcome the CLIENT acts on: the turn is gone (or was never
+ * running), so the message it holds must be sent the ordinary way instead.
+ */
+export async function appendSteer(
+  taskId: string,
+  userId: string,
+  steer: { id: string; text: string; at: string },
+): Promise<"ok" | "tooLate" | "tooMany"> {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE tasks
+        SET steers = steers || $1::jsonb, updated_at = now()
+      WHERE id = $2 AND user_id = $3 AND status = 'running'
+        AND jsonb_array_length(steers) < $4
+      RETURNING id`,
+    [JSON.stringify([steer]), taskId, userId, STEER_MAX_PER_TURN],
+  );
+  if (rows[0]) return "ok";
+  // No row: either the turn isn't running any more or it is full. Only asked on
+  // the failing path, so the happy path stays one round-trip.
+  const { rows: probe } = await pool.query<{ status: TaskStatus; n: number }>(
+    `SELECT status, jsonb_array_length(steers) AS n FROM tasks WHERE id = $1 AND user_id = $2`,
+    [taskId, userId],
+  );
+  return probe[0]?.status === "running" && probe[0].n >= STEER_MAX_PER_TURN ? "tooMany" : "tooLate";
+}
+
+/** Every steer sent to a turn so far, oldest first. The runner keeps its own read
+ *  cursor in memory (this column is never rewritten), so this stays a plain read. */
+export async function readSteers(taskId: string): Promise<{ id: string; text: string; at: string }[]> {
+  const { rows } = await pool.query<{ steers: { id: string; text: string; at: string }[] }>(
+    `SELECT steers FROM tasks WHERE id = $1`,
+    [taskId],
+  );
+  return rows[0]?.steers ?? [];
+}
+
 export async function isCancelRequested(id: string): Promise<boolean> {
   const { rows } = await pool.query<{ cancel_requested: boolean }>(
     `SELECT cancel_requested FROM tasks WHERE id = $1`,

@@ -1,4 +1,4 @@
-import type { StoredPart, MessageMeta } from "./contracts";
+import { steerFrame, type StoredPart, type MessageMeta } from "./contracts";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
 import { INTERRUPTED_TOOL_RESULT } from "./tool-results";
 
@@ -14,6 +14,46 @@ import { INTERRUPTED_TOOL_RESULT } from "./tool-results";
  * share page supplying it would be a real leak rather than an omission. Omitted, no
  * message carries the metadata and nothing is rendered.
  */
+/**
+ * Make a turn's steers visible to EVERY LATER turn.
+ *
+ * A steer is stored on the assistant row it interrupted, so replaying the history
+ * verbatim hands the model the reply without the instruction that shaped it — the
+ * next turn then reads a conversation in which the user never said the thing they
+ * are about to refer to ("do the rest like I asked"). This emits each row's steers
+ * as one synthetic `user` message immediately BEFORE that assistant message.
+ *
+ * Before, not interleaved, and that is deliberate. Inside the assistant message is
+ * where it truly happened, but `parts` carries no step boundaries to splice at, and
+ * a user message spliced between an assistant's `tool_use` and its `tool_result` is
+ * a hard 400 on Anthropic and OpenAI alike. Immediately before the reply is
+ * approximate about the moment and exactly right about the order — the model reads
+ * the instruction, then the work that followed it — and it is legal everywhere.
+ *
+ * A separate function rather than a flag on `toUIMessages`, because only the MODEL
+ * should see these rows: the web transcript renders the same steer as a row on the
+ * turn's own timeline, and emitting it here too would draw the user's words twice.
+ */
+export function expandSteers<T extends { id: string; role: string; content: string; metadata: unknown }>(rows: T[]): T[] {
+  const out: T[] = [];
+  for (const r of rows) {
+    const steers = (r.metadata as MessageMeta | null)?.steers;
+    if (steers?.length) {
+      out.push({
+        ...r,
+        id: `${r.id}:steer`,
+        role: "user",
+        content: steers.map((s) => steerFrame(s.text)).join("\n\n"),
+        // No metadata: this row is text and nothing else. Carrying the original's
+        // would hand the model a copy of the reply's `parts` under a user role.
+        metadata: null,
+      });
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 export function toUIMessages(rows: {
   id: string;
   role: string;
@@ -198,6 +238,10 @@ export function toUIMessages(rows: {
         // empty array is a value a renderer can accidentally treat as "render the frame
         // with no rows in it".
         memoryWrites: memoryWrites[m.id]?.length ? memoryWrites[m.id] : undefined,
+        // The mid-turn instructions this reply took, so the transcript can draw
+        // them on the turn's own rail — the client has no other view of the row.
+        // `undefined` and not `[]` for the same reason as `memoryWrites`.
+        steers: meta?.steers?.length ? meta.steers : undefined,
       },
     };
   });

@@ -67,12 +67,20 @@ export type AttachedFile = {
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: () => void;
+  /** `steer` asks for the text to be folded into the turn that is ALREADY running
+   *  instead of queued behind it (Alt/Option+Enter). The panel decides whether that
+   *  is possible and falls back to the queue when it isn't. */
+  onSubmit: (opts?: { steer?: boolean }) => void;
   onStop: () => void;
   isLoading: boolean;
   /** A card above is awaiting the user — a `manage` approval or an `ask` question.
    *  Block the composer (like Claude Code) so the card is the only next action. */
   awaitingInput?: boolean;
+  /** Whether Alt+Enter would actually steer right now. Only affects what the send
+   *  button's tooltip promises — the shortcut itself is harmless when it can't be
+   *  honoured (the panel queues instead), but a hint for a key that does nothing is
+   *  worse than no hint. */
+  canSteer?: boolean;
   chatId: string;
   files: AttachedFile[];
   onAddFiles: (files: FileList | File[]) => void;
@@ -110,6 +118,7 @@ export function ChatInput({
   onStop,
   isLoading,
   awaitingInput = false,
+  canSteer = false,
   chatId,
   files,
   onAddFiles,
@@ -176,8 +185,10 @@ export function ChatInput({
     if (e.key === "Enter" && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) {
       e.preventDefault();
       // Allow sending while a reply streams — the message queues and runs after
-      // the current turn (serialized per chat on the server).
-      if (canSend) onSubmit();
+      // the current turn (serialized per chat on the server). Holding Alt/Option
+      // asks for the third option instead: fold it into the turn that is running,
+      // without stopping it. The panel is what knows whether that can be honoured.
+      if (canSend) onSubmit(e.altKey ? { steer: true } : undefined);
     }
   };
 
@@ -339,7 +350,7 @@ export function ChatInput({
                   </Button>
                 </Hint>
               ) : (
-                <Hint label={isLoading ? t("queue") : t("send")}>
+                <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button
                     size="icon"
                     className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full transition-transform active:scale-90"
@@ -347,7 +358,8 @@ export function ChatInput({
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send.
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={onSubmit}
+                    // Ignore the click event React would pass as `opts`.
+                    onClick={() => onSubmit()}
                   >
                     {uploading ? (
                       <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />

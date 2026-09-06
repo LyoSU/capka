@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
+import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens, injectSteers,
   FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION, BYTES_PER_TOKEN } from "@/lib/chat/context/step-control";
 import type { ModelMessage } from "ai";
 import { readFileSync } from "node:fs";
@@ -347,5 +347,141 @@ describe("the estimate's boundary", () => {
     // Any compound form shows up here as itself and fails with a readable diff.
     expect(writes).toEqual(["=", "="]);
     expect(runner).toMatch(/lastStepContextTokens = event\.usage\.inputTokens/);
+  });
+});
+
+describe("injectSteers", () => {
+  const say = (text: string): ModelMessage => ({ role: "assistant", content: text });
+  const tool = (): ModelMessage => ({ role: "tool", content: [{ type: "tool-result", toolCallId: "c", toolName: "t", output: { type: "text", value: "ok" } }] });
+  const textOf = (m: ModelMessage) => (typeof m.content === "string" ? m.content : "");
+
+  it("appends a fresh steer at the tail, where every provider accepts a user message", () => {
+    const step = [say("a"), tool()];
+    const { messages, steers } = injectSteers(step, [{ id: "s1", text: "also chart it" }]);
+    expect(messages).toHaveLength(3);
+    expect(messages[2].role).toBe("user");
+    expect(textOf(messages[2])).toContain("also chart it");
+    // Framed, so the model can tell it from the request the turn started on.
+    expect(textOf(messages[2])).not.toBe("also chart it");
+    expect(steers[0].index).toBe(2);
+  });
+
+  // The whole point of recording the index: the SDK rebuilds the list from its own
+  // history each step, so re-appending would move the steer past the assistant
+  // message that answered it and change the prefix on every step.
+  it("holds a steer at the same absolute index while the turn keeps growing", () => {
+    const step1 = [say("a"), tool()];
+    const a = injectSteers(step1, [{ id: "s1", text: "also chart it" }]);
+    expect(a.messages.map((m) => m.role)).toEqual(["assistant", "tool", "user"]);
+
+    // Step 2: the SDK has appended the reply to the steer plus another tool result.
+    const step2 = [say("a"), tool(), say("b"), tool()];
+    const b = injectSteers(step2, a.steers);
+    expect(b.messages.map((m) => m.role)).toEqual(["assistant", "tool", "user", "assistant", "tool"]);
+    expect(textOf(b.messages[2])).toContain("also chart it");
+    expect(b.steers[0].index).toBe(2);
+
+    // Step 3: still index 2, still the same prefix.
+    const step3 = [...step2, say("c"), tool()];
+    const c = injectSteers(step3, b.steers);
+    expect(c.messages.slice(0, 3).map(textOf)).toEqual(b.messages.slice(0, 3).map(textOf));
+    expect(c.steers[0].index).toBe(2);
+  });
+
+  it("shifts a later steer past the earlier ones instead of overwriting their slot", () => {
+    const step1 = [say("a"), tool()];
+    const a = injectSteers(step1, [{ id: "s1", text: "first" }]);
+
+    // A second steer arrives two messages later — it anchors to the END of the
+    // UN-injected list, so the two indices stay comparable to each other.
+    const step2 = [say("a"), tool(), say("b"), tool()];
+    const b = injectSteers(step2, [...a.steers, { id: "s2", text: "second" }]);
+    expect(b.steers.map((s) => s.index)).toEqual([2, 4]);
+    expect(b.messages.map((m) => m.role)).toEqual(["assistant", "tool", "user", "assistant", "tool", "user"]);
+    expect(textOf(b.messages[2])).toContain("first");
+    expect(textOf(b.messages[5])).toContain("second");
+
+    // And on the next step both are put back where they were — the earlier one
+    // pushing the later one one slot along, which is the arithmetic that would
+    // silently drop a steer if the walk spliced repeatedly instead.
+    const step3 = [...step2, say("c"), tool()];
+    const c = injectSteers(step3, b.steers);
+    expect(c.messages.map((m) => m.role)).toEqual(["assistant", "tool", "user", "assistant", "tool", "user", "assistant", "tool"]);
+    expect(textOf(c.messages[2])).toContain("first");
+    expect(textOf(c.messages[5])).toContain("second");
+  });
+
+  it("is a no-op with nothing to inject, so an unsteered turn's prompt is untouched", () => {
+    const step = [say("a"), tool()];
+    const { messages, steers } = injectSteers(step, []);
+    expect(messages).toBe(step);
+    expect(steers).toEqual([]);
+  });
+
+  it("re-anchors to the new tail after a re-stream drops the indices", () => {
+    // makeStream strips `index` because it points into a list the SDK threw away.
+    const rebuilt = [say("resumed"), tool(), say("x")];
+    const { messages, steers } = injectSteers(rebuilt, [{ id: "s1", text: "first" }]);
+    expect(steers[0].index).toBe(3);
+    expect(messages[3].role).toBe("user");
+  });
+});
+
+describe("a steered turn that also has to prune", () => {
+  // The two mechanisms meet in `prepareStep` and count in different units. The
+  // prune boundary is an index into the UN-injected list, while the pruner counts
+  // TRAILING messages of the list it is actually handed — so every steer sitting in
+  // the pruned prefix pushes the protected window one message earlier and buys back
+  // an exchange of tool traffic the turn had decided to shed. The runner corrects
+  // for exactly that (`pruneBoundary + before`); this pins that the correction is
+  // right, and that removing it is observable.
+  const ids = (ms: ModelMessage[]) =>
+    ms
+      .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : []))
+      .filter((c) => c.type === "tool-call")
+      .map((c) => c.toolCallId as string);
+  const at = (ms: ModelMessage[], needle: string) =>
+    ms.findIndex((m) => typeof m.content === "string" && m.content.includes(needle));
+
+  // One steer landed while the turn was four exchanges in, the second only once it
+  // had run all eight — so a cut taken between them has one steer either side.
+  const base = loop(8);
+  const early = injectSteers(loop(4), [{ id: "s1", text: "keep it short" }]);
+  const steered = injectSteers(base, [...early.steers, { id: "s2", text: "and cite it" }]);
+  const before = (b: number) => steered.steers.filter((s) => (s.index ?? 0) <= b).length;
+  const boundary = base.length - 4;
+
+  it("sits the two steers either side of the cut, which is what makes this a test", () => {
+    expect(steered.steers.map((s) => s.index)).toEqual([9, base.length]);
+    expect(before(boundary)).toBe(1);
+  });
+
+  it("sheds exactly the tool traffic the unsteered turn would have, at every cut", () => {
+    // The invariant, not one lucky boundary: whatever the turn decides to shed, a
+    // steered turn sheds the same exchanges. Some cuts land mid-pair and are
+    // unaffected either way, which is why a single case can pass while the
+    // correction is missing.
+    for (let b = 1; b < base.length; b++) {
+      expect(ids(pruneTurnToolTraffic(steered.messages, b + before(b)))).toEqual(ids(pruneTurnToolTraffic(base, b)));
+    }
+  });
+
+  it("would buy back an exchange without the correction, which is the bug", () => {
+    const plain = ids(pruneTurnToolTraffic(base, boundary));
+    const uncorrected = ids(pruneTurnToolTraffic(steered.messages, boundary));
+    expect(uncorrected).not.toEqual(plain);
+    expect(uncorrected.length).toBeGreaterThan(plain.length);
+  });
+
+  it("keeps the early steer in the pruned prefix and the late one in the protected tail", () => {
+    const out = pruneTurnToolTraffic(steered.messages, boundary + before(boundary));
+    // Neither is collateral: a steer is a user message, never tool traffic.
+    expect(at(out, "keep it short")).toBeGreaterThanOrEqual(0);
+    expect(at(out, "and cite it")).toBe(out.length - 1);
+    // The early one is ahead of every tool call that survived — i.e. it is in the
+    // part of the prompt that was shed, exactly where it landed.
+    const firstSurviving = out.findIndex((m) =>
+      Array.isArray(m.content) && (m.content as Array<Record<string, unknown>>).some((c) => c.type === "tool-call"));
+    expect(at(out, "keep it short")).toBeLessThan(firstSurviving);
   });
 });

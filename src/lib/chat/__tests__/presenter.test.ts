@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toUIMessages } from "../presenter";
+import { toUIMessages, expandSteers } from "../presenter";
 import type { MessageMeta } from "../contracts";
 
 type Row = Parameters<typeof toUIMessages>[0][number];
@@ -267,5 +267,93 @@ describe("toUIMessages", () => {
       expect((a.metadata as { memoryWrites?: unknown }).memoryWrites).toBeDefined();
       expect((b.metadata as { memoryWrites?: unknown }).memoryWrites).toBeUndefined();
     });
+  });
+});
+
+describe("a turn's steers on the way to the transcript", () => {
+  // The client has no other view of the row: `toUIMessages` builds the metadata
+  // object field by field, so a steer the runner persisted is simply absent from
+  // the transcript unless it is forwarded here.
+  it("forwards the steers a reply took, and their anchors", () => {
+    const meta: MessageMeta = {
+      parts: [
+        { type: "tool-call", id: "c1", name: "bash", input: {} },
+        { type: "tool-result", id: "c1", name: "bash", output: "ok" },
+      ],
+      steers: [{ id: "s1", text: "one page", at: "2026-06-09T12:00:00.000Z", atStep: 1, afterToolCallId: "c1" }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.metadata.steers).toEqual(meta.steers);
+  });
+
+  it("says nothing at all when the turn was never steered", () => {
+    const [msg] = toUIMessages([row({ metadata: { parts: [] } })]);
+    expect(msg.metadata.steers).toBeUndefined();
+  });
+
+  // THE reason the anchor is a tool-call id and not an index into the runner's
+  // `parts`: the presenter counts in different coordinates. Two calls are four
+  // stored parts and two UI parts, so an index of 4 would address nothing here
+  // while the id still names the exact step the steer followed.
+  it("keeps the anchor addressable after the presenter folds call+result into one part", () => {
+    const meta: MessageMeta = {
+      parts: [
+        { type: "tool-call", id: "c1", name: "bash", input: {} },
+        { type: "tool-result", id: "c1", name: "bash", output: "ok" },
+        { type: "tool-call", id: "c2", name: "bash", input: {} },
+        { type: "tool-result", id: "c2", name: "bash", output: "ok" },
+      ],
+      steers: [{ id: "s1", text: "stop there", at: "2026-06-09T12:00:00.000Z", atStep: 2, afterToolCallId: "c2" }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts).toHaveLength(2);
+    const at = (msg.parts as { toolCallId?: string }[]).findIndex((p) => p.toolCallId === "c2");
+    expect(at).toBe(1);
+  });
+});
+
+describe("expandSteers", () => {
+  const steer = (id: string, text: string, afterToolCallId: string | null = null) =>
+    ({ id, text, at: "2026-06-09T12:00:00.000Z", atStep: 0, afterToolCallId });
+
+  it("puts a turn's steers in front of the reply they steered", () => {
+    // The next turn has to read what the user asked for mid-flight, not just the
+    // answer it shaped — otherwise "do the rest the same way" refers to nothing.
+    const rows = [
+      row({ id: "u1", role: "user", content: "make a report" }),
+      row({ id: "a1", content: "done", metadata: { parts: [], steers: [steer("s1", "keep it to one page")] } }),
+    ];
+    const out = expandSteers(rows);
+    expect(out.map((r) => r.id)).toEqual(["u1", "a1:steer", "a1"]);
+    expect(out[1].role).toBe("user");
+    expect(out[1].content).toContain("keep it to one page");
+  });
+
+  it("frames the text so the model can tell it from the original request", () => {
+    const [emitted] = expandSteers([row({ content: "done", metadata: { steers: [steer("s1", "add a chart")] } })]);
+    expect(emitted.content).not.toBe("add a chart");
+    expect(emitted.content).toContain("add a chart");
+  });
+
+  it("carries no metadata, so the reply's parts aren't replayed under a user role", () => {
+    const [emitted] = expandSteers([
+      row({ content: "done", metadata: { parts: [{ type: "text", text: "done" }], steers: [steer("s1", "x")] } }),
+    ]);
+    expect(emitted.metadata).toBeNull();
+    // And it survives the presenter as one plain text part.
+    const [ui] = toUIMessages([emitted]);
+    expect(ui.parts).toEqual([{ type: "text", text: emitted.content }]);
+  });
+
+  it("joins several steers of one turn into a single message, in the order they landed", () => {
+    const [emitted] = expandSteers([
+      row({ content: "done", metadata: { steers: [steer("s1", "first"), steer("s2", "second", "call-1")] } }),
+    ]);
+    expect(emitted.content.indexOf("first")).toBeLessThan(emitted.content.indexOf("second"));
+  });
+
+  it("leaves an unsteered history exactly as it was", () => {
+    const rows = [row({ id: "u1", role: "user", content: "hi" }), row({ id: "a1", content: "hello" })];
+    expect(expandSteers(rows)).toEqual(rows);
   });
 });

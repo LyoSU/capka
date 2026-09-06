@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "steers" jsonb DEFAULT '[]'::jsonb NOT NULL;

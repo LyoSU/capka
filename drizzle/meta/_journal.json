@@ -512,6 +512,13 @@
       "when": 1788615588318,
       "tag": "0072_medical_karen_page",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788724399742,
+      "tag": "0073_same_longshot",
+      "breakpoints": true
     }
   ]
 }

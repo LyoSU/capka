@@ -2,7 +2,7 @@ import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronDown, ChevronLeft, ChevronRight, GitBranch, X, Info,
-  MoreHorizontal, ArrowRight, Clock, BookMarked,
+  MoreHorizontal, ArrowRight, Clock, BookMarked, CornerDownRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -1216,8 +1216,46 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
   );
 }
 
+/**
+ * A steer on the rail: what the user said while the turn was already working.
+ *
+ * It is on the rail rather than in a bubble of its own because of where it
+ * happened — between two of this turn's actions, not between two turns. Drawn as
+ * a bubble above the reply it interrupted, the transcript would read as if the
+ * user had waited for the answer and then spoken, which is the one thing that did
+ * NOT happen; and drawn after it, as if they had spoken to the next turn.
+ *
+ * The user's own voice, so the text is foreground weight while the label around it
+ * stays muted — the mirror of a MemoryRow, where the label is the sentence and the
+ * user's words are the quoted part.
+ */
+function SteerRow({ text, connect, stagger }: { text: string; connect?: boolean; stagger?: number }) {
+  // See ReasoningRow: the cascade step is fixed at mount, so a row does not
+  // re-animate every time the rail above it grows.
+  const [i] = useState(stagger ?? 0);
+  const t = useTranslations("chat.message");
+  return (
+    <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <CornerDownRight className="animate-step-in h-4 w-4" />
+      </span>
+      {/* Same hairline geometry as MemoryRow — hung from the row, since this text
+          wraps — so a steer between two steps keeps the rail one continuous line. */}
+      {connect && <span aria-hidden className="absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-[15px] leading-snug">
+        <span className="shrink-0">{t("steer")}</span>
+        <span className="min-w-0 text-foreground [overflow-wrap:anywhere]">{text}</span>
+      </span>
+    </div>
+  );
+}
+
 /** A single unit of work on the rail — either the model thinking or a tool call. */
-type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: ToolPart };
+type ActivityItem =
+  | { kind: "reasoning"; text: string }
+  | { kind: "tool"; part: ToolPart }
+  /** Something the user said WHILE this was running — see SteerRow. */
+  | { kind: "steer"; id: string; text: string };
 
 /** Renders an interleaved run of reasoning + tool calls the way the run actually
  *  went: thoughts as prose, actions as small glyph rows between them, consecutive
@@ -1239,6 +1277,8 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, sandb
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} stagger={staggerIndex(i, base)} />
+      : it.kind === "steer"
+      ? <SteerRow key={it.id} text={it.text} connect={items[i + 1]?.kind === "tool"} stagger={staggerIndex(i, base)} />
       : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={staggerIndex(i, base)} />,
   );
   // What the turn wrote to memory closes the rail: it is the one action of the turn
@@ -1741,7 +1781,7 @@ function MessageAttachments({ chatId, files }: { chatId: string; files: { name: 
  * moves — the bubble just solidifies in place.
  */
 export function QueuedBubble({
-  text, refs, chatId, editing, onCancel, onEdit, onEditingChange,
+  text, refs, chatId, editing, onCancel, onEdit, onEditingChange, onSteer,
 }: {
   text: string;
   refs: { name: string; type: string }[];
@@ -1754,6 +1794,10 @@ export function QueuedBubble({
   onCancel?: () => void;
   onEdit?: (next: string, refs: FileRef[]) => void;
   onEditingChange?: (open: boolean) => void;
+  /** Send this message INTO the running turn instead of waiting for it — absent
+   *  when the turn can't take it (finished, awaiting the user) or when the message
+   *  carries files, which a turn already under way can no longer pick up. */
+  onSteer?: () => void;
 }) {
   const t = useTranslations("chat");
   const hasFiles = refs.length > 0;
@@ -1782,6 +1826,17 @@ export function QueuedBubble({
   return (
     <div className="group/queued flex animate-message-in justify-end px-4 md:px-6 py-4">
       <div className="flex max-w-[75%] items-center gap-1.5 lg:max-w-[65%]">
+        {onSteer && (
+          <Hint label={t("panel.steerQueued")}>
+            <button
+              type="button"
+              onClick={onSteer}
+              className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
+            >
+              <CornerDownRight className="h-4 w-4" />
+            </button>
+          </Hint>
+        )}
         {onEdit && (
           <Hint label={t("panel.editQueued")}>
             <button
@@ -2385,6 +2440,10 @@ interface ChatMessageProps {
    *  the "continue" button on a part-way failure can't be offered on a turn the
    *  conversation has already moved past. */
   onContinue?: (text: string) => void | Promise<boolean | void>;
+  /** Steers the composer has just sent for THIS turn but that no snapshot has come
+   *  back with yet. Drawn at the tail of the rail so the user's words appear the
+   *  instant they are sent; retired by id once `metadata.steers` carries them. */
+  pendingSteers?: { id: string; text: string }[];
 }
 
 /** A compaction checkpoint in the transcript: a labelled divider where earlier
@@ -2410,14 +2469,14 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter, pendingSteers }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[]; steers?: { id: string; text: string; afterToolCallId: string | null }[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2467,7 +2526,38 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
     | { kind: "approval"; part: ToolPart }
     | { kind: "ask"; part: ToolPart };
   const groups: Group[] = [];
-  for (const part of parts) {
+  // A steer joins the rail that is being built, and opens one when there isn't a
+  // rail yet (a turn steered before it called anything still has to show the words).
+  const pushSteer = (s: { id: string; text: string }) => {
+    const last = groups[groups.length - 1];
+    if (last?.kind === "activity") last.items.push({ kind: "steer", id: s.id, text: s.text });
+    else groups.push({ kind: "activity", items: [{ kind: "steer", id: s.id, text: s.text }] });
+  };
+  // Where each steer landed, keyed by the part it goes AFTER — `-1` for one that
+  // arrived before the turn had called anything, which opens the rail. The runner
+  // records the id of the tool call it followed rather than an index, because these
+  // `parts` are the presenter's (a call and its result folded into one) and not the
+  // ones it was counting (see ConsumedSteer). An anchor that isn't on screen — a
+  // live snapshot taken between a call being recorded and its part appearing —
+  // falls to the tail with the pending ones, which is where the turn is working.
+  const persistedSteers = metadata?.steers ?? [];
+  const liveSteers = (pendingSteers ?? []).filter((p) => !persistedSteers.some((s) => s.id === p.id));
+  const steerAt = new Map<number, typeof persistedSteers>();
+  const strandedSteers: typeof persistedSteers = [];
+  for (const s of persistedSteers) {
+    const at = s.afterToolCallId === null
+      ? -1
+      : parts.findIndex((p) => isToolPart(p) && (p as ToolPart).toolCallId === s.afterToolCallId);
+    if (at === -1 && s.afterToolCallId !== null) { strandedSteers.push(s); continue; }
+    const bucket = steerAt.get(at);
+    if (bucket) bucket.push(s); else steerAt.set(at, [s]);
+  }
+  for (let pi = 0; pi < parts.length; pi++) {
+    const part = parts[pi];
+    // Flushed at the TOP of the next iteration rather than the bottom of this one:
+    // the card branches below `continue`, and a steer after an approval card would
+    // otherwise be skipped.
+    for (const s of steerAt.get(pi - 1) ?? []) pushSteer(s);
     // A `manage` call suspended for native approval (and its resolved states) is
     // the user's one required action — it always renders as the prominent card.
     if (isToolPart(part) && isApprovalPart(part as ToolPart)) {
@@ -2522,6 +2612,12 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
       else groups.push({ kind: "activity", items: [{ kind: "tool", part: part as ToolPart }] });
     }
   }
+  // After the last part the reply recorded — and, with no parts at all, the `-1`
+  // bucket, so a turn steered before it did anything still shows the words.
+  for (const s of steerAt.get(parts.length - 1) ?? []) pushSteer(s);
+  for (const s of strandedSteers) pushSteer(s);
+  for (const s of liveSteers) pushSteer(s);
+
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
   const lastIdx = groups.length - 1;
   const firstActivityIdx = groups.findIndex((g) => g.kind === "activity");

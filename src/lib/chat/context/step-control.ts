@@ -1,4 +1,5 @@
 import { pruneMessages, type ModelMessage } from "ai";
+import { steerFrame } from "@/lib/chat/contracts";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { outputBytes } from "@/lib/tool-output";
 import { posInt } from "@/lib/config/env";
@@ -150,6 +151,64 @@ export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number)
   const keepLast = messages.length - boundary;
   if (boundary <= 0 || keepLast <= 0) return messages;
   return pruneMessages({ messages, toolCalls: `before-last-${keepLast}-messages` });
+}
+
+/**
+ * A steer this turn has taken, with the absolute index it was placed at — or none
+ * yet, for one that has just arrived and has not been placed by any step.
+ */
+export interface PlacedSteer {
+  id: string;
+  text: string;
+  /** Absolute index into the step's REBUILT message list. Undefined until placed. */
+  index?: number;
+}
+
+/**
+ * Splice this turn's steers into the message list of ONE step.
+ *
+ * A steer has exactly one legal position when it first arrives: the END of the
+ * list. It is a `user` message, and after a tool loop the tail is a tool message —
+ * Anthropic's provider folds a run of tool + user messages into a single user turn,
+ * so appending puts the text after the `tool_result` blocks, which is the one place
+ * every provider accepts it. Anywhere earlier separates a `tool_use` from its
+ * result and is a hard 400.
+ *
+ * Every LATER step then has to put it back, and put it back in the SAME PLACE. A
+ * `messages` value returned from `prepareStep` is that step's prompt and nothing
+ * else — the SDK rebuilds `[...initialMessages, ...responseMessages]` from its own
+ * history each step and never sees what we returned last time. Re-APPENDING would
+ * therefore move the steer past the assistant message that answered it (reversing
+ * the causality the model reads) and change the prompt prefix on every step, which
+ * is a cache miss per step for the rest of the turn. Re-inserting at the recorded
+ * absolute index keeps the prefix byte-identical and the order true: the steer sits
+ * between the tool result it followed and the assistant message it produced. This
+ * is `pruneBoundary`'s trick with the sign flipped — same reason, same lifetime
+ * (one stream: a re-stream rebuilds a different list, so the caller drops the
+ * indices and lets the next step re-place them at the new tail).
+ *
+ * Earlier insertions shift later ones, which is why this walks the list once and
+ * emits by index rather than splicing repeatedly: the recorded indices are all in
+ * the coordinates of the UN-injected list, so they stay comparable to each other
+ * and to the prune boundary no matter how many steers precede them.
+ *
+ * Pure: returns a new list and a new steer array, so the caller can hold the
+ * updated indices for the next step without this function owning turn state.
+ */
+export function injectSteers(
+  messages: ModelMessage[],
+  steers: PlacedSteer[],
+): { messages: ModelMessage[]; steers: PlacedSteer[] } {
+  if (steers.length === 0) return { messages, steers };
+  const placed = steers.map((s) => (s.index === undefined ? { ...s, index: messages.length } : s));
+  const out: ModelMessage[] = [];
+  for (let i = 0; i <= messages.length; i++) {
+    for (const s of placed) {
+      if (s.index === i) out.push({ role: "user", content: steerFrame(s.text) });
+    }
+    if (i < messages.length) out.push(messages[i]);
+  }
+  return { messages: out, steers: placed };
 }
 
 /**

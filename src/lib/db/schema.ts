@@ -307,6 +307,13 @@ export const tasks = pgTable("tasks", {
   heartbeatAt: timestamp("heartbeat_at"),
   workerId: text("worker_id"),
   cancelRequested: boolean("cancel_requested").default(false),
+  // Mid-turn instructions the user added while this turn was already running (see
+  // `Steer`). Append-only from the endpoint, read per step by the runner — a
+  // column on the TASK rather than a message row because a steer belongs to the
+  // reply being written, and the running worker is the only thing that can place
+  // it in the prompt. The runner's own read cursor is in memory, so nothing
+  // rewrites this array and two workers can never fight over it.
+  steers: jsonb("steers").notNull().default([]),
   attempts: integer("attempts").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

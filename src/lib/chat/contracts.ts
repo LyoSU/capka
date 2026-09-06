@@ -65,6 +65,56 @@ export type StoredPart = z.infer<typeof storedPartSchema>;
  */
 export type LlmPurpose = "turn" | "title" | "memory" | "compaction";
 
+/**
+ * A mid-turn instruction the user added while the reply was already streaming —
+ * the third way to send a message, next to queueing it behind the turn and
+ * stopping the turn to send it now. Stored on `tasks.steers` (append-only) by the
+ * steer endpoint and folded into the running turn's next step by the runner.
+ *
+ * `id` is minted by the CLIENT and travels unchanged: the composer draws the
+ * steer on the timeline the instant it is sent, and the same id coming back in
+ * the turn's snapshot is what tells it the optimistic row has been replaced by
+ * the real one.
+ */
+export interface Steer {
+  id: string;
+  text: string;
+  /** ISO timestamp of when the user sent it. */
+  at: string;
+}
+
+/** A steer the runner actually folded into the prompt, with where it landed. */
+export interface ConsumedSteer extends Steer {
+  /** The model step it was folded into — for logs and for reading a turn back. */
+  atStep: number;
+  /** The last `tool-call` the reply had recorded when this landed, or `null` if it
+   *  had not called anything yet. THIS is what places the row on the transcript's
+   *  timeline: `parts` carries no step boundaries (a `StoredPart` has no
+   *  `step-start`), so `atStep` alone cannot be turned back into a position among
+   *  the tool calls the user can see.
+   *
+   *  An ANCHOR and not an index, because the two ends count in different
+   *  coordinates. The runner's `parts` holds a call and its result as two separate
+   *  entries and keeps text/reasoning parts it never renders; the presenter folds
+   *  each call+result pair into ONE `dynamic-tool` part and drops the empty ones.
+   *  So after N tool calls a stored index of ~2N addresses ~N on screen — the row
+   *  lands under the wrong step, or past the end of the list entirely. A tool-call
+   *  id survives that collapse unchanged, which is the one thing both sides agree
+   *  on. */
+  afterToolCallId: string | null;
+}
+
+/**
+ * How a steer reaches the model. Framed rather than passed bare so the model can
+ * tell an instruction that arrived MID-TASK from the request it started on — an
+ * unframed sentence spliced after a tool result reads as part of the original
+ * brief. Shared by the two places a steer is rendered into a prompt: the running
+ * turn's own step (see `injectSteers`) and every LATER turn, which replays it out
+ * of the message row (see `expandSteers`).
+ */
+export const steerFrame = (text: string) => `The user added while you were working: ${text}`;
+
+
 /** One background call's own accounting, denormalized onto the message row so the
  *  (i) popover needs no JOIN — the same bargain `usage`/`costUsd` make. */
 export interface AuxRecord {
@@ -200,6 +250,11 @@ export type MessageMeta = {
   // divider); only what we feed the model is collapsed. Written by the runner's
   // async compaction step. `tokensSaved` is best-effort, for the UI/analytics.
   compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number };
+  // Mid-turn instructions the user added while this reply was streaming, in the
+  // order the turn folded them in. Written by the SAME snapshot that writes
+  // `parts` — this whole object replaces the row's metadata on every save, so a
+  // steer appended separately would be erased by the next token that arrives.
+  steers?: ConsumedSteer[];
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

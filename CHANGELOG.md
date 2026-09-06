@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Steer a running reply: Alt+Enter in the composer (or the new action on a queued message) folds your text into the turn already in progress at its next step, without stopping it. Capped at 10 steers of 4000 characters per turn; a turn that finishes first falls back to sending the message normally.
+
 ## [0.40.0] - 2026-09-06
 
 ### Added

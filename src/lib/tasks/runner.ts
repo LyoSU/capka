@@ -10,9 +10,9 @@ import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath } from "@/lib/chat/tree";
-import { toUIMessages } from "@/lib/chat/presenter";
+import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask } from "@/lib/tasks/queue";
 import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
@@ -27,7 +27,7 @@ import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, thinkingIsDeep, markStepTail,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
-  MAX_STEPS } from "@/lib/chat/context/step-control";
+  injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { resolveAuxTarget } from "@/lib/providers/resolve";
@@ -46,7 +46,7 @@ import { StallWatchdog } from "./stall-watchdog";
 import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
-import type { StoredPart, MessageMeta, AuxRecord } from "@/lib/chat/contracts";
+import type { StoredPart, MessageMeta, AuxRecord, Steer, ConsumedSteer } from "@/lib/chat/contracts";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
@@ -220,6 +220,31 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
    * done anything, and would attribute another reply's calls to this one.
    */
   const inheritedEffects: TurnEffect[] = [];
+  /**
+   * Mid-turn steers, in three pieces because they have three different lifetimes.
+   *
+   * `consumedSteers` is the RECORD: every steer this reply folded in, persisted on
+   * the message with the rest of the snapshot (it has to ride in the same metadata
+   * object — a snapshot replaces the row's metadata wholesale, so anything written
+   * beside it is erased by the next token).
+   *
+   * `steerAnchors` is the PLACEMENT for the stream currently running: the absolute
+   * index each steer must be re-inserted at on every step (see injectSteers). It is
+   * scoped to one stream, like `pruneBoundary`, and for the same reason — a
+   * re-stream rebuilds a different list and the old indices point at nothing.
+   *
+   * `steersRead` is the read cursor into `tasks.steers`. The column is append-only
+   * and never rewritten, so "already folded in" is a count held here rather than a
+   * second write from the worker — which is also what keeps the endpoint's append
+   * free of any read-modify-write to race with.
+   */
+  const consumedSteers: ConsumedSteer[] = [];
+  let steerAnchors: PlacedSteer[] = [];
+  let steersRead = 0;
+  /** Steers inherited from the half of this turn that suspended for approval/answer.
+   *  That half was a DIFFERENT task row, so its unfolded steers live nowhere this
+   *  run would look; carried here and folded in by the first step that runs. */
+  let carriedSteers: Steer[] = [];
   // Set when the AI SDK suspends a `manage` tool call for native approval: the
   // turn finalizes as "awaiting_approval" (non-terminal — no aux, no output-file
   // delivery), the suspended tool-call part is marked with its approvalId, and the
@@ -497,6 +522,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       prior.durationMs = meta.durationMs;
       prior.reasoningMs = meta.reasoningMs;
       prior.llmCalls = meta.llmCalls;
+      // The first half's steers, carried for the same reason as its usage: this run
+      // rewrites the row's metadata wholesale, so a steer the user gave before the
+      // approval would drop off the transcript when the continuation saves.
+      consumedSteers.push(...(meta.steers ?? []));
+      // …and the ones it never got to fold in. They sit on the FIRST half's task row
+      // (a steer is addressed to a running task, and that task is finished), so this
+      // is the only place they can be picked up — `meta.taskId` is still the suspended
+      // half's id at this point; our own snapshot overwrites it below.
+      if (meta.taskId) {
+        carriedSteers = (await readSteers(meta.taskId)).slice((meta.steers ?? []).length);
+      }
       replyParentId = resumeMessageId;
       messageInserted = true;
     } else {
@@ -617,7 +653,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (path.length) {
         const assembled = buildModelContext(nodes as ContextRow[],
           toolsCleared ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST } : {});
-        uiMessages = toUIMessages(assembled);
+        // `expandSteers` re-emits each past turn's mid-turn instructions as user
+        // messages before the reply they steered — the model must read what the
+        // user asked for, not only the answer it shaped. Applied HERE and not
+        // inside buildModelContext so the taint fold below still runs on the real
+        // rows, and so the web transcript (same presenter) never draws them twice.
+        uiMessages = toUIMessages(expandSteers(assembled));
         // THE FOLD, over the ENTIRE assembled prompt — every row the model can see right
         // now, replayed history included. Not "what this turn newly constructed": poison
         // that arrives in turn 1 and acts in turn 5 is still verbatim in the prompt the
@@ -821,6 +862,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // an empty window on a turn that died of a full one. armPruneBoundary's
       // `stepNumber === 0` guard is what keeps it from arming off that ghost.
       pruneBoundary = 0;
+      // Same invalidation, same reason: a steer's anchor is an index into the list
+      // this stream is about to throw away. Dropping the indices (not the steers)
+      // makes the next step re-place them at the new tail, so the instruction stays
+      // in the prompt across a capability retry, an overflow trim or a stall resume.
+      steerAnchors = steerAnchors.map(({ id, text }) => ({ id, text }));
       // reasoning + context-management + caching may all target the same provider
       // namespace (e.g. anthropic) — merge so none clobbers the others.
       const providerOptions = mergeProviderOptions(
@@ -852,14 +898,44 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               experimental_repairToolCall: repairToolCall as never,
               prepareStep: async ({ stepNumber, messages }) => {
                 const base = reasoningStripped ? foldReasoningIntoText(messages) : messages;
+                // STEER: instructions the user added while this turn was already
+                // running. One cheap read of the task row per step; `steersRead` is
+                // the cursor, so each steer is folded in exactly once and every later
+                // step re-places it at the SAME absolute index (see injectSteers) —
+                // which is what keeps the prompt prefix, and therefore the cache,
+                // stable for the rest of the turn.
+                const sent = await readSteers(taskId);
+                const fresh = [...carriedSteers, ...sent.slice(steersRead)];
+                carriedSteers = [];
+                steersRead = sent.length;
+                if (fresh.length) {
+                  // The last call the reply has recorded, which is what puts the row
+                  // on the transcript's timeline: parts carry no step boundaries, and
+                  // an INDEX into them would be read in the presenter's coordinates,
+                  // where a call and its result are one part rather than two — see
+                  // ConsumedSteer. `null` = nothing called yet, so the row opens the
+                  // rail. Both are recorded; `atStep` is for the logs.
+                  let afterToolCallId: string | null = null;
+                  for (let i = parts.length - 1; i >= 0; i--) {
+                    const p = parts[i];
+                    if (p.type === "tool-call") { afterToolCallId = p.id; break; }
+                  }
+                  for (const f of fresh) {
+                    consumedSteers.push({ ...f, atStep: stepNumber, afterToolCallId });
+                    tlog.info("steer folded into the running turn", { stepNumber, steerId: f.id });
+                  }
+                }
+                if (fresh.length) steerAnchors = [...steerAnchors, ...fresh.map((f) => ({ id: f.id, text: f.text }))];
+                const steered = injectSteers(base, steerAnchors);
+                steerAnchors = steered.steers;
+                let msgs = steered.messages;
                 // BRIDGE: on a chat-completions transport the image can't ride the
                 // view_file tool result, so append the rendered pages as a user
                 // message for the one step right after the call (null otherwise, so
                 // we don't override `messages` — and break the cache — on every step).
-                let msgs = base;
                 if (viewFileBridge) {
                   const inject = await buildViewFileInjection(messages, sessionKey, userId);
-                  if (inject) msgs = [...base, inject];
+                  if (inject) msgs = [...msgs, inject];
                 }
                 // RELIEF: shed the tool traffic this turn accumulated before the cut,
                 // armed the first step whose measured prompt crossed the trigger and
@@ -906,7 +982,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                     // and the turn is not recorded as having armed.
                     pruneArmedEarlier = true;
                   }
-                  msgs = pruneTurnToolTraffic(msgs, pruneBoundary);
+                  // The boundary is an index into `base`; the pruner counts TRAILING
+                  // messages of the list it is handed. Injections at or past the cut
+                  // ride in that tail and need no adjustment (which is why the
+                  // view-file bridge never did), but a steer anchored to an earlier
+                  // step sits in the pruned prefix and would otherwise buy back one
+                  // message of tool traffic each.
+                  const before = steerAnchors.filter((a) => (a.index ?? 0) <= pruneBoundary).length;
+                  msgs = pruneTurnToolTraffic(msgs, pruneBoundary + before);
                 }
                 // Moving cache breakpoint on the step tail (see markStepTail for why
                 // it clones): without it, everything a tool loop appends sits beyond
@@ -1115,7 +1198,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const snapContent = getFullText();
       await db.update(messages).set({
         content: snapContent,
-        metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq },
+        // Steers ride INSIDE this object, never beside it: the update replaces the
+        // row's whole metadata, so a separately-written steer would survive exactly
+        // until the next token arrived. Copied, like `parts`, so a steer folded in
+        // during the await can't mutate what we persist.
+        metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq,
+          ...(consumedSteers.length ? { steers: [...consumedSteers] } : {}) },
       }).where(eq(messages.id, msgId));
     };
 
@@ -1873,6 +1961,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // withholding it left the failed turns in the transcript labelled with a
         // bare "Reasoning", which reads as if nothing had happened at all.
         reasoningMs: turn.reasoningMs,
+        // On EVERY outcome, like reasoningMs: a turn the user steered and that then
+        // failed still had those words said to it, and the transcript is where the
+        // user goes looking for them.
+        ...(consumedSteers.length ? { steers: consumedSteers } : {}),
         ...(touchedFiles ? { touchedFiles } : {}),
         ...(citedLean.length ? { citedSources: citedLean } : {}),
         // On EVERY outcome, not just the successful ones: a failed turn's message
@@ -1981,6 +2073,49 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       );
     }
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
+
+    // FALLBACK: steers this turn never read.
+    //
+    // A steer is folded in by `prepareStep`, and `prepareStep` runs before a step —
+    // so a steer that arrives while the model is writing the LAST step (or during a
+    // turn that called no tools at all) reaches no prompt: there is no next step to
+    // fold it into. Those are the user's words, and silently dropping them is the
+    // one outcome this feature cannot have. So they become an ordinary follow-up
+    // turn — one user message carrying them, exactly as if the user had sent it the
+    // moment the reply landed.
+    //
+    // `completed` only, deliberately. A CANCELLED turn was stopped by the user, and
+    // answering them with a turn they did not ask for is the opposite of what they
+    // pressed. A FAILED turn would send the same words straight back into whatever
+    // just broke. A SUSPENDED one is waiting on the user's approval, and a queued
+    // turn would run over the very question being asked — its steers are carried by
+    // the continuation instead (see `carriedSteers`).
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer) {
+      try {
+        const unread = [...carriedSteers, ...(await readSteers(taskId)).slice(steersRead)];
+        if (unread.length) {
+          const followUpId = nanoid();
+          await db.insert(messages).values({
+            id: followUpId, chatId, parentId: msgId, role: "user",
+            content: unread.map((u) => u.text).join("\n\n"),
+            platform: payload.origin?.platform ?? "web",
+          });
+          await db.update(chats).set({ activeLeafId: followUpId, updatedAt: new Date() }).where(eq(chats.id, chatId));
+          // No budget hold: the same path automations take. The turn reconciles its
+          // real spend at finalize either way, and refusing a hold here would strand
+          // the message with nothing to answer it.
+          await enqueueTask({
+            id: nanoid(), chatId, userId,
+            payload: { requestModel: payload.requestModel, projectId: payload.projectId, uiMessages: [], origin: payload.origin },
+          });
+          tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: unread.length });
+        }
+      } catch (e) {
+        // Never fail a finished turn over its epilogue — the reply is already
+        // delivered and this is recovery of a message, not of the answer.
+        tlog.warn("could not queue the late steers as a follow-up turn", { err: errMsg(e) });
+      }
+    }
     // One structured line per finished run — the happy path used to leave no
     // trace in the logs (everything went to the DB), so "what happened with
     // task X" wasn't greppable for successful turns.

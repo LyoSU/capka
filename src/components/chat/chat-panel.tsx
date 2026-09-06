@@ -466,7 +466,54 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // could never re-enable — a failed send left it dead until a reload.
   const handleSendAsUser = useCallback((text: string) => sendRef.current(text, []), []);
 
-  const handleSubmit = async () => {
+  // Steers this client has sent for the turn currently streaming, drawn on its
+  // timeline immediately so the words don't sit in a hole until the next snapshot.
+  // The id is the one the server stores, so the row it comes back in replaces this
+  // one rather than doubling it. Cleared when the turn ends — by then the message's
+  // own metadata carries them.
+  const [pendingSteers, setPendingSteers] = useState<{ id: string; text: string }[]>([]);
+  useEffect(() => {
+    if (!isLoading) setPendingSteers([]);
+  }, [isLoading]);
+
+  // Fold text into the turn that is already running, without stopping it. Returns
+  // false when the turn can no longer take it (it finished between the keystroke
+  // and the request, or it has taken its fill) — the caller then falls back to the
+  // ordinary queue, which is where the message belongs at that point.
+  //
+  // The task id is resolved on demand rather than tracked, for the same reason
+  // `stop()` resolves it: the running turn may have been started by another tab, by
+  // Telegram, or before this client mounted, so no locally-remembered id is
+  // trustworthy — and a steer is a deliberate keystroke, not a hot path.
+  const steer = async (id: string, text: string): Promise<boolean> => {
+    try {
+      const taskId: string | null = await fetch(`/api/tasks?chatId=${chatId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((task) => (task?.status === "running" ? (task.id as string) : null));
+      if (!taskId) return false;
+      const res = await fetch(`/api/tasks/${taskId}/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, text }),
+      });
+      if (!res.ok) return false;
+      setPendingSteers((cur) => [...cur, { id, text }]);
+      scrollActions.jumpToBottom();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // When a message could be steered into the live turn at all. The two holds are
+  // the ones "send now" already refuses: `awaitingInput` is a turn suspended on the
+  // user's own approval or answer, and `!historyLoaded` means this client has no
+  // conversation yet. Attachments are checked per message rather than here — the
+  // turn resolved its files before it started, so there is no step at which a new
+  // one could join it, and such a message queues as its own turn instead.
+  const canSteer = isLoading && !awaitingInput && historyLoaded && !readOnly;
+
+  const handleSubmit = async (opts?: { steer?: boolean }) => {
     const text = input.trim();
     const refs = attachments.readyRefs;
     // Nothing to send, or an attachment is still uploading (send is disabled in
@@ -483,6 +530,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // `!historyLoaded`: a chat opened moments ago may not have its history yet,
     // so sending now would carry no conversation context to the model. Queue it
     // (persisted) and let the drain effect fire once history resolves.
+    //
+    // Unless the user asked to STEER (Alt+Enter): then the message goes into the
+    // running turn instead of behind it. `clearDraft()` above already emptied the
+    // composer, so a steer that lands has nothing left to tidy; one that doesn't
+    // falls through to the queue below, which is where it belongs by then.
+    if (opts?.steer && canSteer && text && refs.length === 0 && (await steer(nanoid(), text))) return;
     if (!historyLoaded || isLoading || queued.length > 0 || dispatchingRef.current || sendingRef.current) {
       // nanoid (not crypto.randomUUID, which is undefined on non-secure origins)
       // — and this id rides through the drain into the POST as the message id, so
@@ -736,6 +789,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       onStop={stop}
       isLoading={isLoading}
       awaitingInput={awaitingInput}
+      canSteer={canSteer}
       chatId={chatId}
       files={attachments.files}
       onAddFiles={attachments.add}
@@ -784,6 +838,16 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               if (editingId === q.id) setEditingId(null);
               ghostGroupRef.current?.focus();
             }}
+            // Offered only for a text-only message on a steerable turn: files can
+            // no longer join a turn that has already started (see `canSteer`). The
+            // ghost keeps its own id, so the steer the server records is the same
+            // message the user is looking at.
+            onSteer={!onWire && canSteer && q.text && q.refs.length === 0 ? async () => {
+              if (await steer(q.id, q.text)) {
+                setQueued((qq) => qq.filter((x) => x.id !== q.id));
+                ghostGroupRef.current?.focus();
+              }
+            } : undefined}
           />
         );
       })}
@@ -954,6 +1018,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       // already spinning on the rail, so it gets a dim sub-line
                       // under that step rather than a second indicator of its own.
                       sandboxPending={isStreamingMsg && taskInfo.phase === "sandbox"}
+                      // Steers this client has just sent, drawn on the running
+                      // turn's timeline before the snapshot that persists them.
+                      pendingSteers={isStreamingMsg ? pendingSteers : undefined}
                       onRegenerate={i === lastAssistantIndex && !readOnly ? handleRegenerate : undefined}
                       onEdit={!readOnly ? handleEdit : undefined}
                       onSwitchBranch={switchBranch}
