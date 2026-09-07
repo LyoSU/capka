@@ -528,23 +528,32 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding,background-color,color] duration-150 ease-[var(--ease-strong)] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  // A nav row is drawn by TONE, not by weight or ink: every row is the same
+  // 14px/500, and the only thing that separates "the chat you are reading" from
+  // the forty above it is a fill and full-strength ink. Rest is muted with no
+  // fill, hover takes the quiet `--hover` step, press the `--hover-strong` one,
+  // and the current row keeps `--sidebar-accent` — the panel's own active token,
+  // a bigger step than hover in both themes, so the three states read as a
+  // ladder instead of two shades of the same wash. Radius is 10px: one notch
+  // under the 12px `rounded-xl` of the surfaces these rows sit inside, which is
+  // the file's own rule (a row is a step below its surface).
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-[10px] px-3 py-2 text-left text-sm font-medium text-muted-foreground ring-sidebar-ring outline-hidden transition-[width,height,padding,background-color,color] duration-150 ease-[var(--ease-strong)] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-hover hover:text-foreground focus-visible:ring-2 active:bg-hover-strong active:text-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-hover data-open:hover:text-foreground data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
-        default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        default: "hover:bg-hover hover:text-foreground",
         // Was `shadow-[0_0_0_1px_hsl(var(--sidebar-border))]` — a leftover from the
         // HSL-triplet era of these variables. Our tokens hold full `oklch(...)`
         // colours, so `hsl(oklch(...))` was invalid and the browser dropped the
         // whole declaration: this variant has been rendering with no edge at all.
         outline:
-          "bg-background shadow-btn hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          "bg-background shadow-btn hover:bg-hover hover:text-foreground",
       },
       // The navigation rung (globals.css): 36px by default, not the menus' 40.
       // `sm` is the control ladder's small step so a dense nav and a dense form
       // agree; `lg` stays a 48px header row.
       size: {
-        default: "h-9 text-[15px]",
+        default: "h-9 text-sm",
         sm: "h-8 text-sm",
         lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
       },

@@ -964,9 +964,13 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href={newChatHref} />}>
+                {/* The one row in the panel that is an ACTION rather than a
+                    destination, so it keeps full-strength ink where every chat
+                    row below it sits at muted — the weight difference is what
+                    puts it at the top of the reading order without a fill. */}
+                <SidebarMenuButton className="text-foreground" render={<Link href={newChatHref} />}>
                   <Plus strokeWidth={2.75} />
-                  <span className="font-medium">{t("newChat")}</span>
+                  <span>{t("newChat")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
