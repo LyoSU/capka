@@ -6,17 +6,42 @@
  * rest of their Markdown (lists, bold, links, fences) renders as written.
  * Blank-line paragraph breaks and fence bodies are left exactly as typed.
  */
+
+/** An opening or closing fence line: up to three spaces of indent, then a run of
+ *  three or more backticks or tildes (CommonMark). Both markers matter — the
+ *  renderer accepts either, so guarding only backticks put two trailing spaces
+ *  inside a `~~~` block and the copied code stopped matching what was typed. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
 export function withHardBreaks(text: string): string {
-  return text
-    .split(/(^|\n)(```[\s\S]*?(?:\n```|$))/)
-    .map((chunk, i) =>
-      // The split keeps its capture groups: from index 1 on, every third element is
-      // the newline that led into a fence and the one after it the fence itself
-      // (opening line through closing line). Only the prose chunks (index 0 mod 3)
-      // get the break treatment; the newline that opens a prose chunk is the closing
-      // fence's own line end, and a fence interrupts a paragraph by itself, so
-      // neither edge needs a break.
-      i % 3 === 0 ? chunk.replace(/(?<!^|\n)\n(?!\n)/g, "  \n") : chunk,
-    )
-    .join("");
+  const lines = text.split("\n");
+  // Which lines belong to a fenced block (its delimiters included) — they are
+  // passed through untouched, and so is the prose line that opens one.
+  const fenced: boolean[] = [];
+  let open: string | null = null;
+  for (const line of lines) {
+    const m = FENCE.exec(line);
+    if (open === null) {
+      // A backtick fence's info string may not contain a backtick, which is what
+      // keeps inline code like ```a``b`` from opening a block. Tildes may.
+      const opens = !!m && (m[1][0] === "~" || !line.slice(m[0].length).includes("`"));
+      fenced.push(opens);
+      if (opens) open = m![1];
+      continue;
+    }
+    fenced.push(true);
+    // Closes only on the SAME marker, at least as long as the opener, with nothing
+    // but whitespace after it — so ``` inside a ~~~ block stays content.
+    if (m && m[1][0] === open[0] && m[1].length >= open.length && line.slice(m[0].length).trim() === "") open = null;
+  }
+  return lines
+    .map((line, i) => {
+      const next = lines[i + 1];
+      // A hard break belongs on a non-empty prose line that another prose line
+      // follows. Not before a blank line (that is a paragraph break the person
+      // typed), not at the end of the message, and never around a fence.
+      const soft = !fenced[i] && !fenced[i + 1] && line !== "" && next !== undefined && next !== "";
+      return soft ? `${line}  ` : line;
+    })
+    .join("\n");
 }

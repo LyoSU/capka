@@ -249,6 +249,9 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     r.onresult = null;
     r.onerror = null;
     r.onend = null;
+    // Detached like the rest: a late audiostart after abort/unmount would otherwise
+    // put the phase back to "hearing" for a run that is already over.
+    r.onaudiostart = null;
     try {
       r.abort();
     } catch {

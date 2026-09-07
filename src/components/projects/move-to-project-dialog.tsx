@@ -17,6 +17,18 @@ import { cn } from "@/lib/utils";
 
 type ProjectLite = { id: string; name: string };
 
+/** Which sentence the move earned. A move succeeds even when a folder cannot come
+ *  along — the destination already has one under that name, and a rejected move
+ *  would be worse than a folder left behind — and the server names the ones that
+ *  stayed in `foldersNotCarried`. Reporting a plain "moved" for that case leaves the
+ *  person hunting for a folder that quietly stopped being attached to this chat.
+ *  Pure, and separate from the component so it can be tested. */
+export function moveOutcome(body: unknown): { key: "moved" | "foldersLeftBehind"; folders: string[] } {
+  const listed = (body as { foldersNotCarried?: unknown } | null)?.foldersNotCarried;
+  const folders = Array.isArray(listed) ? listed.filter((n): n is string => typeof n === "string" && n !== "") : [];
+  return folders.length > 0 ? { key: "foldersLeftBehind", folders } : { key: "moved", folders: [] };
+}
+
 /** Move a chat between projects (or out of one). Presents the honest matrix
  *  message for the chosen destination before applying — a project-less chat's
  *  files are copied in; a chat already in a project keeps that project's shared
@@ -75,7 +87,12 @@ export function MoveToProjectDialog({
         return;
       }
       if (!res.ok) { toast.error(t("error")); return; }
-      toast.success(t("moved"));
+      const outcome = moveOutcome(await res.json().catch(() => null));
+      if (outcome.key === "foldersLeftBehind") {
+        toast.warning(t("foldersLeftBehind", { folders: outcome.folders.join(", "), count: outcome.folders.length }));
+      } else {
+        toast.success(t("moved"));
+      }
       onOpenChange(false);
       onMoved();
     } catch {

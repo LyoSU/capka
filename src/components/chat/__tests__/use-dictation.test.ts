@@ -27,6 +27,7 @@ class FakeRecognition implements SpeechRecognitionLike {
   onresult: ((event: SpeechResultEventLike) => void) | null = null;
   onerror: ((event: { error: string }) => void) | null = null;
   onend: (() => void) | null = null;
+  onaudiostart: (() => void) | null = null;
 
   start() {
     this.started = true;
@@ -243,6 +244,22 @@ describe("dictation engine", () => {
     h.live().end();
     expect(h.errors).toEqual([]);
     expect(h.engine.listening()).toBe(false);
+  });
+
+  // Every handler has to come off the abandoned run, not just the three that
+  // deliver text: an audiostart arriving after the abort would put the phase back
+  // to "hearing" for a session that is over (and update state after unmount).
+  it("detaches every handler from the run it abandons", () => {
+    for (const leave of [(h: ReturnType<typeof harness>) => h.engine.stop(), (h) => h.engine.dispose()] as ((h: ReturnType<typeof harness>) => void)[]) {
+      const h = harness("");
+      h.engine.start();
+      const r = h.live();
+      r.onaudiostart?.();
+      expect(h.engine.phase()).toBe("hearing");
+      leave(h);
+      expect(r.aborted).toBe(true);
+      expect([r.onresult, r.onerror, r.onend, r.onaudiostart]).toEqual([null, null, null, null]);
+    }
   });
 });
 

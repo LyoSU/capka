@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { apiHandler, requireActive } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, pool } from "@/lib/db";
 import { attachedFolders } from "@/lib/db/schema";
 
 // Persist / read the PC-sync base manifest (3-way merge base) around a sync.
@@ -36,12 +36,23 @@ export const PUT = apiHandler(async (req: Request, { params }: { params: Promise
   // If the stored revision moved on (another tab/member synced the same folder
   // meanwhile), reject — overwriting would revert their merge ancestor and can
   // resurrect a file they just deleted. The client re-loads and reconciles next sync.
+  //
+  // The comparison has to live in the UPDATE, not beside it. Reading the row and
+  // then writing it left a window wide enough for two tabs to both read the same
+  // `rev`, both pass the check, and both write: the guard reported success to both
+  // and the second silently reverted the first. Compared as text so a `rev` that
+  // isn't a number fails the swap instead of raising a cast error, and so an absent
+  // state reads as revision 0 — the same starting point the bridge assumes.
+  const json = state === null ? null : JSON.stringify(state);
   if (typeof body.expectedRev === "number") {
-    const currentRev = (row.state as { rev?: number } | null)?.rev ?? 0;
-    if (currentRev !== body.expectedRev) {
-      return Response.json({ error: "Conflict — folder state changed elsewhere." }, { status: 409 });
-    }
+    const { rowCount } = await pool.query(
+      `UPDATE attached_folders SET state = $2::jsonb, updated_at = now()
+        WHERE id = $1 AND COALESCE(state->>'rev', '0') = $3`,
+      [id, json, String(body.expectedRev)],
+    );
+    if (!rowCount) return Response.json({ error: "Conflict — folder state changed elsewhere." }, { status: 409 });
+    return Response.json({ ok: true });
   }
-  await db.update(attachedFolders).set({ state, updatedAt: new Date() }).where(eq(attachedFolders.id, id));
+  await pool.query(`UPDATE attached_folders SET state = $2::jsonb, updated_at = now() WHERE id = $1`, [id, json]);
   return Response.json({ ok: true });
 });

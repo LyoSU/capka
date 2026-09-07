@@ -11,7 +11,10 @@ export type Entry = { mtime: number; size: number; hash?: string };
 export type Manifest = Record<string, Entry>;
 
 /** A losing version to keep beside the winner. `source` is the side the losing
- *  bytes still live on (read them there), `keepAs` is the path to keep them under. */
+ *  bytes still live on (read them there), `keepAs` is the path to keep them under —
+ *  the *proposed* name: only the executor can see whether something already sits
+ *  there, so it steps the counter (`resolveConflictName` in bridge.ts) before
+ *  writing. The directory is what the plan depends on, and that never changes. */
 export type ConflictCopy = { path: string; keepAs: string; source: "local" | "remote" };
 
 export type SyncPlan = {
@@ -23,10 +26,14 @@ export type SyncPlan = {
   conflictCopies: ConflictCopy[]; // the losing versions, preserved before the winner overwrites
 };
 
-/** The name a losing version is kept under: "report.docx" → "report.conflict-2026-09-07-1432.docx".
- *  Dated so two conflicts on the same file never collide, and so the person can tell
- *  at a glance which copy is which. Extension preserved so it still opens. Pure. */
-export function conflictName(path: string, at: Date): string {
+/** The name a losing version is kept under: "report.docx" → "report.conflict-2026-09-07-143200.docx".
+ *  Dated so the person can tell at a glance which copy is which; extension preserved
+ *  so it still opens. `nth` above 1 appends "-2", "-3" … for the case the dated name
+ *  is already taken — the stamp used to stop at the minute, so a second conflict on
+ *  the same file inside that minute produced the SAME name and the write truncated the
+ *  version the first one had just saved. Seconds narrow that window; the counter (see
+ *  `freeConflictName`) closes it. Pure. */
+export function conflictName(path: string, at: Date, nth = 1): string {
   const slash = path.lastIndexOf("/");
   const dir = path.slice(0, slash + 1); // "" when there is no slash
   const base = path.slice(slash + 1);
@@ -35,9 +42,10 @@ export function conflictName(path: string, at: Date): string {
   const stem = dot > 0 ? base.slice(0, dot) : base;
   const ext = dot > 0 ? base.slice(dot) : "";
   const p = (n: number) => String(n).padStart(2, "0");
-  const stamp = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}`;
-  return `${dir}${stem}.conflict-${stamp}${ext}`;
+  const stamp = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
+  return `${dir}${stem}.conflict-${stamp}${nth > 1 ? `-${nth}` : ""}${ext}`;
 }
+
 
 /** Same file content? Compare by hash when both sides carry one (the reliable
  *  signal); otherwise fall back to size (the server manifest is mtime+size only). */

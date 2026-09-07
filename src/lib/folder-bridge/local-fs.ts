@@ -127,6 +127,17 @@ export async function readLocalFile(root: DirHandle, path: string): Promise<File
   return (await dir.getFileHandle(parts[parts.length - 1])).getFile();
 }
 
+/** Is there already a file at this path on the computer? A manifest cannot answer
+ *  that on its own — it is a snapshot, and it deliberately omits ignored and
+ *  oversized paths — so a conflict copy asks the real directory before writing,
+ *  since `createWritable()` truncates whatever it lands on. */
+export async function localFileExists(root: DirHandle, path: string): Promise<boolean> {
+  const parts = path.split("/");
+  const dir = await resolveDir(root, parts.slice(0, -1), false).catch(() => null);
+  if (!dir) return false;
+  return dir.getFileHandle(parts[parts.length - 1]).then(() => true, () => false);
+}
+
 export async function writeLocalFile(root: DirHandle, path: string, data: Blob): Promise<void> {
   const parts = path.split("/");
   const dir = await resolveDir(root, parts.slice(0, -1), true);

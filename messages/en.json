@@ -969,6 +969,7 @@
       "blockedTask": "This chat is still working. Wait for the reply to finish.",
       "error": "Could not move the chat.",
       "moved": "Chat moved",
+      "foldersLeftBehind": "Chat moved. {count, plural, one {The folder {folders} stayed behind: the project already has a folder with that name. Attach it again from the “+” menu if you need it here.} other {These folders stayed behind: {folders}. The project already has folders with those names. Attach them again from the “+” menu if you need them here.}}",
       "moveButton": "Move"
     },
     "emptyHint": "Create one to keep the chats and files of a topic together.",

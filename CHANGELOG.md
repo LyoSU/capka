@@ -44,6 +44,10 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Folder sync: two conflicts on the same file within a minute no longer overwrite each other's kept copy; conflict names carry seconds and a counter, and are checked against both sides before writing.
+- Folder sync: a long sync renews its lease while it runs and stops the moment another window takes the folder over; the shared merge base is written with an atomic compare-and-swap, so two tabs can no longer both "win".
+- Moving a chat into a project now says which connected folders could not come along (a folder with the same name was already there) instead of a plain "moved".
+- Chat: a `~~~` code fence in a user message is left exactly as typed, like a ``` fence; the microphone detaches every listener when dictation stops.
 - Chat secrets: values shorter than 4 characters are refused (the redactor never hid them), encoded forms of a value (base64, hex, URL-encoding) are redacted from command output too, and a chat holds at most 32 secrets (the sandbox limit) instead of breaking every command at the 33rd.
 - Chat secrets: in a project, a secret stored in one chat is redacted from command output in every chat sharing that workspace (a background job's log could reveal it to a sibling chat).
 - "Regenerate title" and storing or deleting secrets require a writing role; a viewer can no longer do either. Regenerating a title also passes the same budget and rate limits as sending a message.

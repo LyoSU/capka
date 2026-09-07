@@ -204,23 +204,40 @@ describe("conflictName — a dated name beside the original", () => {
   const at = new Date(2026, 8, 7, 14, 32); // local time: what the person sees on their PC
 
   it("keeps the extension so the copy still opens", () => {
-    expect(conflictName("report.docx", at)).toBe("report.conflict-2026-09-07-1432.docx");
+    expect(conflictName("report.docx", at)).toBe("report.conflict-2026-09-07-143200.docx");
   });
 
   it("keeps the copy in the same directory", () => {
-    expect(conflictName("a/b/report.docx", at)).toBe("a/b/report.conflict-2026-09-07-1432.docx");
+    expect(conflictName("a/b/report.docx", at)).toBe("a/b/report.conflict-2026-09-07-143200.docx");
   });
 
   it("handles a name with no extension", () => {
-    expect(conflictName("README", at)).toBe("README.conflict-2026-09-07-1432");
+    expect(conflictName("README", at)).toBe("README.conflict-2026-09-07-143200");
   });
 
   it("treats a dotfile as a whole name, not an extension", () => {
-    expect(conflictName(".env", at)).toBe(".env.conflict-2026-09-07-1432");
+    expect(conflictName(".env", at)).toBe(".env.conflict-2026-09-07-143200");
   });
 
-  it("pads month, day, hour and minute", () => {
-    expect(conflictName("x.txt", new Date(2026, 0, 3, 4, 5))).toBe("x.conflict-2026-01-03-0405.txt");
+  it("pads month, day, hour, minute and second", () => {
+    expect(conflictName("x.txt", new Date(2026, 0, 3, 4, 5, 6))).toBe("x.conflict-2026-01-03-040506.txt");
+  });
+
+  // Minute precision was the whole guard, so two conflicts on one file inside the
+  // same minute produced the SAME name and the second write truncated the version
+  // the first had just saved. Seconds narrow that; `nth` is what closes it.
+  it("separates two conflicts on the same file within a minute", () => {
+    const first = conflictName("report.docx", new Date(2026, 8, 7, 14, 32, 4));
+    const second = conflictName("report.docx", new Date(2026, 8, 7, 14, 32, 51));
+    expect(first).not.toBe(second);
+  });
+
+  it("appends a counter from the second name on, keeping the extension last", () => {
+    const at = new Date(2026, 8, 7, 14, 32, 4);
+    expect(conflictName("report.docx", at, 1)).toBe("report.conflict-2026-09-07-143204.docx");
+    expect(conflictName("report.docx", at, 2)).toBe("report.conflict-2026-09-07-143204-2.docx");
+    expect(conflictName("report.docx", at, 3)).toBe("report.conflict-2026-09-07-143204-3.docx");
+    expect(conflictName("README", at, 2)).toBe("README.conflict-2026-09-07-143204-2");
   });
 });
 

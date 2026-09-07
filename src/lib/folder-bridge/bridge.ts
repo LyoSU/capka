@@ -4,15 +4,17 @@
  * decision-making is the pure planner (plan.ts); this file is the browser-only
  * plumbing — File System Access handles, IndexedDB, and the file API calls.
  *
- * Not unit-tested (handle I/O + IndexedDB have no vitest surface); the pure parts
- * it leans on — the 3-way planner and the hash prefilter — are. Best-effort by
- * design: a sync failure warns, it never blocks the turn (see chat-input).
+ * Mostly not unit-tested (handle I/O + IndexedDB have no vitest surface); the pure
+ * parts it leans on — the 3-way planner and the hash prefilter — are, and so are the
+ * two decisions this file makes on its own (`resolveConflictName`, `leaseRenewMs`).
+ * Best-effort by design: a sync failure warns, it never blocks the turn (see
+ * chat-input).
  */
 
-import { planSync, planDirs, type Manifest } from "./plan";
+import { planSync, planDirs, conflictName, type Manifest } from "./plan";
 import {
   walkLocal, walkLocalDirs, hashCandidates, mergeHashed, sha256Hex,
-  readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir,
+  readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir, localFileExists,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
 import { ignoredPath, oversized, exceedsCeiling, sanitizeFolderName, FolderTooLargeError } from "./filter";
@@ -139,6 +141,36 @@ export async function uploadBatch(target: WorkspaceTarget, name: string, paths: 
     if (!res.ok) throw new Error("upload failed");
     onProgress?.({ phase: "uploading", done: Math.min(i + chunk.length, paths.length), total: paths.length });
   }
+}
+
+/** How many "-2", "-3" … steps a conflict copy may take before we give up.
+ *  Unreachable in practice — it would need that many conflicts on one file inside a
+ *  single second — but a bound makes a predicate stuck on "taken" fail loudly. */
+const NAME_TRIES = 100;
+
+/** The name a conflict copy is actually written under: the planner's dated name, or
+ *  the next free "…-2", "…-3" … `taken` has to answer for BOTH sides, because the copy
+ *  is written on the computer AND uploaded to the workspace under this same name, and
+ *  either write truncates whatever is already there — which is how a second conflict on
+ *  one file destroyed the version the first one had just kept. Throws rather than
+ *  returning a colliding name: preserving the losing version is the only reason this
+ *  path exists, and a thrown sync leaves the merge base untouched so the next one
+ *  retries cleanly. `taken` is injected, which is what makes this testable. */
+export async function resolveConflictName(path: string, at: Date, taken: (name: string) => Promise<boolean>): Promise<string> {
+  for (let nth = 1; nth <= NAME_TRIES; nth++) {
+    const name = conflictName(path, at, nth);
+    if (!(await taken(name))) return name;
+  }
+  throw new Error(`Could not find a free name to keep the other version of ${path} under.`);
+}
+
+/** How often to renew the sync lease, given the expiry the server just handed us.
+ *  A fifth of its life, so several missed ticks still cannot let it lapse — a hidden
+ *  tab's timers are throttled to roughly one a minute. The clamps keep a skewed
+ *  browser clock, or a missing/garbled expiry, from producing a useless interval. Pure. */
+export function leaseRenewMs(expiresAt: string | undefined, now: number = Date.now()): number {
+  const ttl = expiresAt ? Date.parse(expiresAt) - now : NaN;
+  return Number.isFinite(ttl) ? Math.min(120_000, Math.max(15_000, Math.floor(ttl / 5))) : 60_000;
 }
 
 async function downloadFromWorkspace(target: WorkspaceTarget, name: string, rel: string): Promise<Blob> {
@@ -350,15 +382,40 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   const leaseRes = await fetch(`/api/folders/${folder.id}/lease`, { method: "POST" }).catch(() => null);
   if (leaseRes?.status === 409) return { synced: 0, conflicts: 0, skipped: 0, skippedByLease: true };
   if (!leaseRes?.ok) throw new Error("Could not reserve the folder for syncing.");
-  const leaseToken = ((await leaseRes.json().catch(() => ({}))) as { token?: string }).token ?? null;
+  const lease = (await leaseRes.json().catch(() => ({}))) as { token?: string; expiresAt?: string };
+  const leaseToken = lease.token ?? null;
   if (!leaseToken) throw new Error("Could not reserve the folder for syncing.");
+
+  // The lease has a fixed lifetime, but the span it protects does not: scanning,
+  // hashing and moving up to FOLDER_MAX_FILES files can outlast it, and once it
+  // lapses a second tab takes it and both runs write against the same folder. So
+  // renew it while the sync works, and stop the sync the moment it is gone —
+  // running on without it is exactly the concurrent-write hazard the lease exists
+  // to stop. Two independent signals of "gone": the server refusing a renewal
+  // (someone else holds it now), and the expiry passing with no renewal getting
+  // through at all (a run of network failures — silence is not consent).
+  let deadline = Date.parse(lease.expiresAt ?? "") || Date.now() + 60_000;
+  let leaseTaken = false;
+  const renew = async () => {
+    const r = await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "PATCH" }).catch(() => null);
+    if (!r) return; // network blip — the expiry above is the backstop
+    if (!r.ok) { leaseTaken = true; return; }
+    deadline = Date.parse(((await r.json().catch(() => ({}))) as { expiresAt?: string }).expiresAt ?? "") || deadline;
+  };
+  const leaseGone = () => leaseTaken || Date.now() >= deadline;
+  const beat = setInterval(() => { void renew(); }, leaseRenewMs(lease.expiresAt));
   try {
     return await runSync(handle);
   } finally {
+    clearInterval(beat);
     await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
   }
 
   async function runSync(handle: DirHandle): Promise<SyncOutcome> {
+  // Called at the start of every phase that writes: no lease, no writing.
+  const guard = () => {
+    if (leaseGone()) throw new Error("Another window took over syncing this folder, so this sync stopped.");
+  };
   // Load the merge ancestor FRESH from the shared row (source of truth across
   // tabs/members) plus its revision for the optimistic write below. A missing/empty
   // base makes this sync a safe union (no data loss, just forgets deletes once).
@@ -370,13 +427,17 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // Paths skipped (oversized) on either side: their absence from a manifest is a
   // "didn't look", not a delete. The planner leaves them untouched entirely.
   const excluded = new Set([...localExcluded, ...remoteExcluded]);
-  const plan = planSync(local, remote, base, excluded);
+  // One timestamp for the plan, so the conflict-copy names the executor resolves
+  // below step from the same stamp the planner proposed.
+  const plannedAt = Date.now();
+  const plan = planSync(local, remote, base, excluded, plannedAt);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
-  const keptCopies = plan.conflictCopies.map((c) => c.keepAs);
   // A directory holding any file this run writes must survive on both sides (D5).
-  const dirPlan = planDirs(localDirs, remoteDirs, dbase, [...plan.upload, ...plan.download, ...localWins, ...remoteWins, ...keptCopies]);
+  // The proposed copy names are enough here: a copy always sits in the directory of
+  // the file it belongs to, and resolving the name never moves it.
+  const dirPlan = planDirs(localDirs, remoteDirs, dbase, [...plan.upload, ...plan.download, ...localWins, ...remoteWins, ...plan.conflictCopies.map((c) => c.keepAs)]);
 
   // Keep the losing version of every conflict BEFORE anything overwrites it. The
   // losing bytes are read from the side they still live on and written to the
@@ -384,27 +445,40 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // the copy exists on both sides by the end of this run. (Writing it only on the
   // computer would put it in the new ancestor while the workspace lacks it, and the
   // next sync would read that as a deletion and remove it again.)
+  guard();
+  // Every path either side already knows about. A conflict copy must not land on one
+  // of them — the write here and the upload that follows both truncate — and the set
+  // grows as we go, so two copies in one run cannot pick the same name either.
+  const claimed = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(base), ...localDirs, ...remoteDirs]);
+  const keptCopies: string[] = [];
   for (const c of plan.conflictCopies) {
+    const keepAs = await resolveConflictName(c.path, new Date(plannedAt), async (n) => claimed.has(n) || await localFileExists(handle, n));
+    claimed.add(keepAs);
     const losing = c.source === "local"
       ? await readLocalFile(handle, c.path)
       : await downloadFromWorkspace(target, folder.name, c.path);
-    await writeLocalFile(handle, c.keepAs, losing);
+    await writeLocalFile(handle, keepAs, losing);
+    keptCopies.push(keepAs);
   }
 
+  guard();
   await uploadBatch(target, folder.name, [...plan.upload, ...localWins, ...keptCopies], (rel) => readLocalFile(handle, rel), onProgress);
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
+  guard();
   await runPool(downloads, 6, async (path) => {
     await writeLocalFile(handle, path, await downloadFromWorkspace(target, folder.name, path));
     onProgress?.({ phase: "downloading", done: ++di, total: downloads.length });
   });
-  await runPool(plan.deleteRemote, 6, (path) => deleteFromWorkspace(target, folder.name, path));
-  await runPool(plan.deleteLocal, 6, (path) => deleteLocalFile(handle, path));
+  // Deletes are the operations a lost lease turns destructive, so they are checked
+  // per file rather than once per phase.
+  await runPool(plan.deleteRemote, 6, (path) => { guard(); return deleteFromWorkspace(target, folder.name, path); });
+  await runPool(plan.deleteLocal, 6, (path) => { guard(); return deleteLocalFile(handle, path); });
   // Directory sync (3-way, so a folder deleted on the PC is removed on the server
   // instead of being blindly re-mirrored back down). Delete husks first, then
   // create genuinely-new server dirs — mirrors empty folders the agent made.
-  for (const d of dirPlan.deleteRemote) await deleteFromWorkspace(target, folder.name, d);
-  for (const d of dirPlan.deleteLocal) await deleteLocalDir(handle, d);
+  for (const d of dirPlan.deleteRemote) { guard(); await deleteFromWorkspace(target, folder.name, d); }
+  for (const d of dirPlan.deleteLocal) { guard(); await deleteLocalDir(handle, d); }
   for (const d of dirPlan.createLocal) await ensureLocalDir(handle, d).catch(() => {});
 
   // Reconciled: local now matches the server for every touched path. Re-walk to
@@ -420,6 +494,10 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // base we loaded fresh this sync, and the next sync reloads whatever the winner
   // stored. The 409 needs no client action; a transient network failure is likewise
   // best-effort (an empty base next time is a safe union).
+  //
+  // A sync that lost its lease must not publish an ancestor at all: the run it
+  // describes was cut short, and the CAS cannot tell that apart from a complete one.
+  guard();
   const put = await fetch(`/api/folders/${folder.id}/state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
