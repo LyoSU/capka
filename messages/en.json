@@ -403,6 +403,13 @@
       "send": "Send message",
       "queue": "Queue message",
       "queueOrSteer": "Queue message — Alt+Enter adds it to the current reply",
+      "dictation": {
+        "start": "Dictate",
+        "stop": "Stop dictating",
+        "undo": "Undo dictation",
+        "permissionDenied": "No access to the microphone. Allow it in your browser settings, then try again.",
+        "failed": "Dictation stopped unexpectedly. Please try again."
+      },
       "remove": "Remove {name}",
       "tooLarge": "Too large (max {max}): {files}",
       "dropHere": "Drop files to attach",

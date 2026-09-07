@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
-import { ArrowUp, Info, Loader2, Paperclip, Square } from "lucide-react";
+import { useCallback, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
+import { ArrowUp, Info, Loader2, Mic, Paperclip, Square } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
 import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { AttachmentTray } from "@/components/chat/attachment-tray";
 import { useAutoGrow } from "@/components/chat/use-auto-grow";
+import { useDictation, type DictationErrorKind } from "@/components/chat/use-dictation";
 import type { FileRef } from "@/lib/constants";
 import type { Modality } from "@/lib/providers/registry";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
@@ -132,6 +134,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const tNotice = useTranslations("chat.notice");
+  const locale = useLocale();
   const isMobile = useIsMobile();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -140,6 +143,30 @@ export function ChatInput({
   // width changes, which is what a rotation or the sidebar opening does to a box
   // whose height was computed for a different line count.
   const resize = useAutoGrow(textareaRef, value);
+
+  // Speech-to-text straight into the composer, on whatever the browser provides.
+  // The hook reports `supported: false` where there is no engine, and the button
+  // simply isn't rendered — no disabled control, no explanation to read.
+  const onDictationError = useCallback(
+    (kind: DictationErrorKind) =>
+      toast.error(kind === "permission" ? t("dictation.permissionDenied") : t("dictation.failed")),
+    [t],
+  );
+  const dictation = useDictation({ textareaRef, value, onChange, lang: locale, onError: onDictationError });
+  const { stop: stopDictation } = dictation;
+
+  // The box grew by however many words were just spoken, so the height has to be
+  // recomputed exactly as it is on a keystroke.
+  useEffect(() => {
+    if (dictation.listening) resize();
+  }, [dictation.listening, value, resize]);
+
+  // Sending clears the composer under the dictation; close the microphone rather
+  // than leave it listening into an empty box.
+  const submit = (opts?: { steer?: boolean }) => {
+    stopDictation();
+    onSubmit(opts);
+  };
 
 
   // Land the caret in the composer when a chat opens — DESKTOP ONLY, where the
@@ -178,6 +205,15 @@ export function ChatInput({
   const canSend = hasContent && !uploading && !awaitingInput;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Escape takes back a dictation: the fastest way out of "that isn't what I
+    // said". `defaultPrevented` keeps us off an Escape that something above
+    // already claimed (a menu or a popover closing).
+    if (e.key === "Escape" && !e.defaultPrevented && (dictation.listening || dictation.canUndo)) {
+      e.preventDefault();
+      if (dictation.canUndo) dictation.undo();
+      else dictation.stop();
+      return;
+    }
     // On mobile, Enter is the on-screen keyboard's newline — sending happens via
     // the button instead (the hardware-keyboard convenience of Enter-to-send only
     // makes sense on a physical keyboard). `isComposing` guards an IME mid-word:
@@ -188,7 +224,7 @@ export function ChatInput({
       // the current turn (serialized per chat on the server). Holding Alt/Option
       // asks for the third option instead: fold it into the turn that is running,
       // without stopping it. The panel is what knows whether that can be honoured.
-      if (canSend) onSubmit(e.altKey ? { steer: true } : undefined);
+      if (canSend) submit(e.altKey ? { steer: true } : undefined);
     }
   };
 
@@ -323,6 +359,54 @@ export function ChatInput({
                 </Hint>
               )}
             </div>
+
+            {/* Dictation. Absent entirely where the browser has no speech engine
+                — a permanently dead button explains nothing. Listening reads as a
+                soft accent tint and the app's own slow pulse (the global
+                reduced-motion rule freezes it), plus a stop glyph, so the way out
+                is the same shape as every other stop on this screen. */}
+            {dictation.supported && (
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Hint label={dictation.listening ? t("dictation.stop") : t("dictation.start")}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-pressed={dictation.listening}
+                    aria-label={dictation.listening ? t("dictation.stop") : t("dictation.start")}
+                    className={`h-10 w-10 sm:h-8 sm:w-8 rounded-xl transition-transform active:scale-90 ${
+                      dictation.listening
+                        ? "animate-pulse-fast bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    // Keep the caret where the words are going — a button click
+                    // would otherwise pull focus out of the composer.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={dictation.toggle}
+                  >
+                    {dictation.listening ? (
+                      <Square className="h-4 w-4 fill-current sm:h-3.5 sm:w-3.5" />
+                    ) : (
+                      <Mic className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                    )}
+                  </Button>
+                </Hint>
+
+                {/* One action puts the composer back exactly as it was. It stands
+                    down the moment the user types, because from then on undoing
+                    would throw their own words away too. */}
+                {dictation.canUndo && (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md px-1.5 py-1 text-xs text-muted-foreground underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={dictation.undo}
+                  >
+                    {t("dictation.undo")}
+                  </button>
+                )}
+              </div>
+            )}
+
             {leading}
             </div>
 
@@ -359,7 +443,7 @@ export function ChatInput({
                     // steal focus (and close the mobile keyboard) on every send.
                     onMouseDown={(e) => e.preventDefault()}
                     // Ignore the click event React would pass as `opts`.
-                    onClick={() => onSubmit()}
+                    onClick={() => submit()}
                   >
                     {uploading ? (
                       <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />

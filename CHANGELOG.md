@@ -21,6 +21,7 @@ All notable changes to Capka are documented here. Format follows
 - `POST /api/chat` responses carry `deduped: true` when the message folded into a turn that was already queued.
 - Automations: "Notify: only when there is something to report" (`notify_mode: when_needed`) gives the run a `nothing_to_report` tool; a run that calls it ends without a Telegram message, a notification or an unread mark, and shows as one muted row in the chat that unfolds into the full turn (steps and reply). Quiet runs are counted per day in Settings.
 - Automations: per-automation "Also send to Telegram" switch (`deliver_telegram`, default on); off keeps results in the web chat only.
+- Chat: a microphone button in the composer dictates into the message with the browser's own speech engine (Chrome/Edge send the audio to Google, Safari to Apple; nothing reaches Capka's server; Firefox has no engine and shows no button). Ten-minute cap, one-step undo.
 
 ### Changed
 
