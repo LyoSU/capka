@@ -89,6 +89,18 @@ export const GET = apiHandler(async (req: Request) => {
     .limit(1)
     .as("last_message");
 
+  // A failure asks to be SEEN, not answered: the error card is already in the
+  // chat, and there is nothing to decide. So, unlike approval/ask (which block
+  // until the person acts), `failed` follows the same rule as `unread` — it leaves
+  // the bucket once the chat has been opened after the failure. Without this, every
+  // chat that ever failed would sit in "needs you" forever with no way out.
+  const attentionKind = sql<AttentionKind | null>`case
+      when ${lastMessage.attentionKind} = 'failed'
+       and coalesce(${chats.lastReadAt}, 'epoch'::timestamp) >= ${lastMessage.attentionSince}
+      then null
+      else ${lastMessage.attentionKind}
+    end`;
+
   const conditions: SQL[] = [eq(chats.userId, userId)];
 
   if (search) conditions.push(ilike(chats.title, `%${search}%`));
@@ -99,7 +111,7 @@ export const GET = apiHandler(async (req: Request) => {
   if (projectId === "none") conditions.push(isNull(chats.projectId));
   else if (projectId) conditions.push(eq(chats.projectId, projectId));
 
-  if (attentionOnly) conditions.push(sql`${lastMessage.attentionKind} is not null`);
+  if (attentionOnly) conditions.push(sql`${attentionKind} is not null`);
 
   // Keyset pagination on the (pinned DESC, updatedAt DESC, id DESC) ordering.
   // Postgres row-comparison does lexicographic ordering, so "rows after the
@@ -160,7 +172,7 @@ export const GET = apiHandler(async (req: Request) => {
           .where(and(eq(tasks.chatId, chats.id), inArray(tasks.status, ["queued", "running"]))),
       ),
       // Folded into the `attention` object below.
-      attentionKind: lastMessage.attentionKind,
+      attentionKind,
       attentionSince: lastMessage.attentionSince,
       // Internal: the canonical updatedAt string the cursor is built from.
       // Stripped from the response body below — never shipped to the client.

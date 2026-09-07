@@ -487,7 +487,13 @@ export function AppSidebar() {
   const reconcileReads = useCallback((rows: ChatItem[]): ChatItem[] => {
     const pending = pendingReadRef.current;
     if (pending.size === 0) return rows;
-    return rows.map((r) => (pending.has(r.id) && r.unread ? { ...r, unread: false } : r));
+    // A failed reply is cleared by opening the chat, exactly like unread (the
+    // server applies the same lastReadAt rule), so the in-flight override covers it.
+    return rows.map((r) =>
+      pending.has(r.id) && (r.unread || r.attention?.kind === "failed")
+        ? { ...r, unread: false, attention: r.attention?.kind === "failed" ? null : r.attention }
+        : r,
+    );
   }, []);
 
   // The "needs you" bucket, fetched separately because the list is paginated and
@@ -586,6 +592,9 @@ export function AppSidebar() {
   const markRead = useCallback((id: string) => {
     const pending = pendingReadRef.current;
     pending.add(id);
+    // Opening is what retires a failure from the bucket; do it locally now rather
+    // than waiting for a refresh, since the chat may sit outside the loaded page.
+    setChats((prev) => prev.map((c) => (c.id === id && c.attention?.kind === "failed" ? { ...c, attention: null } : c)));
     fetch(`/api/chats/${id}/read`, { method: "POST" })
       .catch(() => {})
       .finally(() => { pending.delete(id); });
@@ -682,7 +691,11 @@ export function AppSidebar() {
           // that suspended for an approval finishes normally and its mark was
           // already set above.
           const cid = d.chatId;
-          const failed = d.status === "failed" ? { attention: { kind: "failed" as const, since: new Date().toISOString() } } : {};
+          // Not for the chat being watched: the person is looking at the error
+          // card already, and markRead below stamps it seen on the server too.
+          const failed = d.status === "failed" && cid !== activeChatIdRef.current
+            ? { attention: { kind: "failed" as const, since: new Date().toISOString() } }
+            : {};
           setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false, ...failed } : c)));
           // If you're watching this chat, the reply you just saw complete is
           // read — re-stamp lastReadAt (the open-time stamp predates the reply)

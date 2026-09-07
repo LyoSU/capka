@@ -117,6 +117,25 @@ run("GET /api/chats attention", () => {
     expect(byId.get("att-user-last")!.attention).toBeNull();
   });
 
+  it("retires a failed reply once the chat has been opened after it, but keeps approval/ask", async () => {
+    const { pool } = await import("@/lib/db");
+    await chat("att-failed-seen", { minutesAgo: 1 });
+    await chat("att-failed-unseen", { minutesAgo: 2 });
+    await chat("att-approval-seen", { minutesAgo: 3 });
+    await message("m-fs", "att-failed-seen", "assistant", "failed", 60);
+    await message("m-fu", "att-failed-unseen", "assistant", "failed", 60);
+    await message("m-as", "att-approval-seen", "assistant", "awaiting_approval", 60);
+    // Opened 30s ago — after both 60s-old replies.
+    await pool.query(`UPDATE chats SET last_read_at = now() - interval '30 seconds' WHERE id = ANY($1)`,
+      [["att-failed-seen", "att-approval-seen"]]);
+
+    const byId = new Map((await list()).map((r) => [r.id, r]));
+    expect(byId.get("att-failed-seen")!.attention).toBeNull();
+    expect(byId.get("att-failed-unseen")!.attention?.kind).toBe("failed");
+    expect(byId.get("att-approval-seen")!.attention?.kind).toBe("approval");
+    expect((await list("?attention=true")).map((r) => r.id).sort()).toEqual(["att-approval-seen", "att-failed-unseen"]);
+  });
+
   it("attention=true returns only waiting chats, archived ones excluded", async () => {
     await chat("att-waiting", { minutesAgo: 1 });
     await chat("att-calm", { minutesAgo: 2 });
