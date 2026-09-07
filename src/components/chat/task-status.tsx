@@ -157,8 +157,11 @@ export function TaskStatus({
           number on a fast operation measures it for the user and thereby makes it
           feel slow. It appears only once the wait is long enough that not knowing
           is worse than knowing. `tabular-nums` stops the row twitching as digits
-          change width. */}
-      {time ? <span className="tabular-nums">· {time}</span> : null}
+          change width, and mono at 12px is the same rule a StepRow follows for the
+          literal thing it acted on: the typeface change alone says "machine
+          reading", so the eye can take the sentence beside it in its own
+          language instead of parsing a number set in the same face. */}
+      {time ? <span className="font-mono text-xs tabular-nums">· {time}</span> : null}
     </div>
   );
 }

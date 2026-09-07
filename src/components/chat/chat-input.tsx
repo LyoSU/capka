@@ -285,6 +285,11 @@ export function ChatInput({
             message, so it belongs on the rail the composer rises from — where an
             empty card stays an empty card. */}
         {folders && <FolderChips folders={folders} />}
+        {/* `relative` only so the activity line below can sit over the card. The
+            line has to be a SIBLING of the card rather than a child: the card
+            clips its content, and a stroke drawn on the inside of that clip is
+            shaved in half at every corner. */}
+        <div className="relative">
         <div className="overflow-hidden rounded-2xl bg-card shadow-raised transition-micro focus-within:shadow-overlay">
           {/* Attached files preview — same square FileTile used in chat history, so
               a staged file looks identical to a sent one. A ready file shows its
@@ -492,6 +497,31 @@ export function ChatInput({
               )}
             </div>
           </div>
+        </div>
+        {/* One monochrome line travelling the card's perimeter while the turn
+            runs. The composer already says "working" with a Stop button, which is
+            a control, not a signal — nothing on this surface MOVED, so on a long
+            turn the page read as frozen and people pressed Stop to find out. A
+            30%-of-perimeter dash at 4.5s is slow enough to be peripheral: you see
+            it if you look at the box, not if you are reading the answer above it.
+            `pathLength=100` makes the dash a percentage of the perimeter, so it
+            stays the same fraction whatever the composer has grown to.
+
+            Always mounted, so the opacity transition has something to fade FROM
+            and the line does not blink out at the end of a turn; paused rather
+            than unmounted so it costs nothing while off. Hidden outright under
+            reduced motion (globals.css) — the global reset would otherwise freeze
+            it mid-travel and leave a dash stuck to one edge. */}
+        <svg
+          aria-hidden
+          data-on={isLoading || undefined}
+          className="composer-activity pointer-events-none absolute inset-px"
+          width="100%"
+          height="100%"
+          fill="none"
+        >
+          <rect x="0" y="0" width="100%" height="100%" rx="15" ry="15" pathLength={100} />
+        </svg>
         </div>
       </div>
     </div>

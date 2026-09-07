@@ -735,6 +735,42 @@
   animation: text-shimmer 1.4s linear infinite;
 }
 
+/* The composer's "a turn is running" line: one stroke travelling the card's
+   perimeter. The Stop button already tells you a turn is running, but a button is
+   a control, not a signal — nothing on that surface moved, so a long turn read as
+   a frozen page. Monochrome ink at low alpha with a half-pixel blur, so it is
+   peripheral: visible when you look at the box, invisible while you read the
+   answer above it. `pathLength: 100` (set on the rect in chat-input.tsx) makes the
+   dash a percentage of the perimeter rather than a pixel length, so it stays 30%
+   of the way round however tall the composer has grown.
+
+   The svg is always mounted and the animation is PAUSED rather than unmounted:
+   the opacity transition needs something to fade from at both ends, and a paused
+   animation costs nothing. */
+@keyframes composer-activity {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+.composer-activity {
+  opacity: 0;
+  transition: opacity 450ms var(--ease-out);
+}
+.composer-activity[data-on] {
+  opacity: 0.35;
+}
+.composer-activity rect {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-dasharray: 30 70;
+  filter: blur(0.5px);
+  animation: composer-activity 4.5s linear infinite;
+  animation-play-state: paused;
+}
+.composer-activity[data-on] rect {
+  animation-play-state: running;
+}
+
 /* Citation chips are React components (components/chat/sources.tsx), not CSS
    over the markdown anchor: Streamdown sanitizes the hast with rehype-sanitize's
    default schema, which strips the data-* attribute a selector here would need. */
@@ -886,6 +922,13 @@
     transition-duration: 0.01ms !important;
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
+  }
+  /* The composer's travelling line is the one animation here that cannot be
+     collapsed to its end state: frozen, it is a dash welded to one edge of the
+     box, which says nothing and looks like a rendering fault. It carries no
+     information the Stop button beside it does not already carry, so it goes. */
+  .composer-activity {
+    display: none !important;
   }
   /* View-transition snapshots are pseudo-elements outside the * reset above, so
      the cross-page crossfade needs its own opt-out — content swaps instantly. */
