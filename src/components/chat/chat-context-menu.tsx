@@ -58,6 +58,7 @@ export function ChatContextMenu({
   onOpenChange,
   showTrigger = true,
   contentProps,
+  renameInDialog = false,
 }: {
   chat: ChatItem;
   onUpdate: () => void;
@@ -69,6 +70,12 @@ export function ChatContextMenu({
   /** Where the popover lands. The sidebar row wants it beside itself; a header
    *  button at the right edge of the window wants it below. */
   contentProps?: React.ComponentProps<typeof ActionMenu>["contentProps"];
+  /** Rename in a dialog rather than in place. The inline field REPLACES this
+   *  component's own output, which is right for a sidebar row — the row becomes
+   *  the field — and useless anywhere the component is not the row: in the chat
+   *  header it renders a `w-full` input into an icon-sized span, so Rename read
+   *  as a menu item that did nothing at all. */
+  renameInDialog?: boolean;
   // The menu's open state can be driven from the row (a long-press on touch,
   // where the visible ⋮ trigger is hidden). Falls back to internal state so the
   // component still works uncontrolled.
@@ -211,7 +218,7 @@ export function ChatContextMenu({
     }
   }
 
-  if (renaming) {
+  if (renaming && !renameInDialog) {
     return (
       <form
         onSubmit={(e) => {
@@ -327,6 +334,40 @@ export function ChatContextMenu({
         </button>
         )}
       </ActionMenu>
+
+      {renameInDialog && (
+        <Dialog open={renaming} onOpenChange={(o) => !o && setRenaming(false)}>
+          <DialogContent>
+            <DialogHeader>
+              {/* No description: the dialog is a title and one labelled field,
+                  and a sentence restating "type a name" would be decoration.
+                  Deliberately not a new i18n key for the same reason. */}
+              <DialogTitle>{t("menu.rename")}</DialogTitle>
+            </DialogHeader>
+            {/* A form, so Enter saves — the inline field gets that for free and
+                the dialog has to ask for it. */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitRename();
+              }}
+            >
+              <Input
+                aria-label={t("menu.rename")}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                autoFocus
+              />
+            </form>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRenaming(false)}>
+                {tc("cancel")}
+              </Button>
+              <Button onClick={submitRename}>{tc("save")}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <MoveToProjectDialog
         open={moveOpen}

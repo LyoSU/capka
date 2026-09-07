@@ -78,6 +78,8 @@ export function ChatMenuButton({ chatId }: { chatId: string }) {
           open={menuOpen}
           onOpenChange={setMenuOpen}
           showTrigger={false}
+          // No row here to turn into a text field — see renameInDialog.
+          renameInDialog
           contentProps={{ side: "bottom", align: "end", sideOffset: 8, className: "w-auto" }}
         />
       )}
