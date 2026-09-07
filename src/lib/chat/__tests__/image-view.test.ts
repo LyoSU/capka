@@ -7,6 +7,7 @@ import {
   swipeVerdict,
   FLOOR_MAX_SCALE,
   type Geometry,
+  tapZoomTarget,
 } from "@/lib/chat/image-view";
 
 /** A 1000x1000 picture fitted exactly into a 1000x1000 pane. */
@@ -184,5 +185,27 @@ describe("swipeVerdict", () => {
 
   it("does not divide by a zero-length gesture", () => {
     expect(swipeVerdict({ dx: -50, dy: 0, elapsedMs: 0, width: 800 })).toBe(0);
+  });
+});
+
+describe("tapZoomTarget", () => {
+  const fitted = (naturalWidth: number) => ({ image: { w: 900, h: 600 }, frame: { w: 1000, h: 700 }, naturalWidth });
+
+  it("zooms a fitted picture to 2x when its own pixels are not bigger than that", () => {
+    expect(tapZoomTarget(fitted(900), 1)).toBe(2);
+    expect(tapZoomTarget(fitted(1200), 1)).toBe(2);
+  });
+
+  it("zooms a large capture straight to 1:1, where its small print is readable", () => {
+    expect(tapZoomTarget(fitted(5000), 1)).toBeCloseTo(5000 / 900);
+  });
+
+  it("takes a zoomed picture back to fit, whatever the zoom was", () => {
+    expect(tapZoomTarget(fitted(5000), 1.01)).toBe(1);
+    expect(tapZoomTarget(fitted(900), 8)).toBe(1);
+  });
+
+  it("does not divide by an unlaid-out image", () => {
+    expect(tapZoomTarget({ image: { w: 0, h: 0 }, frame: { w: 1000, h: 700 }, naturalWidth: 5000 }, 1)).toBe(2);
   });
 });

@@ -21,7 +21,7 @@ import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
-import { applyGesture, swipeVerdict, wheelZoomFactor, type Geometry, type Point } from "@/lib/chat/image-view";
+import { applyGesture, swipeVerdict, tapZoomTarget, wheelZoomFactor, TAP_SLOP_PX, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -732,6 +732,15 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
   // React has re-rendered, and a threshold measured against a width of 0 is no
   // threshold at all — every twitch would page.
   const swiping = useRef<{ x: number; y: number; at: number; width: number } | null>(null);
+  // Where the lone pointer went down, so letting go without having travelled can
+  // be told apart from the end of a pan. Cleared the moment a second pointer
+  // joins: a pinch is never a click. The pointer type rides along because a
+  // mouse click zooms while a finger's single tap does not (a tap is how a swipe
+  // starts, and touch has double-tap for this).
+  const tap = useRef<{ at: Point; x: number; y: number; type: string } | null>(null);
+  // `dblclick` is a MouseEvent with no pointer type of its own; this is the type
+  // of the last pointer that touched the frame, which is what produced it.
+  const lastPointerType = useRef("");
 
   const geometry = useCallback((): Geometry | null => {
     const el = picture.current;
@@ -753,11 +762,11 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
    * is read in the same place, for the same reason.
    */
   const apply = useCallback(
-    (next: (cur: number) => number, from: Point, to: Point, animate: boolean) => {
+    (next: (cur: number, g: Geometry) => number, from: Point, to: Point, animate: boolean) => {
       setView((v) => {
         const g = geometry();
         if (!g) return v;
-        const moved = applyGesture(v, g, next(v.scale), from, to);
+        const moved = applyGesture(v, g, next(v.scale, g), from, to);
         // Dragging against a bound, or a resize that changed nothing, must not
         // re-render sixty times a second to say so.
         if (moved.scale === v.scale && moved.x === v.x && moved.y === v.y && animate === v.animate) return v;
@@ -876,6 +885,16 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
 
     const started = swiping.current;
     swiping.current = null;
+    // A mouse button released where it was pressed is a click, and the cursor
+    // has been promising one zooms. Touch is left out on purpose: see `tap`.
+    const pressed = tap.current;
+    if (pressed && pointers.current.size === 0) {
+      tap.current = null;
+      if (pressed.type === "mouse" && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) < TAP_SLOP_PX) {
+        apply((cur, g) => tapZoomTarget(g, cur), pressed.at, pressed.at, true);
+        return;
+      }
+    }
     if (started && onPage) {
       const delta = swipeVerdict({
         dx: e.clientX - started.x,
@@ -907,14 +926,20 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
         role="group"
         aria-label={file.name}
         onDoubleClick={(e) => {
+          // Touch and pen only: on a mouse each click already toggles the zoom, so
+          // the pair would toggle twice and this handler would flip it a third time.
+          if (lastPointerType.current === "mouse") return;
           const at = framePoint(e, e.currentTarget);
-          apply((cur) => (cur > 1 ? 1 : 2), at, at, true);
+          apply((cur, g) => tapZoomTarget(g, cur), at, at, true);
         }}
         onPointerDown={(e) => {
           // Captured so a fast drag that leaves the frame keeps feeding us moves
           // instead of stranding the image mid-pan.
           e.currentTarget.setPointerCapture(e.pointerId);
-          pointers.current.set(e.pointerId, framePoint(e, e.currentTarget));
+          const at = framePoint(e, e.currentTarget);
+          pointers.current.set(e.pointerId, at);
+          lastPointerType.current = e.pointerType;
+          tap.current = pointers.current.size === 1 ? { at, x: e.clientX, y: e.clientY, type: e.pointerType } : null;
           gesture.current = readGesture();
           setDragging(pointers.current.size === 1);
           // Touch and pen only. On a desktop the arrows and the header buttons
@@ -977,7 +1002,9 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
           // `touch-none`: the browser's own pan/zoom must be off for two fingers
           // to reach us as plain pointers.
           "flex h-full touch-none items-center justify-center overflow-hidden p-4 outline-none",
-          zoomed ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
+          // The cursor is the contract: a plus that zooms in on click, a minus that
+          // zooms out on click, and a fist only while a pan is actually under way.
+          zoomed ? (dragging ? "cursor-grabbing" : "cursor-zoom-out") : "cursor-zoom-in",
         )}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}

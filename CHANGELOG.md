@@ -45,7 +45,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 - Chat: the "scroll down" pill no longer lands on top of the composer when the on-screen keyboard closes.
-
+- Chat: clicking a picture in the viewer zooms in where the pointer is, as its cursor has been promising, and clicking again zooms back out; a large capture goes straight to 1:1. Double-tap still zooms on touch.
 - Folder sync: an edit that kept a file's byte length is now detected (`GET /api/sandbox/files` forwards `hash=1` to the controller, so the planner compares content hashes instead of sizes).
 - Folder sync: a folder named in Cyrillic keeps a readable, distinct name in the workspace (`Звіти` → `zvity`) instead of collapsing to `folder` and merging with every other Cyrillic folder. Latin names keep their separators as `-` (`My Reports` → `my-reports`).
 - Moving a chat into a project carries its connected folders along; a folder whose name is already taken in the project stays behind and is named in the response (`foldersNotCarried`).

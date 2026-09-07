@@ -54,9 +54,33 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
  * default, or 1:1 with the file.
  */
 export function maxScale(g: Geometry): number {
-  const oneToOne = g.image.w > 0 ? g.naturalWidth / g.image.w : 1;
-  return Number.isFinite(oneToOne) ? Math.max(FLOOR_MAX_SCALE, oneToOne) : FLOOR_MAX_SCALE;
+  return Math.max(FLOOR_MAX_SCALE, oneToOne(g));
 }
+
+/** The scale at which one file pixel is one screen pixel; 1 for an image that is
+ *  not laid out yet, so nothing downstream divides by zero. */
+function oneToOne(g: Geometry): number {
+  const s = g.image.w > 0 ? g.naturalWidth / g.image.w : 1;
+  return Number.isFinite(s) ? s : 1;
+}
+
+/**
+ * Where a click (or a double-tap) on the picture takes the zoom.
+ *
+ * The cursor over a fitted image is a magnifier with a plus, and that is a
+ * promise: one click has to zoom, at the point clicked. A second click on a
+ * zoomed image undoes it — the magnifier shows a minus by then. The way in is
+ * 1:1 with the file when that is bigger than 2x, because a screenshot is opened
+ * to read the small print and 2x of a 5000px capture still cannot; for a picture
+ * that already fits, 1:1 would be no zoom at all, so 2x is the floor.
+ */
+export function tapZoomTarget(g: Geometry, scale: number): number {
+  return scale > MIN_SCALE ? MIN_SCALE : Math.max(2, oneToOne(g));
+}
+
+/** How far a pointer may wander between down and up and still be a click rather
+ *  than the start of a pan. */
+export const TAP_SLOP_PX = 6;
 
 /**
  * The furthest the image may be nudged from centre before its own edge comes
