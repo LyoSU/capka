@@ -4,7 +4,7 @@ import { execCommand, deleteFile, deleteSharedFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
 import { lineCount } from "@/lib/chat/edit-stats";
-import { redactSecrets } from "@/lib/chat/secrets";
+import { redactSecrets, loadRedactionSecrets } from "@/lib/chat/secrets";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
  *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
@@ -180,6 +180,23 @@ export async function loadSandboxTools(
     });
     return secretEnv;
   };
+  // What gets INJECTED is this chat's own env, above. What gets REDACTED is wider: the
+  // workspace is shared by every chat in the project (`projectId ?? chatId`), so a
+  // background job's raw log under `/workspace/.capka/jobs/` can hold a sibling chat's credential and
+  // this turn would have handed the model the plaintext. Same memoization, and resolved
+  // only for a run that has a chat at all — a caller with no `secrets` thunk has no
+  // session-scoped credentials to look up.
+  let redactPairs: Promise<[string, string][]> | null = null;
+  const resolveRedaction = (): Promise<[string, string][]> => {
+    if (!secrets) return Promise.resolve([]);
+    redactPairs ??= loadRedactionSecrets(sessionKey, userId).catch((e) => {
+      // Degrade to this chat's own values rather than to nothing: a failed union query
+      // must not turn redaction off for the credentials we already hold in hand.
+      console.warn("[sandbox] workspace secrets unavailable for redaction:", e instanceof Error ? e.message : e);
+      return [];
+    });
+    return redactPairs;
+  };
   // Best-effort lease: a job that outlives the turn keeps the container alive only
   // while the controller knows it's there. A failed lease is not a failed job — it
   // just falls back to plain idle eviction — so this never rejects into a tool call.
@@ -202,13 +219,15 @@ export async function loadSandboxTools(
     // by forgetting to opt in. The tee'd capture log inside the workspace keeps the
     // raw bytes — it is the user's own container, not the transcript — and the model
     // can only reach it by reading the file, which is another trip through here.
-    const env = await resolveSecrets();
+    const [env, workspaceSecrets] = await Promise.all([resolveSecrets(), resolveRedaction()]);
+    // This chat's own values first, so they are redacted even if the union query failed.
+    const toRedact: [string, string][] = [...Object.entries(env), ...workspaceSecrets];
     try {
       const result = await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal, env);
       return {
         ...result,
-        stdout: redactSecrets(result.stdout, env),
-        stderr: redactSecrets(result.stderr, env),
+        stdout: redactSecrets(result.stdout, toRedact),
+        stderr: redactSecrets(result.stderr, toRedact),
       };
     } catch (e) {
       // The disk-quota block (HTTP 413) is the one exec failure the agent can fix

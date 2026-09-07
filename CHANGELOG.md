@@ -44,6 +44,11 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Chat secrets: values shorter than 4 characters are refused (the redactor never hid them), encoded forms of a value (base64, hex, URL-encoding) are redacted from command output too, and a chat holds at most 32 secrets (the sandbox limit) instead of breaking every command at the 33rd.
+- Chat secrets: in a project, a secret stored in one chat is redacted from command output in every chat sharing that workspace (a background job's log could reveal it to a sibling chat).
+- "Regenerate title" and storing or deleting secrets require a writing role; a viewer can no longer do either. Regenerating a title also passes the same budget and rate limits as sending a message.
+- Chat: a steer that arrived while the last step was being written is kept as a message even when that turn then fails or is stopped; it is auto-answered only after a clean finish, and that follow-up passes the budget and rate limits.
+- Chat: a queued follow-up is removed from the browser's storage only after the server took it, so closing the tab mid-send no longer loses the text; two tabs no longer overwrite each other's queue.
 - Telegram: in a group, messages from two linked people no longer merge into one turn credited to whoever sent last.
 - Telegram: stopping or redeploying the platform flushes a half-collected message burst into the queue instead of dropping it.
 - Automations: a "tell me only when there is something to say" run shows no live draft in Telegram while it works; it either sends one final message or nothing.

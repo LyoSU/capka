@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { normalizeSecretName, isValidSecretValue, redactSecrets } from "@/lib/chat/secrets";
+import {
+  normalizeSecretName,
+  isValidSecretValue,
+  redactSecrets,
+  MIN_SECRET_VALUE_CHARS,
+} from "@/lib/chat/secrets";
 
 describe("normalizeSecretName", () => {
   it("turns what a person types into an environment variable name", () => {
@@ -25,7 +30,7 @@ describe("normalizeSecretName", () => {
 });
 
 describe("isValidSecretValue", () => {
-  it("takes any non-empty value up to the cap, but never a NUL", () => {
+  it("takes any value from the redactor's floor up to the cap, but never a NUL", () => {
     expect(isValidSecretValue("sk-live-1")).toBe(true);
     expect(isValidSecretValue("")).toBe(false);
     expect(isValidSecretValue("x".repeat(8192))).toBe(true);
@@ -33,6 +38,17 @@ describe("isValidSecretValue", () => {
     // A NUL cannot survive an environment variable — it would truncate the value
     // in the container and store a credential that silently isn't the one saved.
     expect(isValidSecretValue("ab\0cd")).toBe(false);
+  });
+
+  it("refuses exactly what the redactor would skip", () => {
+    // The two floors are ONE constant. Storing a value the redactor ignores would have
+    // kept the credential out of the container's env and put it straight into the
+    // transcript — the promise printed above the field, broken by the API accepting it.
+    expect(MIN_SECRET_VALUE_CHARS).toBeGreaterThan(0);
+    expect(isValidSecretValue("x".repeat(MIN_SECRET_VALUE_CHARS - 1))).toBe(false);
+    expect(isValidSecretValue("x".repeat(MIN_SECRET_VALUE_CHARS))).toBe(true);
+    // The concrete case from the report: `KEY=abc` was accepted and never redacted.
+    expect(isValidSecretValue("abc")).toBe(false);
   });
 });
 
@@ -55,15 +71,71 @@ describe("redactSecrets", () => {
     expect(redactSecrets("value=sk-live-abcd", env)).toBe("value=[secret:BASE]");
   });
 
-  it("leaves values shorter than four characters alone", () => {
+  it("leaves values below the floor alone", () => {
     // A two-character secret matches ordinary prose everywhere; redacting it would
-    // shred the output the model has to read while protecting nothing.
+    // shred the output the model has to read while protecting nothing. Unreachable
+    // through the API now — `isValidSecretValue` refuses to store one — but a row saved
+    // before that gate existed still flows through here.
     expect(redactSecrets("an ab cd result", { SHORT: "ab" })).toBe("an ab cd result");
     expect(redactSecrets("an abcd result", { OK: "abcd" })).toBe("an [secret:OK] result");
+  });
+
+  it("redacts the encodings a command can produce, not only the literal", () => {
+    // `printf %s "$KEY" | base64` was a complete bypass: the literal never appeared, and
+    // the model decodes the output itself. Every form below is a one-liner in the sandbox.
+    const value = "sk-live-abcdef";
+    const env = { TOKEN: value };
+    const b64 = Buffer.from(value, "utf8").toString("base64");
+    const hex = Buffer.from(value, "utf8").toString("hex");
+
+    expect(redactSecrets(`out=${b64}`, env)).toBe("out=[secret:TOKEN]");
+    expect(redactSecrets(`out=${b64.replace(/=+$/, "")}`, env)).toBe("out=[secret:TOKEN]");
+    expect(redactSecrets(`out=${hex}`, env)).toBe("out=[secret:TOKEN]");
+    expect(redactSecrets(`out=${hex.toUpperCase()}`, env)).toBe("out=[secret:TOKEN]");
+  });
+
+  it("redacts url-safe base64 and percent-encoding, which differ only for some values", () => {
+    // A value whose base64 carries `+` and `/` is the only one where the url-safe
+    // alphabet differs — `base64 | tr '+/' '-_'` and `jq -r @base64d` both show up in
+    // real command output, so both alphabets have to be covered.
+    const value = "a?b>c~d/+";
+    const b64 = Buffer.from(value, "utf8").toString("base64");
+    const urlSafe = b64.replace(/\+/g, "-").replace(/\//g, "_");
+    expect(urlSafe).not.toBe(b64);
+    expect(redactSecrets(`x ${b64} y`, { K: value })).toBe("x [secret:K] y");
+    expect(redactSecrets(`x ${urlSafe} y`, { K: value })).toBe("x [secret:K] y");
+    expect(redactSecrets(`x ${urlSafe.replace(/=+$/, "")} y`, { K: value })).toBe("x [secret:K] y");
+    // curl -G --data-urlencode, or any URL the token was pasted into.
+    const pct = encodeURIComponent(value);
+    expect(pct).not.toBe(value);
+    expect(redactSecrets(`https://x/?k=${pct}`, { K: value })).toBe("https://x/?k=[secret:K]");
+  });
+
+  it("orders every form longest-first, so a padded encoding cannot half-leak", () => {
+    // Unpadded base64 is a PREFIX of the padded form. Replacing the short one first
+    // would leave a bare `==` where a credential had been — which reads as redacted and
+    // tells the reader the padded form was matched, when it was not.
+    const value = "sk-live-abcde";
+    const b64 = Buffer.from(value, "utf8").toString("base64");
+    expect(b64.endsWith("=")).toBe(true);
+    expect(redactSecrets(`out=${b64}`, { TOKEN: value })).toBe("out=[secret:TOKEN]");
+  });
+
+  it("takes name/value pairs, so two chats' same-named secrets are both redacted", () => {
+    // The workspace union is pairs, not a map: chats in one project each hold a `TOKEN`.
+    // Keying by name would have kept one value and handed the model the other.
+    const pairs: [string, string][] = [
+      ["TOKEN", "sk-chat-a-value"],
+      ["TOKEN", "sk-chat-b-value"],
+    ];
+    expect(redactSecrets("a=sk-chat-a-value b=sk-chat-b-value", pairs)).toBe(
+      "a=[secret:TOKEN] b=[secret:TOKEN]",
+    );
   });
 
   it("is a no-op with no secrets and on empty text", () => {
     expect(redactSecrets("plain output", {})).toBe("plain output");
     expect(redactSecrets("", { TOKEN: "sk-live-abcdef" })).toBe("");
+    expect(redactSecrets("plain output", [])).toBe("plain output");
   });
 });

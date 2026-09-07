@@ -1,11 +1,15 @@
 import { eq } from "drizzle-orm";
-import { requireSession, apiHandler } from "@/lib/auth";
+import { nanoid } from "nanoid";
+import { requireWriter, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { loadActivePath } from "@/lib/chat/tree";
 import { generateChatTitle } from "@/lib/chat/title";
 import { resolveAuxTarget, resolveUserModelInfo } from "@/lib/providers/resolve";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
+import { BudgetExceededError } from "@/lib/errors";
+import { take } from "@/lib/rate-limit";
 import { recordUsage } from "@/lib/usage";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { stripNul } from "@/lib/tasks/sanitize";
@@ -26,11 +30,28 @@ import type { TokenUsage } from "@/lib/pricing";
  * user is looking at. A chat that has been forked or regenerated holds several
  * versions of the same exchange, and titling from an abandoned branch would name
  * the chat after something the reader cannot see.
+ *
+ * This route SPENDS: it calls a model, on the shared key when that is how the instance is
+ * configured. So it carries the same two gates as `/api/chat` — a write-capable role
+ * (`requireWriter`, which a read-only viewer fails) and a per-user flood guard plus an
+ * atomic budget reservation — rather than the bare `requireSession` it used to hold, which
+ * admitted a viewer and let any owner mint model calls past their cap by clicking a menu
+ * item. Same helpers, deliberately, so there is one answer to "am I over the limit".
  */
 export const POST = apiHandler(async (_req, { params }) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireWriter();
   const { id } = await params;
   const chat = await requireOwned(chats, id, userId, "Chat");
+
+  // Its own bucket, not the chat bucket: renaming must not consume the allowance for
+  // sending messages, and being rate-limited on one must not silence the other.
+  const rl = take(`title:${userId}`);
+  if (!rl.ok) {
+    return Response.json(
+      { error: "Too many requests — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } },
+    );
+  }
 
   const path = await loadActivePath(id, (chat.activeLeafId as string | null) ?? null);
   const userText = path.find((e) => e.node.role === "user")?.node.content ?? "";
@@ -54,8 +75,29 @@ export const POST = apiHandler(async (_req, { params }) => {
     configId: turn.configId, isShared: turn.isShared,
   });
 
+  // Reserve before calling the model, atomically and against the same windows a turn
+  // reserves against — a hold, so two concurrent renames cannot both slip under the cap.
+  // There is no task here, so the hold is keyed by an id minted for this request alone and
+  // released in the `finally` below; the real cost lands as its own settled row.
+  const holdId = nanoid();
+  const reservation = await reserveBudget({
+    userId, taskId: holdId, onSharedKey: target.isShared,
+    modelId: target.modelId, provider: target.provider, configId: target.configId,
+  });
+  if (!reservation.allowed) {
+    throw new BudgetExceededError(reservation.window ?? "m1");
+  }
+
   let spend: TokenUsage | undefined;
-  const title = await generateChatTitle(target.model, target.provider, userText, assistantText, (u) => { spend = u; });
+  let title: string | null = null;
+  try {
+    title = await generateChatTitle(target.model, target.provider, userText, assistantText, (u) => { spend = u; });
+  } finally {
+    // Always: the hold was only ever a reservation for a call that is now over, and the
+    // spend below is recorded independently of it. Leaving it behind would inflate this
+    // user's budget forever — nothing reconciles a hold that has no task row.
+    await releaseHold(holdId);
+  }
 
   // Settled before the response, not fire-and-forget: unlike the runner's pass
   // there is no task to outlive the request, so anything deferred here would be

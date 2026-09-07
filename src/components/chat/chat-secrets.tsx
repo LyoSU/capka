@@ -76,8 +76,15 @@ export function ChatSecrets({
         body: JSON.stringify({ name, value }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { code?: string };
-        toast.error(data.code === "BAD_NAME" ? t("nameInvalid") : t("saveFailed"));
+        // The limits ride in the response: this is a client component and the module
+        // that owns the constants also owns the database.
+        const data = (await res.json().catch(() => ({}))) as { code?: string; min?: number; max?: number };
+        toast.error(
+          data.code === "BAD_NAME" ? t("nameInvalid")
+          : data.code === "VALUE_TOO_SHORT" ? t("valueTooShort", { min: data.min ?? 4 })
+          : data.code === "TOO_MANY" ? t("tooMany", { max: data.max ?? 32 })
+          : t("saveFailed"),
+        );
         return;
       }
       setName("");
