@@ -268,6 +268,11 @@ export function ChatInput({
             you type" stated by depth instead of by a label. `border` is gone
             because `shadow-raised` carries its own hairline as the shadow's first
             layer; keeping both drew a doubled 2px edge. */}
+        {/* Connected folders sit ABOVE the card, not inside it: a folder is standing
+            context for the whole chat rather than something attached to this one
+            message, so it belongs on the rail the composer rises from — where an
+            empty card stays an empty card. */}
+        {folders && <FolderChips folders={folders} />}
         <div className="overflow-hidden rounded-2xl bg-card shadow-raised transition-micro focus-within:shadow-overlay">
           {/* Attached files preview — same square FileTile used in chat history, so
               a staged file looks identical to a sent one. A ready file shows its
@@ -283,10 +288,6 @@ export function ChatInput({
             onRetry={onRetryFile}
             className="px-3 pt-3"
           />
-          {/* Connected folders sit beside the files: what the assistant can see of
-              the person's own machine, in plain sight rather than inside the menu. */}
-          {folders && <FolderChips folders={folders} />}
-
           {/* Quiet heads-up when the picked model can't read a staged file's
               media type natively. Deliberately understated — muted text, an info
               glyph, no button — because the model picker is already a tap away in
@@ -341,8 +342,8 @@ export function ChatInput({
             )}
           </div>
           <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
-            {/* Left cluster: attach, then the model/thinking controls (`leading`). */}
-            <div className="flex min-w-0 items-center gap-0.5">
+            {/* Left cluster: the "+" menu alone — what comes INTO the chat. */}
+            <div className="flex shrink-0 items-center">
             <div className="shrink-0">
               <input
                 ref={fileInputRef}
@@ -362,14 +363,15 @@ export function ChatInput({
                 </Hint>
               </ComposerMenu>
             </div>
-
-            {leading}
             </div>
 
-            {/* Right cluster: context-window ring, then Send/Stop. Grouping them
-                keeps the ring just left of the button, so a loose ring can't drift
-                toward the centre. */}
-            <div className="flex shrink-0 items-center gap-2">
+            {/* Right cluster: how the assistant answers (model + thinking, `leading`),
+                the context-window ring, then the one action button. Everything
+                that governs the reply sits beside the button that asks for it, so
+                the eye travels one way: type, pick, send. `min-w-0` lets the model
+                name truncate on a narrow window instead of pushing the button out. */}
+            <div className="flex min-w-0 items-center gap-2">
+              {leading}
               {contextUsage && <ContextMeter used={contextUsage.used} window={contextUsage.window} />}
 
               {/* One action puts the composer back exactly as it was. It stands

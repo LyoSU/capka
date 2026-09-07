@@ -32,7 +32,7 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
           : "";
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
+    <div className="flex flex-wrap items-center gap-1.5 px-1 pb-2">
       {folders.folders.map((f) => {
         const lapsed = folders.needReconnect.includes(f.id);
         return (

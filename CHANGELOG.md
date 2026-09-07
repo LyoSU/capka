@@ -28,7 +28,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
-- Chat: the paperclip became a "+" menu (files, folder, secrets, and shortcuts to skills, connectors and plugins); connected folders show as chips above the composer with their sync state and a reconnect action.
+- Chat: the paperclip became a "+" menu (files, folder, secrets, and shortcuts to skills, connectors and plugins); connected folders show as chips on the rail above the composer card with their sync state and a reconnect action, and the model and thinking controls moved to the right of the footer beside the send button.
 - Chat: a new chat opened inside a project says so under the greeting (a pill with the project name), instead of looking like a loose chat until the first reply.
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
