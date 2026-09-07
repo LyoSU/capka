@@ -1,6 +1,6 @@
 import { apiHandler, requireActive } from "@/lib/auth";
 import { pool } from "@/lib/db";
-import { liveLeaseSql } from "@/lib/folders/lease";
+import { heldByOtherSql } from "@/lib/folders/lease";
 import { uploadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
@@ -34,20 +34,26 @@ export const POST = apiHandler(async (req: Request) => {
 
   // A sync claims the folder with a lease and holds it for its whole span, but the
   // client alone cannot enforce that: a batch already assembled goes out even if the
-  // lease lapsed while its files were being read, and a stale tab's writes used to
-  // be accepted here unconditionally. So a batch that names a lease must still hold
-  // it, checked against the row this request is about to write into.
+  // lease lapsed while its files were being read, and a stale tab's writes were
+  // accepted here unconditionally.
   //
-  // Absent means "no lease claimed" and behaves as before — the one-shot fallback
-  // import has no folder row to check against, and neither does any non-sync caller.
-  if (lease) {
-    const { rows } = await pool.query(
-      `SELECT 1 FROM attached_folders WHERE session_key = $1 AND name = $2 AND ${liveLeaseSql(3)}`,
-      [key, name, lease],
-    );
-    if (!rows[0]) {
-      return Response.json({ error: "Another window took over syncing this folder.", code: "LEASE_GONE" }, { status: 409 });
-    }
+  // The question is asked of the FOLDER, never of the request: is this row under a
+  // live lease that is not the one named here? Gating on `if (lease)` instead made
+  // the fence opt-in — omitting the field skipped the check entirely and wrote into a
+  // folder another window was mid-sync on, which is the whole hazard. Asking the row
+  // first also keeps the paths that legitimately hold no lease working unchanged: a
+  // folder with no row (the one-shot fallback import) and a row whose lease has
+  // expired or was released are nobody's, so anyone may write.
+  //
+  // Checked once per request. A lease that expires between this check and the last
+  // file of the batch is not re-checked; the client renews at a fifth of the TTL, so
+  // that needs the client to be gone, and the window is one batch. Accepted.
+  const { rows: blocked } = await pool.query(
+    `SELECT 1 FROM attached_folders WHERE session_key = $1 AND name = $2 AND ${heldByOtherSql(3)}`,
+    [key, name, lease],
+  );
+  if (blocked[0]) {
+    return Response.json({ error: "Another window took over syncing this folder.", code: "LEASE_GONE" }, { status: 409 });
   }
 
   // The client-side skip-list and size cap are conveniences, not a boundary — a
@@ -61,15 +67,37 @@ export const POST = apiHandler(async (req: Request) => {
   // controller, so a large batch forwarded one-at-a-time was pure serial latency.
   const POOL = 6;
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(POOL, accepted.length) }, async () => {
+  let failed = 0;
+  const workers = Array.from({ length: Math.min(POOL, accepted.length) }, async () => {
     for (let i = next++; i < accepted.length; i = next++) {
+      // Once any worker has failed the batch is over: a controller that just refused
+      // a write should not then be handed the ninety files nobody has claimed yet.
+      if (failed > 0) return;
       const f = accepted[i];
       const rel = f.name; // path relative to the folder, e.g. "sub/a.txt"
       const slash = rel.lastIndexOf("/");
       const dir = slash >= 0 ? `${name}/${rel.slice(0, slash)}` : name;
       const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
-      await uploadFile(key, dir, new File([f], filename), userId);
+      try {
+        await uploadFile(key, dir, new File([f], filename), userId);
+      } catch (e) {
+        failed++;
+        throw e;
+      }
     }
-  }));
+  });
+  // allSettled, not all: `all` rejects the moment the FIRST worker does, and this
+  // handler answering means the client's sync moves on and releases the folder lease
+  // in its `finally` — while up to five writes were still in flight and would land
+  // under whoever acquired the lease next. Waiting for every worker to settle makes
+  // the response the true end of this request's writes.
+  const settled = await Promise.allSettled(workers);
+  const broke = settled.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (broke.length > 0) {
+    // 500 through apiHandler, which logs the cause. The count is of workers that hit
+    // a failure, not of files: each stops at its first one, and the rest of the batch
+    // was abandoned deliberately.
+    throw new Error(`Could not write ${broke.length} of ${accepted.length} uploaded files to the workspace.`, { cause: broke[0].reason });
+  }
   return Response.json({ ok: true, count: accepted.length });
 });

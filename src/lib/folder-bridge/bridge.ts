@@ -435,6 +435,11 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
     return await runSync(handle, leaseToken);
   } finally {
     clearInterval(beat);
+    // Releasing here is safe only because every write this sync started has already
+    // finished: `runSync` awaits each upload response, and the upload route waits for
+    // ALL of its forwarding workers to settle before answering (it used to answer on
+    // the first failure with up to five writes still in flight, which then landed
+    // after this release, under whoever took the lease next).
     await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
   }
 
