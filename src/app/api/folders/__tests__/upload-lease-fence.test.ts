@@ -101,6 +101,20 @@ describe("POST /api/folders/upload — the sync lease fence", () => {
     expect(h.calls[0].params[2]).toBeNull(); // the absent token reaches SQL as NULL
   });
 
+  // The row is found by name while the controller resolves the path, so "docs/." would
+  // miss the row for "docs" and still write into /workspace/docs — under its lease.
+  it("400s a folder name that is not the canonical spelling, before any lookup", async () => {
+    h.setRow({ token: "t1", live: true });
+    const form = new FormData();
+    form.append("chatId", "c1");
+    form.append("name", "docs/.");
+    form.append("files", new File(["hello"], "a.txt"));
+    const r = await POST(new Request("http://x/api/folders/upload", { method: "POST", body: form }));
+    expect(r.status).toBe(400);
+    expect(h.calls).toEqual([]);
+    expect(h.uploaded).toEqual([]);
+  });
+
   it("409s a batch whose token is not the holder's", async () => {
     h.setRow({ token: "t1", live: true });
     const r = await POST(req("stale"));

@@ -232,6 +232,17 @@ describe("redactSecrets", () => {
     expect(redactSecrets(`out=${flat}`, { TOKEN: value })).toBe("out=[secret:TOKEN]");
   });
 
+  it("redacts wrapped base64 with the padding stripped — `base64 | tr -d =` exactly", () => {
+    // 61 bytes: base64 is 84 chars ending in "=", so GNU wraps it at 76 AND the padding
+    // is there to strip. Wrapping only the padded spelling left this pipeline open.
+    const value = "K".repeat(61);
+    const padded = Buffer.from(value, "utf8").toString("base64");
+    expect(padded.endsWith("=")).toBe(true);
+    const stripped = padded.replace(/=+$/, "");
+    const piped = `${stripped.slice(0, 76)}\n${stripped.slice(76)}`;
+    expect(redactSecrets(`out=${piped}\n`, { TOKEN: value })).toBe("out=[secret:TOKEN]\n");
+  });
+
   it("adds no wrapped form for a value whose base64 fits one line", () => {
     // Otherwise every short secret would carry two useless duplicates of its own base64.
     expect(secretEncodings("sk-live-a?b>c").some((f) => f.includes("\n"))).toBe(false);

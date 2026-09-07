@@ -177,8 +177,11 @@ export function secretEncodings(value: string): string[] {
   // The two default widths in the wild, and only those. A trailing newline is not part of
   // the form: the wrapped body is a substring of whatever the tool printed, so matching it
   // covers the output with or without the final line break.
+  // Every flat base64 spelling gets wrapped, the unpadded ones included: `base64 | tr -d =`
+  // strips the padding but leaves the line break, so wrapping only the padded form
+  // left that exact pipeline uncovered for any value whose length is not a multiple of 3.
   for (const width of [76, 64]) {
-    for (const flat of b64Url === b64 ? [b64] : [b64, b64Url]) {
+    for (const flat of new Set(forms.slice(0, 4))) {
       if (flat.length <= width) continue;
       const lines: string[] = [];
       for (let i = 0; i < flat.length; i += width) lines.push(flat.slice(i, i + width));

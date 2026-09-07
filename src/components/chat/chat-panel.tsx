@@ -636,6 +636,19 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const editingIdRef = useRef<string | null>(null);
   editingIdRef.current = editingId;
 
+  // The chat's model is gone and nothing is currently streaming — the composer
+  // stays, says so in a strip above its footer, and refuses to send until another
+  // model is picked from the pill right under that strip. It does NOT get replaced:
+  // the picker is the remedy and it lives in the composer footer, so a banner in
+  // the composer's place took the remedy away with the thing it stood in for.
+  // Held off while a turn is still running so the composer keeps its stop button.
+  const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
+  // Same block, different sentence and different remedy: the model is fine, its
+  // connection did not answer. Telling someone their model was removed when the
+  // endpoint is merely down sends them to re-pick a model they already have, and
+  // the one action that would actually help — asking again — was not offered.
+  const connectionDown = modelGone && !!modelStatus.connectionDown;
+
   // Drain the queue when the chat frees up: send each queued message as its own
   // message (separate bubbles, just as the user typed them) — the server folds
   // the whole burst into a single reply. Sent sequentially so they chain in
@@ -662,8 +675,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       setSending,
       send,
     }).finally(() => { dispatchingRef.current = false; setSending(null); });
+    // `modelGone` is a dependency on purpose: picking a live model is what lets a
+    // queue parked by a dead one go out, and nothing else in this list changes then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, queued, historyLoaded, editingId]);
+  }, [isLoading, queued, historyLoaded, editingId, modelGone]);
 
   const [filesOpen, setFilesOpen] = useState(false);
 
@@ -684,18 +699,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const lastMsg = messages[messages.length - 1];
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
-  // The chat's model is gone and nothing is currently streaming — the composer
-  // stays, says so in a strip above its footer, and refuses to send until another
-  // model is picked from the pill right under that strip. It does NOT get replaced:
-  // the picker is the remedy and it lives in the composer footer, so a banner in
-  // the composer's place took the remedy away with the thing it stood in for.
-  // Held off while a turn is still running so the composer keeps its stop button.
-  const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
-  // Same block, different sentence and different remedy: the model is fine, its
-  // connection did not answer. Telling someone their model was removed when the
-  // endpoint is merely down sends them to re-pick a model they already have, and
-  // the one action that would actually help — asking again — was not offered.
-  const connectionDown = modelGone && !!modelStatus.connectionDown;
 
   // Rides in the same pill shell as the model picker, and renders itself away
   // when the resolved model has no reasoning levels worth offering. Hidden on a

@@ -5,7 +5,7 @@ import { uploadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
 import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
-import { ignoredPath, oversized } from "@/lib/folder-bridge/filter";
+import { ignoredPath, oversized, sanitizeFolderName } from "@/lib/folder-bridge/filter";
 
 // Bulk upload for PC-folder sync: MANY files in one request, written under
 // /workspace/<name>/<relpath>. Each file's form name is its path relative to the
@@ -29,6 +29,11 @@ export const POST = apiHandler(async (req: Request) => {
   const lease = form.get("lease") as string | null;
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (!name || files.length === 0) return Response.json({ error: "Missing name or files" }, { status: 400 });
+  // The lease check below looks the folder row up by name, while the controller
+  // resolves the write path — so "docs/." would miss the row for "docs" and still land
+  // in /workspace/docs. Only the canonical spelling is accepted: the sanitizer's
+  // charset has no "/" or ".", so every alias of a stored name fails this test.
+  if (name !== sanitizeFolderName(name)) return Response.json({ error: "Invalid folder name" }, { status: 400 });
 
   const { sessionKey: key } = await resolveWorkspaceTarget({ userId, chatId, projectId });
 
