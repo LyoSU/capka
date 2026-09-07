@@ -130,7 +130,7 @@ function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnec
       onClick={onClick}
       className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
     >
-      <Plug className="h-3.5 w-3.5" />
+      <Plug className="size-3.5" />
       {action.label}
     </a>
   );
@@ -160,7 +160,7 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
   return (
     <div>
       <Button size="sm" onClick={onClick} disabled={busy} className="gap-1.5">
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+        {busy ? <Loader2 className="animate-spin" /> : <FolderPlus />}
         {action.label}
       </Button>
       {err && <div className="mt-1.5 text-xs text-destructive">{err}</div>}
@@ -179,7 +179,7 @@ function SettingsLink({ href, t }: { href: string; t: T }) {
       className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
     >
       {t("openInSettings")}
-      <ArrowUpRight className="h-3 w-3" />
+      <ArrowUpRight className="size-3" />
     </Link>
   );
 }
@@ -217,7 +217,7 @@ function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "err
   const Icon = kind === "done" ? Check : kind === "error" ? AlertTriangle : Undo2;
   return (
     <div className={`mt-3 flex items-center gap-1.5 text-sm ${tone}`}>
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <Icon className="size-3.5 shrink-0" />
       <span>{text}</span>
     </div>
   );
@@ -285,7 +285,7 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+        <SlidersHorizontal className="size-4 text-muted-foreground" />
         {t("confirmTitle")}
       </div>
       <div className="mt-2 text-sm text-muted-foreground">{title}</div>
@@ -296,7 +296,7 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
           {items.map((it) => (
             <li key={it} className="flex items-center gap-2">
-              <span className="h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
+              <span className="size-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
               {it}
             </li>
           ))}
@@ -313,7 +313,7 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
       )}
       {impact && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-surface p-2.5 text-xs text-warning-text">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <span>{impact}</span>
         </div>
       )}
@@ -325,7 +325,7 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
       )}
       {phase === "applying" && (
         <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+          <Loader2 className="size-3.5 animate-spin" />{t("applying")}
         </div>
       )}
       {phase === "done" && (
@@ -473,7 +473,7 @@ export function ApprovalCard({
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        {gated ? <ShieldQuestion className="h-4 w-4 text-muted-foreground" /> : <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />}
+        {gated ? <ShieldQuestion className="size-4 text-muted-foreground" /> : <SlidersHorizontal className="size-4 text-muted-foreground" />}
         {gated ? ta("title") : t("confirmTitle")}
       </div>
 
@@ -499,7 +499,7 @@ export function ApprovalCard({
                 <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
                   {preview.items.map((it) => (
                     <li key={it} className="flex items-center gap-2">
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
+                      <span className="size-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
                       {it}
                     </li>
                   ))}
@@ -514,14 +514,14 @@ export function ApprovalCard({
               )}
               {preview.impact && (
                 <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-surface p-2.5 text-xs text-warning-text">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                   <span>{preview.impact}</span>
                 </div>
               )}
             </>
           ) : (
             <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("checking")}
+              <Loader2 className="size-3.5 animate-spin" />{t("checking")}
             </div>
           )}
           <div className="mt-3 flex gap-2">
@@ -542,7 +542,7 @@ export function ApprovalCard({
       )}
       {!awaiting && approval?.approved === true && state !== "output-available" && state !== "output-error" && (
         <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />{gated ? ta("running") : t("applying")}
+          <Loader2 className="size-3.5 animate-spin" />{gated ? ta("running") : t("applying")}
         </div>
       )}
       {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={gated ? ta("declined") : t("declined")} />}
@@ -599,7 +599,7 @@ function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <Check className="h-4 w-4 text-success" />
+        <Check className="size-4 text-success" />
         {t("settingTitle")}
       </div>
       <div className="mt-2 text-sm text-muted-foreground">{title}</div>
@@ -607,14 +607,14 @@ function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
       {undoPendingId && phase === "idle" && (
         <div className="mt-3">
           <Button size="sm" variant="ghost" onClick={undo}>
-            <Undo2 className="h-3.5 w-3.5" />
+            <Undo2 />
             {t("undo")}
           </Button>
         </div>
       )}
       {phase === "applying" && (
         <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+          <Loader2 className="size-3.5 animate-spin" />{t("applying")}
         </div>
       )}
       {phase === "done" && <Outcome kind="done" text={t("reverted")} />}
@@ -632,7 +632,7 @@ function ChoiceCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: s
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+        <SlidersHorizontal className="size-4 text-muted-foreground" />
         {title}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -679,7 +679,7 @@ export function ManageCard({ output, onSend, chatId }: { output: unknown; onSend
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          {isPick ? <FolderPlus className="h-4 w-4 text-muted-foreground" /> : <ExternalLink className="h-4 w-4 text-muted-foreground" />}
+          {isPick ? <FolderPlus className="size-4 text-muted-foreground" /> : <ExternalLink className="size-4 text-muted-foreground" />}
           {o.action.description ?? (isPick ? t("pickFolderHint") : t("openHint"))}
         </div>
         <div className="mt-3">
@@ -698,7 +698,7 @@ export function ManageCard({ output, onSend, chatId }: { output: unknown; onSend
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Icon className="h-4 w-4 text-muted-foreground" />
+          <Icon className="size-4 text-muted-foreground" />
           {o.summary}
         </div>
         {o.data.action && (
@@ -721,7 +721,7 @@ export function ManageCard({ output, onSend, chatId }: { output: unknown; onSend
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Stethoscope className="h-4 w-4 text-muted-foreground" />
+          <Stethoscope className="size-4 text-muted-foreground" />
           {t("debugTitle")}: {itemTitle}
         </div>
         <div className="mt-2 text-sm">
@@ -741,7 +741,7 @@ export function ManageCard({ output, onSend, chatId }: { output: unknown; onSend
         {onSend && itemTitle && (
           <div className="mt-3">
             <Button size="sm" variant="ghost" onClick={() => onSend(t("recheckMsg", { name: itemTitle }))}>
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw />
               {t("recheck")}
             </Button>
           </div>

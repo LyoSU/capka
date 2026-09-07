@@ -48,7 +48,7 @@ export function OrgChangeBanner() {
 
   return (
     <TopBanner
-      icon={<Settings2 className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      icon={<Settings2 className="size-4 shrink-0 text-muted-foreground" />}
       onDismiss={dismiss}
       dismissLabel={t("dismiss")}
     >

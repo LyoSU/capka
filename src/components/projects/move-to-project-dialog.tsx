@@ -105,13 +105,13 @@ export function MoveToProjectDialog({
                 choice === null ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
               )}
             >
-              <MinusCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <MinusCircle className="size-4 shrink-0 text-muted-foreground" />
               <span className="flex-1">{t("removeFromProject")}</span>
-              {choice === null && <Check className="h-4 w-4 shrink-0 text-primary" />}
+              {choice === null && <Check className="size-4 shrink-0 text-primary" />}
             </button>
           )}
           {projects === null ? (
-            <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground/40" /></div>
+            <div className="flex justify-center py-6"><Loader2 className="size-4 animate-spin text-muted-foreground/40" /></div>
           ) : options.length === 0 && !chat.projectId ? (
             <p className="py-4 text-center text-sm text-muted-foreground">{t("noProjects")}</p>
           ) : (
@@ -125,9 +125,9 @@ export function MoveToProjectDialog({
                   choice === p.id ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
                 )}
               >
-                <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                {choice === p.id && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                {choice === p.id && <Check className="size-4 shrink-0 text-primary" />}
               </button>
             ))
           )}
@@ -138,7 +138,7 @@ export function MoveToProjectDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={moving}>{tc("cancel")}</Button>
           <Button onClick={move} disabled={moving || choice === undefined}>
-            {moving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {moving ? <Loader2 className="animate-spin" /> : null}
             {t("moveButton")}
           </Button>
         </DialogFooter>

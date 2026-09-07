@@ -126,13 +126,13 @@ export function TelegramLinkCard() {
 
       {linkLoading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2 className="size-4 animate-spin" />
           {t("link.checkingStatus")}
         </div>
       ) : linked ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2 border-y py-4">
-            <Link2 className="h-4 w-4 text-success" />
+            <Link2 className="size-4 text-success" />
             <span className="text-sm">
               {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
             </span>
@@ -141,7 +141,7 @@ export function TelegramLinkCard() {
             </Badge>
           </div>
           <Button variant="ghost" size="sm" onClick={handleUnlink} disabled={unlinking}>
-            {unlinking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {unlinking && <Loader2 className="animate-spin" />}
             {t("link.changeAccount")}
           </Button>
         </div>
@@ -150,7 +150,7 @@ export function TelegramLinkCard() {
           {oidcEnabled && !linkCode && (
             <div className="space-y-3">
               <Button onClick={handleOidcLink} disabled={linkingOidc} className="bg-[#229ED9] text-white hover:bg-[#1c8dc2]">
-                {linkingOidc ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                {linkingOidc ? <Loader2 className="animate-spin" /> : <Send />}
                 {t("link.oidcLink")}
               </Button>
               <Separator />
@@ -168,7 +168,7 @@ export function TelegramLinkCard() {
                     rel="noopener noreferrer"
                     className={cn(buttonVariants(), "w-full")}
                   >
-                    <Send className="mr-2 h-4 w-4" />
+                    <Send className="mr-2 size-4" />
                     {t("link.openBot", { username: botUsername })}
                   </a>
                   <div className="flex flex-col items-center gap-2 pt-1">
@@ -198,7 +198,7 @@ export function TelegramLinkCard() {
                     className="shrink-0"
                     onClick={handleCopyCode}
                   >
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {copied ? <Check /> : <Copy />}
                   </Button>
                 </Hint>
                 <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
@@ -223,8 +223,8 @@ export function TelegramLinkCard() {
               onClick={handleGenerateCode}
               disabled={generatingCode || !botUsername}
             >
-              {generatingCode && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              <Link2 className="mr-2 h-4 w-4" />
+              {generatingCode && <Loader2 className="animate-spin" />}
+              <Link2 />
               {t("link.generateCode")}
             </Button>
           )}

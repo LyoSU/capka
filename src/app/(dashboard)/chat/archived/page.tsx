@@ -87,7 +87,7 @@ export default function ArchivedChatsPage() {
             href="/chat"
             className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
+            <ArrowLeft className="size-3.5" />
             {t("archived.back")}
           </Link>
 
@@ -103,7 +103,7 @@ export default function ArchivedChatsPage() {
           ) : state === "error" ? (
             <EmptyState icon={Archive} title={t("archived.loadError")} hint={t("archived.loadErrorHint")} className="py-16">
               <Button variant="outline" size="sm" onClick={() => { setState("loading"); fetchArchived(); }}>
-                <RotateCw className="h-4 w-4" />
+                <RotateCw />
                 {tc("retry")}
               </Button>
             </EmptyState>
@@ -144,7 +144,7 @@ export default function ArchivedChatsPage() {
                       aria-label={t("archived.restore")}
                       title={t("archived.restore")}
                     >
-                      {busyId === chat.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                      {busyId === chat.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                     </Button>
                     <Button
                       variant="ghost"
@@ -155,7 +155,7 @@ export default function ArchivedChatsPage() {
                       aria-label={t("archived.delete")}
                       title={t("archived.delete")}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 />
                     </Button>
                   </div>
                 </div>

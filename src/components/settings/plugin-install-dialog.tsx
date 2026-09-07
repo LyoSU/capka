@@ -140,7 +140,7 @@ export function PluginInstallDialog({ target, scope, onInstalled, onClose }: {
               />
             ) : (
               <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />{t("reviewLoading")}
+                <Loader2 className="size-4 animate-spin" />{t("reviewLoading")}
               </p>
             )}
             <AlertDialogFooter>
@@ -152,7 +152,7 @@ export function PluginInstallDialog({ target, scope, onInstalled, onClose }: {
                 disabled={!payload || payload.review.gate === "cannot_apply" || applying}
                 onClick={(e) => { e.preventDefault(); void apply(); }}
               >
-                {applying ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                {applying ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
                 {t("install")}
               </AlertDialogAction>
             </AlertDialogFooter>

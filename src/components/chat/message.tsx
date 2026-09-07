@@ -912,7 +912,7 @@ function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
       {/* Same 40% resting chevron as the activity group and the step rows — one
           quiet level for "there is more here", not a third opacity in the mix. */}
       <CollapsibleTrigger className="group/also mt-2 inline-flex items-center gap-1.5 rounded-md py-1 text-xs text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
-        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/also:opacity-100" />
+        <ChevronRight className="chevron size-3.5 shrink-0 opacity-40 transition-transform group-hover/also:opacity-100" />
         <span>{tw("alsoChanged", { count: paths.length })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -990,7 +990,7 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
             onClick={downloadAll}
             className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Download className="h-3 w-3" />
+            <Download className="size-3" />
             <span>{tw("downloadAll")}</span>
           </button>
         )}
@@ -1066,7 +1066,7 @@ function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreamin
  *  a connected app (MCP), or the spinner while the step runs. Inline, never
  *  ringed — a circle around every icon is a frame the row does not need. */
 function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
-  if (state === "running") return <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />;
+  if (state === "running") return <span className="spinner-ring size-3.5 animate-spin rounded-full" />;
   if (d.category === "mcp" && d.brand?.color) {
     return (
       <span
@@ -1078,7 +1078,7 @@ function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error"
     );
   }
   const Icon = d.Icon;
-  return <Icon className="animate-step-in h-4 w-4" />;
+  return <Icon className="animate-step-in size-4" />;
 }
 
 /** One step: a small glyph, the intent label, and the literal thing acted on
@@ -1157,7 +1157,7 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
           className="absolute -inset-x-2 inset-y-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       )}
-      <span className="pointer-events-none relative z-10 flex h-5 w-5 shrink-0 items-center justify-center">
+      <span className="pointer-events-none relative z-10 flex size-5 shrink-0 items-center justify-center">
         <StepGlyph d={d} state={state} />
         {/* The hairline to the next step, hung from this glyph so it exists only
             between two actions and never trails off after the last one. Its
@@ -1184,7 +1184,7 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
           read as a quiet list of what happened, not as a stack of controls. */}
       {expandable && (
         <ChevronRight
-          className={`pointer-events-none relative z-10 h-3.5 w-3.5 shrink-0 transition-[opacity,transform] ${
+          className={`pointer-events-none relative z-10 size-3.5 shrink-0 transition-[opacity,transform] ${
             open ? "rotate-90 opacity-100" : "opacity-0 group-hover/step:opacity-100"
           }`}
         />
@@ -1237,8 +1237,8 @@ function SteerRow({ text, connect, stagger }: { text: string; connect?: boolean;
   const t = useTranslations("chat.message");
   return (
     <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-        <CornerDownRight className="animate-step-in h-4 w-4" />
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <CornerDownRight className="animate-step-in size-4" />
       </span>
       {/* Same hairline geometry as MemoryRow — hung from the row, since this text
           wraps — so a steer between two steps keeps the rail one continuous line. */}
@@ -1442,14 +1442,14 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, sandboxPend
           <span className="animate-in fade-in duration-200 inline-flex shrink-0 items-center gap-1 tabular-nums">
             <span className="sr-only">{t("memoryCount", { count: shown.length })}</span>
             <span aria-hidden className="text-muted-foreground/70">·</span>
-            <BookMarked aria-hidden className="h-3.5 w-3.5 text-brand" />
+            <BookMarked aria-hidden className="size-3.5 text-brand" />
             <span aria-hidden>
               {shown.length}
               <span className="hidden sm:inline"> {t("inMemory")}</span>
             </span>
           </span>
         )}
-        <ChevronDown className="chevron h-4 w-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
+        <ChevronDown className="chevron size-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
@@ -1527,8 +1527,8 @@ function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; conn
     // dropping to the next line when it must instead of forcing the row wider than the
     // screen.
     <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-brand">
-        <BookMarked className="animate-step-in h-4 w-4" />
+      <span className="flex size-5 shrink-0 items-center justify-center text-brand">
+        <BookMarked className="animate-step-in size-4" />
       </span>
       {/* Hung from the ROW, not the glyph as on a StepRow: this row can be three lines
           tall, and a fixed 16px stub under the glyph left a gap before the next glyph.
@@ -1594,14 +1594,14 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
             aria-hidden
             className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full border border-warning-border bg-warning-surface text-warning-text"
           >
-            <MoreHorizontal className="h-3 w-3" strokeWidth={3} />
+            <MoreHorizontal className="size-3" strokeWidth={3} />
           </span>
         ) : (
           <span
             aria-hidden
             className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
           >
-            <X className="h-3 w-3" strokeWidth={3.5} />
+            <X className="size-3" strokeWidth={3.5} />
           </span>
         )}
         <span className="flex-1 leading-relaxed text-foreground">{message}</span>
@@ -1629,7 +1629,7 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
               );
             }}
           >
-            <ArrowRight className="h-3.5 w-3.5" />
+            <ArrowRight />
             {t("continueTurn")}
           </Button>
         </div>
@@ -1640,7 +1640,7 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
               painting it with the error colour made the notice read as two
               alarms — one of which is just a disclosure triangle. */}
           <CollapsibleTrigger className="mt-2 ml-[30px] flex items-center gap-1 text-xs text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]>.chevron]:rotate-90">
-            <ChevronRight className="chevron h-3 w-3 transition-transform" />
+            <ChevronRight className="chevron size-3 transition-transform" />
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -1677,7 +1677,7 @@ function CopyButton({ text }: { text: string }) {
         onClick={onCopy}
         className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
       >
-        {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
       </button>
     </Hint>
   );
@@ -1705,7 +1705,7 @@ function BranchSwitcher({
           disabled={disabled || index <= 0}
           className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
         >
-          <ChevronLeft className="h-3.5 w-3.5" />
+          <ChevronLeft className="size-3.5" />
         </button>
       </Hint>
       <span className="tabular-nums">{index + 1}/{count}</span>
@@ -1716,7 +1716,7 @@ function BranchSwitcher({
           disabled={disabled || index >= count - 1}
           className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
         >
-          <ChevronRight className="h-3.5 w-3.5" />
+          <ChevronRight className="size-3.5" />
         </button>
       </Hint>
     </div>
@@ -1736,7 +1736,7 @@ function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork
         disabled={disabled}
         className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
       >
-        <GitBranch className="h-3.5 w-3.5" />
+        <GitBranch className="size-3.5" />
       </button>
     </Hint>
   );
@@ -1834,7 +1834,7 @@ export function QueuedBubble({
               onClick={onSteer}
               className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
             >
-              <CornerDownRight className="h-4 w-4" />
+              <CornerDownRight className="size-4" />
             </button>
           </Hint>
         )}
@@ -1845,7 +1845,7 @@ export function QueuedBubble({
               onClick={() => onEditingChange?.(true)}
               className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
             >
-              <Pencil className="h-4 w-4" />
+              <Pencil className="size-4" />
             </button>
           </Hint>
         )}
@@ -1858,7 +1858,7 @@ export function QueuedBubble({
               // pointers get it permanently rather than hiding the only way out.
               className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
             >
-              <X className="h-4 w-4" />
+              <X className="size-4" />
             </button>
           </Hint>
         )}
@@ -1916,7 +1916,7 @@ export function QueuedCaption({
   return (
     <div className="flex justify-end gap-2 px-4 md:px-6 pb-4 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">
-        <Clock className="h-3 w-3 shrink-0" />
+        <Clock className="size-3 shrink-0" />
         <span>{label ?? (held ? t("queuedHeld") : t("queuedHint", { count: count ?? 0 }))}</span>
       </span>
       {onSendNow && !held && (
@@ -2062,7 +2062,7 @@ function UserBubble({
             tabIndex={-1}
             nativeButton={false}
             render={<span />}
-            className="pointer-events-none absolute right-2 bottom-1 h-0 w-0"
+            className="pointer-events-none absolute right-2 bottom-1 size-0"
           />
           {hasFiles && <MessageAttachments chatId={chatId!} files={attachedFiles!} />}
           {/* When the turn is files-only, the thumbnails are the content — skip the
@@ -2092,7 +2092,7 @@ function UserBubble({
                     disabled={actionsDisabled}
                     className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                   >
-                    <Pencil className="h-3.5 w-3.5" />
+                    <Pencil className="size-3.5" />
                   </button>
                 </Hint>
               </span>
@@ -2124,7 +2124,7 @@ function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram
           puts the label on the span, and a bare <svg> would expose nothing. */}
       {isTelegram && (
         <Hint label={t("viaTelegram")}>
-          <span role="img" className="inline-flex"><Send className="h-3 w-3" /></span>
+          <span role="img" className="inline-flex"><Send className="size-3" /></span>
         </Hint>
       )}
       <span>{timestamp}</span>
@@ -2299,7 +2299,7 @@ function MessageDetails({
     <Popover onOpenChange={(open) => !open && setMore(false)}>
       <Hint label={t("show")}>
         <PopoverTrigger className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground">
-          <Info className="h-3.5 w-3.5" />
+          <Info className="size-3.5" />
         </PopoverTrigger>
       </Hint>
       {/* Wide enough that the longest admin row (a background pass with its
@@ -2332,7 +2332,7 @@ function MessageDetails({
             >
               <span>{t("more")}</span>
               <ChevronDown
-                className="h-3.5 w-3.5 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+                className="size-3.5 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
                 style={{ transform: more ? "rotate(180deg)" : undefined }}
                 aria-hidden="true"
               />
@@ -2511,7 +2511,7 @@ function QuietRow({ reason, children }: { reason: string; children: ReactNode })
         aria-label={t("quiet.showRun")}
         className="mx-4 my-2 flex w-[calc(100%-2rem)] items-baseline gap-2 rounded-md text-left text-xs text-muted-foreground transition-colors hover:text-foreground md:mx-6 md:w-[calc(100%-3rem)]"
       >
-        <BellOff className="h-3.5 w-3.5 shrink-0 translate-y-0.5" aria-hidden />
+        <BellOff className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
         <span className="shrink-0 text-foreground/70">{t("quiet.title")}</span>
         <span className="min-w-0 flex-1 truncate">{reason}</span>
       </CollapsibleTrigger>
@@ -2824,7 +2824,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                     disabled={actionsDisabled}
                     className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
+                    <RotateCcw className="size-3.5" />
                   </button>
                 </Hint>
               )}

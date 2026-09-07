@@ -95,11 +95,11 @@ function Caps({ model }: { model: ModelInfo }) {
   );
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-1.5 py-0.5">
-      {caps.vision && cap("vision", <Eye className="h-3.5 w-3.5" />)}
-      {hasPdf && cap("pdf", <FileText className="h-3.5 w-3.5" />)}
-      {hasAudio && cap("audio", <AudioLines className="h-3.5 w-3.5" />)}
-      {hasVideo && cap("video", <Video className="h-3.5 w-3.5" />)}
-      {caps.reasoning && cap("reasoning", <Brain className="h-3.5 w-3.5" />)}
+      {caps.vision && cap("vision", <Eye className="size-3.5" />)}
+      {hasPdf && cap("pdf", <FileText className="size-3.5" />)}
+      {hasAudio && cap("audio", <AudioLines className="size-3.5" />)}
+      {hasVideo && cap("video", <Video className="size-3.5" />)}
+      {caps.reasoning && cap("reasoning", <Brain className="size-3.5" />)}
     </span>
   );
 }
@@ -239,7 +239,7 @@ function FilterBar({
                 : "border-border text-muted-foreground hover:bg-hover hover:text-foreground"
             }`}
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className="size-3.5" />
             {t(`filter.${k}`)}
           </button>
         );
@@ -549,7 +549,7 @@ function ProviderRail({
             vertical ? "w-full" : ""
           }`}
         >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
+          <span className="flex size-5 shrink-0 items-center justify-center">{glyph}</span>
           <span className="truncate">{title}</span>
         </button>
       </Hint>
@@ -564,10 +564,10 @@ function ProviderRail({
           : "flex-row items-center overflow-x-auto border-b p-2"
       }`}
     >
-      {hasRecent && item(RECENT_TAB, t("recent"), <History className="h-4 w-4" />)}
-      {hasNew && item(NEW_TAB, t("newlyAdded"), <BadgePlus className="h-4 w-4" />)}
-      {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
-      {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
+      {hasRecent && item(RECENT_TAB, t("recent"), <History className="size-4" />)}
+      {hasNew && item(NEW_TAB, t("newlyAdded"), <BadgePlus className="size-4" />)}
+      {hasAll && item(ALL_TAB, t("all"), <Layers className="size-4" />)}
+      {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="size-4" />)}
       {(hasRecent || hasNew || hasAll || hasFeatured) && (
         <span className={vertical ? "my-1 h-px w-full bg-border" : "mx-1 h-6 w-px bg-border"} />
       )}
@@ -824,7 +824,7 @@ function ModelList({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {currentMissing && (
         <div className="flex items-center gap-2 border-b border-warning-border bg-warning-surface px-3 py-2 text-xs text-foreground">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning-text" />
+          <AlertCircle className="size-3.5 shrink-0 text-warning-text" />
           <span>{t("currentUnavailable")}</span>
         </div>
       )}
@@ -869,11 +869,11 @@ function ModelList({
             type="button"
             onClick={() => setFiltersOpen((v) => !v)}
             aria-pressed={filtersOpen}
-            className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
+            className={`relative flex size-6 shrink-0 items-center justify-center rounded-md transition-colors ${
               filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground"
             }`}
           >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <SlidersHorizontal className="size-3.5" />
             {filters.size > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground tabular-nums">
                 {filters.size}
@@ -887,20 +887,20 @@ function ModelList({
       <div ref={listRef} id={listboxId} role="listbox" aria-label={t("selectModel")} className="flex-1 overflow-y-auto overscroll-contain">
         {state.loading && (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {!state.loading && visible.length === 0 && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
             {state.syncing ? (
-              <span className="flex flex-col items-center gap-1.5"><Loader2 className="h-4 w-4 animate-spin" />{t("syncing")}</span>
+              <span className="flex flex-col items-center gap-1.5"><Loader2 className="size-4 animate-spin" />{t("syncing")}</span>
             ) : state.needsKey ? (
-              <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />{t("needKey")}</span>
+              <span className="flex flex-col items-center gap-1.5"><KeyRound className="size-4" />{t("needKey")}</span>
             ) : state.error ? (
               // The mark carries the colour; the sentence stays readable ink, like
               // every other failure notice in the chat.
-              <span className="flex flex-col items-center gap-1.5 text-foreground"><AlertCircle className="h-4 w-4 text-destructive" aria-hidden="true" />{state.error}</span>
+              <span className="flex flex-col items-center gap-1.5 text-foreground"><AlertCircle className="size-4 text-destructive" aria-hidden="true" />{state.error}</span>
             ) : searching ? (
               <span className="flex flex-col items-center gap-1.5">
                 {t("noneFound")}
@@ -957,7 +957,7 @@ function ModelList({
                     {variant === null && (searching ? (
                       <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />
                     ) : (
-                      model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
+                      model.featured && <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" />
                     ))}
                     {variant === null ? (
                       <span className="min-w-0 truncate text-sm">{stripGroup(model.name, group)}</span>
@@ -984,7 +984,7 @@ function ModelList({
                         className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
                       >
                         {t("variants", { count: row.variants.length })}
-                        <ChevronDown className={`h-3 w-3 transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+                        <ChevronDown className={`size-3 transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} aria-hidden="true" />
                       </span>
                     )}
                     {/* Right meta cluster, pinned to the row's right edge so the
@@ -1451,14 +1451,14 @@ export function ModelPicker({
             compact ? "gap-1 px-1.5" : "gap-2.5 px-3"
           }`}
         >
-          <span className={`relative flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
+          <span className={`relative flex size-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
             <BrandIcon slug={currentModel?.icon} size={14} />
             {/* Compact has no name for the warning dot to sit beside, but "this
                 model is gone" is exactly the thing that must not be dropped for want
                 of room — so it rides the icon instead. */}
             {compact && modelMissing && (
               <span
-                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-warning-text ring-2 ring-card"
+                className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-warning-text ring-2 ring-card"
                 aria-label={t("unavailable")}
               />
             )}
@@ -1478,7 +1478,7 @@ export function ModelPicker({
                   hiding which model this used to be (the name stays). Uses the
                   semantic warning token so it matches the unavailable banner. */}
               {modelMissing && (
-                <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
+                <span className="size-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
               {currentModel && currentModel.context > 0 && (
                 <Hint label={t("context")}><span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
@@ -1491,7 +1491,7 @@ export function ModelPicker({
               )}
             </span>
           )}
-          <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
+          <ChevronDown className={`size-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       ) : (
         <button
@@ -1520,9 +1520,9 @@ export function ModelPicker({
             </span>
           )}
           {state.loading || state.syncing ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/50" />
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground/50" />
           ) : (
-            <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
+            <ChevronDown className={`size-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
           )}
         </button>
       )}
@@ -1538,7 +1538,7 @@ export function ModelPicker({
           aria-label={t("clearSelection")}
           className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="size-3.5" />
         </button>
       )}
 
@@ -1572,7 +1572,7 @@ export function ModelPicker({
           <div className="flex items-center justify-between border-b px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <span className="text-sm font-medium">{t("selectModel")}</span>
             <button onClick={close} aria-label={t("close")} className="rounded-md p-1 hover:bg-hover">
-              <X className="h-4 w-4" />
+              <X className="size-4" />
             </button>
           </div>
           <div

@@ -127,7 +127,7 @@ export function ChatSecrets({
                   aria-label={t("remove", { name: s.name })}
                   className="text-muted-foreground/70 transition-colors hover:text-foreground disabled:opacity-50"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="size-3.5" />
                 </button>
               </li>
             ))}
@@ -155,7 +155,7 @@ export function ChatSecrets({
             disabled={busy}
           />
           <Button type="submit" className="w-full" disabled={busy || !name.trim() || !value}>
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {busy && <Loader2 className="animate-spin" />}
             {t("save")}
           </Button>
         </form>

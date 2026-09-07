@@ -75,7 +75,7 @@ export function JumpPill({
       >
         {isNew && <span className="whitespace-nowrap font-medium">{newLabel}</span>}
         <span className="relative grid place-items-center">
-          <ArrowDown className="h-4 w-4" />
+          <ArrowDown className="size-4" />
           {tone === "live" && (
             // Anchored to the glyph, not the button, so it reads as "this arrow
             // leads to something happening" rather than as a notification badge

@@ -288,7 +288,7 @@ export function UserDialog({
           <section className="space-y-2">
             <GroupTitle>{t("usageTitle")}</GroupTitle>
             {loading && !detail ? (
-              <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+              <div className="flex justify-center py-4"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>
             ) : detail ? (
               <div className="divide-y">
                 {detail.windows.map((w) => (
@@ -349,7 +349,7 @@ export function UserDialog({
               aria-expanded={securityOpen}
               className="flex w-full items-center gap-1.5 rounded-md text-left text-sm font-semibold tracking-tight"
             >
-              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform motion-reduce:transition-none ${securityOpen ? "rotate-90" : ""}`} />
+              <ChevronRight className={`size-4 text-muted-foreground transition-transform motion-reduce:transition-none ${securityOpen ? "rotate-90" : ""}`} />
               {t("securityTitle")}
             </button>
             {securityOpen && (
@@ -415,7 +415,7 @@ export function UserDialog({
               )}
 
               <AlertDialog>
-                <AlertDialogTrigger render={<Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={busy}><Trash2 className="mr-1 h-3.5 w-3.5" />{t("remove")}</Button>} />
+                <AlertDialogTrigger render={<Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={busy}><Trash2 />{t("remove")}</Button>} />
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>{t("removeTitle", { name: shown.name || shown.email })}</AlertDialogTitle>

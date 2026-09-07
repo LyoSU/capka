@@ -47,10 +47,10 @@ export function AttachmentTray({
       // The dot is 20px, which is under the 24px minimum target — `before:-inset-2.5`
       // grows the hit area to ~40px without moving the dot, which is what makes it
       // usable with a thumb (WCAG 2.5.8 counts the target, not the paint).
-      className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-foreground/80"
+      className="absolute -right-1.5 -top-1.5 z-10 flex size-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-foreground/80"
       aria-label={t("remove", { name: af.name })}
     >
-      <X className="h-3 w-3" />
+      <X className="size-3" />
     </button>
   );
 
@@ -97,7 +97,7 @@ export function AttachmentTray({
                   className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
                   aria-label={t("retryUpload", { name: af.name })}
                 >
-                  <RotateCw className="h-5 w-5" />
+                  <RotateCw className="size-5" />
                 </button>
               </Hint>
             </>
@@ -105,7 +105,7 @@ export function AttachmentTray({
             <>
               {removeButton(af)}
               <div aria-hidden className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-background/55">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
             </>
           );

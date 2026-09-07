@@ -24,9 +24,9 @@ function Monogram({ host, className = "" }: { host: string; className?: string }
   return (
     <span
       aria-hidden
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[10px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
+      className={`flex size-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[10px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
     >
-      {letter ?? <Globe className="h-2.5 w-2.5" />}
+      {letter ?? <Globe className="size-2.5" />}
     </span>
   );
 }
@@ -119,7 +119,7 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
         </span>
         <span>{t("count", { n: rows.length })}</span>
         <ChevronDown
-          className="h-3 w-3 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+          className="size-3 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
           style={{ transform: open ? "rotate(180deg)" : undefined }}
           aria-hidden="true"
         />

@@ -223,24 +223,24 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
             <DropdownMenuTrigger
               render={
                 <Button size="sm" variant="outline" disabled={uploading}>
-                  {uploading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Upload className="mr-1.5 h-4 w-4" />}
+                  {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
                   {t("add")}
-                  <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-60" />
+                  <ChevronDown className="opacity-60" />
                 </Button>
               }
             />
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => startUpload("user")}>
-                <UserRound className="mr-2 h-4 w-4" /> {t("addPersonal")}
+                <UserRound /> {t("addPersonal")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => startUpload("system")}>
-                <Users className="mr-2 h-4 w-4" /> {t("addShared")}
+                <Users /> {t("addShared")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
           <Button size="sm" variant="outline" disabled={uploading} onClick={() => startUpload("user")}>
-            {uploading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Upload className="mr-1.5 h-4 w-4" />}
+            {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
             {t("addPersonal")}
           </Button>
         )}
@@ -250,7 +250,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
       {!loading && total > 0 && (
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -293,7 +293,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
           hint={t("emptyHint")}
           action={isAdmin ? (
             <Link href="/settings/skills?tab=marketplace" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-              <Store className="mr-1.5 h-4 w-4" /> {t("browseMarketplace")}
+              <Store className="mr-1.5 size-4" /> {t("browseMarketplace")}
             </Link>
           ) : undefined}
         />
@@ -326,7 +326,7 @@ function GroupAvatar({ group }: { group: Group }) {
   const Icon = group.kind === "personal" ? UserRound : Users;
   return (
     <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-      <Icon className="h-4 w-4 text-muted-foreground" />
+      <Icon className="size-4 text-muted-foreground" />
     </div>
   );
 }
@@ -368,7 +368,7 @@ function SkillGroup({
               </div>
               {group.kind === "team" && <p className="text-xs text-muted-foreground">{t("group.teamHint")}</p>}
             </div>
-            <ChevronDown className="chevron h-4 w-4 shrink-0 text-muted-foreground transition-transform" />
+            <ChevronDown className="chevron size-4 shrink-0 text-muted-foreground transition-transform" />
           </button>
         }
       />
@@ -398,21 +398,21 @@ function SkillRow({
   return (
     <div className="flex items-start gap-3 py-4">
       <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/70">
-        <Puzzle className="h-3.5 w-3.5 text-muted-foreground" />
+        <Puzzle className="size-3.5 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-medium">{skill.name}</span>
           {skill.orphaned && (
             <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
-              <AlertTriangle className="h-3 w-3" /> {t("orphaned")}
+              <AlertTriangle className="size-3" /> {t("orphaned")}
             </Badge>
           )}
           {/* One badge at a time: for an orphan, a missing description is not the problem
               worth naming. */}
           {!skill.orphaned && noDescription && (
             <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
-              <AlertTriangle className="h-3 w-3" /> {t("noDescription")}
+              <AlertTriangle className="size-3" /> {t("noDescription")}
             </Badge>
           )}
         </div>
@@ -433,7 +433,7 @@ function SkillRow({
               <AlertDialogTrigger
                 render={
                   <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: skill.name })}>
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 />
                   </Button>
                 }
               />

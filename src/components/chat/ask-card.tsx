@@ -102,7 +102,7 @@ export function AskCard({
     >
       {awaiting && (
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <CircleQuestionMark className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <CircleQuestionMark className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {/* Name the state. "Waiting on your decision" is the fact the user needs
               and cannot infer: that the agent has stopped, and that it stops until
               they act. The model's own title, if any, follows as the question. */}
@@ -143,7 +143,7 @@ export function AskCard({
               <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>
                 {/* The spinner lives INSIDE the button that caused it, not beside the
                     row: one locus of feedback for one action. */}
-                {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                {submitting && <Loader2 className="animate-spin" aria-hidden="true" />}
                 {t("submit")}
               </Button>
             ) : (
@@ -210,7 +210,7 @@ function Pager({ page, total, onGo, disabled }: {
   return (
     <div className="flex items-center gap-1.5" role="group" aria-label={t("progress", { current: page + 1, total })}>
       <button type="button" aria-label={t("prev")} disabled={disabled || page === 0} onClick={() => onGo(page - 1)} className={arrow}>
-        <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+        <ChevronLeft className="size-3.5" aria-hidden="true" />
       </button>
       <span className="flex items-center gap-1">
         {Array.from({ length: total }, (_, i) => (
@@ -240,7 +240,7 @@ function Pager({ page, total, onGo, disabled }: {
         ))}
       </span>
       <button type="button" aria-label={t("next")} disabled={disabled || page >= total - 1} onClick={() => onGo(page + 1)} className={arrow}>
-        <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+        <ChevronRight className="size-3.5" aria-hidden="true" />
       </button>
     </div>
   );

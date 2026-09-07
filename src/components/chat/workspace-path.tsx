@@ -84,7 +84,7 @@ function WorkspacePathChip({ rel, chatId }: { rel: string; chatId: string }) {
     "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-px align-baseline text-[0.85em] font-medium leading-tight text-foreground no-underline transition-colors hover:border-primary/40 hover:bg-hover";
   const inner = (
     <>
-      <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} />
+      <Icon className={`size-3.5 shrink-0 ${color}`} />
       <span className="truncate">{name}</span>
     </>
   );

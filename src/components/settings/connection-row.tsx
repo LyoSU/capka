@@ -84,7 +84,7 @@ export function ConnectionRow({
               {...dragHandleProps}
               className="flex h-7 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/50 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
             >
-              <GripVertical className="h-4 w-4" />
+              <GripVertical className="size-4" />
             </button>
           </Hint>
 
@@ -106,7 +106,7 @@ export function ConnectionRow({
             <span className="ml-auto hidden truncate text-xs text-muted-foreground sm:inline">
               {c.defaultModel ? prettyName(c.defaultModel) : t("noModel")}
             </span>
-            <ChevronDown className="chevron h-4 w-4 shrink-0 text-muted-foreground transition-transform" />
+            <ChevronDown className="chevron size-4 shrink-0 text-muted-foreground transition-transform" />
           </CollapsibleTrigger>
         </div>
 
@@ -191,7 +191,7 @@ export function ConnectionRow({
               className="text-muted-foreground hover:text-destructive"
               onClick={onDelete}
             >
-              <Trash2 className="mr-1.5 h-4 w-4" />
+              <Trash2 />
               {tc("delete")}
             </Button>
           </div>

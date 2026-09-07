@@ -63,11 +63,11 @@ export function EmptyState({
       )}
     >
       {page ? (
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Icon className="h-6 w-6" aria-hidden />
+        <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-6" aria-hidden />
         </div>
       ) : (
-        <Icon className="h-8 w-8 text-muted-foreground/30" aria-hidden />
+        <Icon className="size-8 text-muted-foreground/30" aria-hidden />
       )}
 
       <div className={page ? "space-y-1.5" : "space-y-1"}>

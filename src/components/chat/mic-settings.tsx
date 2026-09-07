@@ -96,12 +96,12 @@ export function MicSettings() {
           aria-label={t("microphone")}
           className="inline-flex h-10 w-6 items-center justify-center rounded-lg text-muted-foreground/70 transition-colors hover:text-foreground data-popup-open:text-foreground sm:h-9 sm:w-5"
         >
-          <ChevronDown className="h-3.5 w-3.5" />
+          <ChevronDown className="size-3.5" />
         </PopoverTrigger>
       </Hint>
       <PopoverContent side="top" align="end" sideOffset={8} className="w-72">
         <div className="flex items-center gap-2">
-          <Mic className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          <Mic className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div
             role="meter"
             aria-label={t("level")}

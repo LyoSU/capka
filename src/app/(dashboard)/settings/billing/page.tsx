@@ -178,7 +178,7 @@ export default function BillingPage() {
             {limitsDirty && (
               <div className="flex justify-end">
                 <Button size="sm" onClick={saveLimits} disabled={savingLimits} className="animate-step-in">
-                  {savingLimits && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {savingLimits && <Loader2 className="animate-spin" />}
                   {tc("save")}
                 </Button>
               </div>

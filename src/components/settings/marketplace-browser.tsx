@@ -177,14 +177,14 @@ export function MarketplaceBrowser() {
           onKeyDown={(e) => e.key === "Enter" && addMarket()}
         />
         <Button size="sm" onClick={addMarket} disabled={adding || !addUrl.trim()}>
-          {adding ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
+          {adding ? <Loader2 className="animate-spin" /> : <Plus />}
           {t("add")}
         </Button>
       </div>
 
       {loading && (
         <div className="flex justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
       )}
 
@@ -207,12 +207,12 @@ export function MarketplaceBrowser() {
               </button>
               <Hint label={t("refresh")}>
                 <button onClick={() => refresh(m.id)} className="ml-1 text-muted-foreground hover:text-foreground">
-                  <RefreshCw className="h-3 w-3" />
+                  <RefreshCw className="size-3" />
                 </button>
               </Hint>
               <Hint label={t("remove")}>
                 <button onClick={() => removeMarket(m.id)} className="text-muted-foreground hover:text-destructive">
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="size-3" />
                 </button>
               </Hint>
             </div>
@@ -223,7 +223,7 @@ export function MarketplaceBrowser() {
       {/* Search */}
       {markets.length > 0 && catalog.length > 0 && (
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="pl-8" />
         </div>
       )}
@@ -231,7 +231,7 @@ export function MarketplaceBrowser() {
       {/* Catalog grouped by category */}
       {catalogLoading && (
         <div className="flex justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
       )}
       {!catalogLoading &&
@@ -262,7 +262,7 @@ export function MarketplaceBrowser() {
                       <AlertDialogTrigger
                         render={
                           <Button variant="ghost" size="sm" disabled={busy === c.name}>
-                            <Check className="mr-1.5 h-4 w-4 text-success" />
+                            <Check className="text-success" />
                             {t("installedLabel")}
                           </Button>
                         }
@@ -284,7 +284,7 @@ export function MarketplaceBrowser() {
                       disabled={!c.installable || busy === c.name}
                       onClick={() => selected && setPendingInstall({ marketplaceId: selected, pluginName: c.name })}
                     >
-                      {busy === c.name ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Download className="mr-1.5 h-4 w-4" />}
+                      {busy === c.name ? <Loader2 className="animate-spin" /> : <Download />}
                       {t("install")}
                     </Button>
                   )}

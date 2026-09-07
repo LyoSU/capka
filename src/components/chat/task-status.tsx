@@ -140,8 +140,8 @@ export function TaskStatus({
           className="pointer-events-none absolute -top-1.5 bottom-[calc(50%+10px)] left-2.5 w-px -translate-x-1/2 bg-border"
         />
       )}
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
-        <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
+      <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+        <span className="spinner-ring size-3.5 animate-spin rounded-full" />
       </span>
       {/* Plain text, not `text-shimmer`. The spinner to its left is already a
           motion signal meaning "working"; sweeping a highlight across the label

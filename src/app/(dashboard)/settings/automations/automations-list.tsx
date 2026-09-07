@@ -213,7 +213,7 @@ export default function AutomationsList() {
           icon={CalendarClock}
           title={t("emptyTitle")}
           hint={t("emptyHint")}
-          action={<Button size="sm" onClick={() => setCreating(true)}><Plus className="mr-1 h-3.5 w-3.5" />{t("create")}</Button>}
+          action={<Button size="sm" onClick={() => setCreating(true)}><Plus />{t("create")}</Button>}
         />
         {editor}
       </>
@@ -224,7 +224,7 @@ export default function AutomationsList() {
     <div className="space-y-3">
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-1 h-3.5 w-3.5" />{t("create")}
+          <Plus />{t("create")}
         </Button>
       </div>
       {automations.map((a) => {
@@ -235,8 +235,8 @@ export default function AutomationsList() {
               {/* The icon carries the trigger kind, so a list of both reads at a
                   glance without every row spelling it out in words. */}
               {a.trigger.kind === "webhook"
-                ? <Webhook className="h-3.5 w-3.5 text-muted-foreground" />
-                : <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />}
+                ? <Webhook className="size-3.5 text-muted-foreground" />
+                : <CalendarClock className="size-3.5 text-muted-foreground" />}
             </div>
             <div className="min-w-0 flex-1 space-y-0.5">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -253,12 +253,12 @@ export default function AutomationsList() {
                 )}
                 {status === "autoPaused" && (
                   <Badge variant="outline" className="gap-1 border-warning-border font-normal text-warning-text">
-                    <AlertTriangle className="h-3 w-3" /> {t("status.autoPaused")}
+                    <AlertTriangle className="size-3" /> {t("status.autoPaused")}
                   </Badge>
                 )}
                 {status === "active" && isOverdue(a) && (
                   <Badge variant="outline" className="gap-1 border-warning-border font-normal text-warning-text">
-                    <AlertTriangle className="h-3 w-3" /> {t("status.overdue")}
+                    <AlertTriangle className="size-3" /> {t("status.overdue")}
                   </Badge>
                 )}
               </div>
@@ -307,7 +307,7 @@ export default function AutomationsList() {
               )}
               {a.lastChatId && (
                 <Link href={`/chat/${a.lastChatId}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                  <ExternalLink className="h-3 w-3" /> {a.threadMode === "single" ? t("openThread") : t("openLastRun")}
+                  <ExternalLink className="size-3" /> {a.threadMode === "single" ? t("openThread") : t("openLastRun")}
                 </Link>
               )}
             </div>
@@ -319,21 +319,21 @@ export default function AutomationsList() {
                 onClick={() => runNow(a)} disabled={running === a.id}
                 aria-label={t("runAria", { name: a.title })} title={t("runNow")}
               >
-                <Play className="h-4 w-4" />
+                <Play />
               </Button>
               <Button
                 variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"
                 onClick={() => setEditing(a)}
                 aria-label={t("editAria", { name: a.title })} title={t("edit")}
               >
-                <Pencil className="h-4 w-4" />
+                <Pencil />
               </Button>
               <Switch checked={a.enabled} onCheckedChange={(v) => toggle(a, v)} aria-label={t("toggleAria", { name: a.title })} />
               <AlertDialog>
                 <AlertDialogTrigger
                   render={
                     <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: a.title })}>
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 />
                     </Button>
                   }
                 />

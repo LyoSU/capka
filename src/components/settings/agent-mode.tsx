@@ -94,7 +94,7 @@ export function AgentModeSection({
           a broken one. Only when something is actually capped. */}
       {anyLocked && (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Lock className="mt-0.5 h-3 w-3 shrink-0" />
+          <Lock className="mt-0.5 size-3 shrink-0" />
           {t("cappedByAdmin")}
         </p>
       )}
@@ -107,7 +107,7 @@ export function AgentModeSection({
             className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             aria-expanded={open}
           >
-            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
+            <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
             {t("advanced")}
           </button>
 

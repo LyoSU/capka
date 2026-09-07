@@ -68,7 +68,7 @@ export default function GithubTokenField() {
         <p className="text-sm font-medium">{t("tokenTitle")}</p>
         {configured && (
           <span className="flex items-center gap-1 text-xs text-success">
-            <Check className="h-3.5 w-3.5" />
+            <Check className="size-3.5" />
             {t("tokenConfigured")}
           </span>
         )}
@@ -84,7 +84,7 @@ export default function GithubTokenField() {
           onKeyDown={(e) => e.key === "Enter" && save()}
         />
         <Button size="sm" onClick={save} disabled={busy || !value.trim()}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("tokenSave")}
+          {busy ? <Loader2 className="animate-spin" /> : t("tokenSave")}
         </Button>
         {configured && (
           <Button size="sm" variant="ghost" onClick={clear} disabled={busy}>

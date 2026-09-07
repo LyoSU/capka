@@ -168,7 +168,7 @@ export function SignInTab() {
                       onClick={copyRedirect}
                       aria-label={copied ? t("copied") : t("copyRedirect")}
                     >
-                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copied ? <Check /> : <Copy />}
                     </Button>
                     <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
                   </div>
@@ -180,7 +180,7 @@ export function SignInTab() {
                   <div className="flex items-center justify-end gap-3">
                     <p className="text-[13px] text-warning-text">{t("unsavedCredentials")}</p>
                     <Button size="sm" onClick={save} disabled={saving} className="animate-step-in">
-                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("save")}
+                      {saving && <Loader2 className="animate-spin" />}{t("save")}
                     </Button>
                   </div>
                 )}

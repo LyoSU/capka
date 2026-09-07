@@ -47,7 +47,7 @@ export function UpdateBanner() {
 
   return (
     <TopBanner
-      icon={<ArrowUpCircle className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      icon={<ArrowUpCircle className="size-4 shrink-0 text-muted-foreground" />}
       action={{ href: "/settings/updates", label: t("action") }}
       onDismiss={dismiss}
       dismissLabel={t("dismiss")}

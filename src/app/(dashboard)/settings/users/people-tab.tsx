@@ -112,7 +112,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
       <div className="flex items-start justify-end gap-4">
         {showSearch && (
           <div className="relative w-48 shrink-0">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="pl-8" />
           </div>
         )}
@@ -138,7 +138,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
       {pending.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Clock className="h-4 w-4 text-warning-text" />
+            <Clock className="size-4 text-warning-text" />
             {t("pendingTitle")}
             <Badge variant="secondary" className="text-[10px]">{pending.length}</Badge>
           </div>
@@ -151,7 +151,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button size="sm" onClick={() => approve(u.id)} disabled={updating === u.id}>
-                    <UserCheck className="mr-1 h-3.5 w-3.5" />{t("approve")}
+                    <UserCheck />{t("approve")}
                   </Button>
                   {/* Reject deletes the account outright (same endpoint as Remove in
                       the drawer), so it asks first — a misplaced click here used to
@@ -160,7 +160,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
                     <AlertDialogTrigger
                       render={
                         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={updating === u.id}>
-                          <UserX className="mr-1 h-3.5 w-3.5" />{t("reject")}
+                          <UserX />{t("reject")}
                         </Button>
                       }
                     />
@@ -217,7 +217,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
             >
               {/* person */}
               <div className="flex min-w-0 items-center gap-2.5">
-                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
                   <p className="truncate text-[15px]">{user.name || user.email}</p>
                   <p className="truncate text-xs text-muted-foreground">

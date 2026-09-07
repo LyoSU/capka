@@ -227,7 +227,7 @@ export default function InstalledPlugins() {
     }), p.id);
 
   if (loading) {
-    return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>;
   }
   if (!plugins.length) {
     return <SettingsEmpty icon={Package} title={t("empty")} hint={t("emptyHint")} />;
@@ -278,7 +278,7 @@ export default function InstalledPlugins() {
             )}
             {inFlight && (
               <div className="flex items-start gap-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" />
                 <div>
                   <p className="font-medium text-foreground">
                     {tState(p.applyState?.kind === "install" ? "installing" : "applying")}
@@ -325,13 +325,13 @@ export default function InstalledPlugins() {
                     {p.enabledState === "on" ? t("disable") : t("enable")}
                   </Button>
                   <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => checkUpdate(p)} aria-label={t("update")}>
-                    {busy === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    {busy === p.id ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger
                       render={
                         <Button size="sm" variant="ghost" disabled={busy === p.id} aria-label={t("uninstall")}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <Trash2 className="text-destructive" />
                         </Button>
                       }
                     />
@@ -368,7 +368,7 @@ export default function InstalledPlugins() {
               <div className="flex flex-wrap gap-1.5 border-t pt-3">
                 {p.skills.map((s) => (
                   <Badge key={s.id} variant="outline" className={cn("gap-1 font-normal", !s.enabled && "opacity-50")}>
-                    <Sparkles className="h-3 w-3" />{s.name}
+                    <Sparkles className="size-3" />{s.name}
                   </Badge>
                 ))}
               </div>
@@ -382,18 +382,18 @@ export default function InstalledPlugins() {
                   return (
                     <div key={c.id} className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <Plug className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <Plug className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{c.name}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         <Hint label={st.detail}>
                           <span className={cn("flex items-center gap-1 text-xs", st.cls)}>
-                            <st.Icon className="h-3 w-3" />{st.label}
+                            <st.Icon className="size-3" />{st.label}
                           </span>
                         </Hint>
                         {needsLogin && (
                           <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => signIn(c.id)}>
-                            <LogIn className="mr-1 h-3 w-3" />{t("signIn")}
+                            <LogIn />{t("signIn")}
                           </Button>
                         )}
                       </span>
@@ -407,7 +407,7 @@ export default function InstalledPlugins() {
               <ul className="space-y-1 border-t pt-3 text-xs text-warning-text">
                 {p.notes.map((n, i) => (
                   <li key={i} className="flex items-start gap-1.5">
-                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{n}
+                    <AlertTriangle className="mt-0.5 size-3 shrink-0" />{n}
                   </li>
                 ))}
               </ul>
@@ -451,7 +451,7 @@ export default function InstalledPlugins() {
                 />
               ) : review.preview.touchesConnectors ? (
                 <p className="flex items-start gap-1.5 rounded-lg bg-warning/10 p-2 text-xs text-warning-text">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                   {t("reviewConnectorsWarning")}
                 </p>
               ) : (
@@ -464,7 +464,7 @@ export default function InstalledPlugins() {
               {(review.preview.diff || review.preview.to.message) && (
                 <Collapsible>
                   <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-panel-open]_.chevron]:rotate-180">
-                    <ChevronDown className="chevron h-3.5 w-3.5 shrink-0 transition-transform" />
+                    <ChevronDown className="chevron size-3.5 shrink-0 transition-transform" />
                     <span>{t("diffTitle")}</span>
                     {review.preview.diff && (
                       <span className="ml-auto tabular-nums">

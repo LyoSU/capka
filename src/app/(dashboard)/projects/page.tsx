@@ -70,7 +70,7 @@ export default function ProjectsPage() {
             </div>
           </div>
           <Button size="sm" className="shrink-0" onClick={handleCreate}>
-            <Plus className="h-4 w-4" />
+            <Plus />
             {t("new")}
           </Button>
         </div>
@@ -90,7 +90,7 @@ export default function ProjectsPage() {
         ) : state === "error" ? (
           <EmptyState icon={FolderKanban} title={t("loadError")} hint={t("loadErrorHint")} className="py-16">
             <Button variant="outline" size="sm" onClick={() => { setState("loading"); fetchProjects(); }}>
-              <RotateCw className="h-4 w-4" />
+              <RotateCw />
               {tc("retry")}
             </Button>
           </EmptyState>
@@ -102,7 +102,7 @@ export default function ProjectsPage() {
             className="animate-blur-rise py-16"
           >
             <Button size="sm" onClick={handleCreate}>
-              <Plus className="h-4 w-4" />
+              <Plus />
               {t("create")}
             </Button>
           </EmptyState>
@@ -139,7 +139,7 @@ export default function ProjectsPage() {
                       measures ~4.0:1 on this card and misses WCAG AA. */}
                   <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
                     <span className="inline-flex items-center gap-1">
-                      <MessageSquare className="h-3 w-3" />
+                      <MessageSquare className="size-3" />
                       {t("chatCount", { n: project.chatCount ?? 0 })}
                     </span>
                     {/* A bare em dash is developer shorthand; "no chats yet" is the
@@ -163,10 +163,10 @@ export default function ProjectsPage() {
                     render={<Link href={`/projects/${project.id}?tab=settings`} />}
                     aria-label={tc("edit")}
                   >
-                    <Pencil className="h-3.5 w-3.5" />
+                    <Pencil />
                   </Button>
                   <Button variant="ghost" size="icon-sm" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 />
                   </Button>
                 </div>
                 {/* Darkens with the row: the one mark that says "this row goes

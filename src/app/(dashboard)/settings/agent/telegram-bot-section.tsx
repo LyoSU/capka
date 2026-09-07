@@ -75,7 +75,7 @@ export function TelegramBotSection() {
       <div className="flex items-center gap-2">
         {!loaded ? (
           <Badge variant="secondary" className="text-xs text-muted-foreground">
-            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            <Loader2 className="mr-1 size-3 animate-spin" />
             {t("checking")}
           </Badge>
         ) : hasToken ? (
@@ -93,7 +93,7 @@ export function TelegramBotSection() {
           placeholder={hasToken ? t("telegram.placeholderReplace") : "123456:ABC-DEF..."}
         />
         <Button onClick={save} disabled={saving}>
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {saving && <Loader2 className="animate-spin" />}
           {tc("save")}
         </Button>
       </div>

@@ -14,7 +14,7 @@ export default function ChatLoading() {
     <div className="relative flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-6 py-3">
         <Skeleton className="h-8 w-40 rounded-full" />
-        <Skeleton className="h-8 w-8 rounded-lg" />
+        <Skeleton className="size-8 rounded-lg" />
       </div>
 
       <div className="flex-1" />

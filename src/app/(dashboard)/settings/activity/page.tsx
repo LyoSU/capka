@@ -165,7 +165,7 @@ export default function ActivityPage() {
       />
 
       {loading ? (
-        <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
       ) : entries.length === 0 ? (
         <SettingsEmpty icon={History} title={t("empty")} hint={t("emptyHint")} />
       ) : (
@@ -182,8 +182,8 @@ export default function ActivityPage() {
                   const actor = e.actorName || e.actorEmail || t("systemActor");
                   return (
                     <div key={e.id} className="flex items-start gap-3 py-3.5">
-                      <div className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full", GROUP_TINT[grp])}>
-                        <Icon className="h-3.5 w-3.5" />
+                      <div className={cn("mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full", GROUP_TINT[grp])}>
+                        <Icon className="size-3.5" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[15px]">
@@ -195,7 +195,7 @@ export default function ActivityPage() {
                         </p>
                         <p className="mt-0.5 flex items-center text-[13px] text-muted-foreground">
                           <span className="truncate">{actor}</span>
-                          <Dot className="h-3 w-3 shrink-0" />
+                          <Dot className="size-3 shrink-0" />
                           <Hint label={fullTime(e.createdAt)}>
                             <span className="shrink-0">{timeOf(e.createdAt)}</span>
                           </Hint>
@@ -211,7 +211,7 @@ export default function ActivityPage() {
           {hasMore && (
             <div className="flex justify-center">
               <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("loadMore")}
+                {loadingMore && <Loader2 className="animate-spin" />}{t("loadMore")}
               </Button>
             </div>
           )}

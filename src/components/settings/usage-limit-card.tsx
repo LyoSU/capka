@@ -51,7 +51,7 @@ export function UsageLimitCard() {
   if (capped.length === 0) {
     return (
       <div className="flex items-center gap-2 border-y py-4">
-        <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Gauge className="size-4 shrink-0 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           {t("turns30d", { turns: billing.turns30d })}
         </p>
@@ -68,7 +68,7 @@ export function UsageLimitCard() {
     // report, and a section title left behind would head an empty gap.
     <section className="space-y-3">
       <div className="flex items-center gap-2">
-        <Gauge className="h-4 w-4 text-muted-foreground" />
+        <Gauge className="size-4 text-muted-foreground" />
         <h3 className="text-base font-semibold tracking-tight">{t("title")}</h3>
         {billing.limits?.blocked && (
           <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive-text">

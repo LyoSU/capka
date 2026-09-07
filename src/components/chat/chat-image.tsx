@@ -31,7 +31,7 @@ export function ChatImage({ src, alt }: { src?: string; alt?: string }) {
   if (state === "error") {
     return (
       <span className="my-3 inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-        <ImageOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <ImageOff className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="truncate">{alt || t("imageUnavailable")}</span>
       </span>
     );

@@ -40,8 +40,8 @@ export function ErrorState({ error, retry }: ErrorStateProps) {
 
   return (
     <div className="flex min-h-[60dvh] w-full flex-col items-center justify-center gap-5 p-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-destructive-border bg-destructive-surface text-destructive-text">
-        <AlertTriangle className="h-6 w-6" />
+      <div className="flex size-12 items-center justify-center rounded-full border border-destructive-border bg-destructive-surface text-destructive-text">
+        <AlertTriangle className="size-6" />
       </div>
       <div className="space-y-1.5">
         <h1 className="text-lg font-semibold text-foreground">{t("title")}</h1>
@@ -62,7 +62,7 @@ export function ErrorState({ error, retry }: ErrorStateProps) {
       {isAdmin && detail && (
         <Collapsible className="w-full max-w-md text-left">
           <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-panel-open]>.chevron]:rotate-90">
-            <ChevronRight className="chevron h-3 w-3 transition-transform" />
+            <ChevronRight className="chevron size-3 transition-transform" />
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>

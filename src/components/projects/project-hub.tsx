@@ -203,7 +203,7 @@ export function ProjectHub({
               )}
             </div>
             <Button size="sm" className="shrink-0" nativeButton={false} render={<Link href={newChatHref} />}>
-              <Plus className="h-4 w-4" />
+              <Plus />
               {t("newChat")}
             </Button>
           </div>
@@ -387,7 +387,7 @@ function OverviewTab({
           className="rounded-xl border border-dashed"
         >
           <Button size="sm" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
-            <Plus className="h-4 w-4" />
+            <Plus />
             {t("newChat")}
           </Button>
         </EmptyState>
@@ -426,13 +426,13 @@ function OverviewTab({
         {/* Deliberately the same row geometry as ChatRowLink — icon, text, meta
             right — so the overview is two instances of one card, not two designs. */}
         <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-2.5 text-sm shadow-hairline">
-          <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <FolderKanban className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">{fileCount === null ? "…" : t("fileCount", { n: fileCount })}</span>
           {folderCount > 0 && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
               {syncing
-                ? <RefreshCw className="h-3 w-3 animate-spin" />
-                : <Check className="h-3 w-3 text-success" />}
+                ? <RefreshCw className="size-3 animate-spin" />
+                : <Check className="size-3 text-success" />}
               {t("folderCount", { n: folderCount })}
             </span>
           )}
@@ -645,7 +645,7 @@ function SettingsTab({
           not a hidden button, is what protects this. */}
       <SettingsSection title={th("dangerTitle")} description={th("dangerHint")}>
         <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
-          <Trash2 className="h-4 w-4" />
+          <Trash2 />
           {th("delete")}
         </Button>
       </SettingsSection>
@@ -716,7 +716,7 @@ function MemoryEditor({ projectId }: { projectId: string }) {
 function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; locale: string; emptyLabel: string }) {
   const t = useTranslations("projects.hub");
   if (chats === null) {
-    return <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" /></div>;
+    return <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground/40" /></div>;
   }
   if (chats.length === 0) {
     return <EmptyState icon={MessageSquare} title={emptyLabel} />;

@@ -219,7 +219,7 @@ function CapabilityRow({
       onClick={onOpen}
       className="-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-3 rounded-md px-3 py-3 text-left transition-micro hover:bg-hover"
     >
-      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(item.capabilityType === "skill" ? "skills" : "connectors")} />
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-label={t(item.capabilityType === "skill" ? "skills" : "connectors")} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm">{item.capabilityKey}</span>
         {item.description && (
@@ -232,7 +232,7 @@ function CapabilityRow({
       {ruled ? (
         <EffectBadge effect={effect} label={t(`effect.${effect}`)} />
       ) : (
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" aria-hidden />
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground/40" aria-hidden />
       )}
     </button>
   );
@@ -259,14 +259,14 @@ function DefaultsSection({ items, t, onOpen }: { items: InvItem[]; t: T; onOpen:
         aria-expanded={expanded}
         className="flex w-full items-center gap-2 text-left text-base font-semibold tracking-tight"
       >
-        <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
+        <ChevronRight className={cn("size-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
         {t("defaultsTitle", { count: items.length })}
       </button>
 
       {expanded && (
         <div className="space-y-4 pt-1">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchCapability")} className="pl-8" />
           </div>
           {matches.length === 0 && <p className="text-sm text-muted-foreground">{t("noMatches")}</p>}
@@ -425,7 +425,7 @@ function ExceptionSection({
                 <AlertDialogTrigger
                   render={
                     <Button variant="ghost" size="icon-sm" aria-label={t("removeException")}>
-                      <X className="h-3.5 w-3.5" />
+                      <X />
                     </Button>
                   }
                 />

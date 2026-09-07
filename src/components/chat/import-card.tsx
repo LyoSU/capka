@@ -60,7 +60,7 @@ export function ImportCard({
                 {t("dismiss")}
               </Button>
               <Button size="sm" onClick={onImport}>
-                <Download className="h-3.5 w-3.5" />
+                <Download />
                 {t("import")}
               </Button>
             </div>
@@ -69,7 +69,7 @@ export function ImportCard({
 
         {(state.phase === "previewing" || state.phase === "committing") && (
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <Loader2 className="size-4 shrink-0 animate-spin" />
             <span>{state.phase === "previewing" ? t("reading", { service }) : t("creating")}</span>
           </div>
         )}
@@ -98,7 +98,7 @@ export function ImportCard({
               </Button>
               <Button size="sm" onClick={onConfirm}>
                 {t("confirm")}
-                <ArrowRight className="h-3.5 w-3.5" />
+                <ArrowRight />
               </Button>
             </div>
           </div>
@@ -107,7 +107,7 @@ export function ImportCard({
         {state.phase === "error" && (
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <AlertCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 text-sm text-foreground/90">{errorText(t, state.code, service)}</span>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">

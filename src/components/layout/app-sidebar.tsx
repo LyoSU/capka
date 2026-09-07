@@ -22,7 +22,7 @@ import {
   CircleAlert,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { RESIZE_HANDLE_CLASS, useResizableWidth } from "@/hooks/use-resizable-width";
+import { RESIZE_HANDLE_CLASS, shouldExpand, useResizableWidth } from "@/hooks/use-resizable-width";
 import {
   Sidebar,
   SidebarContent,
@@ -463,6 +463,9 @@ export function AppSidebar() {
     // collapses to the icon rail — the same state ⌘B and the header button give.
     onCollapse: () => setSidebarOpen(false),
   });
+  // Where a pull on the collapsed rail's edge started, or null when none is in
+  // flight. A ref, not state: nothing renders differently until it opens.
+  const pullFrom = useRef<number | null>(null);
   const { theme, setTheme } = useTheme();
   const shortcut = useShortcutLabel();
   const { data: session } = authClient.useSession();
@@ -852,12 +855,51 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" width={`${sidebarResize.width}px`} resizing={sidebarResize.dragging}>
       {/* The handle rides the nav's own right edge. `fixed`, not absolute: the
           column that owns that edge is itself fixed and has no positioned box a
-          child could hang off. Only while expanded — the icon rail's width is a
-          state, not something to drag. */}
-      {sidebarState === "expanded" && (
+          child could hang off. */}
+      {sidebarState === "expanded" ? (
         <div
           {...sidebarResize.handleProps}
           style={{ left: "calc(var(--sidebar-width) - 4px)" }}
+          className={cn(RESIZE_HANDLE_CLASS, "fixed inset-y-0")}
+        />
+      ) : (
+        /* Collapsed, the same edge carries the way back. There is no width to
+           drag here — the icon rail's width is a state — so this is not a
+           separator but a control: pull it right and the nav returns. A drag that
+           closes something the user then cannot drag open is half a gesture, and
+           the pull threshold is the same overshoot that shut it. Click and Enter
+           do it too, for anyone who would rather not drag at all. */
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={t("expandSidebar")}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            pullFrom.current = e.clientX;
+          }}
+          onPointerMove={(e) => {
+            if (pullFrom.current !== null && shouldExpand(e.clientX - pullFrom.current)) {
+              pullFrom.current = null;
+              setSidebarOpen(true);
+            }
+          }}
+          onPointerUp={(e) => {
+            const from = pullFrom.current;
+            pullFrom.current = null;
+            e.currentTarget.releasePointerCapture?.(e.pointerId);
+            // A press that went nowhere is a click, and a click on the edge of a
+            // shut panel means the same thing as pulling it.
+            if (from !== null && Math.abs(e.clientX - from) < 4) setSidebarOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
+              e.preventDefault();
+              setSidebarOpen(true);
+            }
+          }}
+          style={{ left: "calc(var(--sidebar-width-icon) - 4px)" }}
           className={cn(RESIZE_HANDLE_CLASS, "fixed inset-y-0")}
         />
       )}
@@ -869,8 +911,8 @@ export function AppSidebar() {
                 onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
                 className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
-                  <ClawMark className="h-3.5 w-3.5" />
+                <span className="flex size-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
+                  <ClawMark className="size-3.5" />
                 </span>
               </button>
             </Hint>
@@ -899,7 +941,7 @@ export function AppSidebar() {
             href={newChatHref}
             className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden size-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
           >
-            <Plus className="h-4 w-4" strokeWidth={2.75} />
+            <Plus className="size-4" strokeWidth={2.75} />
           </Link>
         </Hint>
       </SidebarHeader>
@@ -915,7 +957,7 @@ export function AppSidebar() {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton render={<Link href={newChatHref} />}>
-                  <Plus className="h-4 w-4" strokeWidth={2.75} />
+                  <Plus strokeWidth={2.75} />
                   <span className="font-medium">{t("newChat")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -961,7 +1003,7 @@ export function AppSidebar() {
         {telegramChats.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>
-              <Send className="mr-1.5 h-3.5 w-3.5" />
+              <Send className="mr-1.5 size-3.5" />
               {t("telegram")}
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -1027,13 +1069,13 @@ export function AppSidebar() {
             "fully loaded" signal. */}
         {nextCursor && (
           <div ref={sentinelRef} className="flex justify-center py-3" aria-hidden>
-            {loadingMore && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {loadingMore && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
           </div>
         )}
 
         {loaded && chats.length === 0 && (
           <div className="animate-blur-rise flex flex-col items-center px-4 py-10 text-center">
-            <ClawMark className="mb-3 h-9 w-9 text-foreground opacity-15" />
+            <ClawMark className="mb-3 size-9 text-foreground opacity-15" />
             <p className="text-xs text-muted-foreground">
               {t("startNewChat")}
             </p>

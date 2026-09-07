@@ -57,11 +57,11 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
             }`}
           >
             {folders.phase === "syncing" && !lapsed ? (
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
             ) : lapsed ? (
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden />
+              <AlertCircle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" aria-hidden />
             ) : (
-              <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
             )}
             <span className="truncate">{f.name}</span>
             {lapsed ? (
@@ -76,12 +76,12 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
               >
                 {folders.reconnectKind[f.id] === "gone" ? (
                   <>
-                    <FolderOpen className="h-3 w-3" aria-hidden />
+                    <FolderOpen className="size-3" aria-hidden />
                     {t("chooseAgain")}
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="h-3 w-3" aria-hidden />
+                    <RefreshCw className="size-3" aria-hidden />
                     {t("reconnect")}
                   </>
                 )}
@@ -94,9 +94,9 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
                 type="button"
                 onClick={() => folders.remove(f.id)}
                 aria-label={t("disconnect")}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-hover hover:text-foreground"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-hover hover:text-foreground"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="size-3.5" />
               </button>
             </Hint>
           </div>

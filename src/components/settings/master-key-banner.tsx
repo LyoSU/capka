@@ -88,7 +88,7 @@ export function MasterKeyBanner() {
     return section(
       <div className="space-y-3 rounded-xl border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
+          <ShieldAlert className="mt-0.5 size-5 shrink-0 text-warning-text" />
           <div className="space-y-1">
             <p className="text-sm font-medium text-foreground">{t("insecureTitle")}</p>
             <p className="text-sm text-muted-foreground">{t("insecureBody")}</p>
@@ -113,7 +113,7 @@ export function MasterKeyBanner() {
     return section(
       <div className="flex items-center justify-between gap-3 rounded-xl border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
+          <ShieldAlert className="mt-0.5 size-5 shrink-0 text-warning-text" />
           <p className="text-sm text-foreground">{t("secureLeftover")}</p>
         </div>
         <Button variant="outline" size="sm" onClick={removeDbCopy} disabled={removing}>

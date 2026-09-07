@@ -74,8 +74,8 @@ export function FileDropZone({
 
   return (
     <div className="animate-in fade-in pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm duration-150">
-      <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-primary/50 bg-card/80 px-10 py-8 text-center shadow-lg">
-        <Upload className="h-8 w-8 text-primary" />
+      <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-primary/50 bg-card/80 px-10 py-8 text-center shadow-overlay">
+        <Upload className="size-8 text-primary" />
         <p className="text-base font-medium text-foreground">{t("dropHere")}</p>
       </div>
     </div>

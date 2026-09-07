@@ -54,7 +54,7 @@ export function ProviderStatusBanner() {
   const message = status === "out_of_credits" ? t("outOfCredits") : t("invalidKey");
   return (
     <TopBanner
-      icon={<AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" />}
+      icon={<AlertTriangle className="size-4 shrink-0 text-warning-text" />}
       action={{ href: "/settings/connections", label: t("fix") }}
       onDismiss={dismiss}
       dismissLabel={t("dismiss")}

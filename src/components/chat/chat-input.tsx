@@ -295,7 +295,7 @@ export function ChatInput({
               way. Just so the user isn't surprised after sending. */}
           {blindModalities && blindModalities.length > 0 && (
             <div className="flex items-center gap-1.5 px-3.5 pt-2 text-xs text-muted-foreground">
-              <Info className="h-3.5 w-3.5 shrink-0 opacity-70" />
+              <Info className="size-3.5 shrink-0 opacity-70" />
               <span>
                 {t("blindModalities", {
                   modalities: blindModalities.map((m) => tNotice(`modality.${m}`)).join(", "),
@@ -358,7 +358,7 @@ export function ChatInput({
               <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
                 <Hint label={t("add")}>
                   <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
-                    <Plus className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                    <Plus className="size-4.5 sm:size-4" />
                   </span>
                 </Hint>
               </ComposerMenu>
@@ -405,7 +405,7 @@ export function ChatInput({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={onStop}
                   >
-                    <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    <Square />
                   </Button>
                 </Hint>
               ) : dictation.listening ? (
@@ -419,7 +419,7 @@ export function ChatInput({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={dictation.stop}
                   >
-                    <Square className="h-4 w-4 fill-current sm:h-3.5 sm:w-3.5" />
+                    <Square className="fill-current" />
                   </Button>
                 </Hint>
               ) : !hasContent && dictation.supported && !awaitingInput ? (
@@ -435,7 +435,7 @@ export function ChatInput({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={dictation.start}
                     >
-                      <Mic className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                      <Mic className="size-4.5 sm:size-4" />
                     </Button>
                   </Hint>
                   <MicSettings />
@@ -453,9 +453,9 @@ export function ChatInput({
                     onClick={() => submit()}
                   >
                     {uploading ? (
-                      <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
+                      <Loader2 className="size-4.5 animate-spin sm:size-4" />
                     ) : (
-                      <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
+                      <ArrowUp className="size-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:size-4" />
                     )}
                   </Button>
                 </Hint>

@@ -132,7 +132,7 @@ export function PluginReviewPanel({
           would let it scroll out of sight among the changes. */}
       {runsCode && (
         <div className="flex items-start gap-2 rounded-lg bg-warning/10 p-3 text-xs text-warning-text">
-          <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <Terminal className="mt-0.5 size-3.5 shrink-0" />
           <div className="space-y-1">
             <p className="font-medium">{t("sandboxTitle")}</p>
             <p>{t("sandboxBody")}</p>
@@ -149,7 +149,7 @@ export function PluginReviewPanel({
         <ul className="space-y-1.5 text-xs">
           {rows.map((e) => (
             <li key={`${e.resource}:${e.key}`} className="flex items-start gap-1.5">
-              <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/70" />
+              <span className="mt-1.5 size-1 shrink-0 rounded-full bg-muted-foreground/70" />
               <span>{sentence(e)}</span>
             </li>
           ))}
@@ -158,7 +158,7 @@ export function PluginReviewPanel({
 
       {locallyModified && (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           {t("localModifications")}
         </p>
       )}
@@ -180,7 +180,7 @@ export function PluginReviewPanel({
                 <label className="inline-flex items-center gap-1">
                   <input
                     type="checkbox"
-                    className="h-3.5 w-3.5 accent-primary"
+                    className="size-3.5 accent-primary"
                     checked={dispositions[p.key] === "delete"}
                     onChange={(ev) => onDisposition(p.key, ev.target.checked ? "delete" : "keep")}
                   />
@@ -195,7 +195,7 @@ export function PluginReviewPanel({
       <Collapsible>
         <CollapsibleTrigger className="inline-flex items-center gap-1 rounded text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-panel-open]_.chevron]:rotate-180">
           {t("details")}
-          <ChevronDown className="chevron h-3.5 w-3.5 transition-transform" />
+          <ChevronDown className="chevron size-3.5 transition-transform" />
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-2 text-xs">
           {review.surface.connectors.map((c) => {

@@ -299,7 +299,7 @@ export default function ConnectionsPage() {
           {loading &&
             Array.from({ length: 2 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2 py-3.5">
-                <Skeleton className="h-4 w-4 rounded" />
+                <Skeleton className="size-4 rounded" />
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="ml-auto h-4 w-16" />
               </div>
@@ -399,7 +399,7 @@ export default function ConnectionsPage() {
               hint={t("resyncModelsHint")}
               control={
                 <Button size="sm" variant="outline" onClick={handleResync} disabled={resyncing}>
-                  {resyncing && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {resyncing && <Loader2 className="animate-spin" />}
                   {t("resyncModelsButton")}
                 </Button>
               }

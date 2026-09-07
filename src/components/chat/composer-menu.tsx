@@ -105,25 +105,25 @@ export function ComposerMenu({
                 const lapsed = folders.needReconnect.includes(f.id);
                 return (
                   <div key={f.id} className="flex items-center gap-3 px-3 py-1 text-sm">
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Folder className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate">{f.name}</span>
                     {lapsed && (
                       <button type="button" onClick={() => reconnect(f.id, f.name)} className="inline-flex items-center gap-0.5 text-xs text-amber-600 hover:underline dark:text-amber-500">
                         {folders.reconnectKind[f.id] === "gone" ? (
                           <>
-                            <FolderOpen className="h-3 w-3" />
+                            <FolderOpen className="size-3" />
                             {t("chooseAgain")}
                           </>
                         ) : (
                           <>
-                            <RefreshCw className="h-3 w-3" />
+                            <RefreshCw className="size-3" />
                             {t("reconnect")}
                           </>
                         )}
                       </button>
                     )}
                     <button type="button" onClick={() => folders.remove(f.id)} aria-label={t("disconnect")} className="text-muted-foreground/70 transition-colors hover:text-foreground">
-                      <X className="h-3.5 w-3.5" />
+                      <X className="size-3.5" />
                     </button>
                   </div>
                 );
@@ -169,7 +169,7 @@ export function ComposerMenu({
                     href={`/api/sandbox/files/download-all?${targetQuery(folders.target)}&paths=${encodeURIComponent(imported.name)}`}
                     className="inline-flex items-center gap-1 text-foreground hover:underline"
                   >
-                    <Download className="h-3 w-3" />
+                    <Download className="size-3" />
                     {t("downloadZip")}
                   </a>
                 </div>
@@ -203,7 +203,7 @@ export function ComposerMenu({
           <Link key={l.href} href={l.href} className={item} onClick={() => setOpen(false)}>
             {l.icon}
             <span className="flex-1">{l.label}</span>
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <ChevronRight className="size-3.5 text-muted-foreground/60" />
           </Link>
         ))}
       </PopoverContent>

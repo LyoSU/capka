@@ -149,7 +149,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-1.5 h-4 w-4" />
+        <Plus />
         {t("addProvider")}
       </Button>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -214,7 +214,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                       onClick={() => setShowKey((v) => !v)}
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
-                      {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                     </button>
                   </Hint>
                 </div>
@@ -278,7 +278,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
               {tc("cancel")}
             </Button>
             <Button onClick={handleTestAndSave} disabled={saving}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {saving && <Loader2 className="animate-spin" />}
               {t("testSave")}
             </Button>
           </DialogFooter>

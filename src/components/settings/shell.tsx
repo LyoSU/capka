@@ -254,7 +254,7 @@ export function SettingsError({ message, action }: { message: string; action?: R
         aria-hidden
         className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
       >
-        <X className="h-3 w-3" strokeWidth={3.5} />
+        <X className="size-3" strokeWidth={3.5} />
       </span>
       <p className="min-w-0 flex-1 leading-relaxed text-foreground">{message}</p>
       {action}

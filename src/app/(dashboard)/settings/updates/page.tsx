@@ -109,7 +109,7 @@ export default function UpdatesSettingsPage() {
           </div>
           {status?.updateAvailable ? (
             <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-warning-surface px-2.5 py-1 text-xs font-medium text-warning-text">
-              <ArrowUpCircle className="h-3.5 w-3.5" />
+              <ArrowUpCircle className="size-3.5" />
               {t("updateAvailable", { version: status.latest! })}
             </span>
           ) : status && !status.enabled ? (
@@ -118,7 +118,7 @@ export default function UpdatesSettingsPage() {
             <span className="shrink-0 text-xs text-muted-foreground">{t("checkFailed")}</span>
           ) : status?.latest ? (
             <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-success">
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CheckCircle2 className="size-3.5" />
               {t("upToDate")}
             </span>
           ) : null}
@@ -146,7 +146,7 @@ export default function UpdatesSettingsPage() {
                 className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium underline-offset-4 hover:underline"
               >
                 {t("viewChangelog")}
-                <ExternalLink className="h-3 w-3" />
+                <ExternalLink className="size-3" />
               </a>
             )}
           </div>
@@ -159,7 +159,7 @@ export default function UpdatesSettingsPage() {
         <div className="flex items-center gap-2 rounded-xl bg-muted p-1.5 pl-3.5">
           <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px]">{UPDATE_CMD}</code>
           <Button variant="ghost" size="sm" onClick={copy} className="shrink-0 text-muted-foreground">
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check /> : <Copy />}
             {copied ? t("copied") : t("copy")}
           </Button>
         </div>

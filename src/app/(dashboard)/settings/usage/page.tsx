@@ -427,7 +427,7 @@ export default function UsagePage() {
                   <h3 className="text-base font-semibold tracking-tight">{t("byUser")}</h3>
                   {data.byUser.length > 5 && (
                     <div className="relative w-44">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="pl-8" />
                     </div>
                   )}
@@ -479,7 +479,7 @@ export default function UsagePage() {
                         onClick={() => setSelectedUser(null)}
                         className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                       >
-                        {selectedUser.name}<X className="h-3 w-3" />
+                        {selectedUser.name}<X className="size-3" />
                       </button>
                     )}
                   </div>
@@ -558,7 +558,7 @@ function FiltersControl({
         )}
         disabled={!opts}
       >
-        <SlidersHorizontal className="h-3.5 w-3.5" />
+        <SlidersHorizontal className="size-3.5" />
         {t("filters")}
         {activeCount > 0 && (
           <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground tabular-nums">
@@ -649,7 +649,7 @@ function Chip({ label, onClear, t }: { label: string; onClear: () => void; t: T 
     <span className="flex items-center gap-1 rounded-full border bg-accent/40 py-0.5 pl-2.5 pr-1 text-xs">
       <span className="max-w-[12rem] truncate">{label}</span>
       <button onClick={onClear} className="rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground" aria-label={t("removeFilter")}>
-        <X className="h-3 w-3" />
+        <X className="size-3" />
       </button>
     </span>
   );
@@ -687,7 +687,7 @@ function AttentionBlock({
       role="status"
     >
       <div className="flex items-center gap-1.5 text-sm font-medium text-warning-text">
-        <AlertTriangle className="h-3.5 w-3.5" />
+        <AlertTriangle className="size-3.5" />
         {t("attn.title")}
       </div>
       <ul className="space-y-1 text-sm text-foreground/90">
@@ -756,7 +756,7 @@ function Trend({
   const color = tone === "cost" ? (up ? "text-destructive-text" : "text-success") : "text-muted-foreground";
   return (
     <span className={cn("flex items-center gap-0.5 text-[11px] font-medium tabular-nums", color)} title={t("vsPrevious")}>
-      <Icon className="h-3 w-3" />
+      <Icon className="size-3" />
       {pct(Math.abs(change))}
     </span>
   );
@@ -839,7 +839,7 @@ function Breakdown({
                 // action most people never find (and no action at all on touch).
                 className="flex shrink-0 items-center px-2.5 text-muted-foreground/40 transition-colors hover:text-foreground focus-visible:text-foreground"
               >
-                <ArrowUpRight className="h-4 w-4" />
+                <ArrowUpRight className="size-4" />
               </Link>
             )}
           </div>

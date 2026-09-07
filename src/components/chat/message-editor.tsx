@@ -132,7 +132,7 @@ export function MessageEditor({
           className="mr-auto"
           onClick={() => fileInputRef.current?.click()}
         >
-          <Paperclip className="h-4 w-4" />
+          <Paperclip />
           <span className={isMobile ? "sr-only" : undefined}>{t("input.attach")}</span>
         </Button>
         <Button variant="ghost" onClick={onCancel}>

@@ -301,14 +301,14 @@ export function AutomationEditor({
                           input is what makes select-all work on every platform. */}
                       <Input readOnly value={webhookUrl} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
                       <Button variant="outline" size="icon" className="shrink-0" onClick={copyUrl} aria-label={t("webhook.copy")} title={t("webhook.copy")}>
-                        <Copy className="h-3.5 w-3.5" />
+                        <Copy />
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">{t("webhook.secretWarning")}</p>
                     <Button variant="ghost" size="sm" onClick={rotate} disabled={rotating}>
                       {rotating
-                        ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                        ? <Loader2 className="animate-spin" />
+                        : <RefreshCw />}
                       {t("webhook.rotate")}
                     </Button>
                     <p className="text-xs text-muted-foreground">{t("webhook.rotateHint")}</p>
@@ -422,7 +422,7 @@ export function AutomationEditor({
         <div className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">
           <Button variant="ghost" onClick={onClose} disabled={saving}>{t("cancel")}</Button>
           <Button onClick={save} disabled={saving || !canSave}>
-            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {saving && <Loader2 className="animate-spin" />}
             {t("save")}
           </Button>
         </div>

@@ -57,7 +57,7 @@ export default function MemberPluginBrowser() {
   // button was broken by the gate landing ahead of its callers.
   const [pendingInstall, setPendingInstall] = useState<{ marketplaceId: string; pluginName: string } | null>(null);
 
-  if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>;
   if (!markets.length) {
     return <SettingsEmpty icon={Store} title={t("empty")} hint={t("emptyHint")} />;
   }
@@ -80,12 +80,12 @@ export default function MemberPluginBrowser() {
       )}
 
       <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="pl-8" />
       </div>
 
       {catalogLoading ? (
-        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
       ) : (
         <div className="divide-y">
           {filtered.map((c) => (
@@ -100,7 +100,7 @@ export default function MemberPluginBrowser() {
               </div>
               {c.installed ? (
                 <span className="flex shrink-0 items-center gap-1 text-xs text-success">
-                  <Check className="h-3.5 w-3.5" />{t("installedLabel")}
+                  <Check className="size-3.5" />{t("installedLabel")}
                 </span>
               ) : (
                 <Button
@@ -109,7 +109,7 @@ export default function MemberPluginBrowser() {
                   disabled={!c.installable}
                   onClick={() => selected && setPendingInstall({ marketplaceId: selected, pluginName: c.name })}
                 >
-                  <Download className="mr-1 h-3.5 w-3.5" />
+                  <Download />
                   {t("install")}
                 </Button>
               )}

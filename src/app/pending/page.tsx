@@ -48,8 +48,8 @@ export default function PendingPage() {
       }
     >
       <div className="flex flex-col items-center gap-3 rounded-xl border bg-muted/30 px-6 py-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-warning-border bg-warning-surface">
-          <Clock className="h-6 w-6 text-warning-text" />
+        <div className="flex size-12 items-center justify-center rounded-full border border-warning-border bg-warning-surface">
+          <Clock className="size-6 text-warning-text" />
         </div>
         <p className="text-sm text-muted-foreground">{t("hint")}</p>
         <Button
@@ -61,7 +61,7 @@ export default function PendingPage() {
             startCheck(() => router.refresh());
           }}
         >
-          {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+          {checking ? <Loader2 className="animate-spin" /> : <RotateCw />}
           {t("recheck")}
         </Button>
       </div>

@@ -65,8 +65,8 @@ function nameFromCommand(raw: string): string {
  *  self-hosted, privacy-positioned product. `url` is kept for call-site stability. */
 function ConnectorIcon() {
   return (
-    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted">
-      <Plug className="h-3.5 w-3.5 text-muted-foreground" />
+    <div className="flex size-6 shrink-0 items-center justify-center rounded bg-muted">
+      <Plug className="size-3.5 text-muted-foreground" />
     </div>
   );
 }
@@ -76,34 +76,34 @@ function HealthLine({ h, loading, t }: { h?: Health; loading: boolean; t: Return
   if (!h) {
     return loading ? (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />{t("health.checking")}
+        <Loader2 className="size-3 animate-spin" />{t("health.checking")}
       </span>
     ) : null;
   }
   if (h.status === "ok") {
     return (
       <span className="flex items-center gap-1 text-xs text-success">
-        <CheckCircle2 className="h-3 w-3" />{t("health.ok", { count: h.toolCount ?? 0 })}
+        <CheckCircle2 className="size-3" />{t("health.ok", { count: h.toolCount ?? 0 })}
       </span>
     );
   }
   if (h.status === "needs_login") {
     return (
       <span className="flex items-center gap-1 text-xs text-warning-text">
-        <LogIn className="h-3 w-3" />{t("health.needsLogin")}
+        <LogIn className="size-3" />{t("health.needsLogin")}
       </span>
     );
   }
   if (h.status === "unauthorized") {
     return (
       <span className="flex items-center gap-1 text-xs text-warning-text">
-        <AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}
+        <AlertTriangle className="size-3" />{t("health.unauthorized")}
       </span>
     );
   }
   return (
     <span className="flex flex-col gap-0.5 text-xs text-destructive">
-      <span className="flex items-center gap-1"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>
+      <span className="flex items-center gap-1"><XCircle className="size-3" />{t("health.unreachable")}</span>
       {h.detail && (
         <code className="block max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-destructive/5 px-1.5 py-1 font-mono text-[11px] leading-snug text-destructive/80">
           {h.detail}
@@ -365,7 +365,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
 
       {!showForm && (
         <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={() => setShowForm(true)}><Plus className="mr-1.5 h-4 w-4" />{t("add")}</Button>
+          <Button variant="outline" size="sm" onClick={() => setShowForm(true)}><Plus />{t("add")}</Button>
         </div>
       )}
 
@@ -406,7 +406,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
               <div className="space-y-1">
                 <Input placeholder="https://mcp.example.com/mcp" value={url} onChange={(e) => { setUrl(e.target.value); setTestResult(null); }} />
                 {inspecting && (
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />{t("inspecting")}</p>
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3 animate-spin" />{t("inspecting")}</p>
                 )}
               </div>
 
@@ -446,7 +446,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">{t("method.oauthHint")}</p>
                   <button type="button" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                    {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{t("advanced")}
+                    {showAdvanced ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}{t("advanced")}
                   </button>
                   {showAdvanced && (
                     <div className="space-y-2 rounded-md bg-muted/40 p-3">
@@ -464,12 +464,12 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
           {testResult && (
             <div className="rounded-md bg-muted/50 px-3 py-2">
               {testResult.status === "ok"
-                ? <span className="flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3 w-3" />{t("testOk", { count: testResult.toolCount ?? 0 })}</span>
+                ? <span className="flex items-center gap-1 text-xs text-success"><CheckCircle2 className="size-3" />{t("testOk", { count: testResult.toolCount ?? 0 })}</span>
                 : testResult.status === "needs_login"
-                  ? <span className="flex items-center gap-1 text-xs text-warning-text"><LogIn className="h-3 w-3" />{t("testOauth")}</span>
+                  ? <span className="flex items-center gap-1 text-xs text-warning-text"><LogIn className="size-3" />{t("testOauth")}</span>
                   : testResult.status === "unauthorized"
-                    ? <span className="flex items-center gap-1 text-xs text-warning-text"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
-                    : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>}
+                    ? <span className="flex items-center gap-1 text-xs text-warning-text"><AlertTriangle className="size-3" />{t("health.unauthorized")}</span>
+                    : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="size-3" />{t("health.unreachable")}</span>}
             </div>
           )}
 
@@ -484,9 +484,9 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
           )}
 
           <div className="flex gap-2">
-            <Button size="sm" onClick={add} disabled={saving || !canSubmit}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{!isLocal && method === "oauth" ? t("saveAndSignIn") : t("save")}</Button>
+            <Button size="sm" onClick={add} disabled={saving || !canSubmit}>{saving && <Loader2 className="animate-spin" />}{!isLocal && method === "oauth" ? t("saveAndSignIn") : t("save")}</Button>
             {!isLocal && method === "token" && (
-              <Button variant="outline" size="sm" onClick={test} disabled={testing || !looksLikeUrl(url)}>{testing && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{t("test")}</Button>
+              <Button variant="outline" size="sm" onClick={test} disabled={testing || !looksLikeUrl(url)}>{testing && <Loader2 className="animate-spin" />}{t("test")}</Button>
             )}
             <Button variant="ghost" size="sm" onClick={resetForm}>{t("cancel")}</Button>
           </div>
@@ -515,7 +515,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                       connector that merely needs fixing. */}
                   {s.orphaned && (
                     <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
-                      <AlertTriangle className="h-3 w-3" />{t("orphaned")}
+                      <AlertTriangle className="size-3" />{t("orphaned")}
                     </Badge>
                   )}
                   {/* At-a-glance "this connector is broken" flag — the detail still
@@ -523,7 +523,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                       (can't reach / token rejected); needs_login has its own Sign in. */}
                   {!s.orphaned && s.enabled && (h?.status === "unreachable" || h?.status === "unauthorized") && (
                     <Badge variant="destructive" className="gap-1">
-                      <AlertTriangle className="h-3 w-3" />{t("health.problem")}
+                      <AlertTriangle className="size-3" />{t("health.problem")}
                     </Badge>
                   )}
                 </div>
@@ -537,7 +537,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {!s.orphaned && isOauth && s.enabled && (h?.status === "needs_login" || h?.status === "unauthorized") && (
-                <Button size="xs" onClick={() => signIn(s.id)}><LogIn className="mr-1 h-3.5 w-3.5" />{t("signIn")}</Button>
+                <Button size="xs" onClick={() => signIn(s.id)}><LogIn />{t("signIn")}</Button>
               )}
               {!s.orphaned && isOauth && s.enabled && h?.status === "ok" && (
                 <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => signOut(s.id)}>{t("signOut")}</Button>
@@ -554,7 +554,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
               {canManage(s) && (
                 <Hint label={t("delete")}>
                   <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s)}>
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 />
                   </Button>
                 </Hint>
               )}

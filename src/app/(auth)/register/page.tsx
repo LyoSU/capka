@@ -63,7 +63,7 @@ export default function RegisterPage() {
   if (registrationEnabled === null) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }

@@ -37,7 +37,7 @@ export function AuthShell({
         <div className="animate-card-morph w-full max-w-md rounded-4xl border border-border bg-card p-7 shadow-[0_1px_2px_oklch(0_0_0/0.05),0_28px_60px_-32px_oklch(0.2_0.01_60/0.28)] sm:p-8">
           <div className="flex flex-col items-center gap-3 text-center">
             <span className="flex size-16 items-center justify-center rounded-3xl bg-primary text-primary-foreground shadow-sm">
-              <ClawMark animated className="h-9 w-9" />
+              <ClawMark animated className="size-9" />
             </span>
             <span className="text-sm font-medium tracking-tight text-muted-foreground">Capka</span>
           </div>

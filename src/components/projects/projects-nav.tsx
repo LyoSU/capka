@@ -99,10 +99,10 @@ function ProjectRow({ project, active }: { project: Project; active: boolean }) 
           tabIndex={-1}
           nativeButton={false}
           render={<span />}
-          className="pointer-events-none absolute right-1 top-1/2 z-10 h-0 w-0 -translate-y-1/2"
+          className="pointer-events-none absolute right-1 top-1/2 z-10 size-0 -translate-y-1/2"
         />
         <SidebarMenuButton render={<Link href={`/projects/${project.id}`} />} data-active={active || undefined}>
-          <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <FolderOpen className="shrink-0 text-muted-foreground" />
           <span className="truncate">{project.name}</span>
         </SidebarMenuButton>
         <button
@@ -175,14 +175,14 @@ export function ProjectsNav() {
           ))}
           <SidebarMenuItem>
             <SidebarMenuButton onClick={() => setDialogOpen(true)} className="text-muted-foreground">
-              <Plus className="h-4 w-4" strokeWidth={2.5} />
+              <Plus strokeWidth={2.5} />
               <span>{t("new")}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {projects.length > MAX_SHOWN && (
             <SidebarMenuItem>
               <SidebarMenuButton render={<Link href="/projects" />} className="text-muted-foreground">
-                <FolderKanban className="h-4 w-4" />
+                <FolderKanban />
                 <span>{t("selector.manage")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>

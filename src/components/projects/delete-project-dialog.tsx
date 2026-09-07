@@ -105,14 +105,14 @@ export function DeleteProjectDialog({
             ))}
           </ul>
         ) : (
-          <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground/50" /></div>
+          <div className="flex justify-center py-4"><Loader2 className="size-4 animate-spin text-muted-foreground/50" /></div>
         )}
 
         <a
           href={`/api/sandbox/files/archive?${targetQuery(projectTarget(project.id))}`}
           className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
         >
-          <Download className="h-4 w-4" />
+          <Download className="size-4" />
           {t("downloadFirst")}
         </a>
 
@@ -121,7 +121,7 @@ export function DeleteProjectDialog({
             {tc("cancel")}
           </Button>
           <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
             {t("confirm")}
           </Button>
         </DialogFooter>

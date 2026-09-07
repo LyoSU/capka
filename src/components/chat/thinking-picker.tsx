@@ -125,7 +125,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
           <span
             key={s}
             aria-hidden
-            className={`pointer-events-none absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity ${
+            className={`pointer-events-none absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity ${
               i === index ? "opacity-0" : i < index ? "bg-foreground/40" : "bg-foreground/25"
             }`}
             style={{ left: centre(i) }}

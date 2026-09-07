@@ -133,6 +133,26 @@
      Surface padding: p-2 when the body is a list of rows, p-4 when it is prose
      or a form.
 
+     Elevation: use the ladder above (hairline / btn / panel / raised /
+     overlay), never Tailwind's own `shadow-sm|md|lg`. Every rung draws a 1px
+     ring as part of the shadow, so the ladder has no ringless drop — the two
+     filled brand tiles on the sign-in and setup screens keep `shadow-sm` for
+     exactly that reason, and they are the only ones allowed to.
+
+     Icons — the CONTAINER owns their size and their spacing
+       Write a square as `size-N`, never `h-N w-N`. The two compile to the same
+       declarations, but every component that sizes its own icons does it with
+       `[&_svg:not([class*='size-'])]:size-N`, and that selector (a class plus a
+       :not on an attribute) outranks a bare `.h-4`. So an icon written
+       `h-3.5 w-3.5` inside a Button silently rendered at the Button's 16px: the
+       author's number was dead, and only the `size-` form is visible to the
+       escape hatch.
+       Inside such a component — Button, a menu/select/command row, Toggle,
+       SidebarMenuButton — state NOTHING on the icon. No size, and no `mr-*`
+       either: the container already sets a gap, so a margin there doubles it.
+       Size an icon only where nothing above it does, or where you genuinely mean
+       to override, and then say `size-N` so the override is seen.
+
      Row inset, by where the row lives — all three land near a 16-20px left edge
        inside a p-2 surface (menu, palette)      px-3
        full-bleed in a clipped container (list)  px-4

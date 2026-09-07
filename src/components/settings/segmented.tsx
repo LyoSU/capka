@@ -73,7 +73,7 @@ export function Segmented<K extends string>({
               on ? cn("bg-card font-medium shadow-btn", option.tone) : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {option.icon && <option.icon className="h-4 w-4" />}
+            {option.icon && <option.icon className="size-4" />}
             {option.label}
           </button>
         );
