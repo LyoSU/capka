@@ -73,8 +73,8 @@ describe("POST /api/folders — pc folder create", () => {
   it("creates a read-write pc row and returns it", async () => {
     const r = await POST(jsonReq("http://x/api/folders", "POST", { chatId: "c1", name: "My Docs" }));
     expect(r.status).toBe(201);
-    expect((await r.json()).folder).toMatchObject({ kind: "pc", name: "mydocs", readOnly: false });
-    expect(h.getRows()[0]).toMatchObject({ kind: "pc", name: "mydocs", userId: "u1" });
+    expect((await r.json()).folder).toMatchObject({ kind: "pc", name: "my-docs", readOnly: false });
+    expect(h.getRows()[0]).toMatchObject({ kind: "pc", name: "my-docs", userId: "u1" });
   });
 
   it("409 on a duplicate name in the same session", async () => {
