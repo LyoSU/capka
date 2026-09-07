@@ -18,6 +18,7 @@ import {
   Copy,
   Check,
   FolderInput,
+  Sparkles,
 } from "lucide-react";
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
@@ -73,6 +74,7 @@ export function ChatContextMenu({
   const [moveOpen, setMoveOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [retitling, setRetitling] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>(
     (chat.visibility as Visibility) ?? "private",
@@ -100,6 +102,36 @@ export function ChatContextMenu({
       onUpdate();
     } catch {
       toast.error(t("menu.updateFailed"));
+    }
+  }
+
+  // Re-derive the title from the conversation. Three outcomes are NOT failures and
+  // must not read as one: the model declining to name the chat, and a chat with no
+  // reply yet, both leave the title alone and say so plainly. Only a real error
+  // gets the error toast.
+  async function regenerateTitle() {
+    if (retitling) return;
+    setRetitling(true);
+    try {
+      const res = await fetch(`/api/chats/${chat.id}/title`, { method: "POST" });
+      if (res.status === 409) {
+        toast(t("menu.titleNothingYet"));
+        return;
+      }
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { title?: string | null };
+      if (!data.title) {
+        toast(t("menu.titleUnchanged"));
+        return;
+      }
+      toast.success(t("menu.titleRegenerated"));
+      // The sidebar already has the new name from the server's `chat:title` event;
+      // this re-reads it for the surfaces that render the title server-side.
+      onUpdate();
+    } catch {
+      toast.error(t("menu.titleFailed"));
+    } finally {
+      setRetitling(false);
     }
   }
 
@@ -196,6 +228,13 @@ export function ChatContextMenu({
 
   const items: ActionItem[] = [
     { key: "rename", icon: <Pencil />, label: t("menu.rename"), onSelect: startRename },
+    {
+      key: "regenerate-title",
+      icon: <Sparkles />,
+      label: t("menu.regenerateTitle"),
+      disabled: retitling,
+      onSelect: regenerateTitle,
+    },
     {
       key: "pin",
       icon: chat.pinned ? <PinOff /> : <Pin />,

@@ -268,6 +268,11 @@
     },
     "menu": {
       "rename": "Rename",
+      "regenerateTitle": "Regenerate title",
+      "titleRegenerated": "Title updated",
+      "titleUnchanged": "Kept the current title",
+      "titleNothingYet": "Send a message first — there is nothing to name yet",
+      "titleFailed": "Could not regenerate the title",
       "pin": "Pin",
       "unpin": "Unpin",
       "archive": "Archive",
