@@ -897,7 +897,7 @@ export function AppSidebar() {
         <Hint label={t("newChat")} side="right">
           <Link
             href={newChatHref}
-            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden size-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
           >
             <Plus className="h-4 w-4" strokeWidth={2.75} />
           </Link>
@@ -933,7 +933,7 @@ export function AppSidebar() {
             {[88, 72, 80, 64, 84, 70, 58].map((w, i) => (
               <div
                 key={i}
-                className="h-8 animate-pulse-fast rounded-md bg-sidebar-accent"
+                className="h-9 animate-pulse-fast rounded-lg bg-sidebar-accent"
                 style={{ width: `${w}%` }}
               />
             ))}
@@ -1047,7 +1047,7 @@ export function AppSidebar() {
           <DropdownMenuTrigger
             aria-label={t("account")}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md p-1.5 text-left outline-none transition-colors",
+              "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left outline-none transition-colors",
               "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[popup-open]:bg-sidebar-accent",
               "group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0"
             )}

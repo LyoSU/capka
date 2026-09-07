@@ -96,6 +96,17 @@
        Group label: px-3 py-1.5 text-xs. Rule: my-1.5 h-px, inset to the
        surface padding (no negative margin).
 
+     Navigation rows — sidebar chat list, project rows, settings nav
+       36px (h-9), gap-2, px-3, rounded-lg, text-[15px], svg size-4.
+       A DELIBERATE second rung, not drift. A menu is eight transient rows read
+       once; a nav is thirty rows scrolled and scanned all day, and it owns a
+       fixed-width column that never gets more room. Four pixels a row is one
+       more chat per screen, and 16px icons keep a long list from reading as a
+       wall of glyphs — the reference products split it the same way (menu 40,
+       sidebar 36). Everything except the height and the icon size matches the
+       list row, so the two still read as one family. A placeholder row must
+       state this rung too, or the list resizes when the fetch lands.
+
      Radius, by what the box IS — never by taste at the call site
        rounded-sm   a glyph-sized chip, ~16-20px — the ladder bottoms out here
        rounded-md   a control below the default rung, a small inline tile
