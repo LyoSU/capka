@@ -82,7 +82,7 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[15px] transition-micro",
+                "flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-[15px] transition-micro",
                 isActiveItem(item.href)
                   ? "bg-hover-strong font-medium text-foreground"
                   : "text-muted-foreground hover:bg-hover hover:text-foreground"
@@ -110,7 +110,7 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex h-9 items-center gap-2 rounded-lg px-3 text-[15px] transition-micro active:scale-[0.99]",
+                      "flex h-9 items-center gap-2 rounded-md px-3 text-[15px] transition-micro active:scale-[0.99]",
                       active
                         ? "bg-hover-strong font-medium text-foreground"
                         : "text-muted-foreground hover:bg-hover hover:text-foreground"

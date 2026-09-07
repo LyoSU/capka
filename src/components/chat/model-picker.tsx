@@ -545,7 +545,7 @@ function ProviderRail({
           type="button"
           aria-pressed={isActive}
           onClick={() => onSelect(key)}
-          className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
+          className={`flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
             vertical ? "w-full" : ""
           }`}
         >
@@ -1552,7 +1552,7 @@ export function ModelPicker({
           ref={popoverRef}
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
-          className="z-50 flex overflow-hidden rounded-2xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
+          className="z-50 flex overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
         >
           {renderList("vertical")}
         </div>,

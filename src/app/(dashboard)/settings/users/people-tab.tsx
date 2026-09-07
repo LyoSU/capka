@@ -213,7 +213,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
               onClick={() => setOpenId(user.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(user.id); } }}
               aria-label={t("openDetails", { name: user.name || user.email })}
-              className="-mx-3 grid cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-lg px-3 py-3 text-left outline-none transition-micro hover:bg-hover focus-visible:bg-hover sm:grid-cols-[1fr_9rem_5rem_9rem_6rem] [&+&]:border-t"
+              className="-mx-3 grid cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-md px-3 py-3 text-left outline-none transition-micro hover:bg-hover focus-visible:bg-hover sm:grid-cols-[1fr_9rem_5rem_9rem_6rem] [&+&]:border-t"
             >
               {/* person */}
               <div className="flex min-w-0 items-center gap-2.5">

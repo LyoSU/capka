@@ -68,7 +68,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
 
       {/* key={type} remounts the list when the type changes, so the rows
           re-run their staggered entrance — switching tabs feels alive. */}
-      <div key={type} className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div key={type} className="overflow-hidden rounded-xl border border-border bg-card">
         {actions.map(({ key: a, icon: ActionIcon }, i) => (
           <button
             key={a}

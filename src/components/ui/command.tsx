@@ -55,7 +55,7 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-[18%] translate-y-0 gap-0 overflow-hidden rounded-2xl! p-0 sm:max-w-[640px]",
+          "top-[18%] translate-y-0 gap-0 overflow-hidden rounded-xl! p-0 sm:max-w-[640px]",
           className
         )}
         showCloseButton={showCloseButton}
@@ -158,7 +158,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-lg px-3 text-[15px] outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-5 data-selected:[&_svg]:text-foreground",
+        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-md px-3 text-[15px] outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-5 data-selected:[&_svg]:text-foreground",
         className
       )}
       {...props}

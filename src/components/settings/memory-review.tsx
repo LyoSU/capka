@@ -132,7 +132,7 @@ export function MemoryConflicts({ conflicts, onChanged }: { conflicts: ConflictV
 
   return (
     <SettingsSection title={t("conflictTitle")} description={t("conflictHint")}>
-      <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-panel">
+      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">
         {conflicts.map((c) => (
           <Conflict key={c.claim.id} conflict={c} onChanged={onChanged} />
         ))}
@@ -235,7 +235,7 @@ export function MemoryArchive({ archive, expiresAt, onChanged }: {
       title={t("archiveTitle")}
       description={t("archiveHint", { date: formatDay(expiresAt, locale) })}
     >
-      <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-panel">
+      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">
         {groupBySource(archive, (p) => sourceText(p.source)).map((run) => (
           <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
             {/* A link, for the reader who does not recognise a suggestion and wants to go

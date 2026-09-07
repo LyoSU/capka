@@ -165,7 +165,7 @@ function ActionSheet({
       side="bottom"
       showCloseButton={false}
       aria-label={ariaLabel}
-      className="gap-0 rounded-t-2xl p-0 pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+      className="gap-0 rounded-t-xl p-0 pb-[max(env(safe-area-inset-bottom),0.5rem)]"
     >
       <SheetTitle className="sr-only">{ariaLabel}</SheetTitle>
       <div
@@ -212,7 +212,7 @@ function ActionSheet({
                     it.onSelect();
                   }}
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-lg px-3 text-[15px] leading-5 outline-none transition-colors focus-visible:bg-hover active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
+                    "flex min-h-12 items-center gap-3 rounded-md px-3 text-[15px] leading-5 outline-none transition-colors focus-visible:bg-hover active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
                     it.variant === "destructive"
                       ? "text-destructive [&_svg]:text-destructive"
                       : "text-foreground [&_svg]:text-muted-foreground",

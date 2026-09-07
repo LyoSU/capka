@@ -91,13 +91,13 @@
        icon-only square on the same rungs: size-6 / size-8 / size-9 / size-10
 
      List rows — menu item, select item, command item, action-sheet row
-       40px tall (py-2.5 + text-[15px]/leading-5), gap-3, px-3, rounded-lg,
+       40px tall (py-2.5 + text-[15px]/leading-5), gap-3, px-3, rounded-md,
        svg size-5. A trailing check/chevron sits at size-4.
        Group label: px-3 py-1.5 text-xs. Rule: my-1.5 h-px, inset to the
        surface padding (no negative margin).
 
      Navigation rows — sidebar chat list, project rows, settings nav
-       36px (h-9), gap-2, px-3, rounded-lg, text-[15px], svg size-4.
+       36px (h-9), gap-2, px-3, rounded-md, text-[15px], svg size-4.
        A DELIBERATE second rung, not drift. A menu is eight transient rows read
        once; a nav is thirty rows scrolled and scanned all day, and it owns a
        fixed-width column that never gets more room. Four pixels a row is one
@@ -109,17 +109,26 @@
 
      Radius, by what the box IS — never by taste at the call site
        rounded-sm   a glyph-sized chip, ~16-20px — the ladder bottoms out here
-       rounded-md   a control below the default rung, a small inline tile
-       rounded-lg   a control on the default rung, a row inside a surface
-       rounded-xl   a box lying FLAT on the page and holding ONE thing: a
-                    settings card, a note, a banner, a dashed empty state, a
-                    single-line status bar
-       rounded-2xl  a container of ROWS, and anything floating or raised above
-                    the page: dropdown, popover, select popup, dialog, command
-                    palette, Card, a `bg-card` panel with a shadow
-       A row is one step below its surface (2xl minus 8px of padding lands on
-       lg), so the corners stay concentric. A row that lifts while dragged is
-       still a row: it keeps lg and gains only a shadow.
+       rounded-md   a ROW inside a surface, and a control below the default rung
+       rounded-lg   a control on the default rung (button, input, select trigger)
+       rounded-xl   a SURFACE, whatever it holds and however it is stacked:
+                    dropdown, popover, select popup, dialog, alert dialog,
+                    command palette, the top of an action sheet, a Card, a
+                    settings card or note, a list container, a raised bg-card
+                    panel. 16px, matching the products this is measured against.
+       rounded-2xl  the CONVERSATION's own shapes, and nothing else: a message
+                    bubble, the composer, a card that sits inline in the
+                    transcript (ask, manage, import, an error), and the
+                    skeletons that stand in for them.
+                    This is the one place two radii are defensible. A bubble is
+                    not a surface holding other things — it is a shape holding
+                    text, sized by its content, floating in a stream, and it
+                    must read as speech rather than as chrome. Rounder is how
+                    every chat product says that, and the step also draws the
+                    line between the transcript and the app around it.
+       A row is one step below its surface (16px minus 8px of padding lands on
+       md), so the corners stay concentric. A row that lifts while dragged is
+       still a row: it keeps md and gains only a shadow.
 
      Surface padding: p-2 when the body is a list of rows, p-4 when it is prose
      or a form.

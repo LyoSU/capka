@@ -130,7 +130,7 @@ export function ChatNav({
           buttons stay out of the tab order until the list is actually shown. */}
       <nav
         aria-label={label}
-        className={`absolute right-0 top-1/2 flex max-h-[70dvh] w-72 max-w-[60vw] -translate-y-1/2 flex-col gap-px overflow-y-auto rounded-2xl bg-popover p-2 shadow-overlay transition-opacity duration-150 ${
+        className={`absolute right-0 top-1/2 flex max-h-[70dvh] w-72 max-w-[60vw] -translate-y-1/2 flex-col gap-px overflow-y-auto rounded-xl bg-popover p-2 shadow-overlay transition-opacity duration-150 ${
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >

@@ -771,7 +771,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
   const inputEl = readOnly ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
-      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/50 px-4 py-5 text-center">
         {isLoading ? (
           // The bot (started from Telegram) is actively working on this read-only
           // chat. We can't reply here, but the running task is the same row a web
@@ -805,7 +805,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           rendered awkwardly in this floating block, and the header picker already
           fixes it (picking an available model flips modelStatus and the composer
           returns). One line says what to do; the button offers the alternative. */}
-      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/50 px-4 py-5 text-center">
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {connectionDown ? t("panel.connectionDownBody") : t("panel.modelGoneBody")}

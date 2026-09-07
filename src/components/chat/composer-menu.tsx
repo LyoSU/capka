@@ -81,7 +81,7 @@ export function ComposerMenu({
     else if (r === "failed") toast(t("reconnectFailed"));
   };
 
-  const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px] leading-5 text-foreground transition-colors hover:bg-hover disabled:opacity-60";
+  const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[15px] leading-5 text-foreground transition-colors hover:bg-hover disabled:opacity-60";
   const icon = "size-5 shrink-0 text-muted-foreground";
 
   return (
