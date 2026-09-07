@@ -2,7 +2,7 @@ import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronDown, ChevronLeft, ChevronRight, GitBranch, X, Info,
-  MoreHorizontal, ArrowRight, Clock, BookMarked, CornerDownRight,
+  MoreHorizontal, ArrowRight, Clock, BookMarked, CornerDownRight, BellOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -2487,6 +2487,39 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
+/**
+ * A monitor run that deliberately said nothing: the automation checked, found
+ * nothing worth the owner's attention, and ended without notifying anyone.
+ *
+ * Deliberately NOT a bubble. This row is a receipt that the check ran, and it has
+ * to read as quieter than an answer even when it sits between two of them — so:
+ * one muted line, no card, no badge colour, no actions. The reply text (a
+ * sentence at most, by the tool's own instruction) folds behind it, because the
+ * transcript still owes the person everything the turn actually said.
+ */
+function QuietRow({ reason, text }: { reason: string; text: string }) {
+  const t = useTranslations("chat.message");
+  const anchorDisclosure = useDisclosureAnchor();
+  const line = (
+    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+      <BellOff className="h-3.5 w-3.5 shrink-0 translate-y-0.5" aria-hidden />
+      <span className="shrink-0 text-foreground/70">{t("quiet.title")}</span>
+      <span className="min-w-0 flex-1 truncate">{reason}</span>
+    </div>
+  );
+  if (!text) return <div className="animate-message-in px-4 py-2 md:px-6">{line}</div>;
+  return (
+    <Collapsible className="animate-message-in px-4 py-2 md:px-6" onOpenChange={(_, d) => anchorDisclosure(d)}>
+      <CollapsibleTrigger aria-label={t("quiet.showReply")} className="w-full rounded-md text-left transition-colors hover:text-foreground">
+        {line}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 ml-5 text-sm text-muted-foreground">
+        <Markdown>{text}</Markdown>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter, pendingSteers }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
@@ -2816,7 +2849,18 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
 // in the memo wrapper, which calls no hooks itself — keeps ChatMessageImpl free
 // of a conditional return sitting between hook calls (rules-of-hooks).
 export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
-  const cpMeta = props.message.metadata as { compaction?: { summary: string } } | undefined;
-  if (cpMeta?.compaction) return <CompactionDivider summary={cpMeta.compaction.summary} />;
+  const rowMeta = props.message.metadata as { compaction?: { summary: string }; quiet?: { reason: string } } | undefined;
+  if (rowMeta?.compaction) return <CompactionDivider summary={rowMeta.compaction.summary} />;
+  // Same branch point as a checkpoint, and for the same reason: a quiet run is
+  // not an assistant bubble with a flag on it, it is a different row. `quiet` is
+  // only ever written at finalize, so a still-streaming turn never lands here.
+  if (rowMeta?.quiet) {
+    const text = props.message.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n\n")
+      .trim();
+    return <QuietRow reason={rowMeta.quiet.reason} text={text} />;
+  }
   return <ChatMessageImpl {...props} />;
 });

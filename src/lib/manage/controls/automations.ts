@@ -120,6 +120,12 @@ export const automationCollection: Collection = {
     "for a webhook it fixes the day a run limit counts against. " +
     "Optional max_runs_per_day caps firings per day (skipped runs are reported, never silent), and thread_mode picks where runs go: " +
     "\"fresh\" (default, a new chat per run) or \"single\" (one ongoing chat the runs are appended to, so the agent keeps the thread's history). " +
+    "Optional notify_mode picks WHEN a run reports: \"always\" (default, every run's reply is delivered) or \"when_needed\" (a MONITOR — the run can " +
+    "end silently, with no message and no unread mark, when it found nothing worth the user's attention). Offer \"when_needed\" whenever the user " +
+    "describes watching rather than reporting (\"keep an eye on\", \"tell me if/when\", \"only let me know if something changed\"), and pair it with " +
+    "thread_mode \"single\" so the agent can compare this run against the previous one. " +
+    "Optional telegram (default true) decides WHERE a run's result lands: pass false when the user says they do not want this one in Telegram, or " +
+    "want it only in the chat — the reply is still written to its chat, it is just not pushed. Independent of notify_mode. " +
     "Optional run_when is ONE plain sentence describing when a firing is worth running (e.g. \"only when the event is a failed payment over 100 EUR\", " +
     "\"only on working days\"): before each run a quick model call checks it against the clock and the incoming event, and skips the firing when it does not hold. " +
     "Leave run_when out unless the user actually described a condition — it costs a small model call on every firing, and an unmet condition is reported as a skip. " +
@@ -142,6 +148,8 @@ export const automationCollection: Collection = {
     webhook: z.boolean().optional(),
     max_runs_per_day: z.number().int().min(1).max(1000).optional(),
     thread_mode: z.enum(["fresh", "single"]).optional(),
+    notify_mode: z.enum(["always", "when_needed"]).optional(),
+    telegram: z.boolean().optional(),
     // A sentence, not an essay: the whole thing is re-sent to a small model on
     // every firing, and a condition nobody can read in one breath is one the
     // gate will judge inconsistently.
@@ -183,6 +191,12 @@ export const automationCollection: Collection = {
             `Next runs: ${nextDates.join(" · ")} — about ${perMonth} ${perMonth === 1 ? "run" : "runs"} per month, each spending tokens like a normal turn.`,
             { dates: nextDates.join(" · "), count: perMonth }),
         condition,
+        // Part of what is being approved, like the condition above: an automation
+        // that may run twenty times and message you twice is a different thing to
+        // agree to than one that reports every time.
+        args.notify_mode === "when_needed"
+          ? loc(t, "automation.quietMode", "Reports only when it finds something worth your attention; other runs end silently.")
+          : null,
       ].filter(Boolean).join(" "),
       body: String(args.prompt),
     };
@@ -207,6 +221,11 @@ export const automationCollection: Collection = {
       // a model call on every firing to judge nothing.
       runWhen: typeof args.run_when === "string" && args.run_when.trim() ? args.run_when.trim() : null,
       threadMode: args.thread_mode === "single" ? "single" : "fresh",
+      notifyMode: args.notify_mode === "when_needed" ? "when_needed" : "always",
+      // Explicit `false` only: an omitted field must keep the default, and
+      // `args.telegram` is a loose record value, so the test is on the one value
+      // that turns delivery off rather than on the truthiness of the rest.
+      deliverTelegram: args.telegram !== false,
       nextRunAt: nextOccurrenceAfter(trigger, new Date()),
     });
     return { itemTitle: String(args.title) };
@@ -229,6 +248,9 @@ export const automationCollection: Collection = {
             ? loc(t, "automation.webhookSubtitle", "runs on webhook")
             : a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : null,
           a.runWhen ? loc(t, "automation.conditionSubtitle", `only when: ${a.runWhen}`, { condition: a.runWhen }) : null,
+          // Without this, a monitor's row looks exactly like a broken automation
+          // to the agent reading the list: recent runs, no output anyone saw.
+          a.notifyMode === "when_needed" ? loc(t, "automation.quietSubtitle", "reports only when needed") : null,
         ].filter(Boolean).join(" · ") || undefined,
         enabled: a.enabled,
         owned: true,
@@ -288,6 +310,16 @@ export const automationCollection: Collection = {
         row.runWhen
           ? loc(t, "automation.condition", `Only runs when: ${row.runWhen}`, { condition: row.runWhen })
           : undefined,
+        // The mode AND what it has already swallowed today, together: the mode
+        // alone leaves "has it run at all?" unanswered, and that is the question
+        // someone asks a monitor that has been silent.
+        row.notifyMode === "when_needed"
+          ? (() => {
+              const quiet = row.runsDay === localDayOf(trigger) ? row.quietToday : 0;
+              return `${loc(t, "automation.quietMode", "Reports only when it finds something worth your attention; other runs end silently.")} ${
+                loc(t, "automation.quietToday", `Quiet runs today: ${quiet}`, { n: quiet })}`;
+            })()
+          : undefined,
         // The cap and — crucially — what it has already refused today. A skip
         // that only ever appeared in a log would look to the agent (and to the
         // user asking it) exactly like a scheduler that had stopped firing.
@@ -303,6 +335,12 @@ export const automationCollection: Collection = {
                 { max: row.maxRunsPerDay, used, skipped });
             })()
           : undefined,
+        // Only when it is OFF: "delivered to Telegram" is the default every other
+        // automation has, and printing it everywhere would bury the one row where
+        // the answer is different.
+        row.deliverTelegram
+          ? undefined
+          : loc(t, "automation.noTelegram", "Results stay in the chat — this automation is not sent to Telegram."),
         row.lastRunAt
           ? loc(t, "automation.lastRun", `Last run: ${row.lastRunAt.toISOString()}`, { date: row.lastRunAt.toISOString() })
           : loc(t, "automation.neverRan", "Never ran yet"),

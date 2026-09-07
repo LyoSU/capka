@@ -15,6 +15,7 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { makeManageTool } from "@/lib/manage/tool";
 import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
 import { makeAskTool } from "@/lib/ask/tool";
+import { makeQuietTool, type QuietState } from "@/lib/automations/quiet-tool";
 import { askAnswerSchema, askFormSchema } from "@/lib/ask/types";
 import { makeVaultMemoryTools } from "@/lib/vault/tools";
 import { makeVaultBudget } from "@/lib/vault/budget";
@@ -339,7 +340,14 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     const visionOk = modelTakesImages(provider, modelInput);
     const emitImageToolResult = supportsImageToolResults(provider, apiStyle);
     const viewFileBridge = visionOk && !emitImageToolResult;
+    // A monitor run: the owner asked to hear only when there is something worth
+    // their attention. `makeQuietTool` owns the gate, so the tool below and the
+    // prompt paragraph further down are decided by ONE expression — the flag it
+    // mutates is read by the runner at finalize.
+    const quiet: QuietState = {};
+    const quietTools = makeQuietTool(payload, quiet);
     const tools = {
+      ...quietTools,
       ...sandbox.tools,
       ...(caps.sandbox && visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
       ...mcp.tools,
@@ -483,6 +491,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       locale: user?.locale ?? payload.origin?.locale ?? null,
       concierge,
       connectorIndex: toolSearch.indexText,
+      // Asked of the tool set itself, never re-derived: the paragraph must appear
+      // exactly when the tool it names is on the turn.
+      quietRun: !!quietTools.nothing_to_report,
       networkMode,
       profile,
       orgInstructions,
@@ -507,7 +518,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // taint is per-MESSAGE and this task may be the SECOND half writing that message (see
     // readResumeRow), while the runner holds two of its mark sites: the assembled-row fold
     // and the provider-executed tool result. One object, marked from both sides.
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint, quiet };
   } catch (e) {
     await closeAll();
     throw e;

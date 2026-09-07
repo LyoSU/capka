@@ -625,7 +625,11 @@
       "viaTelegram": "Sent via Telegram",
       "prevVersion": "Previous version",
       "nextVersion": "Next version",
-      "versions": "{count, plural, one {# version} other {# versions}}"
+      "versions": "{count, plural, one {# version} other {# versions}}",
+      "quiet": {
+        "title": "Nothing new",
+        "showReply": "Show the reply"
+      }
     },
     "memory": {
       "saved": "In memory: {sensitive, select, yes {something marked sensitive} other {<b>“{text}”</b>}}",
@@ -1628,6 +1632,16 @@
       "onWebhook": "Runs when something calls its web address",
       "openThread": "Open the ongoing chat",
       "dailyLimitSkipped": "{skipped} skipped today — daily limit {max}",
+      "notifyModeLabel": "Notify",
+      "notifyMode": {
+        "always": "Always",
+        "whenNeeded": "Only when there is something to report",
+        "alwaysHint": "Every run sends its reply and marks the chat unread.",
+        "whenNeededHint": "A run that found nothing new ends silently. Works best with one ongoing chat, so the agent remembers the previous check."
+      },
+      "quietToday": "Quiet today: {n}",
+      "deliverTelegramLabel": "Also send to Telegram",
+      "deliverTelegramHint": "Off means results stay in the chat here.",
       "runWhen": {
         "label": "Only run when…",
         "placeholder": "e.g. only when the event is a failed payment over 100 EUR",

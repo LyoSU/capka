@@ -263,6 +263,13 @@ export type MessageMeta = {
   // `parts` — this whole object replaces the row's metadata on every save, so a
   // steer appended separately would be erased by the next token that arrives.
   steers?: ConsumedSteer[];
+  // This turn was an automation run that deliberately said nothing: the agent
+  // called `nothing_to_report`, and `reason` is the one line it gave. Present
+  // only on a COMPLETED quiet run, and it is what makes the row quiet everywhere
+  // downstream — the unread predicate skips it, Telegram sends nothing, and the
+  // transcript renders a muted row instead of a bubble. The reply text is still
+  // stored: a monitor's owner must be able to see that it ran.
+  quiet?: { reason: string };
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

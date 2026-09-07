@@ -196,3 +196,20 @@ describe("buildSystemPrompt — org instructions", () => {
     expect(p.stable).toBe("Be terse.");
   });
 });
+
+describe("buildSystemPrompt — quiet automation runs", () => {
+  it("adds the unattended-check paragraph only for a quiet run, and keeps it out of the cached prefixes", () => {
+    const quiet = buildSystemPrompt({ quietRun: true });
+    const normal = buildSystemPrompt({ quietRun: false });
+
+    // Per-RUN, not per-conversation: a `single`-thread automation's chat is one a
+    // person can also type in, and that turn has no `nothing_to_report` to call.
+    expect(quiet.volatile).toContain("Unattended check");
+    expect(quiet.volatile).toContain("nothing_to_report");
+    expect(quiet.stable).not.toContain("Unattended check");
+    expect(quiet.session).not.toContain("Unattended check");
+
+    expect(normal.volatile).not.toContain("Unattended check");
+    expect(buildSystemPrompt({}).volatile).not.toContain("Unattended check");
+  });
+});

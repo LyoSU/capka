@@ -524,6 +524,13 @@ export const automations = pgTable("automations", {
   runsDay: date("runs_day"),
   runsToday: integer("runs_today").notNull().default(0),
   skippedToday: integer("skipped_today").notNull().default(0),
+  // Runs that DID happen and deliberately said nothing (notify_mode
+  // "when_needed" — the agent called `nothing_to_report`). Scoped to the same
+  // stamped `runs_day` as the two tallies above, for the same reason: a monitor
+  // that has been quiet all day must be able to say "I ran eleven times and none
+  // of them was worth telling you about" — otherwise a working monitor and a dead
+  // scheduler look identical from the settings list.
+  quietToday: integer("quiet_today").notNull().default(0),
   // The LAST skip, with its reason: {reason:"daily_limit"|"busy"|"condition",
   // at:ISO, note?}. `skipped_today` counts, this one EXPLAINS — a tally of three
   // says nothing about whether the day's ceiling, an overlapping run or an unmet
@@ -535,6 +542,21 @@ export const automations = pgTable("automations", {
   // behaviour). "single" = one persistent chat, appended to like a Telegram
   // conversation, so the agent keeps the thread's history across runs.
   threadMode: text("thread_mode").notNull().default("fresh"), // "fresh" | "single"
+  // Whether every run reports, or only the ones with something to say.
+  // "always" (default) = today's behaviour: each run's reply is delivered and
+  // marks the chat unread. "when_needed" = a MONITOR: the run gets a
+  // `nothing_to_report` tool, and calling it ends the turn without a Telegram
+  // message, without a notification and without an unread badge. The reply row
+  // is still written — a quiet run is a run that happened, and the transcript is
+  // where someone checks that the monitor is alive.
+  notifyMode: text("notify_mode").notNull().default("always"), // "always" | "when_needed"
+  // Whether a run's result is pushed to the owner's Telegram at all. Orthogonal
+  // to `notify_mode`, which decides WHEN a run has something to say: this decides
+  // WHERE that lands. False makes an automation web-only — the reply is written
+  // to its chat and nothing leaves the browser — which is what someone wants for
+  // a noisy digest they read on their own schedule. Default true: every row that
+  // existed before this column keeps delivering exactly as it did.
+  deliverTelegram: boolean("deliver_telegram").notNull().default(true),
   // The persistent chat of a "single" automation, created lazily on the first
   // firing. Deliberately NOT a FK: a deleted chat must leave the automation
   // working (the next firing simply opens a new thread), not cascade it away or

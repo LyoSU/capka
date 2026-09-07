@@ -210,6 +210,9 @@ export function toUIMessages(rows: {
         // Compaction checkpoint — the transcript renders a divider (not an empty
         // bubble) and lets the user expand the summary it stands in for.
         compaction: meta?.compaction,
+        // A monitor run that found nothing worth reporting — the transcript draws
+        // one muted row with the reason instead of a full assistant bubble.
+        quiet: meta?.quiet,
         // Tech details for the assistant (i) popover.
         durationMs: meta?.durationMs,
         reasoningMs: meta?.reasoningMs,

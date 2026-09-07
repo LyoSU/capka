@@ -65,6 +65,11 @@ export interface TaskResult {
    *  `truncated` means the arguments did not fit the preview — the buttons are
    *  then withheld, because a cut argument list cannot be consented to. */
   approval?: { messageId: string; toolCallId?: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[]; truncated?: boolean };
+  /** The turn was an automation run that found nothing worth the owner's
+   *  attention (it called `nothing_to_report`). Set only on a completed run.
+   *  This channel delivers NOTHING for it — no message, no notification — which
+   *  is the entire promise of "tell me only when there is something to say". */
+  quiet?: boolean;
   /** An `ask` tool call the runner SUSPENDED for a human answer. On Telegram this
    *  starts a sequential field-by-field collection (see ask-collect); `userId` owns
    *  the answer submission, `messageId` is the suspended assistant message. */
@@ -578,6 +583,15 @@ class TelegramSink implements DeliverySink {
       }
       return;
     }
+
+    // A quiet automation run: the monitor checked and found nothing worth the
+    // owner's attention, so this channel stays silent — no final message, no
+    // notification. The draft needs no teardown of its own: everything above
+    // already ran (the terminal latch, the keepalive cancel, and the await on a
+    // draft still in flight), which is exactly how a stopped turn with no partial
+    // text resolves its draft — the ephemeral preview simply lapses instead of
+    // lingering as a live stream.
+    if (result.quiet) return;
 
     // A failure is delivered in-chat, never deferred to the web UI: a calm
     // notice for everyone, plus a collapsed technical detail for admins.

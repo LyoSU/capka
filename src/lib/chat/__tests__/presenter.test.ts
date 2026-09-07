@@ -357,3 +357,25 @@ describe("expandSteers", () => {
     expect(expandSteers(rows)).toEqual(rows);
   });
 });
+
+describe("toUIMessages — quiet runs", () => {
+  // A new metadata field is DEAD until the presenter maps it: the transcript
+  // renders from the UI message, not from the row, so a quiet run would come
+  // back as an ordinary assistant bubble after any history reload.
+  it("forwards the quiet verdict and its reason", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      quiet: { reason: "The page has not changed since the last check." },
+      parts: [{ type: "text", text: "Nothing to add." }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.metadata).toMatchObject({ quiet: { reason: "The page has not changed since the last check." } });
+    // The reply text still travels — a quiet row folds it, it does not drop it.
+    expect(msg.parts).toContainEqual({ type: "text", text: "Nothing to add." });
+  });
+
+  it("leaves an ordinary reply without a quiet field", () => {
+    const [msg] = toUIMessages([row({ metadata: { status: "completed", parts: [{ type: "text", text: "hi" }] } })]);
+    expect((msg.metadata as { quiet?: unknown }).quiet).toBeUndefined();
+  });
+});

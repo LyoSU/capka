@@ -44,7 +44,15 @@ interface Automation {
    *  route; a stamped day in the past arrives here as zero. */
   runsToday: number;
   skippedToday: number;
+  /** Runs that happened today and deliberately said nothing (notify mode
+   *  "when_needed"). Day-scoped by the list route, like the two above. */
+  quietToday: number;
   threadMode: string;
+  /** "always" or "when_needed" — whether every run reports, or only the ones
+   *  that found something. */
+  notifyMode: string;
+  /** Whether runs are pushed to Telegram at all. */
+  deliverTelegram: boolean;
   /** The condition checked before each run, or null when every firing runs. */
   runWhen: string | null;
   /** The LAST skip and why — not scoped to today, on purpose: "why has this been
@@ -66,6 +74,10 @@ export default function AutomationsList() {
   const locale = useLocale();
   const router = useRouter();
   const [automations, setAutomations] = useState<Automation[]>([]);
+  // Handed down to the editor, which uses it to decide whether the Telegram
+  // delivery switch is a real choice. Comes with the list rather than from a
+  // second fetch — see the route.
+  const [telegramLinked, setTelegramLinked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Automation | null>(null);
@@ -76,8 +88,11 @@ export default function AutomationsList() {
     try {
       setError("");
       const res = await fetch("/api/automations");
-      if (res.ok) setAutomations((await res.json()).automations ?? []);
-      else setError(t("loadError"));
+      if (res.ok) {
+        const body = await res.json();
+        setAutomations(body.automations ?? []);
+        setTelegramLinked(!!body.telegramLinked);
+      } else setError(t("loadError"));
     } catch {
       setError(t("loadError"));
     } finally {
@@ -185,6 +200,7 @@ export default function AutomationsList() {
       key={editing?.id ?? (creating ? "new" : "closed")}
       automation={editing}
       open={creating}
+      telegramLinked={telegramLinked}
       onClose={() => { setEditing(null); setCreating(false); }}
       onSaved={load}
     />
@@ -271,6 +287,12 @@ export default function AutomationsList() {
                 <p className="text-xs text-muted-foreground">
                   {t("dailyLimitSkipped", { skipped: a.skippedToday, max: a.maxRunsPerDay })}
                 </p>
+              )}
+              {/* A monitor that has been quiet all day has to say so. Without
+                  this line "no messages" reads as a scheduler that stopped
+                  firing — which is the one thing a monitor must never look like. */}
+              {a.quietToday > 0 && (
+                <p className="text-xs text-muted-foreground">{t("quietToday", { n: a.quietToday })}</p>
               )}
               {/* One calm line: WHEN it last declined to run and WHY. A counter
                   alone cannot answer "why is this quiet", and neither can an

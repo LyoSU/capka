@@ -3,6 +3,7 @@ import { ASSISTANT_PROFILE, type AgentProfile } from "@/lib/agents/profile";
 import { type FileRef } from "@/lib/constants";
 import { acceptsNativeFile, modelSupportsModality, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
+import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
 
 /**
  * The system prompt split into THREE cache tiers, rendered as consecutive
@@ -109,6 +110,11 @@ export function buildSystemPrompt(opts: {
    *  Deterministic (sorted, changes only on connector install/toggle), so it lives
    *  in the cached stable tier alongside skills. */
   connectorIndex?: string;
+  /** This turn is an automation run whose owner asked to be told only when there
+   *  is something worth their attention, so it carries the `nothing_to_report`
+   *  tool. Per-RUN (the same chat's next turn may be a person typing in it), so
+   *  it lives in the volatile tail and never touches a cached prefix. */
+  quietRun?: boolean;
   /** Effective sandbox egress for this session (resolved in the task runner).
    *  Drives the network line in the sandbox prompt so the model knows whether it
    *  can reach the internet. Conversation-stable, so it stays in the cached
@@ -228,6 +234,11 @@ export function buildSystemPrompt(opts: {
       // cached) since it fires exactly once. English — the model relays in the user's
       // language, like the rest of the prompt. Gated with `manage` because it exists
       // purely to offer configuration through that tool.
+      // Rides the volatile tail with the concierge nudge and for the same reason:
+      // it is true of THIS run, not of the conversation — a `single`-thread
+      // automation's chat is one the person can also type in, and its next turn
+      // has no quiet tool to call.
+      opts.quietRun ? QUIET_PROMPT : undefined,
       caps.manage && opts.concierge
         ? `## First run
 This is the operator's FIRST message right after finishing setup. Warmly welcome them in one or two sentences, then offer to help set up the optional things you can do via the \`manage\` tool: their interface language, Telegram delivery, and adding a first connector or skill. Keep it brief — don't dump a list or a wall of options. If they already asked a real question, answer it first and add the offer at the end.`

@@ -26,6 +26,8 @@ const patchBody = z
     // rather than only optional — `undefined` means "leave it alone".
     max_runs_per_day: z.number().int().min(1).max(1000).nullable().optional(),
     thread_mode: z.enum(["fresh", "single"]).optional(),
+    notify_mode: z.enum(["always", "when_needed"]).optional(),
+    deliver_telegram: z.boolean().optional(),
     // The condition sentence. Nullable for the same reason as the ceiling —
     // clearing it has to be able to REMOVE the gate — and trimmed to null when
     // the field is emptied, so a row never carries whitespace that would read as
@@ -42,7 +44,7 @@ export const PATCH = apiHandler(async (req: Request, { params }: { params: Promi
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
   }
-  const { enabled, title, prompt, cron, once_at, webhook, timezone, max_runs_per_day, thread_mode, run_when } = parsed.data;
+  const { enabled, title, prompt, cron, once_at, webhook, timezone, max_runs_per_day, thread_mode, notify_mode, deliver_telegram, run_when } = parsed.data;
   const [row] = await db.select().from(automations).where(and(eq(automations.id, id), eq(automations.userId, userId)));
   if (!row) return Response.json({ error: "Not found" }, { status: 404 });
 
@@ -90,6 +92,8 @@ export const PATCH = apiHandler(async (req: Request, { params }: { params: Promi
       ...(max_runs_per_day !== undefined ? { maxRunsPerDay: max_runs_per_day } : {}),
       ...(run_when !== undefined ? { runWhen: run_when?.trim() || null } : {}),
       ...(thread_mode !== undefined ? { threadMode: thread_mode } : {}),
+      ...(notify_mode !== undefined ? { notifyMode: notify_mode } : {}),
+      ...(deliver_telegram !== undefined ? { deliverTelegram: deliver_telegram } : {}),
       // Leaving `single` mode does NOT delete the thread chat: it is a real
       // conversation the user can still read. The id is dropped so a later switch
       // back opens a fresh thread rather than silently reviving an old one.
@@ -107,7 +111,7 @@ export const PATCH = apiHandler(async (req: Request, { params }: { params: Promi
   // Toggling and editing are different acts in the trail: one resumes spending,
   // the other changes what gets spent on.
   const onlyToggling = enabled !== undefined && title === undefined && prompt === undefined && !trigger
-    && max_runs_per_day === undefined && thread_mode === undefined && run_when === undefined;
+    && max_runs_per_day === undefined && thread_mode === undefined && notify_mode === undefined && deliver_telegram === undefined && run_when === undefined;
   await audit({
     actorId: userId,
     action: onlyToggling ? (enabled ? "automation.enable" : "automation.disable") : "automation.update",

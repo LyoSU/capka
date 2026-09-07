@@ -281,3 +281,142 @@ run("max_runs_per_day and thread_mode single", () => {
     expect(reopened.threadChatId).toBe(third.chatId);
   });
 });
+
+// The quiet tally is a day-stamped counter moved by the same rollover CASE the
+// firing stamp uses — three SET expressions evaluated against the pre-update row.
+// A mock could only assert that the code built a query; only Postgres can say
+// what the query does at a day boundary. No firing here, so no task row is
+// created and the dev container's live worker has nothing to claim.
+run("recordAutomationOutcome — quiet runs", () => {
+  const U3 = "atest-user-3";
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'C','c@test.local') ON CONFLICT (id) DO NOTHING`, [U3]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U3]);
+  });
+  afterAll(async () => {
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U3]);
+    await pool.query(`DELETE FROM "user" WHERE id = $1`, [U3]);
+  });
+
+  async function monitor(): Promise<string> {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const id = nanoid();
+    await db.insert(automations).values({
+      id, userId: U3, title: "Watcher", prompt: "check the page",
+      trigger: { kind: "schedule", cron: "0 * * * *", timezone: "UTC" },
+      notifyMode: "when_needed", threadMode: "single",
+    });
+    return id;
+  }
+
+  it("counts a quiet run for today and still clears the failure streak", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { recordAutomationOutcome } = await import("../runs");
+    const id = await monitor();
+    await pool.query(`UPDATE automations SET consecutive_failures = 2 WHERE id = $1`, [id]);
+
+    await recordAutomationOutcome(id, "completed", undefined, true);
+    await recordAutomationOutcome(id, "completed", undefined, true);
+
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.quietToday).toBe(2);
+    // A quiet run is still a SUCCESS — it ran and it worked.
+    expect(row.consecutiveFailures).toBe(0);
+    expect(row.enabled).toBe(true);
+  });
+
+  it("a run that reported normally leaves the quiet tally alone", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { recordAutomationOutcome } = await import("../runs");
+    const id = await monitor();
+    await recordAutomationOutcome(id, "completed", undefined, true);
+    await recordAutomationOutcome(id, "completed");
+
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.quietToday).toBe(1);
+  });
+
+  it("rolls over: yesterday's quiet runs do not survive today's first one", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { recordAutomationOutcome } = await import("../runs");
+    const id = await monitor();
+    // A day the monitor spent entirely quiet. Nothing runs at midnight to clear
+    // it — the next outcome's own UPDATE is what resets the stamp.
+    await pool.query(
+      `UPDATE automations SET runs_day = current_date - 1, runs_today = 9, skipped_today = 4, quiet_today = 9 WHERE id = $1`,
+      [id],
+    );
+    await recordAutomationOutcome(id, "completed", undefined, true);
+
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.quietToday).toBe(1);    // not 10 — the stamped day changed
+    expect(row.runsToday).toBe(0);     // yesterday's firings are not today's
+    expect(row.skippedToday).toBe(0);
+    expect(row.runsDay).toBe(new Date().toISOString().slice(0, 10));
+  });
+});
+
+// Where a run's result lands, decided per automation. `origin` is the whole of
+// it: with one the runner builds a TelegramSink, without one a no-op sink — so
+// the assertion is on the enqueued payload, which is the only durable record of
+// the decision. A telegram_links row exists for BOTH cases here, because the
+// interesting failure is a linked user still getting a web-only automation
+// pushed to them.
+run("deliver_telegram routes a run's result", () => {
+  const U4 = "atest-user-4";
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'D','d@test.local') ON CONFLICT (id) DO NOTHING`, [U4]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U4]);
+    // `telegram_user_id` is unique and `user_id` is not, so this is a delete-then-
+    // insert rather than an upsert on the user — a stale row from an interrupted
+    // run would otherwise collide on the id, not on the user.
+    await pool.query(`DELETE FROM telegram_links WHERE user_id = $1 OR telegram_user_id = 987654321`, [U4]);
+    await pool.query(
+      `INSERT INTO telegram_links (id, user_id, telegram_user_id) VALUES ($1, $2, 987654321)`,
+      [nanoid(), U4],
+    );
+  });
+  afterAll(async () => {
+    const { rows } = await pool.query<{ chat_id: string }>(`SELECT chat_id FROM tasks WHERE user_id = $1`, [U4]);
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [U4]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U4]);
+    for (const { chat_id } of rows) await pool.query(`DELETE FROM chats WHERE id = $1`, [chat_id]);
+    await pool.query(`DELETE FROM chats WHERE user_id = $1`, [U4]);
+    await pool.query(`DELETE FROM telegram_links WHERE user_id = $1`, [U4]);
+    await pool.query(`DELETE FROM "user" WHERE id = $1`, [U4]);
+  });
+
+  async function firedPayload(deliverTelegram: boolean): Promise<Record<string, unknown>> {
+    const { db } = await import("@/lib/db");
+    const { automations, tasks } = await import("@/lib/db/schema");
+    const { fireAutomation } = await import("../runs");
+    const id = nanoid();
+    await db.insert(automations).values({
+      id, userId: U4, title: `Delivery ${deliverTelegram}`, prompt: "check",
+      trigger: { kind: "webhook", timezone: "UTC" },
+      webhookToken: nanoid(),
+      deliverTelegram,
+    });
+    const [a] = await db.select().from(automations).where(eq(automations.id, id));
+    expect((await fireAutomation(a)).fired).toBe(true);
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, row.lastTaskId!));
+    return task.payload as Record<string, unknown>;
+  }
+
+  it("carries a telegram origin when delivery is on", async () => {
+    const payload = await firedPayload(true);
+    expect(payload.origin).toMatchObject({ platform: "telegram", telegramChatId: 987654321 });
+  });
+
+  it("carries NO origin when delivery is off, even though the user is linked", async () => {
+    const payload = await firedPayload(false);
+    expect(payload.origin).toBeUndefined();
+  });
+});

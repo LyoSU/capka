@@ -79,6 +79,11 @@ export interface TaskPayload {
   /** Set when this turn was fired by an automation — the finalize path reports
    *  the outcome back so consecutive failures can auto-disable it. */
   automationId?: string;
+  /** The firing automation's `notify_mode`, carried on the payload rather than
+   *  re-read at run time so a queued run keeps the setting it was fired under.
+   *  "when_needed" arms the quiet path: the `nothing_to_report` tool, its prompt
+   *  paragraph, and a finish that notifies nobody. */
+  notifyMode?: string;
 }
 
 export interface ClaimedTask {
@@ -390,7 +395,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint, quiet } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     // `taint` — has this turn read anything it did not author? — is CONSTRUCTED in
     // prepareRun and arrives here, rather than being built here from a seed: the vault's
@@ -1948,6 +1953,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ? citedSources(getFullText(), [...turnSourceMap.values()]).map(({ n, title, url }) => ({ n, title, url }))
       : [];
 
+    // The quiet verdict, and the ONE place it is decided: the model called
+    // `nothing_to_report` AND the turn actually got to the end. A run that failed,
+    // was stopped, or suspended for a person has something to say by definition —
+    // silencing those is the failure mode this feature must not have.
+    const quietReason = finalStatus === "completed" && !awaitingApproval && !awaitingAnswer
+      ? quiet.reason
+      : undefined;
+
     const outcomeMeta: MessageMeta = {
         // A suspended turn is NOT done — mark it so the presenter maps the pending
         // tool call to its card state (approval-requested / ask input-available),
@@ -1967,6 +1980,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(consumedSteers.length ? { steers: consumedSteers } : {}),
         ...(touchedFiles ? { touchedFiles } : {}),
         ...(citedLean.length ? { citedSources: citedLean } : {}),
+        ...(quietReason ? { quiet: { reason: quietReason } } : {}),
         // On EVERY outcome, not just the successful ones: a failed turn's message
         // still sits on the path the next turn reads, and this is how that turn
         // learns clearing is already on (see shouldClearToolResults).
@@ -2068,7 +2082,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the next occurrence until the user answers.
       const automationOutcome = awaitingApproval || awaitingAnswer ? "suspended" : finalStatus;
       const { recordAutomationOutcome } = await import("@/lib/automations/runs");
-      await recordAutomationOutcome(payload.automationId, automationOutcome).catch((e) =>
+      await recordAutomationOutcome(payload.automationId, automationOutcome, undefined, !!quietReason).catch((e) =>
         tlog.warn("automation outcome accounting failed", { err: String(e) }),
       );
     }
@@ -2230,6 +2244,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(telegramApproval ? { approval: telegramApproval } : {}),
         ...(telegramAsk ? { ask: telegramAsk } : {}),
         ...(telegramSources.length ? { sources: telegramSources } : {}),
+        // Nothing worth the owner's attention — the sink sends no message and
+        // rings no notification. The web SSE finish below is unchanged: the row
+        // exists and the transcript shows it, quietly.
+        ...(quietReason ? { quiet: true } : {}),
       });
     } catch (e) {
       // Execution truth is already durable in tasks/messages. An outbound channel
@@ -2243,7 +2261,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && payload.origin) {
+    // A quiet run is excluded for the same reason it sends no message: a file
+    // arriving in Telegram is a notification, and it would contradict the one
+    // thing the run just said about itself.
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && !quietReason && payload.origin) {
       try {
         const outFiles = await collectReferencedFiles(sessionKey, userId, getFullText());
         if (outFiles.length) await sink.sendFiles(outFiles);

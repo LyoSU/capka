@@ -160,6 +160,12 @@ export const GET = apiHandler(async (req: Request) => {
               eq(messages.chatId, chats.id),
               eq(messages.role, "assistant"),
               gt(messages.createdAt, sql`COALESCE(${chats.lastReadAt}, 'epoch'::timestamp)`),
+              // A quiet automation run is a reply nobody was meant to be told
+              // about (see MessageMeta.quiet), so it must not light the dot —
+              // that badge is the web's version of the Telegram notification the
+              // sink already withholds. A plain `->>` test, so this stays a
+              // filter on rows the (chat_id, created_at) index already found.
+              sql`coalesce(${messages.metadata}->>'quiet', '') = ''`,
             ),
           ),
       ),

@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { automations, tasks } from "@/lib/db/schema";
+import { automations, tasks, telegramLinks } from "@/lib/db/schema";
 import { automationCollection } from "@/lib/manage/controls/automations";
 import { localDayOf, type AutomationTrigger } from "@/lib/automations/schedule";
 import { getPublicUrl } from "@/lib/url";
@@ -12,6 +12,13 @@ export const GET = apiHandler(async (req: Request) => {
   // not even list them — requireActive, matching the MCP/skill mutation routes.
   const { userId } = await requireActive();
   const rows = await db.select().from(automations).where(eq(automations.userId, userId));
+  // Whether the owner has Telegram connected at all. The editor needs it to decide
+  // whether a per-automation delivery choice is even a choice — offering "also send
+  // to Telegram" to someone who has never linked it is a switch with no effect.
+  // Answered here rather than by a second round-trip from the browser: the page
+  // already makes this call, and the probe is one indexed lookup.
+  const [link] = await db.select({ userId: telegramLinks.userId }).from(telegramLinks)
+    .where(eq(telegramLinks.userId, userId)).limit(1);
   // Resolve each last run's chat for an "open last run" link — one batched query
   // over the referenced task ids, not one round-trip per automation.
   const lastTaskIds = rows.map((a) => a.lastTaskId).filter((id): id is string => !!id);
@@ -45,7 +52,13 @@ export const GET = apiHandler(async (req: Request) => {
       maxRunsPerDay: a.maxRunsPerDay,
       runsToday: fresh ? a.runsToday : 0,
       skippedToday: fresh ? a.skippedToday : 0,
+      // Day-scoped like the two above: runs that happened and said nothing. It is
+      // what tells "the monitor is working and all is well" apart from "nothing
+      // has fired", which look identical everywhere else on this row.
+      quietToday: fresh ? a.quietToday : 0,
       threadMode: a.threadMode,
+      notifyMode: a.notifyMode,
+      deliverTelegram: a.deliverTelegram,
       // In `single` mode "open last run" means the ongoing thread, which is where
       // every run's output actually is — the last task's chat is that same chat,
       // but the thread id is still right before the first run has happened.
@@ -54,7 +67,7 @@ export const GET = apiHandler(async (req: Request) => {
         : a.lastTaskId ? chatByTask.get(a.lastTaskId) ?? null : null,
     };
   });
-  return Response.json({ automations: out });
+  return Response.json({ automations: out, telegramLinked: !!link });
 });
 
 /**

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AutomationTrigger } from "@/lib/automations/schedule";
 import { toForm, toTriggerArgs, type Freq, type ScheduleForm } from "./schedule-form";
@@ -24,19 +25,29 @@ export interface EditableAutomation {
   webhookUrl: string | null;
   maxRunsPerDay: number | null;
   threadMode: string;
+  /** "always" (every run reports) or "when_needed" (a monitor: a run that found
+   *  nothing worth saying ends without a message, a notification or an unread mark). */
+  notifyMode: string;
+  /** Whether runs are pushed to the owner's Telegram. Orthogonal to notifyMode:
+   *  that decides WHEN a run has something to say, this WHERE it lands. */
+  deliverTelegram: boolean;
   /** The condition sentence checked before each run, or null when every firing
    *  runs. Empty text and null mean the same thing to the server. */
   runWhen: string | null;
 }
 
 export function AutomationEditor({
-  automation, open, onClose, onSaved,
+  automation, open, telegramLinked, onClose, onSaved,
 }: {
   /** null with `open` means "new one" — the same form, seeded with a plain
    *  daily-at-09:00 schedule, because creating and editing ask for exactly the
    *  same four things. */
   automation: EditableAutomation | null;
   open?: boolean;
+  /** Whether the owner has Telegram connected at all. The delivery switch is a
+   *  real choice only then; without a link it would be a control with no effect,
+   *  so it is not shown. Resolved by the list route, not fetched again here. */
+  telegramLinked?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -52,6 +63,10 @@ export function AutomationEditor({
     ));
   const [scheduleTouched, setScheduleTouched] = useState(false);
   const [threadMode, setThreadMode] = useState(automation?.threadMode === "single" ? "single" : "fresh");
+  const [notifyMode, setNotifyMode] = useState(automation?.notifyMode === "when_needed" ? "when_needed" : "always");
+  // Absent on a NEW automation, and the default is on — the same bargain the row
+  // default strikes, so creating one in the UI matches creating one in chat.
+  const [deliverTelegram, setDeliverTelegram] = useState(automation?.deliverTelegram !== false);
   // Kept as the raw text of the field: empty means "no limit", and coercing to a
   // number here would turn a half-typed value into a saved one.
   const [maxRuns, setMaxRuns] = useState(automation?.maxRunsPerDay ? String(automation.maxRunsPerDay) : "");
@@ -82,6 +97,8 @@ export function AutomationEditor({
             title: title.trim(),
             prompt: prompt.trim(),
             thread_mode: threadMode,
+            notify_mode: notifyMode,
+            deliver_telegram: deliverTelegram,
             // Emptying the field REMOVES the condition, so an edit always sends
             // the value (null when blank); on create a blank one is simply left
             // out, the same bargain the run limit above strikes.
@@ -347,6 +364,44 @@ export function AutomationEditor({
               {threadMode === "single" ? t("threadMode.singleHint") : t("threadMode.freshHint")}
             </p>
           </div>
+
+          {/* Directly under the thread mode, because the two are read together:
+              "only when there is something to report" means comparing this run
+              with the last one, which is what one ongoing chat gives the agent. */}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("notifyModeLabel")}</p>
+            <ToggleGroup
+              value={[notifyMode]}
+              onValueChange={(v) => v.length && setNotifyMode(v[0] as string)}
+              variant="outline"
+              size="sm"
+              className="flex-wrap justify-start"
+            >
+              <ToggleGroupItem value="always">{t("notifyMode.always")}</ToggleGroupItem>
+              <ToggleGroupItem value="when_needed">{t("notifyMode.whenNeeded")}</ToggleGroupItem>
+            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">
+              {notifyMode === "when_needed" ? t("notifyMode.whenNeededHint") : t("notifyMode.alwaysHint")}
+            </p>
+          </div>
+
+          {/* Under the notify toggle because the two read as one question with two
+              halves — when a run speaks, and where. Shown only to someone who has
+              Telegram connected: without a link this switch changes nothing, and a
+              control with no effect is worse than no control. */}
+          {telegramLinked && (
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="automation-telegram" className="text-sm font-medium">{t("deliverTelegramLabel")}</label>
+                <p className="text-xs text-muted-foreground">{t("deliverTelegramHint")}</p>
+              </div>
+              <Switch
+                id="automation-telegram"
+                checked={deliverTelegram}
+                onCheckedChange={setDeliverTelegram}
+              />
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="automation-max-runs" className="text-sm font-medium">{t("maxRunsLabel")}</label>

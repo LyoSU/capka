@@ -283,15 +283,25 @@ export async function fireAutomation(
     await db.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
     await publishTaskEvent(a.userId, { type: "new_message", chatId });
 
-    // Deliver to Telegram when linked — the run's full result lands in the
-    // messenger via the existing TelegramSink, no new delivery code.
-    const [link] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId));
+    // Deliver to Telegram when linked AND when this automation is meant to leave
+    // the browser — the run's full result lands in the messenger via the existing
+    // TelegramSink, no new delivery code. Without an `origin` the runner builds a
+    // no-op sink, so "web-only" costs nothing and needs nothing downstream.
+    //
+    // Orthogonal to `notify_mode`, deliberately: that one decides WHEN a run has
+    // something to say, this one WHERE it lands. A `when_needed` automation with
+    // delivery off still writes its non-quiet replies into the chat — it just
+    // never pushes them.
+    const [link] = a.deliverTelegram
+      ? await db.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId))
+      : [];
     const path = await loadActivePath(chatId, msgId);
     const payload: TaskPayload = {
       requestModel: a.model ?? undefined,
       projectId: a.projectId ?? undefined,
       uiMessages: toUIMessages(path.map((p) => p.node)),
       automationId: a.id,
+      notifyMode: a.notifyMode,
       ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
     };
     // A created turn OWNS the hold and reconciles it to the real cost at finalize;
@@ -338,14 +348,44 @@ export async function recordAutomationOutcome(
    *  Omitted (null) for an ordinary broken run — "repeated failures" is already
    *  what the streak itself says. */
   reason?: AutomationDisabledReason,
+  /** The run completed and deliberately said nothing (`notify_mode` =
+   *  "when_needed", the agent called `nothing_to_report`). Still a success — it
+   *  ran and it worked — but counted separately, because "eleven runs today, all
+   *  quiet" and "no runs today" are the same empty inbox and completely different
+   *  facts about whether the monitor is alive. */
+  quiet?: boolean,
 ): Promise<void> {
   // A suspended run (awaiting approval/answer) is neither success nor failure: it
   // didn't finish its work, so the streak must NOT reset — but it also isn't a
   // failure to count toward auto-disable. Leave the streak untouched.
   if (status === "suspended") return;
   if (status === "completed") {
+    if (!quiet) {
+      await db.update(automations)
+        .set({ consecutiveFailures: 0, updatedAt: new Date() })
+        .where(eq(automations.id, automationId));
+      return;
+    }
+    // The day is the OWNER's, so it comes from the trigger's timezone — the same
+    // source the firing stamp and every skip use. A row that vanished between the
+    // firing and this write (deleted mid-run) simply has nothing to count.
+    const [row] = await db.select({ trigger: automations.trigger }).from(automations)
+      .where(eq(automations.id, automationId));
+    if (!row) return;
+    const today = localDayOf(row.trigger as AutomationTrigger);
     await db.update(automations)
-      .set({ consecutiveFailures: 0, updatedAt: new Date() })
+      .set({
+        consecutiveFailures: 0,
+        // The same day-rollover CASE the firing stamp and stampSkip use: Postgres
+        // evaluates every SET expression against the PRE-update row, so a turn that
+        // crossed midnight while it ran starts today at this quiet run instead of
+        // adding to yesterday's tally.
+        runsDay: today,
+        runsToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.runsToday} ELSE 0 END`,
+        skippedToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.skippedToday} ELSE 0 END`,
+        quietToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.quietToday} + 1 ELSE 1 END`,
+        updatedAt: new Date(),
+      })
       .where(eq(automations.id, automationId));
     return;
   }
