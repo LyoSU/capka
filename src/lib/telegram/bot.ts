@@ -183,6 +183,9 @@ function flushAlbum(groupId: string): void {
   const p = albums.get(groupId);
   if (!p) return;
   albums.delete(groupId);
+  // A no-op when the debounce itself called us; it matters on the shutdown path,
+  // which flushes every open group early and must not leave live timers behind.
+  clearTimeout(p.timer);
   // Into the burst collector, not straight into `ingest`: a caption, its album
   // and the sentence typed right after it are one request, so they must become
   // one turn.
@@ -800,8 +803,6 @@ export async function stopBot(): Promise<void> {
   const s = botState();
   const bot = s.bot;
   const token = s.token;
-  // Give up poll leadership first so a standby (or our own restart) can re-poll.
-  releasePollerLock();
   // Clear the singleton up front so a concurrent startBot() can't observe the
   // old instance, then stop the previous poller. Crucially we do NOT swallow a
   // stop() failure silently: if it throws, the old getUpdates loop keeps running
@@ -822,13 +823,28 @@ export async function stopBot(): Promise<void> {
       });
     }
   }
-  // Nothing is polling any more, so no new piece can arrive: flush whatever a
-  // burst window still holds. Buffered pieces live in memory only, so returning
-  // without this leaves an already-received message with no task, no reply and
-  // no error — the user's text simply disappears across a restart. Done AFTER
-  // stop() but BEFORE the token is dropped: the flush ingests, and ingesting a
-  // file needs the token to download it.
+  // Nothing is polling any more, so no new piece can arrive: flush what is still
+  // buffered. Both buffers live in memory only, so returning without this leaves
+  // an already-received message with no task, no reply and no error — the user's
+  // text simply disappears across a restart. Done AFTER stop() but BEFORE the
+  // token is dropped: the flush ingests, and ingesting a file needs the token to
+  // download it.
+  //
+  // Albums first, and only then the burst collector: a media group waits out its
+  // own 1.5s debounce BEFORE it reaches the collector, so draining the collector
+  // alone would still drop an album Telegram had already delivered. Flushing it
+  // the way its timer does also keeps the caption typed right after it in the
+  // same turn.
+  for (const groupId of [...albums.keys()]) flushAlbum(groupId);
   await bursts.drainAll().catch((e) => log.error("telegram burst drain on stop failed", { err: String(e) }));
+  // Poll leadership goes LAST, after everything buffered has been ingested.
+  // Released first (as it was), a standby takes over immediately and can serve
+  // this user's `/new` while we are still flushing — `/new` re-pins the active
+  // chat, so our buffered text would land in the chat they just left instead of
+  // the one they typed it in. The cost is the handover waiting out the drain
+  // (normally well under a second); nothing is lost meanwhile, since unpolled
+  // updates simply queue on Telegram's side.
+  releasePollerLock();
   // Only if nobody rebuilt the bot behind us while we stopped and drained
   // (restartBot's startBot, a racing getBot) — clearing then would wipe a live
   // token and break file downloads until the next rebuild.

@@ -51,6 +51,34 @@ const CONTAINS_PARITY_MS = 6 * 60 * 60_000;
  *  retryable "interrupted" by the next instance. Keep the platform's
  *  stop_grace_period comfortably above this (see docker-compose.yml). */
 const DRAIN_GRACE_MS = 25_000;
+/** How long the Telegram stop may hold up the shutdown before the task drain
+ *  starts anyway. The stop flushes message bursts, which can mean file downloads
+ *  and DB writes, so it needs a ceiling: the whole sequence has to fit the
+ *  platform's 35s stop_grace_period, and 3s here + 25s drain + 5s telemetry
+ *  flush leaves a small margin. Unbounded, one slow flush would eat the drain's
+ *  budget and hand Docker a SIGKILL with tasks still running. */
+const TELEGRAM_STOP_BUDGET_MS = 3_000;
+
+/** Await `work`, but stop waiting after `budgetMs`; returns whether it finished
+ *  in time. Timing out does not cancel or fail anything — the work keeps running,
+ *  we just stop blocking on it — so both outcomes are normal and neither throws
+ *  (a rejection counts as finished; the caller owns its own error reporting).
+ *
+ *  Pure (the sleep is injectable) so the timeout branch is testable without
+ *  real timers. */
+export async function awaitWithin(
+  work: Promise<unknown>,
+  budgetMs: number,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<boolean> {
+  let done = false;
+  const settled = work.then(
+    () => { done = true; },
+    () => { done = true; },
+  );
+  await Promise.race([settled, sleep(budgetMs)]);
+  return done;
+}
 
 interface WorkerState {
   started: boolean;
@@ -298,7 +326,14 @@ export async function startWorker(): Promise<void> {
     // already-received messages with no task, no reply and no error. Safe when no
     // bot is configured (every step null-checks); imported lazily so processes
     // that never poll do not load the bot.
-    await (await import("@/lib/telegram/bot")).stopBot().catch((e) => log.error("telegram stop on shutdown failed", { err: String(e) }));
+    const stopping = (await import("@/lib/telegram/bot"))
+      .stopBot()
+      .catch((e) => log.error("telegram stop on shutdown failed", { err: String(e) }));
+    if (!(await awaitWithin(stopping, TELEGRAM_STOP_BUDGET_MS)))
+      log.warn("telegram stop exceeded its shutdown budget — starting the task drain anyway", {
+        signal,
+        budgetMs: TELEGRAM_STOP_BUDGET_MS,
+      });
     // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.
     const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS);
@@ -307,8 +342,8 @@ export async function startWorker(): Promise<void> {
     // past the drain window would never be exported — and the drain deliberately
     // tolerates that case (see DRAIN_GRACE_MS). Close those spans as interrupted
     // WITHOUT touching the tasks (the next instance reconciles them as retryable),
-    // then flush. Budget: 25s drain + 5s flush stays under the platform's 35s
-    // stop_grace_period in docker-compose.yml.
+    // then flush. Budget: 3s Telegram stop + 25s drain + 5s flush stays under the
+    // platform's 35s stop_grace_period in docker-compose.yml.
     endActiveTurnSpans(signal);
     await shutdownTelemetry();
     process.exit(0);
