@@ -197,6 +197,21 @@ export function lateSteerPlan(input: {
  *
  * Left free to throw. Each caller already stands inside its own guard, and
  * swallowing a database error in here would hide it from both of them.
+ *
+ * The leaf move is a CAS on the parent, and that is the whole subtlety. It used to
+ * be an unconditional write, which races the person: `task:finish` unblocks their
+ * composer, so a message sent in the same breath inserts its own child of this very
+ * assistant row and moves the leaf — and an unconditional write here then yanked the
+ * leaf back to the steer, abandoning the message they had just pressed send on (or,
+ * ordered the other way, abandoning the steer).
+ *
+ * A lost CAS is left ALONE rather than retried or rolled back. The steer row is
+ * already written and is now a sibling of their newer send: it stays reachable
+ * through the "‹ i/N ›" branch switcher, so nothing the user said is lost, and it is
+ * their send — the more recent intent — that keeps the visible branch. Retrying the
+ * move would be the same theft one loop later, and deleting the row would destroy
+ * words the steer endpoint already answered `ok` for. `activated` reports which
+ * happened so a caller can say so; it is an outcome, never an error.
  */
 export async function persistUnreadSteers(input: {
   taskId: string;
@@ -208,7 +223,7 @@ export async function persistUnreadSteers(input: {
   carried: Steer[];
   /** How far the runner's read cursor got into `tasks.steers`. */
   read: number;
-}): Promise<{ messageId: string; count: number } | null> {
+}): Promise<{ messageId: string; count: number; activated: boolean } | null> {
   const unread = [...input.carried, ...(await readSteers(input.taskId)).slice(input.read)];
   if (!unread.length) return null;
   const messageId = nanoid();
@@ -217,8 +232,11 @@ export async function persistUnreadSteers(input: {
     content: unread.map((u) => u.text).join("\n\n"),
     platform: input.platform,
   });
-  await db.update(chats).set({ activeLeafId: messageId, updatedAt: new Date() }).where(eq(chats.id, input.chatId));
-  return { messageId, count: unread.length };
+  // Only while the reply this steer hangs off is still the leaf — see above.
+  const { rowCount } = await db.update(chats)
+    .set({ activeLeafId: messageId, updatedAt: new Date() })
+    .where(and(eq(chats.id, input.chatId), eq(chats.activeLeafId, input.parentId)));
+  return { messageId, count: unread.length, activated: (rowCount ?? 0) > 0 };
 }
 
 /**
@@ -2172,10 +2190,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           carried: carriedSteers, read: steersRead,
         });
         if (kept) {
-          if (!steerPlan.answer) {
-            // The words are kept and sit on the active path; the user's own next
-            // send is what asks for a reply to them.
-            tlog.info("late steers kept as a message; this turn does not answer them", { count: kept.count, status: finalStatus });
+          // `!kept.activated` is the second reason not to answer, and it is not a
+          // failure: the person sent their own message in the same breath and took
+          // the leaf, so the steer is a sibling branch. A turn queued now would run
+          // against the ACTIVE path — their newer message — and answer that instead,
+          // duplicating the turn their own send already created. Their send carries
+          // the reply; the steer stays reachable through the branch switcher.
+          if (!steerPlan.answer || !kept.activated) {
+            tlog.info("late steers kept as a message; this turn does not answer them", {
+              count: kept.count, status: finalStatus, activated: kept.activated,
+            });
           } else {
             // A paid turn the user did not send through the chat route, so it passes
             // the SAME two gates that route does: the per-user flood bucket (same
@@ -2625,7 +2649,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           taskId, chatId, parentId: msgId, platform: payload.origin?.platform ?? "web",
           carried: carriedSteers, read: steersRead,
         });
-        if (kept) tlog.info("late steers kept as a message after a turn that threw", { count: kept.count, status });
+        // `activated: false` is an outcome, not an error — the person's own
+        // concurrent send holds the leaf and the steer is a reachable sibling.
+        if (kept) tlog.info("late steers kept as a message after a turn that threw", {
+          count: kept.count, status, activated: kept.activated,
+        });
       } catch (steerError) {
         // Recovering a message must never break the error handling that is this
         // path's whole job.
