@@ -75,6 +75,7 @@
   },
   "nav": {
     "newChat": "New chat",
+    "resizeSidebar": "Resize the sidebar",
     "expandSidebar": "Expand sidebar",
     "unreadReply": "Unread reply",
     "working": "Generating…",
@@ -529,6 +530,7 @@
       "sharedTitle": "Shared files",
       "sharedHint": "Available in every chat",
       "backToFiles": "Back to chat files",
+      "resize": "Resize the files panel",
       "breadcrumb": "Folder path",
       "emptyTitle": "No files here yet",
       "emptyHint": "Drop files here — or just ask the assistant to do something, and the results land here.",
@@ -545,6 +547,7 @@
       "next": "Next",
       "download": "Download",
       "close": "Close",
+      "openInNewTab": "Open in a new tab",
       "loadError": "Couldn't open this file",
       "gone": "This file is no longer in the chat's workspace",
       "temporary": "This file is temporarily unavailable, try again in a moment",
@@ -715,8 +718,12 @@
       "simplify": "Simpler",
       "shorten": "Shorter",
       "ask": "Ask",
+      "quote": "Quote",
+      "fromFile": "From {name}:",
       "prompt": {
         "explain": "Explain this part of the answer in more detail:",
+        "explainFile": "Explain this part of the file:",
+        "askFile": "I have a question about this part of the file:",
         "simplify": "Rewrite this part in simpler words:",
         "shorten": "Shorten this part, keeping the point:"
       }

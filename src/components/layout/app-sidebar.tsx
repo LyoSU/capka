@@ -22,6 +22,7 @@ import {
   CircleAlert,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { RESIZE_HANDLE_CLASS, useResizableWidth } from "@/hooks/use-resizable-width";
 import {
   Sidebar,
   SidebarContent,
@@ -447,6 +448,18 @@ export function AppSidebar() {
   const locale = useLocale();
   const tTheme = useTranslations("theme");
   const { toggleSidebar, state: sidebarState, setOpenMobile, openMobile, isMobile } = useSidebar();
+  // The nav's expanded width is the reader's to set: chat titles are the one
+  // thing in here that has no natural length, and a fixed 18rem truncates most
+  // of them. 14–28rem, remembered per browser. Bounds in px because the drag
+  // arrives in px; they are 14rem / 18rem / 28rem at the root font size.
+  const sidebarResize = useResizableWidth({
+    storageKey: "capka.layout.sidebar",
+    defaultWidth: 288,
+    min: 224,
+    maxWidth: () => 448,
+    label: t("resizeSidebar"),
+    direction: 1,
+  });
   const { theme, setTheme } = useTheme();
   const shortcut = useShortcutLabel();
   const { data: session } = authClient.useSession();
@@ -744,6 +757,15 @@ export function AppSidebar() {
     return () => window.removeEventListener("chat:created", onCreated);
   }, []);
 
+  // Renamed, pinned, archived or moved from somewhere that isn't this list — the
+  // chat panel's own ⋯ menu. It edits the same row the sidebar is showing, so it
+  // says so and the list re-reads, exactly as `onUpdate` does on a row's own menu.
+  useEffect(() => {
+    const onChanged = () => fetchReset();
+    window.addEventListener("chat:changed", onChanged);
+    return () => window.removeEventListener("chat:changed", onChanged);
+  }, [fetchReset]);
+
   // Enter animation bookkeeping: any chat id that wasn't in the previous render
   // is "new" and animates in once. The FIRST loaded batch is the baseline — it's
   // marked seen without animating (the skeleton already covered first paint), so
@@ -824,7 +846,18 @@ export function AppSidebar() {
   const avatarUrl = user?.image;
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" width={`${sidebarResize.width}px`} resizing={sidebarResize.dragging}>
+      {/* The handle rides the nav's own right edge. `fixed`, not absolute: the
+          column that owns that edge is itself fixed and has no positioned box a
+          child could hang off. Only while expanded — the icon rail's width is a
+          state, not something to drag. */}
+      {sidebarState === "expanded" && (
+        <div
+          {...sidebarResize.handleProps}
+          style={{ left: "calc(var(--sidebar-width) - 4px)" }}
+          className={cn(RESIZE_HANDLE_CLASS, "fixed inset-y-0")}
+        />
+      )}
       <SidebarHeader className="p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
           <div className="flex items-center gap-2">

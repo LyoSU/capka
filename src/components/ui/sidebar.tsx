@@ -161,11 +161,23 @@ function Sidebar({
   className,
   children,
   dir,
+  width,
+  resizing,
   ...props
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right"
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
+  /** The expanded width, when the host lets the user drag it (e.g. "312px").
+   *  Overrides the default for this subtree only, so the gap and the fixed
+   *  container move together — setting it on the container alone would leave the
+   *  gap at the old width and the content would slide under the nav. The icon and
+   *  offcanvas widths are untouched: those are states, not preferences. */
+  width?: string
+  /** True while the user is dragging that width. The open/close width animation
+   *  has to stand down for the duration, or every pointer move is chased 200ms
+   *  late and the edge rubber-bands behind the cursor. */
+  resizing?: boolean
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
@@ -230,6 +242,8 @@ function Sidebar({
   return (
     <div
       className="group peer hidden text-sidebar-foreground md:block"
+      style={width ? ({ "--sidebar-width": width } as React.CSSProperties) : undefined}
+      data-resizing={resizing ? "true" : undefined}
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -241,6 +255,7 @@ function Sidebar({
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-[var(--ease-strong)]",
+          "group-data-[resizing=true]:transition-none",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -252,6 +267,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
+          "group-data-[resizing=true]:transition-none",
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-[var(--ease-strong)] data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"

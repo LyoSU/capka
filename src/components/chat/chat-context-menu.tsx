@@ -36,7 +36,9 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { copyToClipboard } from "@/lib/clipboard";
 
-type ChatItem = {
+/** The row this menu acts on. Exported because the chat panel's own ⋯ menu has
+ *  no list row to borrow one from and fetches the same fields itself. */
+export type ChatItem = {
   id: string;
   title: string | null;
   pinned: boolean | null;
@@ -54,10 +56,19 @@ export function ChatContextMenu({
   children,
   open,
   onOpenChange,
+  showTrigger = true,
+  contentProps,
 }: {
   chat: ChatItem;
   onUpdate: () => void;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  /** The built-in ⋮. A host with a trigger of its own turns it off and drives
+   *  `open` itself — two triggers for one menu is one tab stop too many, and the
+   *  hover-reveal that hides this one only exists on a sidebar row. */
+  showTrigger?: boolean;
+  /** Where the popover lands. The sidebar row wants it beside itself; a header
+   *  button at the right edge of the window wants it below. */
+  contentProps?: React.ComponentProps<typeof ActionMenu>["contentProps"];
   // The menu's open state can be driven from the row (a long-press on touch,
   // where the visible ⋮ trigger is hidden). Falls back to internal state so the
   // component still works uncontrolled.
@@ -278,7 +289,7 @@ export function ChatContextMenu({
         title={chat.title || t("untitled")}
         ariaLabel={t("menu.options")}
         items={items}
-        contentProps={{ side: "right", align: "start", sideOffset: 8, className: "w-auto" }}
+        contentProps={{ side: "right", align: "start", sideOffset: 8, className: "w-auto", ...contentProps }}
       >
         {/* Invisible anchor: keeps the desktop popover positioned even when the
             visible ⋮ trigger is hidden on touch, and lets a long-press open it
@@ -295,6 +306,7 @@ export function ChatContextMenu({
             where the row's long-press opens the same menu as a bottom sheet. A
             plain button, not the trigger, so it can sit beside the anchor and
             open the controlled menu on click. */}
+        {showTrigger && (
         <button
           type="button"
           data-sidebar="menu-action"
@@ -304,6 +316,7 @@ export function ChatContextMenu({
         >
           <MoreVertical className="size-4" />
         </button>
+        )}
       </ActionMenu>
 
       <MoveToProjectDialog

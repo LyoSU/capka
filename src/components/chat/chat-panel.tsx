@@ -41,6 +41,7 @@ import { ChatSecrets } from "@/components/chat/chat-secrets";
 import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
+import { ChatMenuButton } from "@/components/chat/chat-menu-button";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { SelectionActions } from "@/components/chat/selection-actions";
 import { Button } from "@/components/ui/button";
@@ -1225,22 +1226,28 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 </Hint>
               )}
             </div>
-            <Hint label={t("panel.workspaceFiles")}>
-              <Button
-                variant="ghost"
-                size="icon"
-                // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
-                // width pressure this button squashed before the model name gave way.
-                className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
-                  filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
-                }`}
-                onClick={() => setFilesOpen(true)}
-                aria-hidden={filesOpen}
-                tabIndex={filesOpen ? -1 : 0}
-              >
-                <FolderOpen className="h-4 w-4" />
-              </Button>
-            </Hint>
+            <div className="flex shrink-0 items-center gap-1">
+              <Hint label={t("panel.workspaceFiles")}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
+                  // width pressure this button squashed before the model name gave way.
+                  className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
+                    filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
+                  }`}
+                  onClick={() => setFilesOpen(true)}
+                  aria-hidden={filesOpen}
+                  tabIndex={filesOpen ? -1 : 0}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              </Hint>
+              {/* Everything the sidebar row's menu does, for the chat in front of
+                  you. Not in a shared, read-only view: none of it is the reader's
+                  to do. */}
+              {!readOnly && <ChatMenuButton chatId={chatId} />}
+            </div>
           </div>
 
           <ChatNav
@@ -1309,10 +1316,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       <WorkspacePanel
         chatId={chatId}
         open={filesOpen}
+        onOpen={() => setFilesOpen(true)}
         onClose={() => setFilesOpen(false)}
         running={isLoading}
         revision={toolRevision}
         folderSync={folderSync}
+        // A passage quoted out of an open file lands in the composer the same way
+        // a passage quoted out of a reply does — same focus hand-off, same send.
+        onPrompt={readOnly ? undefined : fillFromStarter}
       />
     </div>
     </PreviewProvider>

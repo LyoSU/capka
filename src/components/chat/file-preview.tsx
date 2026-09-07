@@ -11,11 +11,12 @@ import {
 } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download, FileWarning, ImageOff, Loader2, Maximize2, Minimize2, RefreshCw, Sparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileWarning, ImageOff, Loader2, Maximize2, Minimize2, RefreshCw, Sparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Hint } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
@@ -108,6 +109,28 @@ export function useFileStatus(file: PreviewFile, enabled = true): "checking" | F
 }
 
 /**
+ * Is this file still there? For restoring a viewer that was open when the tab was
+ * closed — a workspace is scratch space and may have been cleaned out since.
+ *
+ * Returns the same verdict every other surface reads, because the difference
+ * matters here: `gone` means forget the stored path, while `temporary` means the
+ * controller is momentarily unreachable and the path is still good. A positive
+ * answer is remembered the way the status hook remembers one, so the viewer that
+ * opens next does not ask a second time.
+ */
+export async function probeFile(file: PreviewFile): Promise<FileStatus> {
+  try {
+    const res = await fetch(inlineUrl(file));
+    await res.body?.cancel().catch(() => {});
+    const verdict = fileStatusFromHttp(res.status);
+    if (verdict === "ok") presentFiles.add(fileStatusKey(file));
+    return verdict;
+  } catch {
+    return "temporary";
+  }
+}
+
+/**
  * Read just the start of a file without downloading the whole thing: pull one
  * chunk off the response stream, then cancel. Lets a thumbnail show real text
  * regardless of file size, with no extra server endpoint.
@@ -129,6 +152,18 @@ async function readHead(url: string, maxChars = 600): Promise<string> {
 type PreviewCtx = { open: (files: PreviewFile[], index: number) => void };
 const PreviewContext = createContext<PreviewCtx | null>(null);
 
+type PreviewState = { files: PreviewFile[]; index: number };
+
+/** What a host column needs to render the viewer itself, and how it says it can.
+ *  `state` is non-null only while the CURRENT preview belongs to that host. */
+type PreviewDockCtx = {
+  register: (host: (() => void) | null) => void;
+  state: PreviewState | null;
+  setIndex: (i: number) => void;
+  close: () => void;
+};
+const PreviewDockContext = createContext<PreviewDockCtx | null>(null);
+
 /** Open Quick Look for a file. Must be used within <PreviewProvider>. */
 export function usePreview(): PreviewCtx {
   const ctx = useContext(PreviewContext);
@@ -136,29 +171,167 @@ export function usePreview(): PreviewCtx {
   return ctx;
 }
 
+/**
+ * Offer a column as the place previews open, instead of a dialog over the page.
+ *
+ * `onRequestOpen` is how the provider asks that column to appear — a file opened
+ * from a message tile has to bring the panel with it. Registration is what makes
+ * the difference: the project hub mounts the same provider with no host, so its
+ * previews stay dialogs, and so do everyone's on a phone.
+ */
+export function usePreviewDock(onRequestOpen?: () => void): PreviewDockCtx | null {
+  const ctx = useContext(PreviewDockContext);
+  // The callback is a fresh closure every render; the registration must not be.
+  const cb = useRef(onRequestOpen);
+  cb.current = onRequestOpen;
+  const register = ctx?.register;
+  useEffect(() => {
+    if (!register) return;
+    register(() => cb.current?.());
+    return () => register(null);
+  }, [register]);
+  return ctx;
+}
+
 export function PreviewProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<{ files: PreviewFile[]; index: number } | null>(null);
+  const [state, setState] = useState<PreviewState | null>(null);
+  // Whether the preview currently open belongs to a host column. Decided once,
+  // when it opens: a window crossing the breakpoint mid-read shouldn't tear the
+  // viewer out from under the reader and re-open it somewhere else.
+  const [docked, setDocked] = useState(false);
+  const host = useRef<(() => void) | null>(null);
+  const isMobile = useIsMobile();
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
 
   const open = useCallback((files: PreviewFile[], index: number) => {
     if (files.length === 0) return;
+    // A phone has no room to dock beside anything — the sheet covers the chat
+    // there anyway, so the dialog is still the honest shape.
+    const dock = isMobileRef.current ? null : host.current;
+    setDocked(!!dock);
+    dock?.();
     setState({ files, index: Math.max(0, Math.min(index, files.length - 1)) });
   }, []);
   const close = useCallback(() => setState(null), []);
+  const setIndex = useCallback((i: number) => setState((s) => (s ? { ...s, index: i } : s)), []);
+  const register = useCallback((fn: (() => void) | null) => {
+    host.current = fn;
+  }, []);
 
   const ctx = useMemo(() => ({ open }), [open]);
+  const dockCtx = useMemo<PreviewDockCtx>(
+    () => ({ register, state: docked ? state : null, setIndex, close }),
+    [register, docked, state, setIndex, close],
+  );
 
   return (
     <PreviewContext.Provider value={ctx}>
-      {children}
-      {state && (
-        <FilePreview
-          files={state.files}
-          index={state.index}
-          onIndex={(i) => setState((s) => (s ? { ...s, index: i } : s))}
-          onClose={close}
-        />
-      )}
+      <PreviewDockContext.Provider value={dockCtx}>
+        {children}
+        {state && !docked && (
+          <FilePreview files={state.files} index={state.index} onIndex={setIndex} onClose={close} />
+        )}
+      </PreviewDockContext.Provider>
     </PreviewContext.Provider>
+  );
+}
+
+/**
+ * The viewer as a column, not a dialog — the workspace panel's other face.
+ *
+ * The header is deliberately slimmer than the dialog's: in a docked column the
+ * file's own content is the scarce thing, and there is no fullscreen toggle
+ * because the column IS the size the user chose. Back and Close are different
+ * exits and both are offered — one returns to the file list, the other puts the
+ * whole column away.
+ */
+export function DockedPreview({
+  files,
+  index,
+  onIndex,
+  onBack,
+  onClose,
+  selectionBar,
+  className,
+}: {
+  files: PreviewFile[];
+  index: number;
+  onIndex: (i: number) => void;
+  /** Back to the file list, leaving the column open. */
+  onBack: () => void;
+  /** Put the whole column away. */
+  onClose: () => void;
+  /** Built per file by the host, which is the thing that owns the composer. */
+  selectionBar?: (fileName: string) => React.ReactNode;
+  className?: string;
+}) {
+  const t = useTranslations("chat.preview");
+  const tw = useTranslations("chat.workspace");
+  const file = files[index];
+  const many = files.length > 1;
+  const go = useCallback(
+    (delta: number) => onIndex((index + delta + files.length) % files.length),
+    [index, files.length, onIndex],
+  );
+
+  // Escape steps back to the files, one level — it does NOT close the column.
+  // A reader who opened a file from the list expects to land back on the list,
+  // and the dialog's habit of dismissing everything is exactly what docking is
+  // meant to stop. Arrow keys page through the set as they do in the dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onBack();
+      } else if (many && e.key === "ArrowLeft") go(-1);
+      else if (many && e.key === "ArrowRight") go(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [many, go, onBack]);
+
+  // The viewer takes focus when it opens so Escape and the arrows reach it
+  // without a click first, and so a keyboard user isn't left on a control that
+  // the browser just replaced.
+  const paneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    paneRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  return (
+    <div ref={paneRef} tabIndex={-1} className={cn("flex h-full min-w-0 flex-col bg-card outline-none", className)}>
+      <div className="flex items-center gap-1 border-b px-2 py-2">
+        <HeaderButton onClick={onBack} label={tw("backToFiles")}>
+          <ChevronLeft className="h-4 w-4" />
+        </HeaderButton>
+        <p className="min-w-0 flex-1 truncate text-sm font-medium" title={file.name}>
+          {file.name}
+        </p>
+        {many && (
+          <>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {index + 1}/{files.length}
+            </span>
+            <HeaderButton onClick={() => go(-1)} label={t("prev")}><ChevronLeft className="h-4 w-4" /></HeaderButton>
+            <HeaderButton onClick={() => go(1)} label={t("next")}><ChevronRight className="h-4 w-4" /></HeaderButton>
+          </>
+        )}
+        <HeaderButton href={inlineUrl(file)} target="_blank" label={t("openInNewTab")}>
+          <ExternalLink className="h-4 w-4" />
+        </HeaderButton>
+        <HeaderButton href={downloadUrl(file)} download={file.name} label={t("download")}>
+          <Download className="h-4 w-4" />
+        </HeaderButton>
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+        <HeaderButton onClick={onClose} label={t("close")}>
+          <X className="h-4 w-4" />
+        </HeaderButton>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-muted/10">
+        <Viewer key={file.path} file={file} kind={previewKind(file.name)} onClose={onBack} onPage={many ? go : undefined} selectionBar={selectionBar?.(file.name)} />
+      </div>
+    </div>
   );
 }
 
@@ -259,20 +432,21 @@ function FilePreview({
  *  `href` is set. Five copies of the same class string lived here inline, which is
  *  how Download and Close drifted into looking identical. */
 function HeaderButton({
-  label, children, onClick, href, download,
+  label, children, onClick, href, download, target,
 }: {
   label: string;
   children: React.ReactNode;
   onClick?: () => void;
   href?: string;
   download?: string;
+  target?: string;
 }) {
   const cls =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
   return (
     <Hint label={label} side="bottom">
       {href ? (
-        <a href={href} download={download} className={cls}>{children}</a>
+        <a href={href} download={download} target={target} rel={target ? "noopener noreferrer" : undefined} className={cls}>{children}</a>
       ) : (
         <button type="button" onClick={onClick} className={cls}>{children}</button>
       )}
@@ -280,12 +454,16 @@ function HeaderButton({
   );
 }
 
-function Viewer({ file, kind, onClose, onPage }: {
+function Viewer({ file, kind, onClose, onPage, selectionBar }: {
   file: PreviewFile;
   kind: ReturnType<typeof previewKind>;
   onClose: () => void;
   /** Present only when there is more than one file to page between. */
   onPage?: (delta: number) => void;
+  /** The highlight-to-quote bar, built by a host that has a composer to fill.
+   *  The dialog host can float over a page with no chat under it (the project
+   *  hub, the settings pages) and passes nothing. */
+  selectionBar?: React.ReactNode;
 }) {
   if (kind === "image") {
     return <ImageViewer file={file} onPage={onPage} />;
@@ -297,7 +475,7 @@ function Viewer({ file, kind, onClose, onPage }: {
     return <HtmlViewer file={file} />;
   }
   if (kind === "markdown" || kind === "text") {
-    return <TextViewer file={file} markdown={kind === "markdown"} />;
+    return <TextViewer file={file} markdown={kind === "markdown"} selectionBar={selectionBar} />;
   }
   // No in-app viewer for this format. Reached on purpose now: clicking such a file
   // used to start a download with no warning in the grid and do nothing at all in
@@ -922,20 +1100,33 @@ function useFileText(file: PreviewFile): Loaded {
   return loaded;
 }
 
-function TextViewer({ file, markdown }: { file: PreviewFile; markdown: boolean }) {
+function TextViewer({ file, markdown, selectionBar }: {
+  file: PreviewFile;
+  markdown: boolean;
+  selectionBar?: React.ReactNode;
+}) {
   const loaded = useFileText(file);
 
   if (loaded.state === "loading")
     return <ViewerLoading />;
   if (loaded.state !== "ok") return <UnavailableNotice state={loaded.state} file={file} />;
 
+  // `data-preview-text` is the mark the highlight-to-quote bar reads, written
+  // literally the way `data-answer` is on a reply's prose — the selector that
+  // pairs with it lives with the bar, in selection-actions.tsx.
   if (markdown)
     return (
-      <div className="mx-auto max-w-3xl p-6">
+      <div className="mx-auto max-w-3xl p-6" data-preview-text="">
         <Markdown>{loaded.text}</Markdown>
+        {selectionBar}
       </div>
     );
-  return <CodeViewer name={file.name} text={loaded.text} />;
+  return (
+    <div className="h-full" data-preview-text="">
+      <CodeViewer name={file.name} text={loaded.text} />
+      {selectionBar}
+    </div>
+  );
 }
 
 // Lazy, shared Shiki highlighter import — same off-critical-path trick markdown.tsx

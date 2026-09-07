@@ -8,6 +8,10 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Chat: the sidebar and the files panel resize by dragging the edge they share with the conversation (arrow keys, Home/End; double-click resets); widths are remembered per browser, and the conversation never drops below 28rem.
+- Chat: highlight a passage of an open text or Markdown file to quote it, explain it, or ask about it in the composer; the prompt names the file.
+- Chat: whether the files panel was open, and which file was shown in it, is remembered per chat in the browser (50 most recent chats) and restored on the next desktop visit; a file that is gone since is forgotten quietly.
+- Chat: a "⋯" menu in the chat header with the same actions as the sidebar row (rename, regenerate title, pin, archive, move, export, share, delete). `GET /api/chats/[id]` returns the row to its owner.
 - Steer a running reply: Alt+Enter in the composer (or the new action on a queued message) folds your text into the turn already in progress at its next step, without stopping it. Capped at 10 steers of 4000 characters per turn; a turn that finishes first falls back to sending the message normally.
 - Chats waiting on the user (approval card, agent question, failed reply) are grouped at the top of the sidebar with their own marker and a count in the tab title. Derived from each chat's last message: answering clears an approval or question, opening the chat clears a failure.
 - Telegram: messages sent in quick succession (2.5 s of quiet, 12 s at most, 20 messages or 100 KB) are grouped into one turn instead of a reply to the first fragment followed by a follow-up. Requires a platform restart to take effect.
@@ -29,6 +33,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
 - Menus: every dropdown and action menu is roomier (16px radius, 44px rows, 15px text, 20px icons, inset rules between groups), matching the menus people know from other assistants.
+- Chat, desktop: opening a file shows it inside the files panel beside the conversation instead of a dialog over it; Escape returns to the file list, closing the panel puts the file away. Phones keep the full-screen viewer.
 - Chat: the jump rail at the right edge is quieter (hairline marks, dimmer at rest, full weight on keyboard focus) and its list aligns every row's text on one edge with the full message on hover.
 - Chat: thinking levels are named Off / Low / Medium / High (Вимкнено / Низький / Середній / Високий); the explanations under the slider are unchanged.
 - Chat, phone: the model overlay no longer opens the keyboard by itself, and the thinking slider steps aside while a search is being typed.

@@ -165,3 +165,26 @@ export const DELETE = apiHandler(async (_req, { params }) => {
   await deleteChat({ id, userId, projectId: (existing.projectId as string | null) ?? null });
   return new Response(null, { status: 204 });
 });
+
+/**
+ * The one chat row, for a surface that has no list to read it from.
+ *
+ * The chat panel's ⋯ menu needs the same fields the sidebar's row menu already
+ * holds — title, pinned, archived, project, visibility — and the panel is handed
+ * only an id. Same gate as PATCH: someone else's chat is a 404, not a 403, so the
+ * endpoint never confirms that an id exists.
+ */
+export const GET = apiHandler(async (_req, { params }) => {
+  const { userId } = await requireRole("admin", "user");
+  const { id } = await params;
+  const chat = await requireOwned(chats, id, userId, "Chat");
+  return Response.json({
+    id,
+    title: (chat.title as string | null) ?? null,
+    pinned: (chat.pinned as boolean | null) ?? false,
+    archived: (chat.archived as boolean | null) ?? false,
+    projectId: (chat.projectId as string | null) ?? null,
+    visibility: (chat.visibility as string | null) ?? null,
+    shareToken: (chat.shareToken as string | null) ?? null,
+  });
+});
