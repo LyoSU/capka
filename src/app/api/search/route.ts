@@ -25,7 +25,8 @@ const PER_CHAT_LIMIT = 3;
 
 // How far up the parent chain the active-path walk will go. Far above any real
 // conversation — it is there to stop a malformed parent cycle from spinning, not
-// to cap history. See the comment on the `active` CTE.
+// to cap history. It is still a cap: past this depth a match nearer the chat's
+// root goes unanswered, which is accepted. See the comment on the `active` CTE.
 const MAX_PATH_DEPTH = 10000;
 
 /** A LIKE pattern matching `q` literally: the user's `%`, `_` and `\` are their
@@ -168,6 +169,11 @@ export const GET = apiHandler(async (req: Request) => {
     -- fixpoint and holds the whole search until a statement timeout. A counter is
     -- used rather than PG14's CYCLE clause because DATABASE_URL may point at an
     -- external Postgres older than the pinned image.
+    --
+    -- It is a real bound, though, not only a cycle guard: a linear active path
+    -- longer than MAX_PATH_DEPTH stops being walked, so matches nearer the root of
+    -- such a chat are not answered. Accepted — a conversation that deep has
+    -- problems this query is not the place to solve.
     active as (
       select m.id, m.chat_id, m.parent_id, m.created_at, 1 as depth
       from chats
@@ -185,13 +191,23 @@ export const GET = apiHandler(async (req: Request) => {
       select mg.* from merged mg
       where exists (select 1 from active av where av.id = mg.id)
         -- A chat with no leaf pinned has no chain to walk, so nothing is filtered
-        -- there. That is NOT the same rule activePath uses — it descends the
-        -- newest branch instead — and the difference is accepted knowingly: no
-        -- code path can produce a chat that has messages and no pinned leaf (every
-        -- writer sets it in the same transaction, and nothing deletes a message,
-        -- which is the only thing the ON DELETE SET NULL FK would react to). If
-        -- a retention or prune pass ever lands, this needs the descending walk
-        -- (newest root, newest child at each step) to match activePath again.
+        -- there and every branch of that chat stays answerable.
+        --
+        -- That state is REACHABLE, not hypothetical. A web send writes the message
+        -- and then points the chat at it in two statements with no transaction
+        -- around them (api/chat/route.ts) — the FK needs the row to exist first —
+        -- so a search landing between the two sees a chat that has messages and a
+        -- NULL leaf. Legacy rows can sit there permanently.
+        --
+        -- Being over-inclusive for that chat is the deliberate choice: the window
+        -- is milliseconds wide and its only consequence is that the newest message
+        -- of a chat nobody has branched is briefly answerable before the pointer
+        -- catches up. It does diverge from activePath, which falls back to
+        -- descending the newest branch instead, and that divergence is accepted —
+        -- mirroring it would take a second recursive walk (newest root, newest
+        -- child at each step) plus a DISTINCT ON over those chats' messages, which
+        -- is a full chat scan spent on a transient state. Revisit if a retention
+        -- or prune pass ever makes a NULL leaf durable and common.
         or not exists (select 1 from active av where av.chat_id = mg.chat_id)
     ),
     ranked as (
