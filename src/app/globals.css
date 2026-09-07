@@ -1265,6 +1265,14 @@
 .chat-prose blockquote { margin-block: 0.75rem; }
 .chat-prose > :first-child { margin-top: 0; }
 .chat-prose > :last-child { margin-bottom: 0; }
+/* A user bubble: the bubble's own padding is the rhythm, so the first and last
+   block must sit flush with it. Reaches one level deeper than the rule above
+   because Streamdown wraps its blocks in a div of its own — the direct child is
+   that wrapper, which has no margin, and the paragraph inside kept its 0.75rem.
+   Written here, unlayered, because Streamdown's own `[&>*:first-child]:mt-0` is
+   a layered utility and loses to `.chat-prose p` regardless of specificity. */
+.chat-prose-flush > * > :first-child { margin-top: 0; }
+.chat-prose-flush > * > :last-child { margin-bottom: 0; }
 
 /* Headings: clear space above to mark a new section, tight below; balanced and
    slightly tightened. Sizes are toned down from Streamdown defaults (h1 was

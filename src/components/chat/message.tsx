@@ -2068,7 +2068,7 @@ function UserBubble({
           {/* When the turn is files-only, the thumbnails are the content — skip the
               empty "…" bubble. */}
           {(text || !hasFiles) && (
-            <div className="chat-prose inline-block max-w-full break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-left text-[15px] shadow-panel">
+            <div className="chat-prose chat-prose-flush inline-block max-w-full break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-left text-[15px] shadow-panel">
               {/* The same renderer as a reply, so what the person typed in Markdown
                   (a list, **bold**, a fence) reads the way they meant it. Hard breaks
                   keep their Enter as a new line — see withHardBreaks. */}
