@@ -628,7 +628,7 @@
       "versions": "{count, plural, one {# version} other {# versions}}",
       "quiet": {
         "title": "Nothing new",
-        "showReply": "Show the reply"
+        "showRun": "Show what it did"
       }
     },
     "memory": {

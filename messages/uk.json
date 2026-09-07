@@ -628,7 +628,7 @@
       "versions": "{count, plural, one {# версія} few {# версії} many {# версій} other {# версії}}",
       "quiet": {
         "title": "Нічого нового",
-        "showReply": "Показати відповідь"
+        "showRun": "Показати, що зроблено"
       }
     },
     "memory": {

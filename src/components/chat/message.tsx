@@ -14,7 +14,7 @@ import { Markdown } from "@/components/chat/markdown";
 import { staggerIndex } from "@/lib/chat/motion";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
-import { Fragment, useState, useMemo, useEffect, useLayoutEffect, useRef, memo } from "react";
+import { Fragment, useState, useMemo, useEffect, useLayoutEffect, useRef, memo, type ReactNode } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
@@ -2493,29 +2493,27 @@ function CompactionDivider({ summary }: { summary: string }) {
  *
  * Deliberately NOT a bubble. This row is a receipt that the check ran, and it has
  * to read as quieter than an answer even when it sits between two of them — so:
- * one muted line, no card, no badge colour, no actions. The reply text (a
- * sentence at most, by the tool's own instruction) folds behind it, because the
- * transcript still owes the person everything the turn actually said.
+ * one muted line, no card, no badge colour. The full turn (every step the agent
+ * took, then its one-line reply) folds behind it, because "nothing new" is a
+ * verdict the person must be able to audit — a receipt without the work behind
+ * it would read as "it did not check".
  */
-function QuietRow({ reason, text }: { reason: string; text: string }) {
+function QuietRow({ reason, children }: { reason: string; children: ReactNode }) {
   const t = useTranslations("chat.message");
   const anchorDisclosure = useDisclosureAnchor();
-  const line = (
-    <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-      <BellOff className="h-3.5 w-3.5 shrink-0 translate-y-0.5" aria-hidden />
-      <span className="shrink-0 text-foreground/70">{t("quiet.title")}</span>
-      <span className="min-w-0 flex-1 truncate">{reason}</span>
-    </div>
-  );
-  if (!text) return <div className="animate-message-in px-4 py-2 md:px-6">{line}</div>;
   return (
-    <Collapsible className="animate-message-in px-4 py-2 md:px-6" onOpenChange={(_, d) => anchorDisclosure(d)}>
-      <CollapsibleTrigger aria-label={t("quiet.showReply")} className="w-full rounded-md text-left transition-colors hover:text-foreground">
-        {line}
+    <Collapsible className="animate-message-in" onOpenChange={(_, d) => anchorDisclosure(d)}>
+      <CollapsibleTrigger
+        aria-label={t("quiet.showRun")}
+        className="mx-4 my-2 flex w-[calc(100%-2rem)] items-baseline gap-2 rounded-md text-left text-xs text-muted-foreground transition-colors hover:text-foreground md:mx-6 md:w-[calc(100%-3rem)]"
+      >
+        <BellOff className="h-3.5 w-3.5 shrink-0 translate-y-0.5" aria-hidden />
+        <span className="shrink-0 text-foreground/70">{t("quiet.title")}</span>
+        <span className="min-w-0 flex-1 truncate">{reason}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5 ml-5 text-sm text-muted-foreground">
-        <Markdown>{text}</Markdown>
-      </CollapsibleContent>
+      {/* The whole turn — steps, files, the one-line reply, the (i) popover — exactly
+          as a spoken turn renders it. The fold hides it by default; it never drops it. */}
+      <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
   );
 }
@@ -2855,12 +2853,11 @@ export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
   // not an assistant bubble with a flag on it, it is a different row. `quiet` is
   // only ever written at finalize, so a still-streaming turn never lands here.
   if (rowMeta?.quiet) {
-    const text = props.message.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("\n\n")
-      .trim();
-    return <QuietRow reason={rowMeta.quiet.reason} text={text} />;
+    return (
+      <QuietRow reason={rowMeta.quiet.reason}>
+        <ChatMessageImpl {...props} />
+      </QuietRow>
+    );
   }
   return <ChatMessageImpl {...props} />;
 });

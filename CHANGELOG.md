@@ -19,7 +19,7 @@ All notable changes to Capka are documented here. Format follows
 - The chat says when a message from Telegram, another device, or an automation is waiting behind the current reply, with "Send now" and "Don't send".
 - Telegram: a message that lands behind a streaming reply gets a short notice with a "Don't send" button. Requires a platform restart.
 - `POST /api/chat` responses carry `deduped: true` when the message folded into a turn that was already queued.
-- Automations: "Notify: only when there is something to report" (`notify_mode: when_needed`) gives the run a `nothing_to_report` tool; a run that calls it ends without a Telegram message, a notification or an unread mark, and shows as one muted row in the chat. Quiet runs are counted per day in Settings.
+- Automations: "Notify: only when there is something to report" (`notify_mode: when_needed`) gives the run a `nothing_to_report` tool; a run that calls it ends without a Telegram message, a notification or an unread mark, and shows as one muted row in the chat that unfolds into the full turn (steps and reply). Quiet runs are counted per day in Settings.
 - Automations: per-automation "Also send to Telegram" switch (`deliver_telegram`, default on); off keeps results in the web chat only.
 
 ### Fixed
