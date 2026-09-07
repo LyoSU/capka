@@ -773,21 +773,17 @@
      at the card's radius minus that inset. A fixed `rx` drew a second, tighter
      curve beside the card's own corner. */
   rx: calc(var(--radius-2xl) - 1px);
-  animation: composer-activity 4.5s linear infinite;
-  animation-play-state: paused;
-}
-/* Halo first, line on top. Both ride the same dash and phase, so the wide blur
-   is a glow around the thin line and fades its ends — one hard-capped 2px stroke
-   here read as a second border cut off mid-edge. Kept faint on purpose: this is
-   peripheral motion, seen when you look at the box, not while reading above it. */
-.composer-activity rect:first-child {
-  stroke-width: 6;
-  stroke-opacity: 0.14;
-  filter: blur(3px);
-}
-.composer-activity rect:last-child {
+  /* A thin line with a soft halo from a drop-shadow on the SAME element — not a
+     second, wider blurred rect: two rects run two animation clocks and a remount
+     of either leaves them out of phase as two dashes. The halo is what lets the
+     dash end softly; one hard-capped 2px stroke read as a second border cut off
+     mid-edge. Faint on purpose: peripheral motion, seen when you look at the box,
+     not while reading the answer above it. */
   stroke-width: 1.5;
   stroke-opacity: 0.32;
+  filter: drop-shadow(0 0 3px color-mix(in oklab, var(--primary) 55%, transparent));
+  animation: composer-activity 4.5s linear infinite;
+  animation-play-state: paused;
 }
 .composer-activity[data-on] rect {
   animation-play-state: running;

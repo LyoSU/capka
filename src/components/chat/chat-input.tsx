@@ -526,10 +526,10 @@ export function ChatInput({
           {/* No rx here: the corner radius is set in CSS from the same token the
               card's `rounded-2xl` resolves to, so the line follows the card's own
               curve instead of a second, tighter one drawn next to it. */}
-          {/* Two strokes on one path: a wide, blurred halo under a thin crisp line.
-              The halo is what lets the dash END softly — a single hard-capped
-              stroke at this size read as a second border with a cut-off end. */}
-          <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
+          {/* ONE rect. The soft halo around the line is a drop-shadow on this same
+              element (globals.css), not a second blurred rect: two rects each run
+              their own animation clock, and a remount of either — HMR did it —
+              leaves halo and line travelling out of phase as two separate dashes. */}
           <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
         </svg>
         </div>
