@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolveConflictName, leaseRenewMs, uploadBatch } from "../bridge";
+import { resolveConflictName, leaseRenewMs, uploadBatch, LEASE_GONE } from "../bridge";
 import { conflictName } from "../plan";
 import { chatTarget } from "@/lib/workspace-target";
 
@@ -89,11 +89,14 @@ describe("uploadBatch — the lease is checked per chunk, not once per upload", 
   const target = chatTarget("c1");
   const paths = Array.from({ length: 250 }, (_, i) => `f${i}.txt`);
   let posts: string[][];
+  let fields: FormData[];
 
   beforeEach(() => {
     posts = [];
+    fields = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: FormData }) => {
       posts.push(init.body.getAll("files").map((f) => (f as File).name));
+      fields.push(init.body);
       return new Response(null, { status: 200 });
     }));
   });
@@ -101,16 +104,38 @@ describe("uploadBatch — the lease is checked per chunk, not once per upload", 
 
   const read = async (rel: string) => new Blob([rel]);
 
+  /** A guard that passes until its `throwOn`-th call, so a test can say exactly
+   *  which of the two checks in a chunk it wants to fail. */
+  const guardThrowingOn = (throwOn: number) => {
+    const state = { calls: 0 };
+    return [() => { if (++state.calls >= throwOn) throw new Error("lease gone"); }, state] as const;
+  };
+
   it("sends every chunk when nothing objects — the shape a lost lease has to interrupt", async () => {
     await uploadBatch(target, "docs", paths, read);
     expect(posts.map((p) => p.length)).toEqual([100, 100, 50]);
   });
 
-  it("stops before the next chunk once the guard throws", async () => {
-    let calls = 0;
-    const guard = () => { if (++calls > 2) throw new Error("lease gone"); };
-    await expect(uploadBatch(target, "docs", paths, read, undefined, guard)).rejects.toThrow("lease gone");
-    // Two chunks went; the third was never assembled, let alone sent.
+  it("checks the lease twice per chunk, before the reads and after them", async () => {
+    const guard = vi.fn();
+    await uploadBatch(target, "docs", paths, read, { guard });
+    expect(guard).toHaveBeenCalledTimes(6); // three chunks
+  });
+
+  // The blocker: the check at the top of the loop runs BEFORE `read` is called for
+  // 100 files, which takes seconds. A lease lost during those reads left the check
+  // already passed, so the assembled batch went out anyway. The second check closes
+  // that window — nothing may be sent after it fails.
+  it("does not send a chunk whose files were read after the lease went", async () => {
+    const [guard, state] = guardThrowingOn(2);
+    await expect(uploadBatch(target, "docs", paths, read, { guard })).rejects.toThrow("lease gone");
+    expect(state.calls).toBe(2); // passed at the top, failed after the reads
+    expect(posts).toEqual([]);
+  });
+
+  it("stops before the next chunk once the guard throws at the top", async () => {
+    const [guard] = guardThrowingOn(5); // chunks 1 and 2 take calls 1-4
+    await expect(uploadBatch(target, "docs", paths, read, { guard })).rejects.toThrow("lease gone");
     expect(posts.map((p) => p.length)).toEqual([100, 100]);
   });
 
@@ -121,6 +146,22 @@ describe("uploadBatch — the lease is checked per chunk, not once per upload", 
     };
     await expect(uploadBatch(target, "docs", paths, guarded)).rejects.toThrow("lease gone");
     expect(posts).toEqual([]);
+  });
+
+  // The client cannot fence the gap between its own last check and the server's
+  // write, so the batch names its lease and the server refuses a stale one. That
+  // refusal has to end the sync the way a lost lease does, not read as a transient
+  // upload failure the caller might treat differently.
+  it("names the lease in the request when it has one, and omits it otherwise", async () => {
+    await uploadBatch(target, "docs", ["a.txt"], read, { lease: "t1" });
+    expect(fields[0].get("lease")).toBe("t1");
+    await uploadBatch(target, "docs", ["a.txt"], read);
+    expect(fields[1].get("lease")).toBeNull();
+  });
+
+  it("turns the server's refusal into the same lease-gone failure the guard raises", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ code: "LEASE_GONE" }, { status: 409 })));
+    await expect(uploadBatch(target, "docs", ["a.txt"], read, { lease: "stale" })).rejects.toThrow(LEASE_GONE);
   });
 });
 
@@ -148,13 +189,23 @@ describe("runSync guards each mutation individually", () => {
     expect(runSync.match(/guard\(\)/g)!.length).toBeGreaterThanOrEqual(MUTATIONS.length);
   });
 
-  it("hands the guard to the upload, per file and per chunk", () => {
+  it("hands the guard and the lease to the upload", () => {
     const call = runSync.slice(runSync.indexOf("await uploadBatch("), runSync.indexOf("const downloads"));
     expect(call).toContain("guard(); return readLocalFile");
-    expect(call).toContain("onProgress, guard,");
+    expect(call).toContain("{ onProgress, guard, lease: token }");
   });
 
   it("sends the lease token with the ancestor write", () => {
     expect(runSync).toContain("/state?token=${encodeURIComponent(token)}");
+  });
+
+  // A state PUT that did not land means no new merge ancestor exists, so the run did
+  // not finish. It used to only warn and return success, which told the person their
+  // folder was merged while the next sync would start from the old base — the state
+  // a pre-deploy tab lands in, since its bundle sends no token and gets a 400.
+  it("fails the sync when the ancestor write did not land", () => {
+    expect(runSync).toContain("if (!put?.ok)");
+    expect(runSync).toMatch(/if \(!put\?\.ok\) \{\s*\n\s*throw new Error/);
+    expect(runSync).not.toContain("console.warn");
   });
 });

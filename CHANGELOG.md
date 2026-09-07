@@ -31,6 +31,7 @@ All notable changes to Capka are documented here. Format follows
 - Chat: stored secrets per chat ("+" menu in the composer). A value is encrypted at rest, set as an environment variable on every sandbox command of that chat, named but never shown to the model, and redacted out of command output as `[secret:NAME]`. Injection needs the controller image from this release; an older controller runs commands without the variables.
 
 ### Changed
+- Chat secrets: a value must be at least 6 characters (was 4); shorter existing values are no longer injected or redacted. A project's chats may hold at most 512 secrets together (`TOO_MANY_IN_PROJECT`).
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
 - Chat menu: actions are grouped (share, rename, regenerate title | pin, archive | move to project, export | delete) in the sidebar row, the header "⋯" and the touch sheet alike.
@@ -44,6 +45,10 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Chat secrets: a short value's unpadded base64 form is now redacted; an older secret from a sibling chat in the same project is never dropped from redaction.
+- Steer: text left over after a turn no longer overrides a message sent at the same moment; it lands on a side branch instead.
+- Folder sync: an upload chunk cannot leave after the sync lease is lost, and `POST /api/folders/upload` rejects a stale lease (`LEASE_GONE`) when the bridge passes one. A rejected state write now fails the sync instead of reporting success.
+- Telegram: shutdown gives an album or burst still downloading the time left in the 35 s grace period instead of cutting it at 3 s.
 - Chat: the cited-sources list under a reply keeps its outline on all four sides, and the stacked source marks no longer cover each other's letters.
 - Automations: the daily run limit and the "one ongoing chat" thread are decided under a row lock, so two webhook calls arriving together can no longer both run and both open a chat.
 - Automations: a webhook automation with no `max_runs_per_day` of its own now runs under a platform ceiling of 100 per day (`DEFAULT_WEBHOOK_RUNS_PER_DAY`); set a limit on the automation to override it.

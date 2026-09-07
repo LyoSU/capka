@@ -1,4 +1,6 @@
 import { apiHandler, requireActive } from "@/lib/auth";
+import { pool } from "@/lib/db";
+import { liveLeaseSql } from "@/lib/folders/lease";
 import { uploadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
@@ -24,10 +26,29 @@ export const POST = apiHandler(async (req: Request) => {
   const chatId = form.get("chatId") as string | null;
   const projectId = form.get("projectId") as string | null;
   const name = form.get("name") as string | null;
+  const lease = form.get("lease") as string | null;
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (!name || files.length === 0) return Response.json({ error: "Missing name or files" }, { status: 400 });
 
   const { sessionKey: key } = await resolveWorkspaceTarget({ userId, chatId, projectId });
+
+  // A sync claims the folder with a lease and holds it for its whole span, but the
+  // client alone cannot enforce that: a batch already assembled goes out even if the
+  // lease lapsed while its files were being read, and a stale tab's writes used to
+  // be accepted here unconditionally. So a batch that names a lease must still hold
+  // it, checked against the row this request is about to write into.
+  //
+  // Absent means "no lease claimed" and behaves as before — the one-shot fallback
+  // import has no folder row to check against, and neither does any non-sync caller.
+  if (lease) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM attached_folders WHERE session_key = $1 AND name = $2 AND ${liveLeaseSql(3)}`,
+      [key, name, lease],
+    );
+    if (!rows[0]) {
+      return Response.json({ error: "Another window took over syncing this folder.", code: "LEASE_GONE" }, { status: 409 });
+    }
+  }
 
   // The client-side skip-list and size cap are conveniences, not a boundary — a
   // hand-crafted request could otherwise smuggle a dependency tree or an oversized

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { apiHandler, requireActive } from "@/lib/auth";
 import { db, pool } from "@/lib/db";
 import { attachedFolders } from "@/lib/db/schema";
+import { liveLeaseSql } from "@/lib/folders/lease";
 
 // Persist / read the PC-sync base manifest (3-way merge base) around a sync.
 // Owner-checked; the manifest is opaque JSON the browser bridge round-trips.
@@ -55,10 +56,9 @@ export const PUT = apiHandler(async (req: Request, { params }: { params: Promise
   // isn't a number fails the swap instead of raising a cast error, and so an absent
   // state reads as revision 0 — the same starting point the bridge assumes.
   //
-  // The lease predicate sits in the same statement for the same reason, and requires
-  // the lease to still be live: a token that matches an expired lease belongs to a
-  // sync that has already been superseded, whether or not anyone has claimed the
-  // folder yet. A revision claim is optional; holding the lease is not.
+  // The lease predicate sits in the same statement for the same reason, and is the
+  // same one the bulk-upload route fences on (see `liveLeaseSql`). A revision claim
+  // is optional; holding the lease is not.
   const args: unknown[] = [id, JSON.stringify(state), token];
   let revClause = "";
   if (typeof body.expectedRev === "number") {
@@ -67,9 +67,7 @@ export const PUT = apiHandler(async (req: Request, { params }: { params: Promise
   }
   const { rowCount } = await pool.query(
     `UPDATE attached_folders SET state = $2::jsonb, updated_at = now()
-      WHERE id = $1
-        AND sync_lease->>'token' = $3
-        AND (sync_lease->>'expiresAt')::timestamptz > now()${revClause}`,
+      WHERE id = $1 AND ${liveLeaseSql(3)}${revClause}`,
     args,
   );
   // One status for both losses. The client's answer is the same either way: stand

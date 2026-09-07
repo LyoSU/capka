@@ -130,20 +130,41 @@ async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<vo
 // chunk, rate-limited per request) — NOT the interactive per-file upload route,
 // which caps at ~10/min and would 429 on any real folder.
 const UPLOAD_CHUNK = 100;
-/** `guard` is checked before each chunk leaves, and it may throw to stop the upload
- *  (a sync uses it to abort when its folder lease is gone). One request carries a
- *  whole chunk, so this is the finest granularity an upload has — checking only
- *  before the first chunk let a lease lost at file 40 of 5,000 push all the rest.
- *  The per-file half of the check belongs in `read`, which is called per path. */
-export async function uploadBatch(target: WorkspaceTarget, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void, guard?: () => void): Promise<void> {
+
+/** The one message a sync ends with when its folder lease is gone. Thrown by the
+ *  per-mutation guard AND by an upload the server fenced off, so the two arrive at
+ *  the caller as the same outcome. */
+export const LEASE_GONE = "Another window took over syncing this folder, so this sync stopped.";
+
+/** One request carries a whole chunk, so a chunk is the finest granularity an upload
+ *  has — checking `guard` only before the first one let a lease lost at file 40 of
+ *  5,000 push all the rest. It is checked twice per chunk, and both are needed:
+ *  before the reads, and again after them, because reading 100 files takes seconds
+ *  and a lease lost during that window used to let the assembled batch go out anyway.
+ *  `read` is called per path and carries the per-file check.
+ *
+ *  `lease` names the sync's lease in the request, so the server can refuse a batch
+ *  from a run that no longer holds the folder — the client cannot fence the gap
+ *  between its last check and the server's write on its own. Callers with no lease
+ *  (the one-shot fallback import) omit it and are unaffected. */
+export async function uploadBatch(
+  target: WorkspaceTarget, name: string, paths: string[], read: (rel: string) => Promise<Blob>,
+  opts?: { onProgress?: (p: SyncProgress) => void; guard?: () => void; lease?: string },
+): Promise<void> {
+  const { onProgress, guard, lease } = opts ?? {};
   for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
     guard?.();
     const chunk = paths.slice(i, i + UPLOAD_CHUNK);
     const form = new FormData();
     for (const [k, v] of Object.entries(targetBody(target))) form.append(k, v);
     form.append("name", name);
+    if (lease) form.append("lease", lease);
     for (const rel of chunk) form.append("files", new File([await read(rel)], rel));
+    guard?.();
     const res = await fetch("/api/folders/upload", { method: "POST", body: form });
+    // The server fences the same condition, so its refusal has to end the sync the
+    // way a lost lease already does rather than read as a generic upload failure.
+    if (res.status === 409) throw new Error(LEASE_GONE);
     if (!res.ok) throw new Error("upload failed");
     onProgress?.({ phase: "uploading", done: Math.min(i + chunk.length, paths.length), total: paths.length });
   }
@@ -424,7 +445,7 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // Called before every single file mutation, not once per phase: no lease, no
   // writing. It throws, so it also aborts a pool or a batch mid-flight.
   const guard = () => {
-    if (leaseGone()) throw new Error("Another window took over syncing this folder, so this sync stopped.");
+    if (leaseGone()) throw new Error(LEASE_GONE);
   };
   // Load the merge ancestor FRESH from the shared row (source of truth across
   // tabs/members) plus its revision for the optimistic write below. A missing/empty
@@ -477,7 +498,7 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // moment a second tab is reconciling the same folder against its own plan.
   await uploadBatch(
     target, folder.name, [...plan.upload, ...localWins, ...keptCopies],
-    (rel) => { guard(); return readLocalFile(handle, rel); }, onProgress, guard,
+    (rel) => { guard(); return readLocalFile(handle, rel); }, { onProgress, guard, lease: token },
   );
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
@@ -523,8 +544,16 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expectedRev: rev, state: { v: 1, rev: rev + 1, files: merged, dirs: mergedDirs } }),
   }).catch(() => null);
-  if (put && !put.ok && put.status !== 409) {
-    console.warn(`[folders] could not persist sync state (HTTP ${put.status})`);
+  // A PUT that did not land means there is no new merge ancestor, so this sync did
+  // NOT finish: reporting success would claim a merge the next run cannot see, and
+  // that run would start from the old base believing it was current. Fail instead —
+  // the base is untouched, so the next sync reconciles from the same ancestor. This
+  // is the only honest answer for a 400 from a pre-deploy tab whose bundle sends no
+  // lease token, and for a 409, which now means this run was overtaken rather than
+  // that two runs raced harmlessly. The caller turns a throw into the "sync failed"
+  // state and does not retry on its own.
+  if (!put?.ok) {
+    throw new Error(put ? `Could not record the folder's sync state (HTTP ${put.status}).` : "Could not record the folder's sync state.");
   }
 
   return {
