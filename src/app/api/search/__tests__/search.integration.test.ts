@@ -141,6 +141,62 @@ run("GET /api/search", () => {
     expect(body.messages.some((m) => m.chatId === "s-short")).toBe(true);
   });
 
+  async function branch(chatId: string, leafId: string) {
+    const { pool } = await import("@/lib/db");
+    await pool.query(`UPDATE chats SET active_leaf_id = $2 WHERE id = $1`, [chatId, leafId]);
+  }
+
+  async function child(id: string, chatId: string, parentId: string, content: string, secondsAgo = 0) {
+    const { pool } = await import("@/lib/db");
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, created_at)
+       VALUES ($1,$2,$3,'assistant',$4, now() - ($5 || ' seconds')::interval)`,
+      [id, chatId, parentId, content, String(secondsAgo)],
+    );
+  }
+
+  it("never answers with a message off the visible branch", async () => {
+    await chat("s-branch");
+    // One question, two replies to it: the first was regenerated away. Editing and
+    // regenerating both leave the old version in place as a sibling, so it keeps
+    // matching this search forever — but the chat API serves only the active path,
+    // so opening the chat would not contain it.
+    await message("m-ask", "s-branch", "which quarter?", "user", 30);
+    await child("m-dead", "s-branch", "m-ask", "the invoice was rejected", 20);
+    await child("m-live", "s-branch", "m-ask", "the invoice was approved", 10);
+    await branch("s-branch", "m-live");
+
+    // "rejected" exists only on the abandoned branch.
+    expect((await search("?q=rejected")).messages).toEqual([]);
+    // The reply that IS shown, and its parent, are both answerable — a hit does not
+    // have to be the leaf, only reachable from it.
+    expect((await search("?q=approved")).messages.map((m) => m.messageId)).toEqual(["m-live"]);
+    expect((await search("?q=quarter")).messages.map((m) => m.messageId)).toEqual(["m-ask"]);
+  });
+
+  it("keeps answering a chat that has no leaf pinned", async () => {
+    // No active_leaf_id at all: activePath falls back to the newest branch, so
+    // hiding every hit here would lose messages that are perfectly reachable.
+    await chat("s-noleaf");
+    await message("m-noleaf", "s-noleaf", "the deposit cleared");
+    expect((await search("?q=deposit")).messages.map((m) => m.messageId)).toEqual(["m-noleaf"]);
+  });
+
+  it("still answers a substring-only hit when the lexical lane is trimmed short", async () => {
+    // Six whole-word hits in one chat, so the lexical lane is deep — but the
+    // per-chat cap trims it to three, which is fewer than the answer limit. The
+    // substring lane therefore still has room and must run: gating it on the
+    // UNTRIMMED lexical count would drop the other chat entirely.
+    await chat("s-many");
+    await chat("s-sub-only");
+    for (let i = 0; i < 6; i++) await message(`m-many-${i}`, "s-many", "the deposit again", "user", i);
+    await message("m-only", "s-sub-only", "see the depositing notes", "user", 20);
+
+    const body = await search("?q=deposit&limit=5");
+    expect(body.messages.filter((m) => m.chatId === "s-many")).toHaveLength(3);
+    expect(body.messages.map((m) => m.messageId)).toContain("m-only");
+  });
+
   it("ignores non-conversation roles and treats wildcards literally", async () => {
     await chat("s-roles");
     await message("m-system", "s-roles", "budget in a system row", "system");

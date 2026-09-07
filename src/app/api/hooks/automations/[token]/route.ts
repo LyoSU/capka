@@ -20,9 +20,13 @@ import { log } from "@/lib/log";
  *  - The body is UNTRUSTED, and is quoted as such into the run's user message
  *    (see quoteEvent / untrusted_ingress in lib/automations/runs.ts). Whoever
  *    holds the URL can put anything in it; nothing they write is an instruction.
- *  - Rate limiting is `max_runs_per_day` and nothing else. A second mechanism
+ *  - Rate limiting is the daily run ceiling and nothing else. A second mechanism
  *    here would be a second thing to keep honest, and the cap is already the
- *    one the user configured, sees, and pays for.
+ *    one the user configured, sees, and pays for. The one thing it must NOT be
+ *    is optional: `max_runs_per_day` is nullable, and a leaked URL with no cap
+ *    is unbounded paid ingress — so a webhook automation that has none falls
+ *    back to `DEFAULT_WEBHOOK_RUNS_PER_DAY` (see lib/automations/runs.ts), which
+ *    reports itself through the same `skipped, daily_limit` answer below.
  *
  * Every outcome that is not a refusal is a 202 with a `status` — accepted,
  * duplicate, or skipped with a reason — because a webhook sender needs to know

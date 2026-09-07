@@ -75,7 +75,7 @@ export const GET = apiHandler(async (req: Request) => {
 
   // Two lanes, not one OR'd predicate: the lexical lane's WHERE is exactly
   // `to_tsvector('simple', content) @@ websearch_to_tsquery('simple', $q)`, the
-  // expression a future `GIN (to_tsvector('simple', content))` index can serve.
+  // expression `idx_messages_content_fts` indexes, character for character.
   // OR-ing `ilike` into it would force a sequential scan for both halves.
   //
   // The substring lane is not there for a rare case: 'simple' has no stemmer for
@@ -83,7 +83,7 @@ export const GET = apiHandler(async (req: Request) => {
   // plainly expects it to. `lane` orders the merged set, so a whole-word match
   // always sorts above a substring-only one.
   const hits = await db.execute(sql`
-    with tsq as (select websearch_to_tsquery('simple', ${q}) as q),
+    with recursive tsq as (select websearch_to_tsquery('simple', ${q}) as q),
     lex as (
       select m.id, m.chat_id, 1 as lane,
              ts_rank_cd(to_tsvector('simple', m.content), tsq.q) as rank
@@ -96,12 +96,41 @@ export const GET = apiHandler(async (req: Request) => {
       order by rank desc, m.created_at desc
       limit ${LANE_DEPTH}
     ),
+    -- How many rows the indexed lane alone will actually SHOW. Trimmed exactly
+    -- the way the answer trims, and that is exact rather than approximate:
+    -- the "ranked" CTE below orders by lane first, so a lexical hit's row_number does
+    -- not depend on whether the substring lane ran.
+    lex_answer as (
+      select count(*) as n from (
+        select row_number() over (partition by chat_id order by rank desc, id) as rn from lex
+      ) t where rn <= ${PER_CHAT_LIMIT}
+    ),
     sub as (
       select m.id, m.chat_id, 2 as lane, 0::float4 as rank
       from messages m
       join chats on chats.id = m.chat_id
       where ${scope}
         and m.role in ('user', 'assistant')
+        -- The one predicate in this statement no index can serve, so it does not
+        -- run when it cannot change the answer: lane 1 sorts ahead of lane 2, so
+        -- once the lexical lane alone fills the answer limit rows a substring-only hit
+        -- could never have been shown. Whole words and phrases — every query a
+        -- person finishes typing — are therefore answered from
+        -- idx_messages_content_fts alone.
+        --
+        -- The trade-off, stated plainly: a PARTIAL word still matches no lexeme,
+        -- so the lexical lane comes up empty and this scans the caller's messages
+        -- (bounded by their chat scope and LANE_DEPTH, and it is why the lane
+        -- exists at all — 'simple' has no stemmer). Making that case indexed
+        -- needs the pg_trgm extension and a gin (content gin_trgm_ops) index,
+        -- i.e. a migration.
+        --
+        -- Counted before the active-path filter below, which is the one place
+        -- this gate is approximate: a caller whose lexical hits are mostly on
+        -- abandoned branches can get a short answer where the substring lane
+        -- would have filled it. Deliberate — counting after the filter would put
+        -- the walk before the lane it is walking for.
+        and (select n from lex_answer) < ${limit}
         and m.content ilike ${like}
       order by m.created_at desc
       limit ${LANE_DEPTH}
@@ -111,10 +140,48 @@ export const GET = apiHandler(async (req: Request) => {
       from (select * from lex union all select * from sub) u
       group by id, chat_id
     ),
+    -- Only messages on the VISIBLE conversation may be answered. Editing or
+    -- regenerating inserts a sibling and moves the chat's leaf; nothing is
+    -- deleted, so an abandoned branch keeps matching this search forever — while
+    -- the chat API serves only the active path, so the palette would open a
+    -- conversation that does not contain the message the user clicked.
+    --
+    -- The active path is a pointer chain, not a flag (see activePath in
+    -- lib/chat/tree.ts): chats.active_leaf_id up through parent_id. Walked
+    -- only for the chats that matched, and only back to the oldest candidate in
+    -- each — a parent is always older than its child, so nothing above that floor
+    -- can be an ancestor of a candidate.
+    oldest as (
+      select mg.chat_id, min(coalesce(m.created_at, '-infinity'::timestamp)) as at
+      from merged mg join messages m on m.id = mg.id
+      group by mg.chat_id
+    ),
+    active as (
+      select m.id, m.chat_id, m.parent_id, m.created_at
+      from chats
+      join oldest o on o.chat_id = chats.id
+      join messages m on m.id = chats.active_leaf_id
+      union all
+      select p.id, p.chat_id, p.parent_id, p.created_at
+      from active a
+      join messages p on p.id = a.parent_id
+      join oldest o on o.chat_id = p.chat_id
+      where coalesce(p.created_at, '-infinity'::timestamp) >= o.at
+    ),
+    visible as (
+      select mg.* from merged mg
+      where exists (select 1 from active av where av.id = mg.id)
+        -- A chat with no leaf pinned (active_leaf_id is NULL, which is also what
+        -- deleting the pinned message leaves behind) has no chain to walk, and
+        -- activePath falls back to its newest branch. Filtering every hit out of
+        -- such a chat would hide messages that ARE reachable, so nothing is
+        -- filtered there.
+        or not exists (select 1 from active av where av.chat_id = mg.chat_id)
+    ),
     ranked as (
       select id, chat_id, lane, rank,
              row_number() over (partition by chat_id order by lane, rank desc, id) as rn
-      from merged
+      from visible
     )
     select r.id as message_id, m.chat_id, chats.title as chat_title, m.role, m.created_at,
            -- One line, never a paragraph: the palette row is a single line, so a

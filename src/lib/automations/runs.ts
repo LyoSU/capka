@@ -4,12 +4,12 @@ import { db } from "@/lib/db";
 import { automations, chats, messages, telegramLinks, users, tasks } from "@/lib/db/schema";
 import { localDayOf, type AutomationTrigger } from "./schedule";
 import { evaluateRunWhen } from "./run-when";
-import { enqueueTask } from "@/lib/tasks/queue";
+import { enqueueTask, notifyTaskEnqueued, type QueueTx } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { toUIMessages } from "@/lib/chat/presenter";
-import { loadActivePath } from "@/lib/chat/tree";
+import { activePath } from "@/lib/chat/tree";
 import { getTranslator } from "@/lib/i18n/translator";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { log } from "@/lib/log";
@@ -29,6 +29,22 @@ export type AutomationDisabledReason = "owner_suspended" | "project_deleted" | "
  *  body over 256 KB; this is the second, prompt-side bound — a 200 KB accepted
  *  payload must not become a 200 KB turn. */
 const MAX_EVENT_CHARS = 8000;
+
+/**
+ * The ceiling a WEBHOOK automation runs under when its owner set no
+ * `max_runs_per_day` of their own.
+ *
+ * A webhook URL is the whole credential — no signature, no header — and it is
+ * meant to be pasted into spreadsheets, form services and cron boxes, so it
+ * leaks the way such URLs always leak. Without a floor here, one leaked URL is
+ * unbounded paid ingress on the shared key: every POST is a model turn.
+ *
+ * Only the webhook trigger needs it. A schedule's clock IS its ceiling, and
+ * "Run now" is a person standing in front of the run. An owner who really wants
+ * more sets `max_runs_per_day` explicitly, which overrides this in both
+ * directions.
+ */
+export const DEFAULT_WEBHOOK_RUNS_PER_DAY = 100;
 
 /** Why a firing did not happen, for `automations.last_skip`. `skipped_today`
  *  counts skips; this says which KIND, because "the day's ceiling", "the previous
@@ -58,9 +74,14 @@ export type AutomationSkip = {
  * between that read and this write: the increment then landed on a stale day,
  * which the list route and the manage collection both report as ZERO — an
  * invisible skip, which is the one thing `skipped_today` exists to prevent.
+ *
+ * `exec` is the pool by default and the caller's transaction when there is one:
+ * the ceiling skip below is stamped from inside the firing transaction, which
+ * holds this row's lock, so the same write on the pool would wait forever for a
+ * transaction that is waiting for it.
  */
-async function stampSkip(automationId: string, skip: AutomationSkip, today?: string): Promise<void> {
-  await db.update(automations)
+async function stampSkip(exec: QueueTx, automationId: string, skip: AutomationSkip, today?: string): Promise<void> {
+  await exec.update(automations)
     .set({
       lastSkip: skip,
       ...(today
@@ -124,21 +145,27 @@ export async function fireAutomation(
 ): Promise<{ fired: boolean; chatId?: string; reason?: "busy" | "daily_limit" | "condition"; note?: string }> {
   const single = a.threadMode === "single";
   const today = localDayOf(a.trigger as AutomationTrigger);
+  // The ceiling this firing actually runs under: the owner's when they set one,
+  // otherwise the platform floor that only a webhook needs (see the constant).
+  const cap = a.maxRunsPerDay
+    ?? ((a.trigger as AutomationTrigger).kind === "webhook" ? DEFAULT_WEBHOOK_RUNS_PER_DAY : null);
 
-  // Daily ceiling. Read FRESH rather than from the caller's snapshot (the manual
-  // run route and the scheduler both hand one over that is seconds old) and
-  // compared against the stamped day, so the rollover needs no job of its own.
-  // Two firings racing for the last free slot can both pass — this is a
-  // runaway-spend guard, not an invariant; the budget gate below is the hard one.
-  if (a.maxRunsPerDay && !opts.manual) {
+  // Daily ceiling, cheap pass. Read FRESH rather than from the caller's snapshot
+  // (the manual run route and the scheduler both hand one over that is seconds
+  // old) and compared against the stamped day, so the rollover needs no job of
+  // its own. This read is advisory: the AUTHORITATIVE check is the identical one
+  // inside the firing transaction below, taken under the row's lock. This one
+  // exists so the ordinary "ceiling reached" case costs neither a budget hold nor
+  // a condition-gate model call.
+  if (cap && !opts.manual) {
     const [live] = await db.select({ runsDay: automations.runsDay, runsToday: automations.runsToday })
       .from(automations).where(eq(automations.id, a.id));
-    if (live && live.runsDay === today && live.runsToday >= a.maxRunsPerDay) {
+    if (live && live.runsDay === today && live.runsToday >= cap) {
       // Counted and surfaced, never silent — the settings list, the manage
       // collection and the webhook's 202 all report it. A cap that skipped in
       // silence would be indistinguishable from a scheduler that had died.
-      await stampSkip(a.id, { reason: "daily_limit", at: new Date().toISOString() }, today);
-      log.info("automation skipped: daily limit reached", { automationId: a.id, max: a.maxRunsPerDay });
+      await stampSkip(db, a.id, { reason: "daily_limit", at: new Date().toISOString() }, today);
+      log.info("automation skipped: daily limit reached", { automationId: a.id, max: cap });
       return { fired: false, reason: "daily_limit" };
     }
   }
@@ -151,7 +178,7 @@ export async function fireAutomation(
     // message is appended and enqueueTask either folds it into the queued turn or
     // queues one behind the running one, exactly like a second Telegram message.
     if (prev && (prev.status === "queued" || prev.status === "running") && !single) {
-      await stampSkip(a.id, { reason: "busy", at: new Date().toISOString() });
+      await stampSkip(db, a.id, { reason: "busy", at: new Date().toISOString() });
       log.info("automation skipped: previous run still live", { automationId: a.id, lastTaskId: a.lastTaskId });
       return { fired: false, reason: "busy" };
     }
@@ -170,7 +197,7 @@ export async function fireAutomation(
         ))
         .limit(1);
       if (blocked) {
-        await stampSkip(a.id, { reason: "busy", at: new Date().toISOString() });
+        await stampSkip(db, a.id, { reason: "busy", at: new Date().toISOString() });
         log.info("automation skipped: previous run awaiting user input", { automationId: a.id, lastTaskId: a.lastTaskId });
         return { fired: false, reason: "busy" };
       }
@@ -217,7 +244,7 @@ export async function fireAutomation(
       // this one releases its own. Leaving it would inflate the user's budget
       // forever with no task row for the zombie reconciler to find.
       await releaseHold(taskId);
-      await stampSkip(a.id, { reason: "condition", at: new Date().toISOString(), ...(note ? { note } : {}) }, today);
+      await stampSkip(db, a.id, { reason: "condition", at: new Date().toISOString(), ...(note ? { note } : {}) }, today);
       log.info("automation skipped: condition not met", { automationId: a.id, note });
       return { fired: false, reason: "condition", note };
     }
@@ -232,108 +259,168 @@ export async function fireAutomation(
   // an instruction and so every downstream fold knows the turn carries it.
   const content = event ? `${a.prompt}${event}` : a.prompt;
 
-  // In `single` mode the thread is looked up, not assumed: a chat the user deleted
-  // leaves a dangling thread_chat_id, and the right answer is a new thread rather
-  // than a failing automation. Only a chat this call CREATES may be cleaned up on
-  // failure below — deleting a reused thread would take its whole history with it.
-  const [thread] = single && a.threadChatId
-    ? await db.select({ id: chats.id, activeLeafId: chats.activeLeafId }).from(chats).where(eq(chats.id, a.threadChatId))
-    : [];
-  const chatId = thread?.id ?? nanoid();
-  const createdChat = !thread;
   const runDate = new Intl.DateTimeFormat(locale === "uk" ? "uk-UA" : "en-US", { day: "numeric", month: "short" }).format(new Date());
 
-  // Everything past this point can fail independently (no shared transaction —
-  // enqueueTask issues its own raw-SQL round-trip). A failure here would otherwise
-  // strand a chat with an unanswered user message and silently drop the occurrence
-  // (the scheduler already advanced next_run_at before calling us), so clean up
-  // the orphan chat on any failure — messages cascade-delete with it. A REUSED
-  // `single` thread is never deleted (its history is not this run's to throw
-  // away), so a failure there leaves an unanswered message in the thread — which
-  // is exactly what a failed Telegram send leaves behind too. The hold
-  // reserved above belongs to whoever ends up answering, so it is released on
-  // every path that does NOT hand it to a live turn; leaking it would inflate the
-  // user's budget forever, with no task row for the zombie reconciler to find.
-  let handedOff = false;
-  try {
-    if (createdChat) {
-      await db.insert(chats).values({
-        id: chatId,
-        userId: a.userId,
-        projectId: a.projectId,
-        // A `single` thread outlives every run, so its title is the automation's
-        // — a date suffix would name it after whichever run happened to open it.
-        title: single ? a.title : `${a.title} — ${runDate}`,
-        model: a.model,
-        source: "web", // fully interactive in the web UI — the user can follow up
-      });
-    }
-    const msgId = nanoid();
-    await db.insert(messages).values({
-      id: msgId,
-      chatId,
-      // Chained onto the thread's current leaf so the conversation tree stays
-      // linear across runs, exactly like a second Telegram message.
-      parentId: thread?.activeLeafId ?? null,
-      role: "user",
-      content,
-      platform: "automation",
-      untrustedIngress: event !== null,
-    });
-    await db.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
-    await publishTaskEvent(a.userId, { type: "new_message", chatId });
+  /**
+   * ONE transaction, opened by LOCKING the automation row, and everything that
+   * writes lives inside it — including `enqueueTask`, which takes a transaction
+   * for exactly this reason.
+   *
+   * The lock is the fix for two races that concurrent webhook POSTs hit head-on,
+   * because both read state at the top of a firing and wrote it at the bottom:
+   * the daily ceiling (both saw `runs_today` = 0 and both ran, so a cap of 1
+   * bought two paid runs) and the `single` thread claim (both saw
+   * `thread_chat_id` = NULL and both created one, so one thread was orphaned on
+   * the spot). A second firing now waits here and then reads the first one's
+   * committed writes — the ceiling it filled and the thread it claimed — instead
+   * of a snapshot from before it existed.
+   *
+   * The condition gate and the budget reservation are deliberately still ABOVE
+   * this line: the lock must not be held across a model call.
+   *
+   * Being one transaction also removes the orphan-chat cleanup this used to need.
+   * A failure anywhere rolls the whole firing back — no stranded chat, no
+   * unanswered message in a reused thread, no counter to put back — so the only
+   * thing left to undo by hand is the budget hold, which lives on another table
+   * and belongs to whoever ends up answering.
+   */
+  type Outcome =
+    | { kind: "fired"; chatId: string; turnId: string; created: boolean }
+    | { kind: "daily_limit" }
+    | { kind: "gone" };
+  const outcome = await db
+    .transaction(async (tx): Promise<Outcome> => {
+      const [locked] = await tx
+        .select({
+          runsDay: automations.runsDay,
+          runsToday: automations.runsToday,
+          threadChatId: automations.threadChatId,
+        })
+        .from(automations)
+        .where(eq(automations.id, a.id))
+        .for("update");
+      // Deleted between the caller's snapshot and this lock — there is nothing
+      // left to fire, and writing a chat for a row that no longer exists would
+      // leave a conversation nobody can trace back to anything.
+      if (!locked) return { kind: "gone" };
 
-    // Deliver to Telegram when linked AND when this automation is meant to leave
-    // the browser — the run's full result lands in the messenger via the existing
-    // TelegramSink, no new delivery code. Without an `origin` the runner builds a
-    // no-op sink, so "web-only" costs nothing and needs nothing downstream.
-    //
-    // Orthogonal to `notify_mode`, deliberately: that one decides WHEN a run has
-    // something to say, this one WHERE it lands. A `when_needed` automation with
-    // delivery off still writes its non-quiet replies into the chat — it just
-    // never pushes them.
-    const [link] = a.deliverTelegram
-      ? await db.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId))
-      : [];
-    const path = await loadActivePath(chatId, msgId);
-    const payload: TaskPayload = {
-      requestModel: a.model ?? undefined,
-      projectId: a.projectId ?? undefined,
-      uiMessages: toUIMessages(path.map((p) => p.node)),
-      automationId: a.id,
-      notifyMode: a.notifyMode,
-      ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
-    };
-    // A created turn OWNS the hold and reconciles it to the real cost at finalize;
-    // a folded one (created=false) does not, and the finally cancels ours. In
-    // `fresh` mode folding only happens under a race (the chat is brand new); in
-    // `single` mode it is the ordinary case, which is why the overlap guard lets a
-    // live run through there. `lastTaskId` follows the turn that will actually
-    // answer, so the guard watches a live row either way.
-    const { id: turnId, created } = await enqueueTask({ id: taskId, chatId, userId: a.userId, payload });
-    handedOff = created;
-    await db.update(automations)
-      .set({
-        lastTaskId: turnId, lastRunAt: new Date(), updatedAt: new Date(),
-        ...(single && createdChat ? { threadChatId: chatId } : {}),
-        // The day stamp and both tallies move in ONE statement, so a rollover can
-        // never be observed half-applied. Postgres evaluates every SET expression
-        // against the PRE-update row, so the CASEs compare the day this firing is
-        // replacing — an older one resets the tallies instead of adding to them.
-        runsDay: today,
-        runsToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.runsToday} + 1 ELSE 1 END`,
-        skippedToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.skippedToday} ELSE 0 END`,
-      })
-      .where(eq(automations.id, a.id));
-    // The chat id goes back to the caller so a manual run can drop the user
-    // straight into the conversation it just opened.
-    return { fired: true, chatId };
-  } catch (e) {
-    if (createdChat) await db.delete(chats).where(eq(chats.id, chatId)).catch(() => {});
-    throw e;
-  } finally {
-    if (!handedOff) await releaseHold(taskId);
+      // The authoritative ceiling check, same predicate as the cheap pass above
+      // but taken under the lock, which is what makes it an invariant instead of
+      // a guard two callers can walk through together.
+      if (cap && !opts.manual && locked.runsDay === today && locked.runsToday >= cap) {
+        await stampSkip(tx, a.id, { reason: "daily_limit", at: new Date().toISOString() }, today);
+        return { kind: "daily_limit" };
+      }
+
+      // In `single` mode the thread is looked up, not assumed: a chat the user
+      // deleted leaves a dangling thread_chat_id, and the right answer is a new
+      // thread rather than a failing automation. Read from the LOCKED row, so a
+      // firing that lost the race above reuses the thread the winner claimed.
+      const [thread] = single && locked.threadChatId
+        ? await tx.select({ id: chats.id, activeLeafId: chats.activeLeafId }).from(chats).where(eq(chats.id, locked.threadChatId))
+        : [];
+      const chatId = thread?.id ?? nanoid();
+      if (!thread) {
+        await tx.insert(chats).values({
+          id: chatId,
+          userId: a.userId,
+          projectId: a.projectId,
+          // A `single` thread outlives every run, so its title is the automation's
+          // — a date suffix would name it after whichever run happened to open it.
+          title: single ? a.title : `${a.title} — ${runDate}`,
+          model: a.model,
+          source: "web", // fully interactive in the web UI — the user can follow up
+        });
+      }
+      const msgId = nanoid();
+      await tx.insert(messages).values({
+        id: msgId,
+        chatId,
+        // Chained onto the thread's current leaf so the conversation tree stays
+        // linear across runs, exactly like a second Telegram message.
+        parentId: thread?.activeLeafId ?? null,
+        role: "user",
+        content,
+        platform: "automation",
+        untrustedIngress: event !== null,
+      });
+      await tx.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
+
+      // Deliver to Telegram when linked AND when this automation is meant to leave
+      // the browser — the run's full result lands in the messenger via the existing
+      // TelegramSink, no new delivery code. Without an `origin` the runner builds a
+      // no-op sink, so "web-only" costs nothing and needs nothing downstream.
+      //
+      // Orthogonal to `notify_mode`, deliberately: that one decides WHEN a run has
+      // something to say, this one WHERE it lands. A `when_needed` automation with
+      // delivery off still writes its non-quiet replies into the chat — it just
+      // never pushes them.
+      const [link] = a.deliverTelegram
+        ? await tx.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId))
+        : [];
+      // The tree is read on `tx`, not through loadActivePath: the message this
+      // firing just inserted is not visible on any other connection yet, and a
+      // payload assembled without it would hand the turn a prompt missing its own
+      // instruction.
+      const path = activePath(await tx.select().from(messages).where(eq(messages.chatId, chatId)), msgId);
+      const payload: TaskPayload = {
+        requestModel: a.model ?? undefined,
+        projectId: a.projectId ?? undefined,
+        uiMessages: toUIMessages(path.map((p) => p.node)),
+        automationId: a.id,
+        notifyMode: a.notifyMode,
+        ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
+      };
+      // A created turn OWNS the hold and reconciles it to the real cost at finalize;
+      // a folded one (created=false) does not, and the release below cancels ours. In
+      // `fresh` mode folding only happens under a race (the chat is brand new); in
+      // `single` mode it is the ordinary case, which is why the overlap guard lets a
+      // live run through there. `lastTaskId` follows the turn that will actually
+      // answer, so the guard watches a live row either way.
+      const { id: turnId, created } = await enqueueTask({ id: taskId, chatId, userId: a.userId, payload }, tx);
+      await tx.update(automations)
+        .set({
+          lastTaskId: turnId, lastRunAt: new Date(), updatedAt: new Date(),
+          ...(single && !thread ? { threadChatId: chatId } : {}),
+          // The day stamp and both tallies move in ONE statement, so a rollover can
+          // never be observed half-applied. Postgres evaluates every SET expression
+          // against the PRE-update row, so the CASEs compare the day this firing is
+          // replacing — an older one resets the tallies instead of adding to them.
+          runsDay: today,
+          runsToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.runsToday} + 1 ELSE 1 END`,
+          skippedToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.skippedToday} ELSE 0 END`,
+        })
+        .where(eq(automations.id, a.id));
+      return { kind: "fired", chatId, turnId, created };
+    })
+    .catch(async (e) => {
+      // The transaction rolled back, so there is no turn for the hold to belong
+      // to. Leaking it would inflate the user's budget forever, with no task row
+      // for the zombie reconciler to find.
+      await releaseHold(taskId);
+      throw e;
+    });
+  if (outcome.kind !== "fired" || !outcome.created) await releaseHold(taskId);
+
+  if (outcome.kind === "daily_limit") {
+    // Counted and surfaced, never silent — the settings list, the manage
+    // collection and the webhook's 202 all report it.
+    log.info("automation skipped: daily limit reached", { automationId: a.id, max: cap });
+    return { fired: false, reason: "daily_limit" };
   }
+  if (outcome.kind === "gone") {
+    log.warn("automation vanished mid-firing", { automationId: a.id });
+    return { fired: false };
+  }
+
+  // Both wake-ups fire AFTER the commit, and neither could before it: a client or
+  // worker on another connection cannot see rows this transaction had not yet
+  // committed, so the notify would send it looking for nothing.
+  await publishTaskEvent(a.userId, { type: "new_message", chatId: outcome.chatId });
+  if (outcome.created) await notifyTaskEnqueued(outcome.turnId);
+  // The chat id goes back to the caller so a manual run can drop the user
+  // straight into the conversation it just opened.
+  return { fired: true, chatId: outcome.chatId };
 }
 
 /**

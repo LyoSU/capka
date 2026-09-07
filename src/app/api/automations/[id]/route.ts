@@ -22,8 +22,10 @@ const patchBody = z
     once_at: z.string().optional(),
     webhook: z.boolean().optional(),
     timezone: z.string().optional(),
-    // null is a real value here ("no ceiling"), which is why this is nullable
-    // rather than only optional — `undefined` means "leave it alone".
+    // null is a real value here ("no ceiling of my own"), which is why this is
+    // nullable rather than only optional — `undefined` means "leave it alone".
+    // For a webhook automation "no ceiling" still is not unlimited: firing falls
+    // back to DEFAULT_WEBHOOK_RUNS_PER_DAY, because the URL is the credential.
     max_runs_per_day: z.number().int().min(1).max(1000).nullable().optional(),
     thread_mode: z.enum(["fresh", "single"]).optional(),
     notify_mode: z.enum(["always", "when_needed"]).optional(),
