@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
-import { automations, chats, tasks } from "@/lib/db/schema";
+import { automations, chats, messages, tasks } from "@/lib/db/schema";
 import { localDayOf } from "../schedule";
 import { fireAutomation, DEFAULT_WEBHOOK_RUNS_PER_DAY } from "../runs";
 
@@ -97,6 +97,51 @@ run("fireAutomation: the daily ceiling is an invariant, and a webhook always has
     expect(results[0].chatId).toBe(results[1].chatId);
     expect((await load(id)).threadChatId).toBe(results[0].chatId);
     expect(await db.select({ id: chats.id }).from(chats).where(eq(chats.userId, U))).toHaveLength(1);
+  });
+
+  it("two concurrent fresh-mode firings with room under the ceiling still run once", async () => {
+    // `fresh` mode, nothing near the ceiling: the ONLY guard against a second
+    // parallel chat answering the same instruction is the overlap check, and it
+    // used to read `last_task_id` from the pre-lock snapshot — where both callers
+    // saw "no previous run".
+    const id = await insert({ threadMode: "fresh" });
+    const a = await load(id);
+
+    const results = await Promise.all([
+      fireAutomation(a, { rawBody: "{}" }),
+      fireAutomation(a, { rawBody: "{}" }),
+    ]);
+
+    expect(results.filter((r) => r.fired)).toHaveLength(1);
+    expect(results.find((r) => !r.fired)?.reason).toBe("busy");
+    expect(await db.select({ id: chats.id }).from(chats).where(eq(chats.userId, U))).toHaveLength(1);
+    expect(await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.userId, U))).toHaveLength(1);
+    // The refusal is a skip, not a failure — it must not count toward auto-disable.
+    expect((await load(id)).consecutiveFailures).toBe(0);
+  });
+
+  it("the queued payload names only the message the firing wrote", async () => {
+    // The runner rebuilds the model context from the live tree off the payload's
+    // last message id, so handing it the thread's history means reading that
+    // history twice — once here, under the automation's row lock — and using it
+    // once. Pinned because the saving is invisible from the outside.
+    const id = await insert({ threadMode: "single" });
+    expect((await fireAutomation(await load(id), { rawBody: "{}" })).fired).toBe(true);
+    // Let the first turn finish, so the second firing queues a task of its own
+    // instead of folding its message into the first one's.
+    await db.update(tasks).set({ status: "completed" })
+      .where(eq(tasks.id, (await load(id)).lastTaskId!));
+    expect((await fireAutomation(await load(id), { rawBody: "{}" })).fired).toBe(true);
+
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, (await load(id)).lastTaskId!));
+    const ui = (task.payload as { uiMessages: { id: string; role: string }[] }).uiMessages;
+    // The thread holds two messages by now; the payload names one.
+    expect(await db.select({ id: messages.id }).from(messages).where(eq(messages.chatId, task.chatId))).toHaveLength(2);
+    expect(ui).toHaveLength(1);
+    expect(ui[0].role).toBe("user");
+    const [chat] = await db.select().from(chats).where(eq(chats.id, task.chatId));
+    // …and it is the thread's current leaf, which is what the runner walks up from.
+    expect(ui[0].id).toBe(chat.activeLeafId);
   });
 
   it("a webhook with no max_runs_per_day still stops at the platform default", async () => {

@@ -9,7 +9,6 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { toUIMessages } from "@/lib/chat/presenter";
-import { activePath } from "@/lib/chat/tree";
 import { getTranslator } from "@/lib/i18n/translator";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { log } from "@/lib/log";
@@ -96,6 +95,56 @@ async function stampSkip(exec: QueueTx, automationId: string, skip: AutomationSk
     .where(eq(automations.id, automationId));
 }
 
+/**
+ * Is the automation's PREVIOUS run still in the way? `null` means clear.
+ *
+ * "live" — queued or running. Skips the occurrence in `fresh` mode: a second
+ * parallel chat answering the same instruction is noise nobody asked for. In
+ * `single` mode it does NOT, because one ongoing conversation is the whole point
+ * — the message is appended and enqueueTask either folds it into the queued turn
+ * or queues one behind the running one, exactly like a second Telegram message.
+ *
+ * "awaiting" — the task row finished but its reply is suspended on the user's
+ * approval or answer (`metadata.status` awaiting_*). Firing again would pile up
+ * parallel questions nobody asked for, so this one skips in BOTH modes: a
+ * suspended turn is waiting on a person, and piling onto it would bury the
+ * question they still have to answer. The resume flips that status the moment
+ * they respond, so it clears itself.
+ *
+ * Called TWICE on purpose. Once before the budget hold and the condition gate,
+ * so the ordinary overlap costs neither — and once INSIDE the firing transaction
+ * against the locked row's `last_task_id`. Only the second is authoritative: the
+ * first reads a snapshot taken before the lock, so two concurrent webhook POSTs
+ * both passed it and both bought a paid run.
+ */
+async function previousRunBlocks(
+  exec: QueueTx,
+  lastTaskId: string | null,
+  single: boolean,
+): Promise<"live" | "awaiting" | null> {
+  if (!lastTaskId) return null;
+  const [prev] = await exec.select({ status: tasks.status, chatId: tasks.chatId }).from(tasks).where(eq(tasks.id, lastTaskId));
+  if (!prev) return null;
+  if ((prev.status === "queued" || prev.status === "running") && !single) return "live";
+  if (prev.status === "completed") {
+    const [blocked] = await exec.select({ id: messages.id }).from(messages)
+      .where(and(
+        eq(messages.chatId, prev.chatId),
+        sql`${messages.metadata}->>'status' IN ('awaiting_answer', 'awaiting_approval')`,
+      ))
+      .limit(1);
+    if (blocked) return "awaiting";
+  }
+  return null;
+}
+
+/** What to log for each overlap reason — one sentence per state, so the log says
+ *  which of the two guards refused rather than only that something did. */
+const BUSY_LOG = {
+  live: "automation skipped: previous run still live",
+  awaiting: "automation skipped: previous run awaiting user input",
+} as const;
+
 /** The delimited, labelled block a webhook body is quoted into. Kept here rather
  *  than in the route so the ONE place that decides "this is untrusted" is the same
  *  place that sets `untrusted_ingress` on the row. */
@@ -170,38 +219,13 @@ export async function fireAutomation(
     }
   }
 
-  if (a.lastTaskId) {
-    const [prev] = await db.select({ status: tasks.status, chatId: tasks.chatId }).from(tasks).where(eq(tasks.id, a.lastTaskId));
-    // A live previous run skips the occurrence in `fresh` mode: a second parallel
-    // chat answering the same instruction is noise nobody asked for. In `single`
-    // mode it does NOT — one ongoing conversation is the whole point, so the
-    // message is appended and enqueueTask either folds it into the queued turn or
-    // queues one behind the running one, exactly like a second Telegram message.
-    if (prev && (prev.status === "queued" || prev.status === "running") && !single) {
-      await stampSkip(db, a.id, { reason: "busy", at: new Date().toISOString() });
-      log.info("automation skipped: previous run still live", { automationId: a.id, lastTaskId: a.lastTaskId });
-      return { fired: false, reason: "busy" };
-    }
-    // A finished task can still be BLOCKED: its reply suspended for the user's
-    // approval/answer (task row "completed", message metadata awaiting_*). Firing
-    // again would pile up parallel questions the user never asked for, so skip
-    // until the last run is unblocked — the resume flips the message status away
-    // from awaiting_* the moment the user responds, so this clears itself. This
-    // guard holds in `single` mode too: a suspended turn is waiting on a person,
-    // and piling onto it would bury the question they still have to answer.
-    if (prev && prev.status === "completed") {
-      const [blocked] = await db.select({ id: messages.id }).from(messages)
-        .where(and(
-          eq(messages.chatId, prev.chatId),
-          sql`${messages.metadata}->>'status' IN ('awaiting_answer', 'awaiting_approval')`,
-        ))
-        .limit(1);
-      if (blocked) {
-        await stampSkip(db, a.id, { reason: "busy", at: new Date().toISOString() });
-        log.info("automation skipped: previous run awaiting user input", { automationId: a.id, lastTaskId: a.lastTaskId });
-        return { fired: false, reason: "busy" };
-      }
-    }
+  // Overlap guard, cheap pass — advisory for the same reason the ceiling read
+  // above is, and re-taken under the row lock below.
+  const overlap = await previousRunBlocks(db, a.lastTaskId, single);
+  if (overlap) {
+    await stampSkip(db, a.id, { reason: "busy", at: new Date().toISOString() });
+    log.info(BUSY_LOG[overlap], { automationId: a.id, lastTaskId: a.lastTaskId });
+    return { fired: false, reason: "busy" };
   }
 
   // Budget gate, same one the web and Telegram sends pass through: an unattended
@@ -287,6 +311,7 @@ export async function fireAutomation(
   type Outcome =
     | { kind: "fired"; chatId: string; turnId: string; created: boolean }
     | { kind: "daily_limit" }
+    | { kind: "busy"; why: "live" | "awaiting" }
     | { kind: "gone" };
   const outcome = await db
     .transaction(async (tx): Promise<Outcome> => {
@@ -295,6 +320,11 @@ export async function fireAutomation(
           runsDay: automations.runsDay,
           runsToday: automations.runsToday,
           threadChatId: automations.threadChatId,
+          // Re-read, not taken from the caller's snapshot: it is what the overlap
+          // guard below decides on, and the previous firing sets it. Reading the
+          // pre-lock value let two concurrent POSTs (with room under the ceiling)
+          // both see "no previous run" and both buy a paid turn.
+          lastTaskId: automations.lastTaskId,
         })
         .from(automations)
         .where(eq(automations.id, a.id))
@@ -310,6 +340,13 @@ export async function fireAutomation(
       if (cap && !opts.manual && locked.runsDay === today && locked.runsToday >= cap) {
         await stampSkip(tx, a.id, { reason: "daily_limit", at: new Date().toISOString() }, today);
         return { kind: "daily_limit" };
+      }
+
+      // The authoritative overlap guard, on the locked row's `last_task_id`.
+      const blocked = await previousRunBlocks(tx, locked.lastTaskId, single);
+      if (blocked) {
+        await stampSkip(tx, a.id, { reason: "busy", at: new Date().toISOString() });
+        return { kind: "busy", why: blocked };
       }
 
       // In `single` mode the thread is looked up, not assumed: a chat the user
@@ -332,9 +369,12 @@ export async function fireAutomation(
           source: "web", // fully interactive in the web UI — the user can follow up
         });
       }
-      const msgId = nanoid();
-      await tx.insert(messages).values({
-        id: msgId,
+      // `returning()` rather than a re-read: the row this firing needs for the
+      // payload is the row it just wrote, and asking for it back costs nothing and
+      // enumerates no column names (a new column would otherwise be silently
+      // missing from the turn's view of its own message).
+      const [inserted] = await tx.insert(messages).values({
+        id: nanoid(),
         chatId,
         // Chained onto the thread's current leaf so the conversation tree stays
         // linear across runs, exactly like a second Telegram message.
@@ -343,8 +383,8 @@ export async function fireAutomation(
         content,
         platform: "automation",
         untrustedIngress: event !== null,
-      });
-      await tx.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
+      }).returning();
+      await tx.update(chats).set({ activeLeafId: inserted.id, updatedAt: new Date() }).where(eq(chats.id, chatId));
 
       // Deliver to Telegram when linked AND when this automation is meant to leave
       // the browser — the run's full result lands in the messenger via the existing
@@ -358,15 +398,16 @@ export async function fireAutomation(
       const [link] = a.deliverTelegram
         ? await tx.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId))
         : [];
-      // The tree is read on `tx`, not through loadActivePath: the message this
-      // firing just inserted is not visible on any other connection yet, and a
-      // payload assembled without it would hand the turn a prompt missing its own
-      // instruction.
-      const path = activePath(await tx.select().from(messages).where(eq(messages.chatId, chatId)), msgId);
+      // Just the message this firing wrote — NOT the thread's history. The runner
+      // reads the payload's last message id and rebuilds the model context from
+      // the live tree itself (loadActivePath in runner.ts), so a history handed
+      // over here is read twice and used once. Sending it also meant loading every
+      // message of a long-lived `single` thread while this transaction holds the
+      // automation's row lock, which is the most expensive thing that was under it.
       const payload: TaskPayload = {
         requestModel: a.model ?? undefined,
         projectId: a.projectId ?? undefined,
-        uiMessages: toUIMessages(path.map((p) => p.node)),
+        uiMessages: toUIMessages([inserted]),
         automationId: a.id,
         notifyMode: a.notifyMode,
         ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
@@ -408,6 +449,10 @@ export async function fireAutomation(
     log.info("automation skipped: daily limit reached", { automationId: a.id, max: cap });
     return { fired: false, reason: "daily_limit" };
   }
+  if (outcome.kind === "busy") {
+    log.info(BUSY_LOG[outcome.why], { automationId: a.id });
+    return { fired: false, reason: "busy" };
+  }
   if (outcome.kind === "gone") {
     log.warn("automation vanished mid-firing", { automationId: a.id });
     return { fired: false };
@@ -416,8 +461,26 @@ export async function fireAutomation(
   // Both wake-ups fire AFTER the commit, and neither could before it: a client or
   // worker on another connection cannot see rows this transaction had not yet
   // committed, so the notify would send it looking for nothing.
-  await publishTaskEvent(a.userId, { type: "new_message", chatId: outcome.chatId });
-  if (outcome.created) await notifyTaskEnqueued(outcome.turnId);
+  //
+  // And both are BEST-EFFORT, independently. The firing is already committed by
+  // now — chat, message, task and counters — so a throw here would report a run
+  // that fully happened as a failure, and the webhook route releases its
+  // idempotency claim on a failure: the sender's retry would then buy a SECOND
+  // paid run for one event. Nothing is lost by swallowing them either. The worker
+  // finds the queued turn on its 5s poll without the notify, and the browser
+  // refetches the chat on its own.
+  try {
+    await publishTaskEvent(a.userId, { type: "new_message", chatId: outcome.chatId });
+  } catch (e) {
+    log.warn("automation fired; new_message event failed", { automationId: a.id, chatId: outcome.chatId, err: String(e) });
+  }
+  if (outcome.created) {
+    try {
+      await notifyTaskEnqueued(outcome.turnId);
+    } catch (e) {
+      log.warn("automation fired; worker wake-up failed", { automationId: a.id, taskId: outcome.turnId, err: String(e) });
+    }
+  }
   // The chat id goes back to the caller so a manual run can drop the user
   // straight into the conversation it just opened.
   return { fired: true, chatId: outcome.chatId };

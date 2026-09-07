@@ -23,6 +23,11 @@ const LANE_DEPTH = 200;
 // fill the group and hide the other chats that matched too.
 const PER_CHAT_LIMIT = 3;
 
+// How far up the parent chain the active-path walk will go. Far above any real
+// conversation — it is there to stop a malformed parent cycle from spinning, not
+// to cap history. See the comment on the `active` CTE.
+const MAX_PATH_DEPTH = 10000;
+
 /** A LIKE pattern matching `q` literally: the user's `%`, `_` and `\` are their
  *  own characters, not wildcards. Backslash is Postgres' default LIKE escape. */
 function likePattern(q: string): string {
@@ -156,26 +161,37 @@ export const GET = apiHandler(async (req: Request) => {
       from merged mg join messages m on m.id = mg.id
       group by mg.chat_id
     ),
+    --
+    -- The depth column is a loop bound, not a product rule. parent_id is a tree by
+    -- construction and nothing in the app can close a cycle, but UNION ALL has no
+    -- visited set: one malformed pair (A parent B, B parent A) never reaches a
+    -- fixpoint and holds the whole search until a statement timeout. A counter is
+    -- used rather than PG14's CYCLE clause because DATABASE_URL may point at an
+    -- external Postgres older than the pinned image.
     active as (
-      select m.id, m.chat_id, m.parent_id, m.created_at
+      select m.id, m.chat_id, m.parent_id, m.created_at, 1 as depth
       from chats
       join oldest o on o.chat_id = chats.id
       join messages m on m.id = chats.active_leaf_id
       union all
-      select p.id, p.chat_id, p.parent_id, p.created_at
+      select p.id, p.chat_id, p.parent_id, p.created_at, a.depth + 1
       from active a
       join messages p on p.id = a.parent_id
       join oldest o on o.chat_id = p.chat_id
       where coalesce(p.created_at, '-infinity'::timestamp) >= o.at
+        and a.depth < ${MAX_PATH_DEPTH}
     ),
     visible as (
       select mg.* from merged mg
       where exists (select 1 from active av where av.id = mg.id)
-        -- A chat with no leaf pinned (active_leaf_id is NULL, which is also what
-        -- deleting the pinned message leaves behind) has no chain to walk, and
-        -- activePath falls back to its newest branch. Filtering every hit out of
-        -- such a chat would hide messages that ARE reachable, so nothing is
-        -- filtered there.
+        -- A chat with no leaf pinned has no chain to walk, so nothing is filtered
+        -- there. That is NOT the same rule activePath uses — it descends the
+        -- newest branch instead — and the difference is accepted knowingly: no
+        -- code path can produce a chat that has messages and no pinned leaf (every
+        -- writer sets it in the same transaction, and nothing deletes a message,
+        -- which is the only thing the ON DELETE SET NULL FK would react to). If
+        -- a retention or prune pass ever lands, this needs the descending walk
+        -- (newest root, newest child at each step) to match activePath again.
         or not exists (select 1 from active av where av.chat_id = mg.chat_id)
     ),
     ranked as (

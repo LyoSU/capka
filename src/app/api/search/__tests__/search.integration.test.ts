@@ -174,6 +174,22 @@ run("GET /api/search", () => {
     expect((await search("?q=quarter")).messages.map((m) => m.messageId)).toEqual(["m-ask"]);
   });
 
+  it("terminates on a parent cycle instead of spinning", async () => {
+    // A parent cycle cannot be produced by the app, but UNION ALL has no visited
+    // set: without the depth bound the active-path walk never reaches a fixpoint
+    // and the search runs until a statement timeout. Nothing about the answer is
+    // interesting here — that it comes back at all is the assertion.
+    await chat("s-cycle");
+    await message("m-a", "s-cycle", "the refund is pending", "user", 20);
+    await child("m-b", "s-cycle", "m-a", "the refund cleared", 10);
+    await branch("s-cycle", "m-b");
+    const { pool } = await import("@/lib/db");
+    await pool.query(`UPDATE messages SET parent_id = 'm-b' WHERE id = 'm-a'`);
+
+    const body = await search("?q=refund");
+    expect(body.messages.map((m) => m.messageId).sort()).toEqual(["m-a", "m-b"]);
+  }, 15_000);
+
   it("keeps answering a chat that has no leaf pinned", async () => {
     // No active_leaf_id at all: activePath falls back to the newest branch, so
     // hiding every hit here would lose messages that are perfectly reachable.
