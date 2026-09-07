@@ -40,7 +40,11 @@ describe("a file opened from the chat brings the column with it", () => {
     // instead of shrinking it.
     expect(preview).toMatch(/onOpenChange=\{\(o\) => !o && \(onRestore \?\? onClose\)\(\)\}/);
     // The size control restores to the column when there is one to restore to.
-    expect(preview).toMatch(/onClick=\{onRestore \?\? \(\(\) => setFullscreen\(\(f\) => !f\)\)\}/);
+    expect(preview).toMatch(/onClick=\{onRestore \?\? \(\(\) => setWide\(\(f\) => !f\)\)\}/);
+    // A phone has one size — the whole screen — so the toggle is not drawn there
+    // and the sheet cannot fall back to the 85dvh rung.
+    expect(preview).toMatch(/const fullscreen = isMobile \|\| wide;/);
+    expect(preview).toMatch(/\{!isMobile && \(\s*<HeaderButton onClick=\{onRestore/);
   });
 
   it("the column stops drawing the file while the window owns it", () => {

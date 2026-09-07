@@ -414,7 +414,12 @@ function FilePreview({
   onRestore?: () => void;
 }) {
   const t = useTranslations("chat.preview");
-  const [fullscreen, setFullscreen] = useState(forceFullscreen);
+  const [wide, setWide] = useState(forceFullscreen);
+  // A phone has one size for a file: the whole screen. The 85dvh sheet left a strip
+  // of chat above it that nothing could be done with, and the toggle that grew it
+  // was a tap the person had to make every single time — so there is no toggle.
+  const isMobile = useIsMobile();
+  const fullscreen = isMobile || wide;
   const file = files[index];
   const many = files.length > 1;
   const go = useCallback(
@@ -471,9 +476,11 @@ function FilePreview({
               <HeaderButton onClick={() => go(1)} label={t("next")}><ChevronRight className="h-4 w-4" /></HeaderButton>
             </div>
           )}
-          <HeaderButton onClick={onRestore ?? (() => setFullscreen((f) => !f))} label={fullscreen ? t("exitFullscreen") : t("fullscreen")}>
-            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </HeaderButton>
+          {!isMobile && (
+            <HeaderButton onClick={onRestore ?? (() => setWide((f) => !f))} label={fullscreen ? t("exitFullscreen") : t("fullscreen")}>
+              {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </HeaderButton>
+          )}
           <HeaderButton href={downloadUrl(file)} download={file.name} label={t("download")}>
             <Download className="h-4 w-4" />
           </HeaderButton>
