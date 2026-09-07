@@ -182,8 +182,13 @@ export function WorkspacePanel({
         // hairline instead. But it was `--border`, the quiet in-surface divider,
         // which left the pane looking like nothing had opened; `--border-strong` is
         // the token for an edge that has to hold against the page.
-        "relative z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-overlay transition-[width,transform] duration-300 ease-out",
-        "fixed inset-y-0 right-0 w-full md:static md:z-auto md:w-(--workspace-w) md:border-l-border-strong md:shadow-none",
+        "z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-overlay transition-[width,transform] duration-300 ease-out",
+        // `md:relative`, stated on purpose: the resize handle is an absolute child and
+        // needs this box as its containing block. A bare `relative` beside `fixed`
+        // is dropped by the class merger (they conflict), and the handle then only
+        // held its place because `translate-x-0` happens to create a containing
+        // block too — a side effect of the slide animation, not a decision.
+        "fixed inset-y-0 right-0 w-full md:relative md:z-auto md:w-(--workspace-w) md:border-l-border-strong md:shadow-none",
         open
           ? "translate-x-0"
           : "pointer-events-none translate-x-full md:w-0 md:translate-x-0 md:border-l-0",
