@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { MAX_REDACTION_PAIRS } from "@/lib/chat/secrets";
+import { MAX_SESSION_SECRETS } from "@/lib/chat/secrets";
 
 /**
  * The two loaders, and the rules they enforce that the API's validators cannot.
@@ -23,7 +23,7 @@ const captured = vi.hoisted(() => ({
   where: undefined as unknown,
   joined: [] as string[],
   limit: undefined as number | undefined,
-  rows: [] as { name: string; valueEnc: string }[],
+  rows: [] as Record<string, unknown>[],
   warns: [] as { msg: string; ctx: Record<string, unknown> }[],
 }));
 
@@ -72,7 +72,7 @@ vi.mock("@/lib/log", () => ({
   },
 }));
 
-import { loadRedactionSecrets, loadSecretEnv } from "@/lib/chat/secrets";
+import { loadRedactionSecrets, loadSecretEnv, countSessionSecrets } from "@/lib/chat/secrets";
 
 const rendered = () => new PgDialect().sqlToQuery(captured.where as never);
 
@@ -138,42 +138,72 @@ describe("loadRedactionSecrets", () => {
     expect(await loadRedactionSecrets("c1", "u1")).toEqual([]);
   });
 
-  it("bounds the union and says so when it cuts", async () => {
-    // Nothing bounds how many chats a project holds, and every pair costs several
-    // full-string passes over EVERY tool result. One row past the bound is fetched so
-    // the cut is a fact rather than an inference from a full page.
-    captured.rows = Array.from({ length: MAX_REDACTION_PAIRS + 50 }, (_, i) => ({
-      name: `K${i}`,
-      valueEnc: `enc:sk-live-value-${i}`,
-    }));
+  it("covers an OLD sibling secret even when the session is over the bound", async () => {
+    // The blocker this replaced: the loader used to take the newest 512 and stop, so a
+    // project of seventeen chats at the per-chat cap silently dropped chat A's older —
+    // and still active — credential, and chat B's read of the shared job log printed it
+    // in the clear. A read-time cut IS the leak; the bound belongs at write time.
+    captured.rows = [
+      ...Array.from({ length: MAX_SESSION_SECRETS + 50 }, (_, i) => ({
+        name: `K${i}`,
+        valueEnc: `enc:sk-live-value-${i}`,
+      })),
+      // Last row = oldest under the previous newest-first ordering.
+      { name: "OLDEST", valueEnc: "enc:sk-live-oldest" },
+    ];
 
     const pairs = await loadRedactionSecrets("p1", "u1");
 
-    expect(captured.limit).toBe(MAX_REDACTION_PAIRS + 1);
-    expect(pairs).toHaveLength(MAX_REDACTION_PAIRS);
+    expect(pairs).toHaveLength(MAX_SESSION_SECRETS + 51);
+    expect(pairs).toContainEqual(["OLDEST", "sk-live-oldest"]);
+    // No cut, so nothing is fetched with a limit at all.
+    expect(captured.limit).toBeUndefined();
+    // Legacy data over the bound is still reported, because the turn will be slower.
     expect(captured.warns.map((w) => w.msg)).toContain(
-      "workspace has more secrets than the redactor covers; oldest are not redacted",
+      "workspace holds more secrets than the session bound; redaction will be slow",
     );
   });
 
-  it("says nothing when the workspace fits inside the bound", async () => {
-    captured.rows = Array.from({ length: MAX_REDACTION_PAIRS }, (_, i) => ({
+  it("says nothing when the session fits inside the bound", async () => {
+    captured.rows = Array.from({ length: MAX_SESSION_SECRETS }, (_, i) => ({
       name: `K${i}`,
       valueEnc: `enc:sk-live-value-${i}`,
     }));
 
-    expect(await loadRedactionSecrets("p1", "u1")).toHaveLength(MAX_REDACTION_PAIRS);
+    expect(await loadRedactionSecrets("p1", "u1")).toHaveLength(MAX_SESSION_SECRETS);
     expect(captured.warns).toEqual([]);
   });
 
-  it("spends the bound only on pairs that can redact something", async () => {
-    // A pre-floor row would occupy a slot and redact nothing.
+  it("drops a pre-floor row, which can redact nothing", async () => {
     captured.rows = [
       { name: "LEGACY", valueEnc: "enc:abc" },
       { name: "LIVE", valueEnc: "enc:sk-live-value" },
     ];
 
     expect(await loadRedactionSecrets("p1", "u1")).toEqual([["LIVE", "sk-live-value"]]);
+  });
+});
+
+describe("countSessionSecrets", () => {
+  it("counts over the same scope the redactor loads", async () => {
+    // The number the route refuses on and the set the redactor covers must be one set,
+    // or the bound guards something other than what it protects.
+    captured.rows = [{ n: 7 }];
+
+    expect(await countSessionSecrets("p1", "u1")).toBe(7);
+
+    expect(captured.joined).toContain("chats");
+    const { sql, params } = rendered();
+    expect(sql).toContain('"chats"."project_id"');
+    expect(sql).toContain('"chats"."id"');
+    expect(sql).toContain('"chats"."user_id"');
+    expect(params).toContain("u1");
+    expect(params).toContain("p1");
+  });
+
+  it("reads an empty session as zero rather than throwing", async () => {
+    captured.rows = [];
+    expect(await countSessionSecrets("c1", "u1")).toBe(0);
   });
 });
 
@@ -207,14 +237,19 @@ describe("loadSecretEnv", () => {
     captured.rows = [
       { name: "L1", valueEnc: "enc:abc" },
       { name: "L2", valueEnc: "enc:xy" },
+      // Four and five characters: storable under the ORIGINAL floor, and now below it
+      // because the floor rose to keep every encoded form covered. They take the same
+      // path as any other pre-floor row — no migration, no second code path.
+      { name: "L3", valueEnc: "enc:abcd" },
+      { name: "L4", valueEnc: "enc:abcde" },
       { name: "LIVE", valueEnc: "enc:sk-live-value" },
     ];
 
-    await loadSecretEnv("c1");
+    expect(await loadSecretEnv("c1")).toEqual({ LIVE: "sk-live-value" });
 
     const floorWarns = captured.warns.filter((w) => w.msg.includes("below the redaction floor"));
     expect(floorWarns).toHaveLength(1);
-    expect(floorWarns[0].ctx).toMatchObject({ chatId: "c1", names: "L1,L2" });
+    expect(floorWarns[0].ctx).toMatchObject({ chatId: "c1", names: "L1,L2,L3,L4" });
     expect(JSON.stringify(floorWarns[0].ctx)).not.toContain("abc");
   });
 

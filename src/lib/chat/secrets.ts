@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, or } from "drizzle-orm";
+import { and, asc, count, eq, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chatSecrets, chats } from "@/lib/db/schema";
@@ -21,7 +21,7 @@ const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 export const MAX_SECRET_VALUE_CHARS = 8192;
 
 /**
- * The redactor's floor, and therefore the storage floor too.
+ * The floor for a stored value, and the floor for the LITERAL form in the redactor.
  *
  * A value this short matches ordinary prose everywhere, so redacting it would shred the
  * output the model has to read. The redactor has always skipped such values; the API used
@@ -29,37 +29,51 @@ export const MAX_SECRET_VALUE_CHARS = 8192;
  * it") that nothing upstream kept. ONE constant, read by both the validator and the
  * redactor, is what makes the two ends agree — a floor enforced on only one side is the
  * hole, not the trade-off.
+ *
+ * SIX, not four, and the number is derived rather than chosen: see
+ * `MIN_ENCODED_FORM_CHARS`. At four, `TOKEN=abcd` had an uncovered spelling —
+ * `printf %s "$TOKEN" | base64 | tr -d =` prints the six-character `YWJjZA`, under the
+ * encoded floor, so the model could read the credential back out through the exact bypass
+ * the encoded forms were added to close.
  */
-export const MIN_SECRET_VALUE_CHARS = 4;
+export const MIN_SECRET_VALUE_CHARS = 6;
 
 /**
  * The floor for an ENCODED form, which is higher than the floor for the literal.
  *
- * A short value produces short encodings — `abcd` yields the six-character `YWJjZA` — and
- * six characters of base64 alphabet turn up inside ordinary identifiers, hashes and log
- * lines that have nothing to do with any credential. Redacting those replaces a fragment
- * of someone's variable name with `[secret:NAME]`, which is both wrong and alarming to
- * read. The literal stays at `MIN_SECRET_VALUE_CHARS`: it is the form the user actually
- * pasted, so a match on it is far more likely to be the real thing.
+ * Two floors, because the forms are not equally trustworthy. Six characters of base64
+ * alphabet turn up inside ordinary identifiers, hashes and log lines that have nothing to
+ * do with any credential, and replacing a fragment of someone's variable name with
+ * `[secret:NAME]` is both wrong and alarming to read. The literal is the string the user
+ * actually pasted, so a match on it is far likelier to be the real thing.
  *
- * The cost is honest and bounded: for a value at the literal floor, the unpadded base64
- * form is no longer covered. A four-character credential protects almost nothing anyway,
- * and the padded base64 and hex forms of it clear this floor and stay covered.
+ * INVARIANT, and the reason the raw floor is what it is: every form of every STORABLE
+ * value clears this floor, so no valid value has an uncovered spelling. A six-character
+ * value is at least six UTF-8 bytes, whose base64 is exactly eight characters with no
+ * padding to strip (6 bytes = two complete groups), whose hex is twelve, and whose
+ * percent-encoding is either identical to the literal — already covered at the raw floor,
+ * and deduped — or longer, since encoding even one character costs three characters for
+ * one. Lower the raw floor and that stops being true; `secretEncodings` is pinned to it
+ * by a test for exactly that reason.
  */
 export const MIN_ENCODED_FORM_CHARS = 8;
 
 /**
- * The most name/value pairs one workspace contributes to the redactor.
+ * The most credentials one sandbox session may hold, across every chat that shares it.
  *
- * The union spans every chat sharing the session key, and nothing bounds how many chats a
- * project holds: 1,000 chats at the per-chat cap is 32,000 values, each expanded into
- * several forms and each form driving its own full-string `split`/`join` on EVERY tool
- * result. That is a self-inflicted stall on the turn, so the query takes the newest pairs
- * and stops. This chat's OWN values are never at risk of being cut — `loadSandboxTools`
- * puts the injected env in front of this list, so the bound only ever drops a sibling
- * chat's older credentials, and it warns when it does.
+ * The redactor's set is the union over the session (see `loadRedactionSecrets`), and
+ * nothing bounds how many chats a project holds: 1,000 chats at the per-chat cap is 32,000
+ * values, each expanded into several forms and each form driving its own full-string
+ * `split`/`join` on EVERY tool result — a self-inflicted stall on the turn.
+ *
+ * Enforced at WRITE time, in the route, and deliberately NOT as a read-time cut. A cut
+ * here was itself a leak: dropping the oldest pairs left an older-but-still-active
+ * credential of a sibling chat unredacted, so a project of seventeen chats at the per-chat
+ * cap handed chat A's secret to chat B out of the shared job log — the very hole the union
+ * exists to close. A bound that refuses the 513th save keeps the guarantee total; a bound
+ * that silently narrows the redactor cannot.
  */
-export const MAX_REDACTION_PAIRS = 512;
+export const MAX_SESSION_SECRETS = 512;
 
 /**
  * How many credentials one chat may store.
@@ -128,8 +142,11 @@ export function isValidSecretValue(value: string): boolean {
  * can throw turns a command that already ran into a failed tool call — for this chat and
  * for every project sibling whose union includes the row. `isValidSecretValue` refuses
  * such a value now; a row stored before it did still reaches here.
+ *
+ * Exported for ONE reason: a test pins the `MIN_ENCODED_FORM_CHARS` invariant against it,
+ * so lowering the raw floor cannot silently uncover a spelling. Not a call site.
  */
-function secretEncodings(value: string): string[] {
+export function secretEncodings(value: string): string[] {
   const bytes = Buffer.from(value, "utf8");
   const b64 = bytes.toString("base64");
   const b64Url = b64.replace(/\+/g, "-").replace(/\//g, "_");
@@ -279,6 +296,23 @@ export async function loadSecretEnv(chatId: string): Promise<Record<string, stri
 }
 
 /**
+ * The rows belonging to one sandbox session: every chat that shares the session key, and
+ * only this owner's.
+ *
+ * A session key is `projectId ?? chatId` (`workspaceSessionKey`), so it is a project id
+ * for a chat in a project and the chat's own id otherwise — hence both columns. Chat ids
+ * and project ids are distinct nanoids, so matching both can never widen the set.
+ *
+ * The `userId` predicate is belt-and-braces: a project belongs to exactly one user
+ * (`projects.user_id` is NOT NULL) and `/api/chat` refuses to retarget a chat into another
+ * owner's project. It is written out so a future write site cannot quietly make the union
+ * cross an owner boundary.
+ */
+function sessionSecretScope(sessionKey: string, userId: string) {
+  return and(eq(chats.userId, userId), or(eq(chats.projectId, sessionKey), eq(chats.id, sessionKey)));
+}
+
+/**
  * Every secret that could turn up in the output of a command run in THIS workspace,
  * as name/value pairs for `redactSecrets`.
  *
@@ -291,16 +325,17 @@ export async function loadSecretEnv(chatId: string): Promise<Record<string, stri
  * the plaintext. So the set of values to REDACT is the union across the session key,
  * while the set to INJECT stays this chat's own.
  *
- * Scoped to `userId` as well as the session key. A project belongs to exactly one user
- * (`projects.user_id` is NOT NULL) and `/api/chat` refuses to retarget a chat to another
- * owner's project, so the union is already single-owner; the predicate says so out loud
- * rather than trusting that invariant to hold at every future write site.
+ * Scoped to the owner as well as the session key — see `sessionSecretScope`.
  *
  * PAIRS, not a map: two chats in one project may each store a `TOKEN`, with different
  * values, and collapsing them by name would redact one and leak the other.
  *
- * Bounded at `MAX_REDACTION_PAIRS`, newest first, because nothing bounds how many chats a
- * project holds. A cut is logged.
+ * EVERY row in the session, with no cut. The size problem is real, but a read-time cut is
+ * the wrong end of it: dropping the oldest pairs leaves an older-but-still-active sibling
+ * credential unredacted, which is the leak the union exists to close. It is bounded at
+ * write time instead (`MAX_SESSION_SECRETS`, refused by the route), so this query is
+ * bounded too — and a workspace already over the bound from before it existed is warned
+ * about and still covered in full.
  *
  * KNOWN LIMIT, accepted rather than fixed: a value that has been deleted or rotated is no
  * longer in this union, so its old plaintext survives in whatever job log under
@@ -313,23 +348,20 @@ export async function loadRedactionSecrets(sessionKey: string, userId: string): 
     .select({ name: chatSecrets.name, valueEnc: chatSecrets.valueEnc })
     .from(chatSecrets)
     .innerJoin(chats, eq(chats.id, chatSecrets.chatId))
-    .where(and(eq(chats.userId, userId), or(eq(chats.projectId, sessionKey), eq(chats.id, sessionKey))))
-    // Newest first: a credential in current use is likelier to be the one a command is
-    // about to print. One row past the bound, so a cut can be reported as a fact rather
-    // than inferred from a full page.
-    .orderBy(desc(chatSecrets.createdAt))
-    .limit(MAX_REDACTION_PAIRS + 1);
+    .where(sessionSecretScope(sessionKey, userId));
   if (rows.length === 0) return [];
-  const cut = rows.length > MAX_REDACTION_PAIRS;
-  if (cut) {
-    log.warn("workspace has more secrets than the redactor covers; oldest are not redacted", {
+  if (rows.length > MAX_SESSION_SECRETS) {
+    // Only reachable from data written before the write-time bound existed. Redacted in
+    // full anyway — the cost is a slower turn, and the alternative was a silent leak.
+    log.warn("workspace holds more secrets than the session bound; redaction will be slow", {
       sessionKey,
-      limit: MAX_REDACTION_PAIRS,
+      count: rows.length,
+      bound: MAX_SESSION_SECRETS,
     });
   }
   const key = await getMasterKey();
   const pairs: [string, string][] = [];
-  for (const row of cut ? rows.slice(0, MAX_REDACTION_PAIRS) : rows) {
+  for (const row of rows) {
     let value: string;
     try {
       value = decrypt(row.valueEnc, key);
@@ -338,9 +370,25 @@ export async function loadRedactionSecrets(sessionKey: string, userId: string): 
       log.warn("chat secret could not be decrypted; skipping redaction for it", { sessionKey, name: row.name });
       continue;
     }
-    // A value the redactor would skip anyway (a pre-floor row) is dropped here so the
-    // bound above is spent on pairs that actually redact something.
+    // A value the redactor would skip anyway (a pre-floor row) contributes nothing.
     if (isValidSecretValue(value)) pairs.push([row.name, value]);
   }
   return pairs;
+}
+
+/**
+ * How many credentials the whole sandbox session already holds — the quantity
+ * `MAX_SESSION_SECRETS` bounds, for the route to check before it stores one more.
+ *
+ * Shares `sessionSecretScope` with `loadRedactionSecrets` on purpose: the number the
+ * route refuses on and the set the redactor covers have to be the same set, or the bound
+ * guards something other than the thing it is protecting.
+ */
+export async function countSessionSecrets(sessionKey: string, userId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(chatSecrets)
+    .innerJoin(chats, eq(chats.id, chatSecrets.chatId))
+    .where(sessionSecretScope(sessionKey, userId));
+  return Number(row?.n ?? 0);
 }

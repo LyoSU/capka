@@ -3,6 +3,7 @@ import {
   normalizeSecretName,
   isValidSecretValue,
   redactSecrets,
+  secretEncodings,
   MIN_SECRET_VALUE_CHARS,
   MIN_ENCODED_FORM_CHARS,
 } from "@/lib/chat/secrets";
@@ -48,8 +49,10 @@ describe("isValidSecretValue", () => {
     expect(MIN_SECRET_VALUE_CHARS).toBeGreaterThan(0);
     expect(isValidSecretValue("x".repeat(MIN_SECRET_VALUE_CHARS - 1))).toBe(false);
     expect(isValidSecretValue("x".repeat(MIN_SECRET_VALUE_CHARS))).toBe(true);
-    // The concrete case from the report: `KEY=abc` was accepted and never redacted.
+    // The concrete cases from the reports: `KEY=abc` was accepted and never redacted, and
+    // `KEY=abcd` was accepted while its unpadded base64 `YWJjZA` went out in the clear.
     expect(isValidSecretValue("abc")).toBe(false);
+    expect(isValidSecretValue("abcd")).toBe(false);
   });
 
   it("refuses a value that is not well-formed UTF-16", () => {
@@ -89,7 +92,8 @@ describe("redactSecrets", () => {
     // through the API now — `isValidSecretValue` refuses to store one — but a row saved
     // before that gate existed still flows through here.
     expect(redactSecrets("an ab cd result", { SHORT: "ab" })).toBe("an ab cd result");
-    expect(redactSecrets("an abcd result", { OK: "abcd" })).toBe("an [secret:OK] result");
+    expect(redactSecrets("an abcd result", { LEGACY: "abcd" })).toBe("an abcd result");
+    expect(redactSecrets("an abcdef result", { OK: "abcdef" })).toBe("an [secret:OK] result");
   });
 
   it("redacts the encodings a command can produce, not only the literal", () => {
@@ -155,16 +159,45 @@ describe("redactSecrets", () => {
   });
 
   it("holds encoded forms to a higher floor than the literal", () => {
-    // `abcd` yields the six-character `YWJjZA`, which turns up inside unrelated
-    // identifiers and hashes; replacing part of one with `[secret:NAME]` is both wrong
-    // and alarming to read. The literal keeps the lower floor.
+    // Six characters of base64 alphabet turn up inside unrelated identifiers and hashes;
+    // replacing part of one with `[secret:NAME]` is both wrong and alarming to read. The
+    // literal keeps the lower floor because it is the string the user actually pasted.
     expect(MIN_ENCODED_FORM_CHARS).toBeGreaterThan(MIN_SECRET_VALUE_CHARS);
-    const env = { OK: "abcd" };
-    expect(redactSecrets("id=xYWJjZAq unrelated", env)).toBe("id=xYWJjZAq unrelated");
-    expect(redactSecrets("the abcd literal", env)).toBe("the [secret:OK] literal");
-    // Its forms that DO clear the floor stay covered: padded base64 and hex are both 8.
-    expect(redactSecrets("v=YWJjZA==", env)).toBe("v=[secret:OK]");
-    expect(redactSecrets("v=61626364", env)).toBe("v=[secret:OK]");
+    // A row from before the raw floor rose: its encodings are under the encoded floor,
+    // and its literal is under the raw floor, so it contributes nothing at all.
+    expect(redactSecrets("id=xYWJjZAq unrelated", { LEGACY: "abcd" })).toBe("id=xYWJjZAq unrelated");
+  });
+
+  it("covers EVERY spelling of a value at the raw floor", () => {
+    // The invariant `MIN_ENCODED_FORM_CHARS` is derived from: a storable value has no
+    // uncovered form. This is the blocker that made the raw floor six — at four,
+    // `printf %s "$TOKEN" | base64 | tr -d =` printed a six-character string that walked
+    // straight past the encoded floor.
+    const value = "a".repeat(MIN_SECRET_VALUE_CHARS);
+    expect(isValidSecretValue(value)).toBe(true);
+    for (const form of secretEncodings(value)) {
+      // Percent-encoding may be the literal itself; that one is covered at the raw floor
+      // and deduped inside `redactSecrets`.
+      if (form === value) continue;
+      expect(form.length).toBeGreaterThanOrEqual(MIN_ENCODED_FORM_CHARS);
+    }
+    // And it holds for the awkward shapes too, not only for a run of one letter.
+    for (const v of ["ab cd!", "\u{1f600}\u{1f600}\u{1f600}", "a?b>c~", "ABCDEF"]) {
+      expect(v.length).toBe(MIN_SECRET_VALUE_CHARS);
+      for (const form of secretEncodings(v)) {
+        if (form === v) continue;
+        expect(form.length).toBeGreaterThanOrEqual(MIN_ENCODED_FORM_CHARS);
+      }
+    }
+  });
+
+  it("redacts the unpadded base64 of a value at the raw floor", () => {
+    // The exact bypass, spelled the exact way a shell spells it.
+    const value = "abcdef";
+    const unpadded = Buffer.from(value, "utf8").toString("base64").replace(/=+$/, "");
+    expect(unpadded).toBe("YWJjZGVm");
+    expect(redactSecrets(`out=${unpadded}`, { TOKEN: value })).toBe("out=[secret:TOKEN]");
+    expect(redactSecrets("out=616263646566", { TOKEN: value })).toBe("out=[secret:TOKEN]");
   });
 
   it("is a no-op with no secrets and on empty text", () => {

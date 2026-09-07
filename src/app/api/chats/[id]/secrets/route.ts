@@ -7,10 +7,13 @@ import {
   deleteSecret,
   normalizeSecretName,
   isValidSecretValue,
+  countSessionSecrets,
   MAX_SECRET_VALUE_CHARS,
   MIN_SECRET_VALUE_CHARS,
   MAX_CHAT_SECRETS,
+  MAX_SESSION_SECRETS,
 } from "@/lib/chat/secrets";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 
 /**
  * Thread-scoped credentials: names in, names out, values one-way.
@@ -34,10 +37,10 @@ import {
 async function ownedChat(
   id: string,
   gate: () => Promise<{ userId: string }> = requireSession,
-): Promise<{ userId: string; chatId: string }> {
+): Promise<{ userId: string; chatId: string; projectId: string | null }> {
   const { userId } = await gate();
-  await requireOwned(chats, id, userId, "Chat");
-  return { userId, chatId: id };
+  const chat = await requireOwned(chats, id, userId, "Chat");
+  return { userId, chatId: id, projectId: (chat.projectId as string | null) ?? null };
 }
 
 export const GET = apiHandler(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
@@ -48,7 +51,7 @@ export const GET = apiHandler(async (_req: Request, { params }: { params: Promis
 
 export const POST = apiHandler(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  const { userId, chatId } = await ownedChat(id, requireWriter);
+  const { userId, chatId, projectId } = await ownedChat(id, requireWriter);
 
   const body = (await req.json()) as { name?: unknown; value?: unknown };
   const rawName = typeof body.name === "string" ? body.name : "";
@@ -78,10 +81,26 @@ export const POST = apiHandler(async (req: Request, { params }: { params: Promis
   // accepting one more here would not add a credential — it would break every command in
   // this chat until someone deleted a row. Checked against the names already stored, and
   // only for a NEW name: rotating an existing credential at the cap must keep working.
+  // Non-atomic against a concurrent save of a different new name, which is accepted: two
+  // simultaneous saves can land the 33rd row, and the recovery is deleting one.
   const existing = await listSecretNames(chatId);
-  if (existing.length >= MAX_CHAT_SECRETS && !existing.some((s) => s.name === name)) {
+  const isNewName = !existing.some((s) => s.name === name);
+  if (existing.length >= MAX_CHAT_SECRETS && isNewName) {
     return Response.json(
       { error: `This chat can hold ${MAX_CHAT_SECRETS} secrets`, code: "TOO_MANY", max: MAX_CHAT_SECRETS },
+      { status: 400 },
+    );
+  }
+
+  // The redactor covers every credential in the sandbox SESSION, not just this chat's —
+  // chats in a project share one `/workspace`, so a sibling's value can turn up in a job
+  // log this chat reads. That union is what has to stay bounded, and it is bounded HERE
+  // rather than by narrowing the redactor: a read-time cut would leave an older sibling
+  // credential unredacted, which is the leak the union closes. New names only, same as
+  // the per-chat cap above.
+  if (isNewName && (await countSessionSecrets(workspaceSessionKey({ id: chatId, projectId }), userId)) >= MAX_SESSION_SECRETS) {
+    return Response.json(
+      { error: `This project can hold ${MAX_SESSION_SECRETS} secrets`, code: "TOO_MANY_IN_PROJECT", max: MAX_SESSION_SECRETS },
       { status: 400 },
     );
   }

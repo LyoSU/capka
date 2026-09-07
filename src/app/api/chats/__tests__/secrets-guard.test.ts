@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ForbiddenError } from "@/lib/errors";
-import { MAX_CHAT_SECRETS, MIN_SECRET_VALUE_CHARS } from "@/lib/chat/secrets";
+import { MAX_CHAT_SECRETS, MAX_SESSION_SECRETS, MIN_SECRET_VALUE_CHARS } from "@/lib/chat/secrets";
 
 /**
  * Storing a credential is a MUTATION, and it used to be gated by `requireSession` — which
@@ -11,14 +11,16 @@ import { MAX_CHAT_SECRETS, MIN_SECRET_VALUE_CHARS } from "@/lib/chat/secrets";
  * below the redactor's floor (stored under a promise nothing upstream kept), and one past
  * the controller's 32-entry `env` limit (the 33rd secret 400'd every command in the chat).
  */
-const { requireSession, requireWriter, requireOwned, listSecretNames, setSecret, deleteSecret } = vi.hoisted(() => ({
-  requireSession: vi.fn(),
-  requireWriter: vi.fn(),
-  requireOwned: vi.fn(),
-  listSecretNames: vi.fn(),
-  setSecret: vi.fn(),
-  deleteSecret: vi.fn(),
-}));
+const { requireSession, requireWriter, requireOwned, listSecretNames, setSecret, deleteSecret, countSessionSecrets } =
+  vi.hoisted(() => ({
+    requireSession: vi.fn(),
+    requireWriter: vi.fn(),
+    requireOwned: vi.fn(),
+    listSecretNames: vi.fn(),
+    setSecret: vi.fn(),
+    deleteSecret: vi.fn(),
+    countSessionSecrets: vi.fn(),
+  }));
 
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
@@ -29,7 +31,7 @@ vi.mock("@/lib/db/ownership", () => ({ requireOwned }));
 // the three functions that touch the database are replaced.
 vi.mock("@/lib/chat/secrets", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/chat/secrets")>();
-  return { ...actual, listSecretNames, setSecret, deleteSecret };
+  return { ...actual, listSecretNames, setSecret, deleteSecret, countSessionSecrets };
 });
 
 import { GET, POST, DELETE } from "@/app/api/chats/[id]/secrets/route";
@@ -45,10 +47,11 @@ const forbid = () => Promise.reject(new ForbiddenError("Read-only access."));
 beforeEach(() => {
   requireSession.mockReset().mockResolvedValue({ userId: "u1", role: "viewer", status: "active" });
   requireWriter.mockReset().mockResolvedValue({ userId: "u1", role: "user", status: "active" });
-  requireOwned.mockReset().mockResolvedValue({ id: "c1", userId: "u1" });
+  requireOwned.mockReset().mockResolvedValue({ id: "c1", userId: "u1", projectId: "p1" });
   listSecretNames.mockReset().mockResolvedValue([]);
   setSecret.mockReset().mockResolvedValue(undefined);
   deleteSecret.mockReset().mockResolvedValue(undefined);
+  countSessionSecrets.mockReset().mockResolvedValue(0);
 });
 
 describe("POST/DELETE /api/chats/[id]/secrets — write gate", () => {
@@ -109,5 +112,41 @@ describe("POST /api/chats/[id]/secrets — the controller's env ceiling", () => 
     const res = await post({ name: "K0", value: "sk-live-rotated" });
     expect(res.status).toBe(200);
     expect(setSecret).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/chats/[id]/secrets — the session bound the redactor depends on", () => {
+  it("refuses a new name once the whole session is at the bound", async () => {
+    // The redactor covers every credential in the sandbox session, because chats in a
+    // project share one `/workspace`. Bounding that set HERE is what lets the loader stay
+    // uncut — narrowing it at read time left an older sibling credential unredacted.
+    countSessionSecrets.mockResolvedValue(MAX_SESSION_SECRETS);
+    const res = await post({ name: "one more", value: "sk-live-abcdef" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "TOO_MANY_IN_PROJECT", max: MAX_SESSION_SECRETS });
+    expect(setSecret).not.toHaveBeenCalled();
+  });
+
+  it("counts over this chat's SESSION, not the chat", async () => {
+    // Session key is the project when the chat has one — otherwise the bound would be
+    // measuring a different set than the one the redactor loads.
+    countSessionSecrets.mockResolvedValue(1);
+    await post({ name: "key", value: "sk-live-abcdef" });
+    expect(countSessionSecrets).toHaveBeenCalledWith("p1", "u1");
+
+    countSessionSecrets.mockClear();
+    requireOwned.mockResolvedValue({ id: "c1", userId: "u1", projectId: null });
+    await post({ name: "key", value: "sk-live-abcdef" });
+    expect(countSessionSecrets).toHaveBeenCalledWith("c1", "u1");
+  });
+
+  it("still lets an existing credential be rotated at the session bound", async () => {
+    countSessionSecrets.mockResolvedValue(MAX_SESSION_SECRETS);
+    listSecretNames.mockResolvedValue([{ name: "KEY", createdAt: null }]);
+    const res = await post({ name: "key", value: "sk-live-rotated" });
+    expect(res.status).toBe(200);
+    // Not even asked: rotating adds no row, so the bound cannot be the thing that blocks
+    // replacing a credential that has just leaked.
+    expect(countSessionSecrets).not.toHaveBeenCalled();
   });
 });

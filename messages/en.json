@@ -280,6 +280,7 @@
       "saveFailed": "Could not save it. Please try again.",
       "valueTooShort": "Use a value of at least {min} characters. Shorter ones cannot be hidden from the assistant.",
       "tooMany": "This chat already holds {max} secrets. Remove one before adding another.",
+      "tooManyInProject": "This project already holds {max} secrets across its chats. Remove one to add another.",
       "removeFailed": "Could not remove it. Please try again."
     },
     "menu": {

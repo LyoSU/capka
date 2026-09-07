@@ -83,6 +83,7 @@ export function ChatSecrets({
           data.code === "BAD_NAME" ? t("nameInvalid")
           : data.code === "VALUE_TOO_SHORT" ? t("valueTooShort", { min: data.min ?? 4 })
           : data.code === "TOO_MANY" ? t("tooMany", { max: data.max ?? 32 })
+          : data.code === "TOO_MANY_IN_PROJECT" ? t("tooManyInProject", { max: data.max ?? 512 })
           : t("saveFailed"),
         );
         return;
