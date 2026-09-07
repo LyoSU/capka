@@ -45,6 +45,7 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Chat: when a chat's model is no longer available, the composer stays with a notice above its footer and the model picker in place, instead of a banner that offered no way to pick another model.
 - Chat secrets: a short value's unpadded base64 form is now redacted; an older secret from a sibling chat in the same project is never dropped from redaction.
 - Steer: text left over after a turn no longer overrides a message sent at the same moment; it lands on a side branch instead.
 - Folder sync: an upload chunk cannot leave after the sync lease is lost, and `POST /api/folders/upload` rejects a stale lease (`LEASE_GONE`) when the bridge passes one. A rejected state write now fails the sync instead of reporting success.

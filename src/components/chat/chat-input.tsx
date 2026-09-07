@@ -113,6 +113,15 @@ interface ChatInputProps {
    *  will be answered, and one control living in one place is what lets a user
    *  find it without looking. */
   leading?: ReactNode;
+  /** A sentence the composer has to say about itself right now — the chat's model
+   *  is gone, its connection did not answer — drawn as a strip INSIDE the card,
+   *  above the footer that holds the remedy. It used to replace the whole
+   *  composer with a banner, which took the model picker away with it and left a
+   *  sentence asking for an action the screen no longer offered. */
+  notice?: ReactNode;
+  /** Sending is refused (Enter and the button) while this is set; typing is not,
+   *  so the draft survives whatever the notice is about. */
+  sendBlocked?: boolean;
   /** Opens the credentials dialog from the "+" menu. Absent when this chat
    *  cannot hold any (read-only). */
   onOpenSecrets?: () => void;
@@ -136,6 +145,8 @@ export function ChatInput({
   focusSignal,
   folders,
   leading,
+  notice,
+  sendBlocked = false,
   onOpenSecrets,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
@@ -216,7 +227,7 @@ export function ChatInput({
   const hasContent = Boolean(value.trim()) || hasReady;
   // A pending card (approval or question) hard-blocks sending — the user must act
   // on the card first.
-  const canSend = hasContent && !uploading && !awaitingInput;
+  const canSend = hasContent && !uploading && !awaitingInput && !sendBlocked;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Escape takes back a dictation: the fastest way out of "that isn't what I
@@ -342,6 +353,16 @@ export function ChatInput({
               </span>
             )}
           </div>
+          {/* Warning tokens, the same as the picker's own "current model is gone"
+              line, so the strip and the dot on the pill below read as one signal. */}
+          {notice && (
+            <div
+              role="status"
+              className="animate-message-in mx-2.5 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-warning-border/60 bg-warning-surface px-3 py-2 text-xs text-foreground"
+            >
+              {notice}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
             {/* Left cluster: the "+" menu alone — what comes INTO the chat. */}
             <div className="flex shrink-0 items-center">

@@ -262,7 +262,7 @@
       "serverQueuedDrop": "Don't send",
       "contextFull": "Conversation is {pct}% full",
       "contextTokens": "{used} / {total} tokens",
-      "modelGoneBody": "This model isn't available anymore — pick another model to keep chatting",
+      "modelGoneBody": "This model isn't available anymore. Pick another one below to keep chatting.",
       "modelGoneNew": "New chat",
       "connectionDownBody": "This model's connection isn't responding right now — try again, or pick another model",
       "connectionDownRetry": "Try again",

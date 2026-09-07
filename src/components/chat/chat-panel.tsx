@@ -680,10 +680,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const lastMsg = messages[messages.length - 1];
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
-  // The chat's model is gone and nothing is currently streaming — swap the
-  // composer for a notice that explains why and lets the user pick another model
-  // to continue right here (or start fresh). Held off while a turn is still
-  // running so the composer keeps its stop button.
+  // The chat's model is gone and nothing is currently streaming — the composer
+  // stays, says so in a strip above its footer, and refuses to send until another
+  // model is picked from the pill right under that strip. It does NOT get replaced:
+  // the picker is the remedy and it lives in the composer footer, so a banner in
+  // the composer's place took the remedy away with the thing it stood in for.
+  // Held off while a turn is still running so the composer keeps its stop button.
   const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
   // Same block, different sentence and different remedy: the model is fine, its
   // connection did not answer. Telling someone their model was removed when the
@@ -793,37 +795,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
         )}
       </div>
     </div>
-  ) : modelGone ? (
-    <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
-      {/* Calm, centered — matches the read-only block above. No inline picker: it
-          rendered awkwardly in this floating block, and the header picker already
-          fixes it (picking an available model flips modelStatus and the composer
-          returns). One line says what to do; the button offers the alternative. */}
-      <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/50 px-4 py-5 text-center">
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {connectionDown ? t("panel.connectionDownBody") : t("panel.modelGoneBody")}
-        </p>
-        {connectionDown ? (
-          <Button variant="outline" size="sm" onClick={() => modelStatus.retry?.()}>
-            {t("panel.connectionDownRetry")}
-          </Button>
-        ) : (
-          // "Start a new chat" is only an alternative when this one has something
-          // in it. Offered on an empty chat it pointed at the state the user was
-          // already in, which reads as the app not knowing where it is.
-          messages.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
-            >
-              {t("panel.modelGoneNew")}
-            </Button>
-          )
-        )}
-      </div>
-    </div>
   ) : (
     <ChatInput
       value={input}
@@ -843,6 +814,41 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       folders={folderSync}
       focusSignal={starterFocus}
       leading={controlsEl}
+      notice={
+        modelGone ? (
+          <>
+            <AlertCircle className="size-3.5 shrink-0 text-warning-text" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              {connectionDown ? t("panel.connectionDownBody") : t("panel.modelGoneBody")}
+            </span>
+            {connectionDown ? (
+              // The model is fine, its connection did not answer: asking again is
+              // the one action that helps, so it sits in the strip.
+              <button
+                type="button"
+                onClick={() => modelStatus.retry?.()}
+                className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline"
+              >
+                {t("panel.connectionDownRetry")}
+              </button>
+            ) : (
+              // "Start a new chat" is only an alternative when this one has
+              // something in it. Offered on an empty chat it pointed at the state
+              // the user was already in.
+              messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
+                  className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  {t("panel.modelGoneNew")}
+                </button>
+              )
+            )}
+          </>
+        ) : undefined
+      }
+      sendBlocked={modelGone}
       onOpenSecrets={readOnly ? undefined : () => setSecretsOpen(true)}
     />
   );
