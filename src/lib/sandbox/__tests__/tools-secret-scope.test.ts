@@ -87,14 +87,35 @@ describe("loadSandboxTools — secret scope", () => {
     expect(loadRedactionSecrets).toHaveBeenCalledTimes(1);
   });
 
-  it("still redacts this chat's own values when the union lookup fails", async () => {
-    // Degrading to no redaction at all would make a failed query a leak.
+  it("refuses the command outright when the union cannot be read", async () => {
+    // FAIL CLOSED. Degrading to this chat's own values read as a safe fallback and was
+    // not one: the values in hand are exactly the injected ones, and the union exists for
+    // the values that are NOT — a sibling chat's credential in a shared job log. So a
+    // database hiccup switched the leak back on for the only case that needed the union.
+    // Refusing BEFORE the exec is what makes "nothing leaves here unredacted" hold.
     loadRedactionSecrets.mockRejectedValue(new Error("db down"));
-    execCommand.mockResolvedValue({ stdout: "key=sk-own-abcdef", stderr: "", exitCode: 0 });
     const { tools } = await load();
-    const res = (await tools.execute_bash.execute!({ command: "true" }, opts)) as { output: string };
-    expect(res.output).toContain("[secret:OWN_TOKEN]");
-    expect(res.output).not.toContain("sk-own-abcdef");
+
+    await expect(
+      tools.execute_bash.execute!({ command: "cat /workspace/.capka/jobs/j1/log" }, opts),
+    ).rejects.toThrow(/could not be loaded/i);
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
+  it("retries the union on the next command instead of caching the failure", async () => {
+    // One bad moment must not disable every remaining command of the turn — the memo is
+    // dropped on rejection, so the next call asks again.
+    loadRedactionSecrets.mockRejectedValueOnce(new Error("db down"));
+    loadRedactionSecrets.mockResolvedValue([["SIBLING_TOKEN", "sk-sibling-abcdef"]]);
+    execCommand.mockResolvedValue({ stdout: "AUTH=sk-sibling-abcdef", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+
+    await expect(tools.execute_bash.execute!({ command: "a" }, opts)).rejects.toThrow();
+    const res = (await tools.execute_bash.execute!({ command: "b" }, opts)) as { output: string };
+
+    expect(loadRedactionSecrets).toHaveBeenCalledTimes(2);
+    expect(res.output).toContain("[secret:SIBLING_TOKEN]");
+    expect(res.output).not.toContain("sk-sibling-abcdef");
   });
 
   it("looks nothing up for a run with no chat", async () => {

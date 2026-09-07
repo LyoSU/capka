@@ -191,6 +191,52 @@ describe("redactSecrets", () => {
     }
   });
 
+  it("produces exactly the forms named here, written out rather than derived", () => {
+    // Pinned as LITERAL strings on purpose. The invariant test above iterates whatever
+    // `secretEncodings` returns, so it would pass just as happily if the function were
+    // emptied — it checks a property of the list, not that the list exists. These are the
+    // strings a shell actually prints, transcribed by hand.
+    const value = "sk-live-a?b>c";
+    const expected = [
+      "c2stbGl2ZS1hP2I+Yw==", // base64, padded
+      "c2stbGl2ZS1hP2I+Yw", //   base64, padding stripped (`| tr -d =`)
+      "c2stbGl2ZS1hP2I-Yw==", // url-safe alphabet, padded
+      "c2stbGl2ZS1hP2I-Yw", //   url-safe, padding stripped
+      "736b2d6c6976652d613f623e63", // hex (xxd -p, sha-style tooling)
+      "736B2D6C6976652D613F623E63", // hex, upper (od, some hexdump flavours)
+      "sk-live-a%3Fb%3Ec", //   percent-encoded (curl --data-urlencode)
+    ];
+    // Set equality both ways: a missing form is a leak, and an unexpected one means the
+    // list grew without anyone writing down what a command would have to do to produce it.
+    expect(new Set(secretEncodings(value))).toEqual(new Set(expected));
+    // And each of them actually redacts, which the list alone does not prove.
+    for (const form of expected) {
+      expect(redactSecrets(`out=${form}`, { TOKEN: value })).toBe("out=[secret:TOKEN]");
+    }
+  });
+
+  it("redacts column-wrapped base64, which is what the tools print by default", () => {
+    // GNU coreutils `base64` wraps at 76 columns and `openssl base64` at 64, so for any
+    // value over 57 bytes the output is two lines and an exact-substring redactor looking
+    // for the flat string finds nothing. That made `printf %s "$KEY" | base64` a bypass
+    // again for exactly the long credentials most worth protecting.
+    const value = "K".repeat(60);
+    const flat = Buffer.from(value, "utf8").toString("base64");
+    expect(flat).toHaveLength(80);
+
+    const gnu = `${flat.slice(0, 76)}\n${flat.slice(76)}`;
+    const openssl = `${flat.slice(0, 64)}\n${flat.slice(64)}`;
+    expect(redactSecrets(`out=${gnu}\n`, { TOKEN: value })).toBe("out=[secret:TOKEN]\n");
+    expect(redactSecrets(`out=${openssl}\n`, { TOKEN: value })).toBe("out=[secret:TOKEN]\n");
+    // The flat form stays covered too — a `| tr -d '\\n'` or a 57-byte value produces it.
+    expect(redactSecrets(`out=${flat}`, { TOKEN: value })).toBe("out=[secret:TOKEN]");
+  });
+
+  it("adds no wrapped form for a value whose base64 fits one line", () => {
+    // Otherwise every short secret would carry two useless duplicates of its own base64.
+    expect(secretEncodings("sk-live-a?b>c").some((f) => f.includes("\n"))).toBe(false);
+  });
+
   it("redacts the unpadded base64 of a value at the raw floor", () => {
     // The exact bypass, spelled the exact way a shell spells it.
     const value = "abcdef";

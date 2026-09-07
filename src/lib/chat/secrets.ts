@@ -14,6 +14,17 @@ import { log } from "@/lib/log";
  * (never quoted) in the system prompt. Nothing here returns a plaintext value to the
  * web layer — `loadSecretEnv` is for the sandbox injection alone, and the redaction
  * below is what keeps a value that leaks into command output out of the transcript.
+ *
+ * WHAT REDACTION IS NOT. It is the last line, not the boundary. `secretEncodings` covers
+ * the spellings an ordinary command produces by accident or by one obvious pipe — base64,
+ * hex, percent-encoding, and the column-wrapped base64 that `base64` and `openssl` emit
+ * by default. It does not and cannot cover what the model's own commands could deliberately
+ * do to a value: base32, rot13, `rev`, gzip, per-character `printf`, splitting it across
+ * two lines of output, or any composition of those. Enumerating them is a losing game and
+ * the code deliberately stops here. The guarantee that does hold is structural: the value
+ * is injected as an environment variable and never appears in the prompt, so a leak needs
+ * the model to run a command that prints it — and that is the case redaction narrows, not
+ * the case it eliminates.
  */
 
 /** Shell/env shape, and the ceiling a controller-side validator repeats. */
@@ -72,6 +83,11 @@ export const MIN_ENCODED_FORM_CHARS = 8;
  * cap handed chat A's secret to chat B out of the shared job log — the very hole the union
  * exists to close. A bound that refuses the 513th save keeps the guarantee total; a bound
  * that silently narrows the redactor cannot.
+ *
+ * A SOFT cap, checked on POST alone: moving a chat that already holds secrets into a
+ * project can push a session past it, and that is accepted rather than blocked. The loader
+ * is unbounded, so an over-full session costs redaction work on every tool result — never
+ * coverage.
  */
 export const MAX_SESSION_SECRETS = 512;
 
@@ -131,6 +147,12 @@ export function isValidSecretValue(value: string): boolean {
  * cases, and percent-encoding. Encodings are of the UTF-8 bytes, which is what any tool
  * in the sandbox would encode.
  *
+ * The base64 forms are also emitted COLUMN-WRAPPED, because the two tools that produce
+ * them wrap by default: GNU coreutils `base64` at 76 columns, `openssl base64` at 64. A
+ * value whose base64 is longer than the width is printed as two or more lines, and an
+ * exact-substring redactor looking for the unwrapped string finds nothing in it — which
+ * made `printf %s "$KEY" | base64` a bypass again for any value over 57 bytes.
+ *
  * This list exists because `printf %s "$KEY" | base64` was a complete bypass of the
  * literal-only redactor: the model decodes it itself, so the transcript held the
  * credential in a form only a human reader would call redacted.
@@ -152,6 +174,17 @@ export function secretEncodings(value: string): string[] {
   const b64Url = b64.replace(/\+/g, "-").replace(/\//g, "_");
   const hex = bytes.toString("hex");
   const forms = [b64, b64.replace(/=+$/, ""), b64Url, b64Url.replace(/=+$/, ""), hex, hex.toUpperCase()];
+  // The two default widths in the wild, and only those. A trailing newline is not part of
+  // the form: the wrapped body is a substring of whatever the tool printed, so matching it
+  // covers the output with or without the final line break.
+  for (const width of [76, 64]) {
+    for (const flat of b64Url === b64 ? [b64] : [b64, b64Url]) {
+      if (flat.length <= width) continue;
+      const lines: string[] = [];
+      for (let i = 0; i < flat.length; i += width) lines.push(flat.slice(i, i + width));
+      forms.push(lines.join("\n"));
+    }
+  }
   try {
     forms.push(encodeURIComponent(value));
   } catch {

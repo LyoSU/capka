@@ -182,18 +182,27 @@ export async function loadSandboxTools(
   };
   // What gets INJECTED is this chat's own env, above. What gets REDACTED is wider: the
   // workspace is shared by every chat in the project (`projectId ?? chatId`), so a
-  // background job's raw log under `/workspace/.capka/jobs/` can hold a sibling chat's credential and
-  // this turn would have handed the model the plaintext. Same memoization, and resolved
-  // only for a run that has a chat at all — a caller with no `secrets` thunk has no
-  // session-scoped credentials to look up.
+  // background job's raw log under `/workspace/.capka/jobs/` can hold a sibling chat's
+  // credential and this turn would have handed the model the plaintext. Same memoization,
+  // and resolved only for a run that has a chat at all — a caller with no `secrets` thunk
+  // has no session-scoped credentials to look up.
+  //
+  // FAIL CLOSED. This used to degrade to this chat's own values on a failed query, which
+  // read as a safe fallback and was not one: the values "already in hand" are exactly the
+  // ones this chat's env carries, and the whole reason the union exists is the values that
+  // are NOT — a sibling chat's credential sitting in a shared job log. So a database
+  // hiccup turned the leak back on, silently, for the one case the union was added for.
+  // The failure is not memoized either: a later command in the same turn retries rather
+  // than inheriting one bad moment for the rest of the run.
   let redactPairs: Promise<[string, string][]> | null = null;
   const resolveRedaction = (): Promise<[string, string][]> => {
     if (!secrets) return Promise.resolve([]);
     redactPairs ??= loadRedactionSecrets(sessionKey, userId).catch((e) => {
-      // Degrade to this chat's own values rather than to nothing: a failed union query
-      // must not turn redaction off for the credentials we already hold in hand.
+      redactPairs = null;
       console.warn("[sandbox] workspace secrets unavailable for redaction:", e instanceof Error ? e.message : e);
-      return [];
+      // Calm and relayable: the model can say this and try again, which is the whole
+      // recovery. It must NOT read as the command having failed on its own terms.
+      throw new Error("Workspace secrets could not be loaded, so this command was not run — try again.");
     });
     return redactPairs;
   };
@@ -219,8 +228,12 @@ export async function loadSandboxTools(
     // by forgetting to opt in. The tee'd capture log inside the workspace keeps the
     // raw bytes — it is the user's own container, not the transcript — and the model
     // can only reach it by reading the file, which is another trip through here.
+    // Rejects when the workspace union could not be read, and that rejection is the
+    // point: the command has not run yet, so refusing here is what makes "no output
+    // leaves this function unredacted" true even when the database is unreachable.
     const [env, workspaceSecrets] = await Promise.all([resolveSecrets(), resolveRedaction()]);
-    // This chat's own values first, so they are redacted even if the union query failed.
+    // This chat's own values first — the union already contains them, and listing them
+    // ahead keeps the injected set covered whatever order the query returns.
     const toRedact: [string, string][] = [...Object.entries(env), ...workspaceSecrets];
     try {
       const result = await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal, env);
