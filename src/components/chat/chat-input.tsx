@@ -523,7 +523,14 @@ export function ChatInput({
           height="100%"
           fill="none"
         >
-          <rect x="0" y="0" width="100%" height="100%" rx="15" ry="15" pathLength={100} />
+          {/* No rx here: the corner radius is set in CSS from the same token the
+              card's `rounded-2xl` resolves to, so the line follows the card's own
+              curve instead of a second, tighter one drawn next to it. */}
+          {/* Two strokes on one path: a wide, blurred halo under a thin crisp line.
+              The halo is what lets the dash END softly — a single hard-capped
+              stroke at this size read as a second border with a cut-off end. */}
+          <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
+          <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
         </svg>
         </div>
       </div>

@@ -753,19 +753,41 @@
 }
 .composer-activity {
   opacity: 0;
+  /* The rect fills the svg edge to edge, so half its stroke falls OUTSIDE the
+     svg box. Inline svg clips by default, which shaved the line to a 1px sliver
+     hugging the card's border and made it look crooked; let it overflow and the
+     full stroke sits centred on the card's edge instead. */
+  overflow: visible;
   transition: opacity 450ms var(--ease-out);
 }
 .composer-activity[data-on] {
-  opacity: 0.35;
+  opacity: 1;
 }
 .composer-activity rect {
   fill: none;
   stroke: var(--primary);
-  stroke-width: 2;
+  stroke-linecap: round;
   stroke-dasharray: 30 70;
-  filter: blur(0.5px);
+  /* Geometry in CSS, not attributes, so the corner follows the card: the card is
+     `rounded-2xl`, the svg sits 1px inside it, so the stroke's centre line runs
+     at the card's radius minus that inset. A fixed `rx` drew a second, tighter
+     curve beside the card's own corner. */
+  rx: calc(var(--radius-2xl) - 1px);
   animation: composer-activity 4.5s linear infinite;
   animation-play-state: paused;
+}
+/* Halo first, line on top. Both ride the same dash and phase, so the wide blur
+   is a glow around the thin line and fades its ends — one hard-capped 2px stroke
+   here read as a second border cut off mid-edge. Kept faint on purpose: this is
+   peripheral motion, seen when you look at the box, not while reading above it. */
+.composer-activity rect:first-child {
+  stroke-width: 6;
+  stroke-opacity: 0.14;
+  filter: blur(3px);
+}
+.composer-activity rect:last-child {
+  stroke-width: 1.5;
+  stroke-opacity: 0.32;
 }
 .composer-activity[data-on] rect {
   animation-play-state: running;
