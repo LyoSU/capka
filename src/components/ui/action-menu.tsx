@@ -37,7 +37,18 @@ export type ActionItem = {
   variant?: "default" | "destructive";
   disabled?: boolean;
   hidden?: boolean;
+  /** Items with different groups are separated by a rule; the group's name is
+   *  never shown. Order the items by group — a group is a run, not a set. */
+  group?: string;
 };
+
+/** A rule before `it` when it opens a new group, and always before the first
+ *  destructive item after a non-destructive one, whatever the groups say. */
+function separatorBefore(it: ActionItem, prev: ActionItem | undefined): boolean {
+  if (!prev) return false;
+  if (it.variant === "destructive" && prev.variant !== "destructive") return true;
+  return it.group !== prev.group;
+}
 
 /**
  * One long-press/⋮ menu, two presentations. On a fine pointer (desktop) it is
@@ -82,9 +93,7 @@ export function ActionMenu({
       {!isTouch && (
         <DropdownMenuContent {...contentProps}>
           {visible.map((it, i) => {
-            const prev = visible[i - 1];
-            const needsSeparator =
-              it.variant === "destructive" && prev && prev.variant !== "destructive";
+            const needsSeparator = separatorBefore(it, visible[i - 1]);
             return (
               <React.Fragment key={it.key}>
                 {needsSeparator && <DropdownMenuSeparator />}
@@ -190,9 +199,7 @@ function ActionSheet({
         </div>
         <div className={cn("flex flex-col px-2 pt-1", !title && "pt-2")}>
           {items.map((it, i) => {
-            const prev = items[i - 1];
-            const needsSeparator =
-              it.variant === "destructive" && prev && prev.variant !== "destructive";
+            const needsSeparator = separatorBefore(it, items[i - 1]);
             return (
               <React.Fragment key={it.key}>
                 {needsSeparator && <div className="my-1 h-px bg-border" />}

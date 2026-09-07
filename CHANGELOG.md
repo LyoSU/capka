@@ -28,6 +28,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
+- Menus: every dropdown and action menu is roomier (16px radius, 44px rows, 15px text, 20px icons, inset rules between groups), matching the menus people know from other assistants.
 - Chat: the jump rail at the right edge is quieter (hairline marks, dimmer at rest, full weight on keyboard focus) and its list aligns every row's text on one edge with the full message on hover.
 - Chat: thinking levels are named Off / Low / Medium / High (Вимкнено / Низький / Середній / Високий); the explanations under the slider are unchanged.
 - Chat, phone: the model overlay no longer opens the keyboard by itself, and the thinking slider steps aside while a search is being typed.
