@@ -130,23 +130,6 @@ export async function probeFile(file: PreviewFile): Promise<FileStatus> {
   }
 }
 
-/**
- * Read just the start of a file without downloading the whole thing: pull one
- * chunk off the response stream, then cancel. Lets a thumbnail show real text
- * regardless of file size, with no extra server endpoint.
- */
-async function readHead(url: string, maxChars = 600): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error("read failed");
-  const reader = res.body.getReader();
-  try {
-    const { value } = await reader.read();
-    return new TextDecoder().decode(value ?? new Uint8Array()).slice(0, maxChars);
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-}
-
 // ── Context ──────────────────────────────────────────────────────────────────
 
 type PreviewCtx = { open: (files: PreviewFile[], index: number) => void };
@@ -1487,10 +1470,12 @@ export function FileThumb({ file, className }: { file: PreviewFile; className?: 
   const kind = previewKind(file.name);
 
   if (kind === "image") return <ImageThumb file={file} className={className} />;
-  if (kind === "text" || kind === "markdown" || kind === "html") return <TextThumb file={file} className={className} />;
-
-  // Binaries with no in-app viewer (docx, xlsx, zip…): a document glyph instead
-  // of a bare icon, so a non-previewable file still reads as a real file.
+  // Everything that is not an image: the typed sheet with its extension on a
+  // badge. A .csv used to get a different tile from a .xlsx sitting next to it
+  // — the csv rendered the first 600 characters of itself at 4px, which at tile
+  // size is grey noise, and put a network read behind every tile in the grid to
+  // fetch it. Two files whose names differ and whose contents differ looked
+  // like the same smudge; the sheet at least says CSV.
   return <BinaryFileThumb name={file.name} className={className} />;
 }
 
@@ -1570,40 +1555,3 @@ function ImageThumb({ file, className }: { file: PreviewFile; className?: string
   );
 }
 
-function TextThumb({ file, className }: { file: PreviewFile; className?: string }) {
-  const { Icon, color, bg } = fileKind(file.name);
-  const [head, setHead] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    readHead(inlineUrl(file))
-      .then((h) => alive && setHead(h))
-      .catch(() => alive && setFailed(true));
-    return () => {
-      alive = false;
-    };
-  }, [file]);
-
-  if (failed || head === "")
-    return (
-      <div className={cn("flex items-center justify-center", bg, className)}>
-        <Icon className={cn("h-4 w-4", color)} />
-      </div>
-    );
-
-  return (
-    // aria-hidden: this is decoration. Without it the <pre> below contributes the
-    // file's first 600 characters to the enclosing control's accessible name.
-    <div aria-hidden className={cn("relative overflow-hidden bg-background ring-1 ring-border/60", className)}>
-      {/* 4px, and wrapping on words rather than mid-character: at 3px with
-          `break-all` the peek was grey noise, and two different source files were
-          indistinguishable from each other in the grid. */}
-      <pre className="whitespace-pre-wrap break-words p-1 font-mono text-[4px] leading-[1.35] text-foreground/70">
-        {head ?? ""}
-      </pre>
-      {/* Fade the bottom so the clipped text reads as a peek, not a cut-off. */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
-    </div>
-  );
-}
