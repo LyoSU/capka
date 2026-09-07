@@ -229,8 +229,11 @@ export const POST = apiHandler(async (req: Request) => {
   // our hold; the turn that actually answers carries its own.
   if (created) handedOff = true;
 
-  // Return immediately — client syncs via SSE
-  return Response.json({ taskId: turnId, chatId });
+  // Return immediately — client syncs via SSE. `deduped` says the message folded
+  // into a turn that already existed rather than starting one of its own, so a
+  // client can tell "queued behind the current reply" from "sent" without having
+  // to compare the returned id against one it never knew.
+  return Response.json({ taskId: turnId, chatId, deduped: !created });
   } finally {
     if (!handedOff) await releaseHold(taskId);
   }

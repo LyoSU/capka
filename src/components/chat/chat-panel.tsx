@@ -188,7 +188,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     setGreeting(pickGreeting({ name: userName, t: tGreeting }));
   }, [chatId, userName, tGreeting]);
   const router = useRouter();
-  const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo, queuedTurn, refreshQueuedTurn } = useBackgroundChat({
     chatId,
     projectId,
   });
@@ -901,6 +901,37 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     </div>
   ) : null;
 
+  // A turn waiting behind this reply that was NOT typed here: a message from
+  // Telegram, another device, or an automation. It has no ghost bubble — its user
+  // message is already in the transcript, persisted by whoever sent it — so the
+  // caption is the only thing that says a reply to it is still coming, and the
+  // only place to get to it sooner or drop it.
+  //
+  // Suppressed while the local drain has a POST in flight: that request's task id
+  // isn't known yet, so for a few hundred ms our own send is indistinguishable
+  // from someone else's. (The hook already excludes the turn THIS tab is
+  // tracking; local ghost ids are message ids and can never equal a task id, so
+  // there is nothing else to compare.)
+  const serverQueued = !sending && queuedTurn ? queuedTurn : null;
+  const serverQueuedEl = serverQueued ? (
+    <QueuedCaption
+      label={t(
+        serverQueued.platform === "telegram" ? "panel.serverQueuedTelegram"
+        : serverQueued.platform === "automation" ? "panel.serverQueuedAutomation"
+        : "panel.serverQueuedDevice",
+      )}
+      // Same two holds as the local queue's "send now": a turn suspended on the
+      // user's own approval must not be cancelled out from under the question,
+      // and a client with no history loaded has no conversation to send.
+      onSendNow={isLoading && !awaitingInput && historyLoaded && !readOnly ? () => { void stop(); } : undefined}
+      onDrop={readOnly ? undefined : () => {
+        void fetch(`/api/tasks/${serverQueued.id}/cancel`, { method: "POST" })
+          .catch(() => {})
+          .then(() => refreshQueuedTurn());
+      }}
+    />
+  ) : null;
+
   return (
     <ChatScrollProvider value={scrollActions}>
     <PreviewProvider>
@@ -1137,6 +1168,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   time — and INSIDE the content, above `contentEndRef`, so
                   "scroll to the end" lands on them rather than stopping short. */}
               {ghostsEl}
+              {/* …and the one waiting turn this tab did not type. Below the local
+                  ghosts because it is already in the transcript above them: those
+                  bubbles are still only in this browser. */}
+              {serverQueuedEl}
               {/* End of real content (used to detect/scroll to the latest), then
                   the spacer that lets the latest turn rise to the top. */}
               <div ref={scroll.contentEndRef} />

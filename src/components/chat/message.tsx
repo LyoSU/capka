@@ -1892,22 +1892,31 @@ export function QueuedBubble({
  * inside the ghost it measured 2.5:1 against a 4.5:1 bar.
  */
 export function QueuedCaption({
-  count, held, onSendNow,
+  count, held, label, onSendNow, onDrop,
 }: {
-  count: number;
+  /** How many local ghosts this caption speaks for. Omitted with `label`, which
+   *  carries its own sentence about a single server-side turn. */
+  count?: number;
   /** An editor is open, so the drain is deliberately parked. */
-  held: boolean;
+  held?: boolean;
+  /** Replaces the ghost-run sentence. Used for a turn queued on the SERVER — a
+   *  message from Telegram, another device, or an automation: there is no ghost
+   *  bubble above it to count, only a sentence saying where it came from. */
+  label?: string;
   /** Absent when there is nothing to interrupt (or when interrupting would be
    *  wrong — see the panel: a turn awaiting an approval is waiting on the user,
    *  and cancelling it would throw away the very question being asked). */
   onSendNow?: () => void;
+  /** Drop the waiting turn instead of waiting for it. Only the server-side
+   *  follow-up has this — a local ghost is cancelled on the bubble's own ×. */
+  onDrop?: () => void;
 }) {
   const t = useTranslations("chat.panel");
   return (
     <div className="flex justify-end gap-2 px-4 md:px-6 pb-4 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">
         <Clock className="h-3 w-3 shrink-0" />
-        <span>{held ? t("queuedHeld") : t("queuedHint", { count })}</span>
+        <span>{label ?? (held ? t("queuedHeld") : t("queuedHint", { count: count ?? 0 }))}</span>
       </span>
       {onSendNow && !held && (
         <button
@@ -1917,6 +1926,15 @@ export function QueuedCaption({
           className="rounded-md px-1.5 underline decoration-dotted underline-offset-4 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           {t("queuedSendNow")}
+        </button>
+      )}
+      {onDrop && !held && (
+        <button
+          type="button"
+          onClick={onDrop}
+          className="rounded-md px-1.5 underline decoration-dotted underline-offset-4 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          {t("serverQueuedDrop")}
         </button>
       )}
     </div>

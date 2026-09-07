@@ -6,7 +6,7 @@ import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import { enqueueTask, requestCancel } from "@/lib/tasks/queue";
+import { enqueueTask, requestCancel, cancelQueuedTurn } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { toUIMessages } from "@/lib/chat/presenter";
@@ -305,11 +305,38 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
       attachedFiles: attachedFiles.length ? attachedFiles : undefined,
       origin: { platform: "telegram", telegramChatId: ctx.chat!.id, locale: ctx.from?.language_code },
     };
-    const { created } = await enqueueTask({ id: tgTaskId, chatId: chat.id, userId: link.userId, payload });
+    const { id: turnId, created } = await enqueueTask({ id: tgTaskId, chatId: chat.id, userId: link.userId, payload });
     // Folded into an existing turn — our reserved turn won't run, so release its
     // hold; the turn that answers carries its own hold.
     if (!created) await releaseHold(tgTaskId);
     await ctx.replyWithChatAction("typing").catch(() => {});
+
+    // Say so when this message is NOT being answered now. A chat's turns are
+    // serialized, so a message sent while a reply is streaming waits — and on
+    // Telegram that wait is indistinguishable from being ignored: the typing
+    // indicator lapses after a few seconds and nothing else appears until the
+    // current reply finishes. Two ways to end up waiting: our row was created but
+    // sits behind a running turn, or it folded into a follow-up that was already
+    // queued (`created: false`). An ordinary send into a free chat says nothing.
+    // `ne(id, turnId)`: the chat may have been free and a worker may have claimed
+    // OUR row in the moments since the insert — that is being answered now, not
+    // waiting, and announcing a wait for it would be a plain lie.
+    const [runningTurn] = created
+      ? await db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(and(eq(tasks.chatId, chat.id), eq(tasks.status, "running"), ne(tasks.id, turnId)))
+          .limit(1)
+      : [];
+    if (!created || runningTurn) {
+      // `qc:<taskId>` — a nanoid, so ~24 bytes against Telegram's 64-byte
+      // callback_data limit. `turnId` is the turn that will actually answer
+      // (ours, or the incumbent this message folded into), never our unused id.
+      const kb = new InlineKeyboard().text(tFor(ctx)("queuedDrop"), `qc:${turnId}`);
+      await ctx
+        .replyWithRichMessage({ markdown: tFor(ctx)("queuedBehind") }, { reply_markup: kb })
+        .catch((e) => log.warn("telegram queued notice failed", { err: String(e) }));
+    }
   } catch (error: unknown) {
     // The turn never got enqueued — release its budget hold so it doesn't leak.
     await releaseHold(tgTaskId);
@@ -485,6 +512,35 @@ async function buildBot(): Promise<Bot | null> {
       if (outcome !== "busy") await ctx.editMessageReplyMarkup().catch(() => {});
     });
   }
+
+  // "Don't send" was tapped on a queued-behind notice: drop the turn that has not
+  // started rather than making the user wait for a reply they no longer want. The
+  // row is removed outright (see cancelQueuedTurn) — the flag alone would sit
+  // unread until the current reply finished. Scoped to the tapper's OWN task: the
+  // link's userId must own the row, so a callback replayed against someone else's
+  // task id reads as absent. Their MESSAGE stays in the chat and is answered by
+  // whatever runs next; only the reply to it is dropped.
+  bot.callbackQuery(/^qc:(.+)$/, async (ctx) => {
+    const link = await findLink(ctx.from!.id);
+    if (!link) { await ctx.answerCallbackQuery(); return; }
+    const t = tFor(ctx);
+    const [task] = await db
+      .select({ id: tasks.id, chatId: tasks.chatId, status: tasks.status })
+      .from(tasks)
+      .where(and(eq(tasks.id, ctx.match![1]), eq(tasks.userId, link.userId)))
+      .limit(1);
+    // Already started (use the reply's own stop button) or already gone.
+    if (task?.status !== "queued") {
+      await ctx.answerCallbackQuery({ text: t("queuedGone") });
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return;
+    }
+    // "flagged" (a worker claimed it in the same instant) cancels it too, so both
+    // arms are the same news for the user: this turn is not happening.
+    await cancelQueuedTurn({ id: task.id, userId: link.userId, chatId: task.chatId });
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(t("queuedDropped")).catch(() => {});
+  });
 
   // An `ask` question field was answered by tapping a choice/boolean button, or
   // skipped. The collection state (keyed by Telegram chat) records it and, once the

@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { realtime } from "@/lib/realtime";
+import { releaseHold } from "@/lib/billing/limits";
+import { publishTaskEvent } from "@/lib/tasks/events";
 import type { MessageMeta } from "@/lib/chat/contracts";
 import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR } from "@/lib/errors/friendly";
 
@@ -380,6 +382,55 @@ export async function requestCancel(id: string): Promise<void> {
     `UPDATE tasks SET cancel_requested = true, updated_at = now() WHERE id = $1`,
     [id],
   );
+}
+
+/**
+ * Cancel a turn that has NOT started — now, not whenever a worker gets to it.
+ *
+ * `requestCancel` alone is the wrong inverse for a queued row: the flag is only
+ * read once a worker CLAIMS the task, and a chat's turns are serialized, so a
+ * follow-up waiting behind a running reply stays visibly "waiting" for the whole
+ * remaining turn and is only then finalized as cancelled. Deleting the row ends
+ * it immediately, which is what the user pressing "Don't send" asked for.
+ *
+ * The delete is also what makes releasing the hold OUR job rather than a later
+ * sweep's. `enqueueTask`'s callers reserve a pending budget hold keyed to the
+ * task id, and every path that clears one — the runner's absorb, the reaper's
+ * `swept_holds` — finds it by joining the task row. Once the row is gone nothing
+ * can ever attribute that hold again, so it would erode the user's budget until
+ * the 30-day window rolled. Delete and release travel together.
+ *
+ * The queued turn's user message is deliberately left in the transcript: it is
+ * already persisted, and the next turn rebuilds its context from the live tree,
+ * so those words are answered by whatever runs next rather than being lost.
+ *
+ * Returns which arm ran. "flagged" means a worker claimed the row between our
+ * DELETE and its own UPDATE — the turn is live now, so the cooperative flag is
+ * the only cancellation left, and the runner releases the hold on its way out.
+ */
+export async function cancelQueuedTurn(input: {
+  id: string;
+  userId: string;
+  chatId: string;
+}): Promise<"removed" | "flagged"> {
+  const { rows } = await pool.query<{ id: string }>(
+    `DELETE FROM tasks WHERE id = $1 AND status = 'queued' RETURNING id`,
+    [input.id],
+  );
+  if (!rows[0]) {
+    await requestCancel(input.id);
+    return "flagged";
+  }
+  await releaseHold(input.id);
+  // The row is gone, so nothing will ever publish an outcome for it — say so
+  // here or every open client keeps showing a turn that no longer exists.
+  await publishTaskEvent(input.userId, {
+    type: "task:finish",
+    taskId: input.id,
+    chatId: input.chatId,
+    status: "cancelled",
+  }).catch(() => {});
+  return "removed";
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,

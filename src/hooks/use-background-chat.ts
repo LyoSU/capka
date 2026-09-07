@@ -30,6 +30,15 @@ type Message = {
   metadata?: Record<string, unknown>;
 };
 
+/** A turn queued behind the chat's live one, as `GET /api/tasks` reports it.
+ *  `platform` is that of the newest user message it will answer — the only thing
+ *  that can tell the user where a follow-up they did not type came from. */
+export type QueuedTurn = { id: string; createdAt: string | null; platform: string };
+
+/** What `GET /api/tasks?chatId=` answers: the chat's live turn (the running one
+ *  when there is one), plus its pending follow-up. */
+type TaskProbe = { id: string; status: string; error: string | null; queued: QueuedTurn | null };
+
 // ── Hook ─────────────────────────────────────────────────────
 
 export function useBackgroundChat({
@@ -43,6 +52,13 @@ export function useBackgroundChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
+  // The turn waiting behind the one in flight, as the SERVER sees it — a message
+  // sent from Telegram, another device, or an automation. Distinct from the local
+  // send queue (`useChatQueue`): that one is this tab's own typing, held in
+  // localStorage and never POSTed until the chat frees up, so it has no task row
+  // and cannot appear here. A chat holds at most one of these
+  // (`uq_tasks_one_queued_per_chat`), which is why this is a value, not a list.
+  const [queuedTurn, setQueuedTurn] = useState<QueuedTurn | null>(null);
   // `phase` names the stretches of a turn that produce no content of their own,
   // so the status row can say which one the user is waiting on instead of a
   // uniform "Thinking…". "queued" is ours to set (we posted and nothing has come
@@ -156,17 +172,25 @@ export function useBackgroundChat({
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // ── Check for running task on mount (reconnection) ─────────
-  useEffect(() => {
-    fetch(`/api/tasks?chatId=${chatId}`)
+  /** Re-read the chat's live turn and whatever is queued behind it. Returns the
+   *  turn so the caller can adopt it; `queuedTurn` is state because it changes on
+   *  its own (someone else sends from Telegram) and has to redraw the transcript. */
+  const syncTask = useCallback(async (): Promise<TaskProbe | null> => {
+    const task = (await fetch(`/api/tasks?chatId=${chatId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((task) => {
-        if (task?.status === "running") {
-          setTaskId(task.id);
-          setStatus("running");
-        }
-      })
-      .catch(() => {});
+      .catch(() => null)) as TaskProbe | null;
+    setQueuedTurn(task?.queued ?? null);
+    return task;
   }, [chatId]);
+
+  useEffect(() => {
+    void syncTask().then((task) => {
+      if (task?.status === "running") {
+        setTaskId(task.id);
+        setStatus("running");
+      }
+    });
+  }, [syncTask]);
 
   // ── SSE listener ───────────────────────────────────────────
   useEffect(() => {
@@ -207,6 +231,9 @@ export function useBackgroundChat({
           // turn, another tab) would otherwise leave the stop button unable
           // to cancel anything (taskId was only set by our own POST before).
           setTaskId(data.taskId);
+          // The turn that just started may BE the follow-up we were announcing —
+          // re-read so the "waiting" caption goes away the moment it stops waiting.
+          void syncTask();
           // Keep the clock our own send already started: task:start fires only
           // after the task was claimed and `prepareRun` resolved the model and
           // connected the tools, so re-anchoring here would throw away the part
@@ -452,6 +479,9 @@ export function useBackgroundChat({
           // unreadable red blink above the composer. The banner is reserved
           // for load errors (loadHistory's own catch).
           loadHistory();
+          // A follow-up may have been queued behind this turn and be next in line
+          // (or, if the user dismissed it, be gone) — either way this is stale now.
+          void syncTask();
           break;
         }
 
@@ -479,8 +509,11 @@ export function useBackgroundChat({
         }
 
         case "new_message": {
-          // External message (e.g. Telegram) — reload
+          // External message (e.g. Telegram) — reload. It may also have enqueued a
+          // turn behind the reply in flight, which is the whole point of announcing
+          // it: the words are in the transcript, the turn that answers them is not.
           loadHistory();
+          void syncTask();
           break;
         }
 
@@ -596,7 +629,7 @@ export function useBackgroundChat({
       pacer.dispose();
       unsubscribe();
     };
-  }, [chatId, loadHistory]);
+  }, [chatId, loadHistory, syncTask]);
 
   // ── Polling fallback — only really needed when SSE is down ──
   useEffect(() => {
@@ -892,5 +925,15 @@ export function useBackgroundChat({
     ),
   );
 
-  return { messages, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingInput, taskInfo };
+  return {
+    messages, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch,
+    forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running",
+    awaitingInput, taskInfo,
+    // Never our OWN in-flight turn. A direct send from this tab is queued for the
+    // moments between the POST and a worker claiming it, and announcing "a message
+    // from another device is waiting" for the message the user just typed here is
+    // the one thing this caption must not do.
+    queuedTurn: queuedTurn && queuedTurn.id !== taskId ? queuedTurn : null,
+    refreshQueuedTurn: syncTask,
+  };
 }
