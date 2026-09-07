@@ -12,6 +12,11 @@ const PUBLIC_PATHS = [
   "/share",
   "/api/auth",
   "/api/setup",
+  // Automation webhooks are called by other systems, which hold no session: the
+  // unguessable URL is the credential, and the route itself answers a uniform
+  // 404 to anything it does not accept. Bouncing them here with a 401 would make
+  // every webhook automation a dead endpoint.
+  "/api/hooks",
 ];
 
 export async function proxy(request: NextRequest) {
