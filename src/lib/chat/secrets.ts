@@ -1,4 +1,4 @@
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chatSecrets, chats } from "@/lib/db/schema";
@@ -33,6 +33,35 @@ export const MAX_SECRET_VALUE_CHARS = 8192;
 export const MIN_SECRET_VALUE_CHARS = 4;
 
 /**
+ * The floor for an ENCODED form, which is higher than the floor for the literal.
+ *
+ * A short value produces short encodings — `abcd` yields the six-character `YWJjZA` — and
+ * six characters of base64 alphabet turn up inside ordinary identifiers, hashes and log
+ * lines that have nothing to do with any credential. Redacting those replaces a fragment
+ * of someone's variable name with `[secret:NAME]`, which is both wrong and alarming to
+ * read. The literal stays at `MIN_SECRET_VALUE_CHARS`: it is the form the user actually
+ * pasted, so a match on it is far more likely to be the real thing.
+ *
+ * The cost is honest and bounded: for a value at the literal floor, the unpadded base64
+ * form is no longer covered. A four-character credential protects almost nothing anyway,
+ * and the padded base64 and hex forms of it clear this floor and stay covered.
+ */
+export const MIN_ENCODED_FORM_CHARS = 8;
+
+/**
+ * The most name/value pairs one workspace contributes to the redactor.
+ *
+ * The union spans every chat sharing the session key, and nothing bounds how many chats a
+ * project holds: 1,000 chats at the per-chat cap is 32,000 values, each expanded into
+ * several forms and each form driving its own full-string `split`/`join` on EVERY tool
+ * result. That is a self-inflicted stall on the turn, so the query takes the newest pairs
+ * and stops. This chat's OWN values are never at risk of being cut — `loadSandboxTools`
+ * puts the injected env in front of this list, so the bound only ever drops a sibling
+ * chat's older credentials, and it warns when it does.
+ */
+export const MAX_REDACTION_PAIRS = 512;
+
+/**
  * How many credentials one chat may store.
  *
  * The sandbox controller refuses an exec whose `env` carries more than 32 entries
@@ -59,41 +88,61 @@ export function normalizeSecretName(raw: string): string | null {
   return NAME_RE.test(name) ? name : null;
 }
 
-/** A value is storable when it clears the redactor's floor, stays within the cap, and
- *  carries no NUL — a NUL cannot survive an environment variable and would truncate it
- *  silently. The floor is `MIN_SECRET_VALUE_CHARS`, shared with `redactSecrets`. */
+/**
+ * A value is storable when it clears the redactor's floor, stays within the cap, carries
+ * no NUL, and is well-formed UTF-16. The floor is `MIN_SECRET_VALUE_CHARS`, shared with
+ * `redactSecrets`.
+ *
+ * A NUL cannot survive an environment variable and would truncate the value silently.
+ *
+ * An UNPAIRED surrogate (`"\ud800abc"`, reachable only from a hand-written JSON body, not
+ * from typing) is refused because nothing downstream can carry it: `Buffer.from` turns it
+ * into a replacement character, so its encoded forms describe a different string than the
+ * one injected, and `encodeURIComponent` throws on it outright — which, before this check,
+ * made the redactor fail EVERY tool result in the chat and in its project siblings, after
+ * the command had already run.
+ */
 export function isValidSecretValue(value: string): boolean {
   return (
     value.length >= MIN_SECRET_VALUE_CHARS &&
     value.length <= MAX_SECRET_VALUE_CHARS &&
-    !value.includes("\0")
+    !value.includes("\0") &&
+    value.isWellFormed()
   );
 }
 
 /**
- * Every spelling of one value that the model could read back out as the value itself:
- * the literal, its base64 (standard and url-safe, padded and not), its hex in both
- * cases, and its percent-encoding when that differs. Encodings are of the UTF-8 bytes,
- * which is what any tool in the sandbox would encode.
+ * Every spelling of one value that the model could read back out as the value itself,
+ * EXCLUDING the literal: base64 (standard and url-safe, padded and not), hex in both
+ * cases, and percent-encoding. Encodings are of the UTF-8 bytes, which is what any tool
+ * in the sandbox would encode.
  *
  * This list exists because `printf %s "$KEY" | base64` was a complete bypass of the
  * literal-only redactor: the model decodes it itself, so the transcript held the
  * credential in a form only a human reader would call redacted.
+ *
+ * The literal is the caller's to add, because the two carry different floors — see
+ * `MIN_ENCODED_FORM_CHARS`.
+ *
+ * NEVER throws. `encodeURIComponent` rejects an unpaired surrogate, and a redactor that
+ * can throw turns a command that already ran into a failed tool call — for this chat and
+ * for every project sibling whose union includes the row. `isValidSecretValue` refuses
+ * such a value now; a row stored before it did still reaches here.
  */
-function secretForms(value: string): string[] {
+function secretEncodings(value: string): string[] {
   const bytes = Buffer.from(value, "utf8");
   const b64 = bytes.toString("base64");
+  const b64Url = b64.replace(/\+/g, "-").replace(/\//g, "_");
   const hex = bytes.toString("hex");
-  return [
-    value,
-    b64,
-    b64.replace(/=+$/, ""),
-    b64.replace(/\+/g, "-").replace(/\//g, "_"),
-    b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
-    hex,
-    hex.toUpperCase(),
-    encodeURIComponent(value),
-  ];
+  const forms = [b64, b64.replace(/=+$/, ""), b64Url, b64Url.replace(/=+$/, ""), hex, hex.toUpperCase()];
+  try {
+    forms.push(encodeURIComponent(value));
+  } catch {
+    // A lone surrogate. The other forms above describe the replacement character rather
+    // than this string, so they are useless too — but they cost nothing and cannot lie
+    // about a value they do not match.
+  }
+  return forms;
 }
 
 /**
@@ -114,7 +163,8 @@ function secretForms(value: string): string[] {
  *
  * Values shorter than `MIN_SECRET_VALUE_CHARS` are skipped, and the API refuses to store
  * one — the two floors are the same constant precisely so this branch cannot be reached
- * by anything the user was allowed to save.
+ * by anything the user was allowed to save. An encoded form carries a HIGHER floor
+ * (`MIN_ENCODED_FORM_CHARS`), because a short one matches unrelated identifiers.
  *
  * Takes a map, or name/value PAIRS when one name legitimately carries two values: the
  * chats sharing a workspace each have their own `TOKEN`, and both must be redacted.
@@ -127,16 +177,18 @@ export function redactSecrets(
   const entries = Array.isArray(secrets) ? secrets : Object.entries(secrets);
   const forms: { name: string; form: string }[] = [];
   const seen = new Set<string>();
+  // Dedupe: url-safe base64 equals standard base64 for most values, and two chats may
+  // store the same credential. A second pass over an already-replaced form is harmless
+  // but pointless, and a stable first-wins keeps the label deterministic.
+  const add = (name: string, form: string, floor: number) => {
+    if (form.length < floor || seen.has(form)) return;
+    seen.add(form);
+    forms.push({ name, form });
+  };
   for (const [name, value] of entries) {
     if (value.length < MIN_SECRET_VALUE_CHARS) continue;
-    for (const form of secretForms(value)) {
-      // Dedupe: url-safe base64 equals standard base64 for most values, and two chats
-      // may store the same credential. A second pass over an already-replaced form is
-      // harmless but pointless, and a stable first-wins keeps the label deterministic.
-      if (form.length < MIN_SECRET_VALUE_CHARS || seen.has(form)) continue;
-      seen.add(form);
-      forms.push({ name, form });
-    }
+    add(name, value, MIN_SECRET_VALUE_CHARS);
+    for (const form of secretEncodings(value)) add(name, form, MIN_ENCODED_FORM_CHARS);
   }
   forms.sort((a, b) => b.form.length - a.form.length);
   let out = text;
@@ -183,6 +235,14 @@ export async function deleteSecret(chatId: string, name: string): Promise<void> 
  * out from under one stale row must not take down every turn in the chat, and the model
  * gets a clear failure from the command that needed the variable instead of an opaque
  * dead conversation.
+ *
+ * A row the REDACTOR would not cover is skipped the same way, and this is the reason the
+ * API's floor did not close the hole on its own: the validator only guards new writes,
+ * while a value stored before it existed kept being injected into the container and
+ * skipped by the redactor — the exact combination the floor was added to make impossible.
+ * Enforcing it here as well means the two ends cannot drift again, whatever is already in
+ * the table. Reported once per load with the names, not once per row: this runs on the
+ * first command of every turn, and a per-row line would flood the ops log.
  */
 export async function loadSecretEnv(chatId: string): Promise<Record<string, string>> {
   const rows = await db
@@ -192,13 +252,28 @@ export async function loadSecretEnv(chatId: string): Promise<Record<string, stri
   if (rows.length === 0) return {};
   const key = await getMasterKey();
   const env: Record<string, string> = {};
+  const unredactable: string[] = [];
   for (const row of rows) {
+    let value: string;
     try {
-      env[row.name] = decrypt(row.valueEnc, key);
+      value = decrypt(row.valueEnc, key);
     } catch {
       // No value, no name-plus-value pairing, nothing that narrows the ciphertext.
       log.warn("chat secret could not be decrypted; skipping", { chatId, name: row.name });
+      continue;
     }
+    if (!isValidSecretValue(value)) {
+      unredactable.push(row.name);
+      continue;
+    }
+    env[row.name] = value;
+  }
+  if (unredactable.length > 0) {
+    // Names only, never a value or a length — the point of the module.
+    log.warn("chat secret is below the redaction floor or malformed; not injected", {
+      chatId,
+      names: unredactable.join(","),
+    });
   }
   return env;
 }
@@ -223,23 +298,49 @@ export async function loadSecretEnv(chatId: string): Promise<Record<string, stri
  *
  * PAIRS, not a map: two chats in one project may each store a `TOKEN`, with different
  * values, and collapsing them by name would redact one and leak the other.
+ *
+ * Bounded at `MAX_REDACTION_PAIRS`, newest first, because nothing bounds how many chats a
+ * project holds. A cut is logged.
+ *
+ * KNOWN LIMIT, accepted rather than fixed: a value that has been deleted or rotated is no
+ * longer in this union, so its old plaintext survives in whatever job log under
+ * `/workspace/.capka/jobs/` already holds it, and is readable again.
+ * The log lives in the owner's own workspace and
+ * is theirs to clear; scrubbing the filesystem on a delete is a different job from this one.
  */
 export async function loadRedactionSecrets(sessionKey: string, userId: string): Promise<[string, string][]> {
   const rows = await db
     .select({ name: chatSecrets.name, valueEnc: chatSecrets.valueEnc })
     .from(chatSecrets)
     .innerJoin(chats, eq(chats.id, chatSecrets.chatId))
-    .where(and(eq(chats.userId, userId), or(eq(chats.projectId, sessionKey), eq(chats.id, sessionKey))));
+    .where(and(eq(chats.userId, userId), or(eq(chats.projectId, sessionKey), eq(chats.id, sessionKey))))
+    // Newest first: a credential in current use is likelier to be the one a command is
+    // about to print. One row past the bound, so a cut can be reported as a fact rather
+    // than inferred from a full page.
+    .orderBy(desc(chatSecrets.createdAt))
+    .limit(MAX_REDACTION_PAIRS + 1);
   if (rows.length === 0) return [];
+  const cut = rows.length > MAX_REDACTION_PAIRS;
+  if (cut) {
+    log.warn("workspace has more secrets than the redactor covers; oldest are not redacted", {
+      sessionKey,
+      limit: MAX_REDACTION_PAIRS,
+    });
+  }
   const key = await getMasterKey();
   const pairs: [string, string][] = [];
-  for (const row of rows) {
+  for (const row of cut ? rows.slice(0, MAX_REDACTION_PAIRS) : rows) {
+    let value: string;
     try {
-      pairs.push([row.name, decrypt(row.valueEnc, key)]);
+      value = decrypt(row.valueEnc, key);
     } catch {
       // Same rule as `loadSecretEnv`: one undecryptable row must not take down the turn.
       log.warn("chat secret could not be decrypted; skipping redaction for it", { sessionKey, name: row.name });
+      continue;
     }
+    // A value the redactor would skip anyway (a pre-floor row) is dropped here so the
+    // bound above is spent on pairs that actually redact something.
+    if (isValidSecretValue(value)) pairs.push([row.name, value]);
   }
   return pairs;
 }

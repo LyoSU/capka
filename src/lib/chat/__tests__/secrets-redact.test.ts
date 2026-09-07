@@ -4,6 +4,7 @@ import {
   isValidSecretValue,
   redactSecrets,
   MIN_SECRET_VALUE_CHARS,
+  MIN_ENCODED_FORM_CHARS,
 } from "@/lib/chat/secrets";
 
 describe("normalizeSecretName", () => {
@@ -49,6 +50,17 @@ describe("isValidSecretValue", () => {
     expect(isValidSecretValue("x".repeat(MIN_SECRET_VALUE_CHARS))).toBe(true);
     // The concrete case from the report: `KEY=abc` was accepted and never redacted.
     expect(isValidSecretValue("abc")).toBe(false);
+  });
+
+  it("refuses a value that is not well-formed UTF-16", () => {
+    // Only reachable from a hand-written JSON body. `encodeURIComponent` throws on a lone
+    // surrogate, and the redactor runs on every tool result — so one such row used to
+    // fail every command in the chat AND in its project siblings, after the command had
+    // already run its side effects.
+    expect(isValidSecretValue("\ud800abc")).toBe(false);
+    expect(isValidSecretValue("\udc00abcd")).toBe(false);
+    // A COMPLETE pair is ordinary text and stays storable — an emoji in a passphrase.
+    expect(isValidSecretValue("pass\u{1f600}word")).toBe(true);
   });
 });
 
@@ -131,6 +143,28 @@ describe("redactSecrets", () => {
     expect(redactSecrets("a=sk-chat-a-value b=sk-chat-b-value", pairs)).toBe(
       "a=[secret:TOKEN] b=[secret:TOKEN]",
     );
+  });
+
+  it("never throws on a value stored before the validator refused it", () => {
+    // The row is already in the table; the redactor is the last line and must not be the
+    // thing that breaks the turn. The percent-encoded form is simply skipped.
+    const env = { BROKEN: "\ud800abcdef" };
+    expect(() => redactSecrets("some output", env)).not.toThrow();
+    // The literal still redacts — that is the form a shell would echo.
+    expect(redactSecrets("v=\ud800abcdef", env)).toBe("v=[secret:BROKEN]");
+  });
+
+  it("holds encoded forms to a higher floor than the literal", () => {
+    // `abcd` yields the six-character `YWJjZA`, which turns up inside unrelated
+    // identifiers and hashes; replacing part of one with `[secret:NAME]` is both wrong
+    // and alarming to read. The literal keeps the lower floor.
+    expect(MIN_ENCODED_FORM_CHARS).toBeGreaterThan(MIN_SECRET_VALUE_CHARS);
+    const env = { OK: "abcd" };
+    expect(redactSecrets("id=xYWJjZAq unrelated", env)).toBe("id=xYWJjZAq unrelated");
+    expect(redactSecrets("the abcd literal", env)).toBe("the [secret:OK] literal");
+    // Its forms that DO clear the floor stay covered: padded base64 and hex are both 8.
+    expect(redactSecrets("v=YWJjZA==", env)).toBe("v=[secret:OK]");
+    expect(redactSecrets("v=61626364", env)).toBe("v=[secret:OK]");
   });
 
   it("is a no-op with no secrets and on empty text", () => {
