@@ -18,6 +18,25 @@ import type * as React from "react";
 const STEP = 16;
 
 /**
+ * How far past the minimum a drag has to go before it closes the column instead
+ * of stopping dead against it.
+ *
+ * Without this the last stretch of the gesture is a dead zone: the handle stops
+ * moving and the pointer keeps going, which reads as the drag having broken. And
+ * the intent behind shoving a panel all the way into the edge of the screen is
+ * never "make it 14rem" — it is "get this out of my way". So the overshoot is
+ * given a meaning rather than swallowed. It is a deliberate 64px, far more than
+ * the wobble of a hand that meant to stop at the minimum.
+ */
+const COLLAPSE_OVERSHOOT = 64;
+
+/** Has this drag gone far enough past the minimum to mean "close it"? Only ever
+ *  true for a host that offered a way to close (see `onCollapse`). */
+export function shouldCollapse(rawWidth: number, min: number): boolean {
+  return rawWidth < min - COLLAPSE_OVERSHOOT;
+}
+
+/**
  * Look and interaction of the drag handle, shared by both edges. Positioning is
  * the host's business (one edge is `fixed` beside the sidebar, the other sits
  * inside a clipped panel), so this carries no `position` of its own.
@@ -84,6 +103,7 @@ export function useResizableWidth({
   maxWidth,
   label,
   direction,
+  onCollapse,
 }: {
   storageKey: string;
   defaultWidth: number;
@@ -95,6 +115,10 @@ export function useResizableWidth({
   /** `1` when dragging right widens the column (a left-hand panel), `-1` when it
    *  narrows it (a right-hand panel). */
   direction: 1 | -1;
+  /** Shut the column. Supplied by a host that HAS a closed state; a drag shoved
+   *  well past the minimum then closes it instead of grinding against the clamp.
+   *  Omit it and the minimum is simply the end of the road. */
+  onCollapse?: () => void;
 }): { width: number; dragging: boolean; handleProps: ResizeHandleProps; reset: () => void } {
   // What the user asked for, before the ceiling. Starts at the default so the
   // server and the first client render agree; the stored value is adopted on mount.
@@ -156,7 +180,21 @@ export function useResizableWidth({
     onPointerMove: (e) => {
       const start = drag.current;
       if (!start) return;
-      setPreferred(clampWidth(start.from + (e.clientX - start.x) * direction, min, max));
+      const raw = start.from + (e.clientX - start.x) * direction;
+      if (onCollapse && shouldCollapse(raw, min)) {
+        // End the drag here and hand back the width the column had before it.
+        // The gesture said "close", not "resize, then close" — so re-opening
+        // should give back the width the user chose, not the sliver they shoved
+        // it through on the way out. Storage is untouched for the same reason:
+        // it still holds that pre-drag width.
+        drag.current = null;
+        setDragging(false);
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        setPreferred(start.from);
+        onCollapse();
+        return;
+      }
+      setPreferred(clampWidth(raw, min, max));
     },
     onPointerUp: (e) => {
       if (!drag.current) return;

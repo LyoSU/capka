@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { clampWidth, readStoredWidth, writeStoredWidth } from "@/hooks/use-resizable-width";
+import { readFileSync } from "node:fs";
+import { clampWidth, readStoredWidth, shouldCollapse, writeStoredWidth } from "@/hooks/use-resizable-width";
 
 // The hook itself needs a DOM; its decisions do not. Everything that can be
 // wrong about a remembered width — the clamp, the round-trip through storage,
@@ -36,6 +37,38 @@ describe("clampWidth", () => {
   it("falls back to the minimum for a width that is not a number", () => {
     expect(clampWidth(Number.NaN, 224, 448)).toBe(224);
     expect(clampWidth(Number.POSITIVE_INFINITY, 224, 448)).toBe(224);
+  });
+});
+
+describe("shouldCollapse", () => {
+  const MIN = 224; // the sidebar's 14rem
+
+  it("is false anywhere inside the range, and at the minimum itself", () => {
+    expect(shouldCollapse(300, MIN)).toBe(false);
+    expect(shouldCollapse(MIN, MIN)).toBe(false);
+  });
+
+  it("is false for the wobble of a hand that meant to stop at the minimum", () => {
+    expect(shouldCollapse(MIN - 1, MIN)).toBe(false);
+    expect(shouldCollapse(MIN - 63, MIN)).toBe(false);
+  });
+
+  it("is true once the drag is a deliberate shove past it", () => {
+    expect(shouldCollapse(MIN - 65, MIN)).toBe(true);
+    expect(shouldCollapse(0, MIN)).toBe(true);
+    // A pointer dragged past the left edge of the window reports a negative x.
+    expect(shouldCollapse(-120, MIN)).toBe(true);
+  });
+});
+
+describe("both columns take the gesture", () => {
+  // Symmetry is the whole point and a silent omission on one side is exactly the
+  // regression: one edge would close under a hard drag and the other grind.
+  it("the nav and the workspace column each hand the hook a way to close", () => {
+    const nav = readFileSync("src/components/layout/app-sidebar.tsx", "utf8");
+    const panel = readFileSync("src/components/chat/workspace-panel.tsx", "utf8");
+    expect(nav).toMatch(/onCollapse: \(\) => setSidebarOpen\(false\)/);
+    expect(panel).toMatch(/onCollapse: onClose/);
   });
 });
 

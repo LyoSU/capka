@@ -150,6 +150,10 @@ export function WorkspacePanel({
     },
     label: t("resize"),
     direction: -1,
+    // Same gesture as the nav's, mirrored: shoved hard into the right edge, the
+    // column shuts rather than grinding against its 20rem floor. Closing it also
+    // clears the docked preview, through the effect above.
+    onCollapse: onClose,
   });
 
   // Always mounted so open/close can animate. On mobile it's a fixed overlay that

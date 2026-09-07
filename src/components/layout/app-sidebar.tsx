@@ -447,7 +447,7 @@ export function AppSidebar() {
   const t = useTranslations("nav");
   const locale = useLocale();
   const tTheme = useTranslations("theme");
-  const { toggleSidebar, state: sidebarState, setOpenMobile, openMobile, isMobile } = useSidebar();
+  const { toggleSidebar, state: sidebarState, setOpen: setSidebarOpen, setOpenMobile, openMobile, isMobile } = useSidebar();
   // The nav's expanded width is the reader's to set: chat titles are the one
   // thing in here that has no natural length, and a fixed 18rem truncates most
   // of them. 14–28rem, remembered per browser. Bounds in px because the drag
@@ -459,6 +459,9 @@ export function AppSidebar() {
     maxWidth: () => 448,
     label: t("resizeSidebar"),
     direction: 1,
+    // Shoving the handle well past 14rem means "get this out of my way", so it
+    // collapses to the icon rail — the same state ⌘B and the header button give.
+    onCollapse: () => setSidebarOpen(false),
   });
   const { theme, setTheme } = useTheme();
   const shortcut = useShortcutLabel();
