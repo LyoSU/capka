@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { ChevronDown, Mic } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Hint } from "@/components/ui/tooltip";
+import { dictationLanguages, speechLangLabels } from "@/components/chat/use-dictation";
 
 /**
  * The small chevron beside the microphone: which microphone the browser is using,
@@ -20,9 +22,19 @@ import { Hint } from "@/components/ui/tooltip";
  * always captures from the system default input and offers no way to choose another;
  * a list that let the person pick would change the meter and not the dictation, which
  * is worse than no list. The device the meter shows IS the one dictation hears.
+ *
+ * It IS a language picker. The engine transcribes in exactly one language per
+ * session and cannot tell which one it heard, so someone reading the UI in
+ * English and speaking Ukrainian gets confident nonsense until they say so here.
+ * Remembered per browser; see `useDictationLang`.
  */
-export function MicSettings() {
+export function MicSettings({ lang, onLangChange }: { lang: string; onLangChange: (tag: string) => void }) {
   const t = useTranslations("chat.input.dictation");
+  const locale = useLocale();
+  const languages = useMemo(() => {
+    const browser = typeof navigator === "undefined" ? [] : navigator.languages;
+    return speechLangLabels(dictationLanguages(locale, browser, lang), locale);
+  }, [locale, lang]);
   const [open, setOpen] = useState(false);
   const [level, setLevel] = useState(0);
   const [device, setDevice] = useState<string | null>(null);
@@ -100,7 +112,20 @@ export function MicSettings() {
         </PopoverTrigger>
       </Hint>
       <PopoverContent side="top" align="end" sideOffset={8} className="w-72">
-        <div className="flex items-center gap-2">
+        <label className="text-xs font-medium text-muted-foreground">{t("languageLabel")}</label>
+        <Select value={lang} onValueChange={(v) => onLangChange(v as string)} items={languages}>
+          <SelectTrigger className="mt-1.5 w-full" size="sm" aria-label={t("languageLabel")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {languages.map((it) => (
+              <SelectItem key={it.value} value={it.value}>
+                {it.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="mt-4 flex items-center gap-2">
           <Mic className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div
             role="meter"

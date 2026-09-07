@@ -7,7 +7,7 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Added
-
+- Dictation: a language picker beside the microphone, remembered per browser (defaults to the UI locale).
 - Chat: the sidebar and the files panel resize by dragging the edge they share with the conversation (arrow keys, Home/End; double-click resets); widths are remembered per browser, and the conversation never drops below 28rem. Shoving a handle well past its minimum closes that column, and re-opening it restores the width it had; a collapsed sidebar pulls back open with the same drag (click or Enter on its edge works too).
 - Chat: highlight a passage of an open text or Markdown file to quote it, explain it, or ask about it in the composer; the prompt names the file.
 - Chat: a file shown in the files panel can be taken full-window from its header and put back; Escape steps back to the panel. Opening a file anew always lands in the panel.

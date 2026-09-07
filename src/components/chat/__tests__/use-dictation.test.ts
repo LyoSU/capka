@@ -6,6 +6,9 @@ import {
   createDictationEngine,
   isDictationSupported,
   speechLangFor,
+  dictationLanguages,
+  speechLangLabel,
+  speechLangLabels,
   type DictationErrorKind,
   type SpeechRecognitionLike,
   type SpeechResultEventLike,
@@ -117,6 +120,47 @@ describe("speechLangFor", () => {
     // "zh-ZH" is not a thing; a bare "zh" is, and every engine resolves it.
     expect(speechLangFor("zh")).toBe("zh");
     expect(speechLangFor("pt-BR")).toBe("pt-BR");
+  });
+});
+
+describe("dictationLanguages", () => {
+  it("puts the UI locale first, then the browser's languages, then the common set, without repeats", () => {
+    const list = dictationLanguages("en", ["en-US", "uk", "pl-PL"]);
+    expect(list.slice(0, 3)).toEqual(["en-US", "uk-UA", "pl-PL"]);
+    expect(new Set(list.map((t) => t.toLowerCase())).size).toBe(list.length);
+    expect(list).toContain("de-DE");
+  });
+
+  it("keeps a remembered choice that is in neither list, so the picker can show it", () => {
+    expect(dictationLanguages("uk", [], "ja-JP")).toContain("ja-JP");
+  });
+
+  it("folds a bare browser tag into the regioned one, so 'ru' and 'ru-RU' are one row", () => {
+    const list = dictationLanguages("uk", ["ru"]);
+    expect(list.filter((t) => t.toLowerCase().startsWith("ru"))).toEqual(["ru-RU"]);
+    expect(list.indexOf("ru-RU")).toBe(1);
+  });
+});
+
+describe("speechLangLabels", () => {
+  it("spells the region out only for a language that appears twice", () => {
+    const labels = speechLangLabels(["uk-UA", "en-US", "en-GB"], "en");
+    expect(labels[0].label).toBe("Ukrainian");
+    expect(labels[1].label).not.toBe(labels[2].label);
+    expect(labels[1].label).toMatch(/English/);
+  });
+});
+
+describe("speechLangLabel", () => {
+  it("names the tag in the UI language, capitalised", () => {
+    expect(speechLangLabel("uk-UA", "uk")).toMatch(/^[А-ЯЇІЄҐ]/u);
+    // ICU names dialects the way people say them ("American English"), which is
+    // what a picker wants over "English (United States)".
+    expect(speechLangLabel("en-US", "en")).toMatch(/^[A-Z].*English/);
+  });
+
+  it("falls back to the tag itself when the browser cannot name it", () => {
+    expect(speechLangLabel("x-unknown-thing", "en")).toBe("X-unknown-thing");
   });
 });
 

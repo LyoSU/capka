@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { AttachmentTray } from "@/components/chat/attachment-tray";
 import { useAutoGrow } from "@/components/chat/use-auto-grow";
-import { useDictation, type DictationErrorKind } from "@/components/chat/use-dictation";
+import { useDictation, useDictationLang, type DictationErrorKind } from "@/components/chat/use-dictation";
 import type { FileRef } from "@/lib/constants";
 import type { Modality } from "@/lib/providers/registry";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
@@ -165,7 +165,8 @@ export function ChatInput({
     };
     toast.error(t(key[kind]));
   }, [t]);
-  const dictation = useDictation({ textareaRef, value, onChange, lang: locale, onError: onDictationError });
+  const [dictationLang, setDictationLang] = useDictationLang(locale);
+  const dictation = useDictation({ textareaRef, value, onChange, lang: dictationLang, onError: onDictationError });
   const { stop: stopDictation } = dictation;
 
   // The box grew by however many words were just spoken, so the height has to be
@@ -438,7 +439,7 @@ export function ChatInput({
                       <Mic className="size-4.5 sm:size-4" />
                     </Button>
                   </Hint>
-                  <MicSettings />
+                  <MicSettings lang={dictationLang} onLangChange={setDictationLang} />
                 </div>
               ) : (
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>

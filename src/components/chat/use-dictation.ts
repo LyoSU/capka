@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 
 /**
  * Voice dictation for the composer, on the browser's own Web Speech API — no
@@ -112,6 +112,100 @@ export function speechLangFor(locale: string): string {
   if (base === "uk") return "uk-UA";
   if (base === "en") return locale.includes("-") ? locale : "en-US";
   return locale;
+}
+
+/**
+ * Languages the microphone popover offers. The engine cannot detect a language —
+ * `lang` is one tag per session and nothing in the result says what was heard —
+ * so a person who reads the UI in one language and speaks another has to say so
+ * once. The list is the UI locale first, then whatever the browser is set to
+ * (a bilingual person usually has both there), then a short common set; the
+ * remembered choice is kept even when it comes from none of those.
+ */
+const COMMON_SPEECH_LANGS = ["en-US", "uk-UA", "en-GB", "pl-PL", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "tr-TR", "ru-RU"];
+
+export function dictationLanguages(locale: string, browser: readonly string[], chosen?: string): string[] {
+  const all = [speechLangFor(locale), ...browser.map(speechLangFor), ...(chosen ? [chosen] : []), ...COMMON_SPEECH_LANGS].filter(Boolean);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of all) {
+    // A browser often lists a bare "ru" beside our "ru-RU": one language, and the
+    // regioned tag is the one the engines prefer, so it stands in for the bare one.
+    const pick = tag.includes("-") ? tag : all.find((t) => t.toLowerCase().startsWith(tag.toLowerCase() + "-")) ?? tag;
+    const key = pick.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(pick);
+  }
+  return out;
+}
+
+/**
+ * What the picker prints for each tag, in the UI language, capitalised the way a
+ * list wants it. The region is spelled out only when the same language appears
+ * twice ("American English" / "British English"); a language present once is just
+ * its name — "Ukrainian (Ukraine)" says nothing "Ukrainian" does not.
+ */
+export function speechLangLabels(tags: readonly string[], locale: string): { value: string; label: string }[] {
+  const baseCount = new Map<string, number>();
+  for (const t of tags) {
+    const base = t.toLowerCase().split("-")[0];
+    baseCount.set(base, (baseCount.get(base) ?? 0) + 1);
+  }
+  return tags.map((tag) => {
+    const base = tag.split("-")[0];
+    return { value: tag, label: speechLangLabel((baseCount.get(base.toLowerCase()) ?? 0) > 1 ? tag : base, locale) };
+  });
+}
+
+export function speechLangLabel(tag: string, locale: string): string {
+  let name: string | undefined;
+  try {
+    name = new Intl.DisplayNames([locale], { type: "language" }).of(tag);
+  } catch {
+    // An unknown or malformed tag: the tag itself is the honest label.
+  }
+  const s = name ?? tag;
+  return s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+}
+
+const DICTATION_LANG_KEY = "capka.dictation.lang";
+
+function subscribeDictationLang(cb: () => void) {
+  window.addEventListener("storage", cb);
+  return () => window.removeEventListener("storage", cb);
+}
+
+/**
+ * The remembered dictation language, per browser: a choice about how a person
+ * speaks, not about a chat, so it is not keyed by chat. Falls back to the UI locale
+ * until one is made. The synthetic `storage` event is what makes a change in the
+ * popover reach the composer in the same document.
+ */
+export function useDictationLang(locale: string): [string, (tag: string) => void] {
+  const fallback = speechLangFor(locale);
+  const lang = useSyncExternalStore(
+    subscribeDictationLang,
+    () => {
+      try {
+        return localStorage.getItem(DICTATION_LANG_KEY) || fallback;
+      } catch {
+        return fallback;
+      }
+    },
+    () => fallback,
+  );
+  const set = useCallback((tag: string) => {
+    try {
+      localStorage.setItem(DICTATION_LANG_KEY, tag);
+      window.dispatchEvent(new StorageEvent("storage", { key: DICTATION_LANG_KEY }));
+    } catch {
+      // Storage refused (private mode, quota): the store is the only source of
+      // truth here, so the choice cannot take. The picker snaps back, which is
+      // at least visible.
+    }
+  }, []);
+  return [lang, set];
 }
 
 /**
