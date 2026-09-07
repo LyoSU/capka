@@ -699,7 +699,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const lastMsg = messages[messages.length - 1];
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
-
   // Rides in the same pill shell as the model picker, and renders itself away
   // when the resolved model has no reasoning levels worth offering. Hidden on a
   // read-only (Telegram) chat, where nothing is sendable from here anyway.
