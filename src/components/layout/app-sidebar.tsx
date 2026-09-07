@@ -855,11 +855,19 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" width={`${sidebarResize.width}px`} resizing={sidebarResize.dragging}>
       {/* The handle rides the nav's own right edge. `fixed`, not absolute: the
           column that owns that edge is itself fixed and has no positioned box a
-          child could hang off. */}
+          child could hang off.
+
+          The half pixel is not a typo. The rail's `border-r` paints the last 1px
+          INSIDE its box, so it ends on the edge rather than straddling it; an 8px
+          strip centred on that edge puts its own hairline half a pixel to the
+          right of the border, and the two paint 1.5px between them — which is the
+          fuzzy, doubled line. Offsetting by 4.5px lands the hairline exactly on
+          the border, measured, so one crisp pixel is painted twice instead of two
+          half-lit ones side by side. */}
       {sidebarState === "expanded" ? (
         <div
           {...sidebarResize.handleProps}
-          style={{ left: "calc(var(--sidebar-width) - 4px)" }}
+          style={{ left: "calc(var(--sidebar-width) - 4.5px)" }}
           className={cn(RESIZE_HANDLE_CLASS, "fixed inset-y-0")}
         />
       ) : (
@@ -899,7 +907,7 @@ export function AppSidebar() {
               setSidebarOpen(true);
             }
           }}
-          style={{ left: "calc(var(--sidebar-width-icon) - 4px)" }}
+          style={{ left: "calc(var(--sidebar-width-icon) - 4.5px)" }}
           className={cn(RESIZE_HANDLE_CLASS, "fixed inset-y-0")}
         />
       )}

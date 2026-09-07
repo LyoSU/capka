@@ -37,6 +37,19 @@ export function shouldCollapse(rawWidth: number, min: number): boolean {
 }
 
 /**
+ * Has a drag from a CLOSED edge gone far enough to mean "bring it back"?
+ *
+ * `dx` is how far the pointer has travelled in the growing direction, not a
+ * width: a shut column has no width to drag, only a way back. The threshold is
+ * the same overshoot that closed it, so the gesture is its own inverse — the
+ * column comes back the way it went, and a drag that closes something the user
+ * then cannot drag open is half a gesture.
+ */
+export function shouldExpand(dx: number): boolean {
+  return dx > COLLAPSE_OVERSHOOT;
+}
+
+/**
  * Look and interaction of the drag handle, shared by both edges. Positioning is
  * the host's business (one edge is `fixed` beside the sidebar, the other sits
  * inside a clipped panel), so this carries no `position` of its own.

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { clampWidth, readStoredWidth, shouldCollapse, writeStoredWidth } from "@/hooks/use-resizable-width";
+import { clampWidth, readStoredWidth, shouldCollapse, shouldExpand, writeStoredWidth } from "@/hooks/use-resizable-width";
 
 // The hook itself needs a DOM; its decisions do not. Everything that can be
 // wrong about a remembered width — the clamp, the round-trip through storage,
@@ -58,6 +58,42 @@ describe("shouldCollapse", () => {
     expect(shouldCollapse(0, MIN)).toBe(true);
     // A pointer dragged past the left edge of the window reports a negative x.
     expect(shouldCollapse(-120, MIN)).toBe(true);
+  });
+});
+
+describe("shouldExpand", () => {
+  it("ignores a nudge, and the wrong direction entirely", () => {
+    expect(shouldExpand(0)).toBe(false);
+    expect(shouldExpand(40)).toBe(false);
+    expect(shouldExpand(-200)).toBe(false);
+  });
+
+  it("opens on a deliberate pull", () => {
+    expect(shouldExpand(65)).toBe(true);
+    expect(shouldExpand(300)).toBe(true);
+  });
+
+  it("is the exact inverse of the shove that closed it", () => {
+    // Same overshoot both ways: whatever distance shuts a column at its minimum
+    // is the distance that brings it back, so the gesture is learnable once.
+    const MIN = 224;
+    for (const d of [63, 64, 65, 100]) {
+      expect(shouldExpand(d)).toBe(shouldCollapse(MIN - d, MIN));
+    }
+  });
+});
+
+describe("the hairline lands ON the border, not beside it", () => {
+  it("both nav handles are offset by half a pixel, and that half pixel is load-bearing", () => {
+    const nav = readFileSync("src/components/layout/app-sidebar.tsx", "utf8");
+    // `border-r` paints the last 1px INSIDE the rail's box, so an 8px strip
+    // centred on the edge puts its hairline half a pixel to the right and the two
+    // paint 1.5px between them — the fuzzy, doubled line. Measured in a harness:
+    // 4px gives border [287,288] against hairline [287.5,288.5]; 4.5px makes them
+    // identical. It reads like a typo, which is exactly why it is pinned here.
+    expect(nav).toMatch(/calc\(var\(--sidebar-width\) - 4\.5px\)/);
+    expect(nav).toMatch(/calc\(var\(--sidebar-width-icon\) - 4\.5px\)/);
+    expect(nav).not.toMatch(/calc\(var\(--sidebar-width(-icon)?\) - 4px\)/);
   });
 });
 
