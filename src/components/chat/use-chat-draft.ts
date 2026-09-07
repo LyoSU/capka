@@ -2,7 +2,8 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-const PREFIX = "capka:draft:";
+/** Exported so the command palette can seed a new chat's draft (Tab on a search). */
+export const DRAFT_PREFIX = "capka:draft:";
 
 /**
  * Per-chat composer draft, persisted to localStorage so a typed-but-unsent
@@ -33,7 +34,7 @@ function readDraft(key: string): string {
 }
 
 export function useChatDraft(chatId: string) {
-  const key = PREFIX + chatId;
+  const key = DRAFT_PREFIX + chatId;
 
   const draft = useSyncExternalStore(
     subscribe,

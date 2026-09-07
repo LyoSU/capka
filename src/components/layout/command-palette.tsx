@@ -18,6 +18,7 @@ import {
   Sparkles,
   CalendarClock,
   Bot,
+  User,
   Users,
   Wallet,
   Lock,
@@ -43,6 +44,7 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useBilling } from "@/hooks/use-billing";
 import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { SETTINGS_DIRECTORY, visibleSettings } from "@/lib/settings-directory";
+import { DRAFT_PREFIX } from "@/components/chat/use-chat-draft";
 
 /** The glyph of the settings page a row lives on — the same icons the settings
  *  sidebar draws for those pages, so a palette result and the page it opens look
@@ -64,6 +66,36 @@ function pageIcon(href: string): LucideIcon {
   return PAGE_ICONS.find(([prefix]) => href.startsWith(prefix))?.[1] ?? Settings;
 }
 
+type ChatRow = { id: string; title: string | null; projectName?: string | null; updatedAt: string | null };
+type MessageHit = {
+  messageId: string;
+  chatId: string;
+  chatTitle: string | null;
+  role: string;
+  createdAt: string;
+  snippet: string;
+};
+
+/** Below this the server answers nothing (see /api/search), so neither does the
+ *  palette pretend to have looked. */
+const MIN_SEARCH = 2;
+
+
+/** The server marks what it matched with `<<…>>`; this turns those into a
+ *  highlight. Split into text nodes rather than set as HTML — the string is a
+ *  person's own message, and it is never treated as markup anywhere. */
+function highlightSnippet(snippet: string) {
+  return snippet.split(/<<(.*?)>>/g).map((part, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="rounded-sm bg-brand/15 px-0.5 text-foreground">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function CommandPalette() {
   const t = useTranslations("commandPalette");
   // Root-namespaced: directory entries carry full key paths so a palette row reads
@@ -75,10 +107,16 @@ export function CommandPalette() {
   const { billing } = useBilling();
   const [open, setOpen] = useState(false);
   // The palette is also the chat search: what you type filters the static rows
-  // AND asks the server for matching chats. Recent chats fill the group while the
-  // field is empty, so opening the palette is a chat switcher before a keystroke.
+  // AND asks the server for matching chat titles and matching message text.
+  // Recent chats fill the group while the field is empty, so opening the palette
+  // is a chat switcher before a keystroke.
   const [query, setQuery] = useState("");
-  const [chats, setChats] = useState<{ id: string; title: string | null; projectName?: string | null; updatedAt: string | null }[]>([]);
+  const [chats, setChats] = useState<ChatRow[]>([]);
+  // Messages whose text matched, and the query those results belong to. The
+  // second is what tells "we looked and found nothing" from "we have not asked
+  // yet" — without it the empty sentence flashes between keystrokes.
+  const [hits, setHits] = useState<MessageHit[]>([]);
+  const [resultsFor, setResultsFor] = useState("");
   const locale = useLocale();
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
@@ -118,26 +156,37 @@ export function CommandPalette() {
     };
   }, [router]);
 
-  // Same endpoint and same title match (`ilike`) the sidebar list uses, so a chat
-  // found here is the chat the sidebar would have shown. Debounced only while
-  // typing; the recents fetch on open is immediate. The AbortController drops a
-  // stale response that lands after the next keystroke.
+  // Empty field: recent chats, straight from the list the sidebar shows. Typed
+  // field: /api/search, which answers with title matches AND matches inside the
+  // messages themselves — so what a person half-remembers saying is enough to
+  // find the chat again, not only what the chat happens to be called.
+  //
+  // Debounced only while typing; the recents fetch on open is immediate. The
+  // AbortController drops a stale response that lands after the next keystroke.
   useEffect(() => {
     if (!open) return;
     const ctrl = new AbortController();
     const q = query.trim();
     const timer = setTimeout(async () => {
       try {
-        const params = new URLSearchParams();
-        if (q) params.set("search", q);
-        const res = await fetch(`/api/chats?${params}`, { signal: ctrl.signal });
+        if (!q) {
+          const res = await fetch("/api/chats", { signal: ctrl.signal });
+          if (!res.ok) return;
+          setChats(((await res.json()) as ChatRow[]).slice(0, 8));
+          setHits([]);
+          setResultsFor("");
+          return;
+        }
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
         if (!res.ok) return;
-        const rows = (await res.json()) as { id: string; title: string | null; projectName?: string | null; updatedAt: string | null }[];
-        setChats(rows.slice(0, 8));
+        const body = (await res.json()) as { chats: ChatRow[]; messages: MessageHit[] };
+        setChats(body.chats);
+        setHits(body.messages);
+        setResultsFor(q);
       } catch {
-        /* aborted or offline — the group simply keeps its last rows */
+        /* aborted or offline — the groups simply keep their last rows */
       }
-    }, q ? 150 : 0);
+    }, q ? 200 : 0);
     return () => {
       clearTimeout(timer);
       ctrl.abort();
@@ -148,6 +197,33 @@ export function CommandPalette() {
     setOpen(false);
     fn();
   }
+
+  /** The day a chat or a message belongs to — the same slot and the same shape in
+   *  both groups, so one column reads as one kind of fact. */
+  function dayMonth(iso: string) {
+    return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }).format(new Date(iso));
+  }
+
+  /** Tab on a typed query: start a fresh chat that already holds those words. The
+   *  search field is often where the thought was actually formed, and retyping it
+   *  into the composer is the step this removes. */
+  function startChatWithQuery() {
+    const text = query.trim();
+    const id = nanoid();
+    try {
+      localStorage.setItem(DRAFT_PREFIX + id, text);
+    } catch {
+      /* private mode or a full store — the chat still opens, just empty */
+    }
+    run(() => router.push(`/chat/${id}`));
+  }
+
+  // The server has answered THIS query and found neither a chat nor a message.
+  // Comparing against the query the results belong to is what keeps the sentence
+  // from appearing over stale results mid-typing.
+  const trimmed = query.trim();
+  const searchedEmpty =
+    trimmed.length >= MIN_SEARCH && resultsFor === trimmed && chats.length === 0 && hits.length === 0;
 
   function cycleTheme() {
     const order = ["system", "light", "dark"] as const;
@@ -160,12 +236,43 @@ export function CommandPalette() {
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (!v) setQuery("");
+        // Closing forgets the search, results included — reopening should be the
+        // recents list, not a moment of last week's hits under a live heading.
+        if (!v) {
+          setQuery("");
+          setHits([]);
+          setResultsFor("");
+        }
       }}
     >
-      <CommandInput placeholder={t("search")} value={query} onValueChange={setQuery} />
+      <CommandInput
+        placeholder={t("search")}
+        value={query}
+        onValueChange={setQuery}
+        onKeyDown={(e) => {
+          // Only a bare Tab, and only with something typed: otherwise Tab stays
+          // the browser's own focus move, which is how the footer's hints and the
+          // list are reached by keyboard.
+          if (e.key !== "Tab" || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey || !query.trim()) return;
+          e.preventDefault();
+          startChatWithQuery();
+        }}
+      />
       <CommandList>
-        <CommandEmpty>{t("noResults")}</CommandEmpty>
+        {/* cmdk counts only the rows it owns, and the message rows are force-mounted
+            — so it has to be told when the list is not actually empty. And when the
+            search itself has a sentence to say, two "nothing here" lines for one
+            empty search is one too many. */}
+        {hits.length === 0 && !searchedEmpty && <CommandEmpty>{t("noResults")}</CommandEmpty>}
+
+        {searchedEmpty && (
+          <CommandGroup forceMount>
+            <CommandItem disabled forceMount>
+              <Search />
+              {t("noSearchHits")}
+            </CommandItem>
+          </CommandGroup>
+        )}
 
         {chats.length > 0 && (
           <CommandGroup heading={query.trim() ? t("groups.chats") : t("groups.recentChats")}>
@@ -184,9 +291,37 @@ export function CommandPalette() {
                     or failing that the day it was last touched — the same slot the
                     settings rows use for their page name. */}
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {c.projectName ||
-                    (c.updatedAt && new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }).format(new Date(c.updatedAt)))}
+                  {c.projectName || (c.updatedAt && dayMonth(c.updatedAt))}
                 </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {hits.length > 0 && (
+          // `forceMount`, group and rows: these came back ranked — a whole-word
+          // match above a substring one, at most three per chat — and cmdk's own
+          // filter both re-scores and REORDERS the rows it owns, which would
+          // silently replace that ranking with a fuzzy score over a snippet. Force
+          // -mounted rows are left in the order they arrived, and stay arrow-key
+          // reachable (cmdk walks the DOM for that).
+          <CommandGroup heading={t("groups.messages")} forceMount>
+            {hits.map((h) => (
+              <CommandItem
+                key={h.messageId}
+                forceMount
+                value={h.messageId}
+                className="h-auto items-start py-2"
+                onSelect={() => run(() => router.push(`/chat/${h.chatId}?m=${h.messageId}`))}
+              >
+                {h.role === "user" ? <User className="mt-0.5" /> : <Bot className="mt-0.5" />}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {h.chatTitle || tRoot("nav.newChat")}
+                  </span>
+                  <span className="block truncate">{highlightSnippet(h.snippet)}</span>
+                </span>
+                <span className="shrink-0 self-start text-xs text-muted-foreground">{dayMonth(h.createdAt)}</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -277,6 +412,11 @@ export function CommandPalette() {
       <div className="flex items-center gap-4 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><CommandKbd>↑↓</CommandKbd>{t("hints.navigate")}</span>
         <span className="flex items-center gap-1.5"><CommandKbd>↵</CommandKbd>{t("hints.open")}</span>
+        {/* Named only once there is text to carry over, so the resting palette
+            keeps its three keys. */}
+        {trimmed && (
+          <span className="flex items-center gap-1.5"><CommandKbd>tab</CommandKbd>{t("hints.newChatWith")}</span>
+        )}
         <span className="ml-auto flex items-center gap-1.5"><CommandKbd>esc</CommandKbd>{t("hints.close")}</span>
       </div>
     </CommandDialog>

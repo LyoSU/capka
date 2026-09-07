@@ -2168,12 +2168,14 @@
       "shortcuts": "Гарячі клавіші",
       "settings": "Знайти налаштування",
       "chats": "Чати",
-      "recentChats": "Нещодавні чати"
+      "recentChats": "Нещодавні чати",
+      "messages": "Повідомлення"
     },
     "hints": {
       "navigate": "перейти",
       "open": "відкрити",
-      "close": "закрити"
+      "close": "закрити",
+      "newChatWith": "новий чат із цим текстом"
     },
     "newChat": "Новий чат",
     "projects": "Проєкти",
@@ -2184,7 +2186,8 @@
     "toggleSidebar": "Бічна панель",
     "toggleTheme": "Тема",
     "commandPalette": "Палітра команд",
-    "searchChats": "Пошук чатів"
+    "searchChats": "Пошук чатів і повідомлень",
+    "noSearchHits": "Жоден чат чи повідомлення не збігається із запитом."
   },
   "auth": {
     "emailLabel": "Пошта",

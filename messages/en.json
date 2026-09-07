@@ -2168,12 +2168,14 @@
       "shortcuts": "Keyboard shortcuts",
       "settings": "Find a setting",
       "chats": "Chats",
-      "recentChats": "Recent chats"
+      "recentChats": "Recent chats",
+      "messages": "Messages"
     },
     "hints": {
       "navigate": "navigate",
       "open": "open",
-      "close": "close"
+      "close": "close",
+      "newChatWith": "new chat with this text"
     },
     "newChat": "New chat",
     "projects": "Projects",
@@ -2184,7 +2186,8 @@
     "toggleSidebar": "Toggle sidebar",
     "toggleTheme": "Toggle theme",
     "commandPalette": "Command palette",
-    "searchChats": "Search chats"
+    "searchChats": "Search chats and messages",
+    "noSearchHits": "No chats or messages match your search."
   },
   "auth": {
     "emailLabel": "Email",

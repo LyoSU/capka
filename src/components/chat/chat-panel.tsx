@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
@@ -235,6 +235,43 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // `memo(ChatMessage)` can close over these without a ref to keep them from
   // changing identity on every keystroke.
   const scrollActions = scroll.actions;
+
+  // Arriving from search on one particular message (`?m=<id>`): put it on the
+  // reading line and mark it for a moment, so the eye has somewhere to land in a
+  // wall of transcript. `jumpToMessage` rather than `scrollIntoView` — it hands
+  // the engine the same anchor and ownership a click on the navigator does, so
+  // nothing pulls the view back afterwards. The transcript arrives after mount,
+  // so the row is looked for over a couple of seconds and then simply given up
+  // on: a link to a deleted message is not worth saying anything about.
+  const targetMessageId = useSearchParams().get("m");
+  useEffect(() => {
+    if (!targetMessageId) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const marks = still ? ["rounded-xl", "bg-brand/10"] : ["rounded-xl", "bg-brand/10", "transition-colors", "duration-700"];
+    const deadline = Date.now() + 2000;
+    let frame = 0;
+    let unmark = 0;
+    const seek = () => {
+      const el = document.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(targetMessageId)}"]`);
+      if (!el) {
+        if (Date.now() < deadline) frame = requestAnimationFrame(seek);
+        return;
+      }
+      scrollActions.jumpToMessage(targetMessageId);
+      el.classList.add(...marks);
+      unmark = window.setTimeout(() => el.classList.remove(...marks), 2000);
+      // Drop the parameter, keeping any other: a reload should show the chat, not
+      // jump back to a message the reader has already read.
+      const rest = new URLSearchParams(window.location.search);
+      rest.delete("m");
+      router.replace(window.location.pathname + (rest.toString() ? `?${rest}` : ""), { scroll: false });
+    };
+    frame = requestAnimationFrame(seek);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(unmark);
+    };
+  }, [targetMessageId, scrollActions, router]);
 
   // Fold older messages out of layout and paint. Every message in a long chat is a
   // full markdown tree with its highlighted code, formulas and diagrams; the

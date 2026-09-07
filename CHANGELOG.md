@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - Steer a running reply: Alt+Enter in the composer (or the new action on a queued message) folds your text into the turn already in progress at its next step, without stopping it. Capped at 10 steers of 4000 characters per turn; a turn that finishes first falls back to sending the message normally.
 - Chats waiting on the user (approval card, agent question, failed reply) are grouped at the top of the sidebar with their own marker and a count in the tab title. Derived from each chat's last message: answering clears an approval or question, opening the chat clears a failure.
 - Telegram: messages sent in quick succession (2.5 s of quiet, 12 s at most, 20 messages or 100 KB) are grouped into one turn instead of a reply to the first fragment followed by a follow-up. Requires a platform restart to take effect.
+- Search (Cmd+K) now also finds text inside messages, yours and the assistant's, with a highlighted snippet; opening a hit scrolls to that message. Tab starts a new chat with the typed text.
 
 ### Security
 
