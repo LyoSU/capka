@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ignoredPath, oversized, FOLDER_MAX_FILE_MB } from "../filter";
+import { ignoredPath, oversized, sanitizeFolderName, FOLDER_MAX_FILE_MB } from "../filter";
 
 describe("ignoredPath", () => {
   it("ignores dependency/build trees at any depth", () => {
@@ -75,5 +75,48 @@ describe("oversized", () => {
     expect(oversized(FOLDER_MAX_FILE_MB * 1024 * 1024 + 1)).toBe(true);
     expect(oversized(FOLDER_MAX_FILE_MB * 1024 * 1024)).toBe(false);
     expect(oversized(1024)).toBe(false);
+  });
+});
+
+describe("sanitizeFolderName", () => {
+  // No literal Cyrillic lives under `src/` (the release gate forbids it outside the
+  // message catalogues), so every Cyrillic input below is written as \u escapes and
+  // its Latin reading is named in the comment.
+
+  it("transliterates Cyrillic instead of erasing it", () => {
+    expect(sanitizeFolderName("\u0417\u0432\u0456\u0442\u0438")).toBe("zvity");                 // Zvity
+    expect(sanitizeFolderName("\u0414\u043e\u0433\u043e\u0432\u043e\u0440\u0438 2026")).toBe("dohovory-2026");         // Dohovory 2026
+    expect(sanitizeFolderName("\u0429\u043e\u0434\u0435\u043d\u043d\u0438\u043a")).toBe("shchodennyk");           // Shchodennyk
+    expect(sanitizeFolderName("\u041a\u0438\u0457\u0432")).toBe("kyiv");                  // Kyiv (dotted i)
+  });
+
+  it("keeps two differently-named Cyrillic folders apart", () => {
+    // The defect: both collapsed to "" (or to their digits), so two folders shared
+    // one sandbox directory and their contents merged.
+    expect(sanitizeFolderName("\u0417\u0432\u0456\u0442\u0438")).not.toBe(sanitizeFolderName("\u0414\u043e\u0433\u043e\u0432\u043e\u0440\u0438 2026"));
+    expect(sanitizeFolderName("\u0417\u0432\u0456\u0442\u0438")).not.toBe("");
+  });
+
+  it("handles a mix of Latin and Cyrillic", () => {
+    expect(sanitizeFolderName("Alpha \u0417\u0432\u0456\u0442")).toBe("alpha-zvit");            // Alpha Zvit
+  });
+
+  it("collapses separator runs to one dash and trims the ends", () => {
+    expect(sanitizeFolderName("  My   Reports!!  ")).toBe("my-reports");
+    expect(sanitizeFolderName("a -- b")).toBe("a-b");
+    expect(sanitizeFolderName("_keep_underscores_")).toBe("_keep_underscores_");
+  });
+
+  it("returns an empty name when nothing usable is left", () => {
+    expect(sanitizeFolderName("!!! ??? ---")).toBe("");
+    expect(sanitizeFolderName("")).toBe("");
+  });
+
+  it("caps the name at 40 chars without leaving a trailing dash", () => {
+    const capped = sanitizeFolderName("\u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 ");   // "Zvity " repeated eight times
+    expect(capped.length).toBeLessThanOrEqual(40);
+    expect(capped.endsWith("-")).toBe(false);
+    // Deterministic: the same input always yields the same bytes on both sides.
+    expect(sanitizeFolderName("\u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 \u0417\u0432\u0456\u0442\u0438 ")).toBe(capped);
   });
 });

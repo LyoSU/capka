@@ -16,11 +16,15 @@ export const GET = apiHandler(async (req: Request) => {
   // reads as server-side deletes and would drive a destructive local delete).
   const limitRaw = parseInt(searchParams.get("limit") || "0", 10);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+  // Folder sync passes hash=1 so every file entry carries a content SHA-256 and
+  // the 3-way planner can see an edit that kept the byte length. The file browser
+  // omits it: hashing a whole tree reads every file, which it has no use for.
+  const withHash = searchParams.get("hash") === "1";
 
   // Browse a chat's or a project's shared workspace (exactly one target), resolved
   // + ownership-checked server-side — read from the host fs, no running container.
   const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
-  const data = await listFiles(sessionKey, path, userId, depth, limit);
+  const data = await listFiles(sessionKey, path, userId, depth, limit, withHash);
   return Response.json(data);
 });
 

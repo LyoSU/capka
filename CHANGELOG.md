@@ -28,6 +28,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
+- Chat: the jump rail at the right edge is quieter (hairline marks, dimmer at rest, full weight on keyboard focus) and its list aligns every row's text on one edge with the full message on hover.
 - Chat: thinking levels are named Off / Low / Medium / High (Вимкнено / Низький / Середній / Високий); the explanations under the slider are unchanged.
 - Chat, phone: the model overlay no longer opens the keyboard by itself, and the thinking slider steps aside while a search is being typed.
 - Chat: the paperclip became a "+" menu (files, folder, secrets, and shortcuts to skills, connectors and plugins); connected folders show as chips on the rail above the composer card with their sync state and a reconnect action, and the model and thinking controls moved to the right of the footer beside the send button.
@@ -36,6 +37,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Folder sync: an edit that kept a file's byte length is now detected (`GET /api/sandbox/files` forwards `hash=1` to the controller, so the planner compares content hashes instead of sizes).
+- Folder sync: a folder named in Cyrillic keeps a readable, distinct name in the workspace (`Звіти` → `zvity`) instead of collapsing to `folder` and merging with every other Cyrillic folder. Latin names keep their separators as `-` (`My Reports` → `my-reports`).
+- Moving a chat into a project carries its connected folders along; a folder whose name is already taken in the project stays behind and is named in the response (`foldersNotCarried`).
 - Chat: the microphone button did nothing in development builds (React strict mode disposed the dictation engine on mount); production was unaffected.
 - `GET /api/tasks?chatId=` reports the chat's running turn instead of the newest row, so Stop cancels the streaming reply and steering works while a follow-up is queued behind it.
 - Cancelling a queued turn removes it and releases its budget hold immediately instead of leaving it waiting until the current reply ends.

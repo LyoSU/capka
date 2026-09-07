@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chats, tasks } from "@/lib/db/schema";
+import { chats, tasks, attachedFolders } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { NotFoundError } from "@/lib/errors";
 import { isShared, generateShareToken } from "@/lib/chat/sharing";
@@ -19,6 +19,9 @@ export const PATCH = apiHandler(async (req, { params }) => {
 
   const body = await req.json();
   const oldProjectId = (existing.projectId as string | null) ?? null;
+  // Folders the move could NOT bring along (their name is already taken in the
+  // target project). Reported to the caller rather than failing the move.
+  const foldersNotCarried: string[] = [];
   // A "projectId" key present in the body is a move (to a project, or to null =
   // "remove from project"). Distinguish "absent" (no move) from "null" (unassign).
   const movingProject = Object.prototype.hasOwnProperty.call(body, "projectId");
@@ -59,6 +62,42 @@ export const PATCH = apiHandler(async (req, { params }) => {
         const subdir = `From chat "${title}" (${id.slice(0, 8)})`;
         await copyWorkspace(newProjectId, srcKey, subdir, userId);
         log.info("chat files carried into project on move", { chatId: id, projectId: newProjectId });
+      }
+
+      // The chat's attached folders are keyed by the SAME session key as its
+      // workspace, so the move has to re-key them or they silently fall off: the
+      // menu stops listing them, the bridge syncs nothing and the prompt forgets
+      // them. Only this direction moves rows — a project's folders are shared by
+      // every chat in it (see the workspace note above), so a chat leaving a
+      // project, or hopping to another one, must not drag them away from the
+      // chats that stay.
+      const dstKey = workspaceSessionKey({ id, projectId: newProjectId });
+      const mine = await db
+        .select({ id: attachedFolders.id, name: attachedFolders.name })
+        .from(attachedFolders)
+        .where(eq(attachedFolders.sessionKey, srcKey));
+      if (mine.length > 0) {
+        // `uq_attached_folders_session_name` would reject a duplicate name, and a
+        // rejected move is worse than a folder left behind: check first, carry the
+        // rest, and name the ones that stayed.
+        const taken = new Set(
+          (await db
+            .select({ name: attachedFolders.name })
+            .from(attachedFolders)
+            .where(eq(attachedFolders.sessionKey, dstKey))
+          ).map((r) => r.name),
+        );
+        const carried = mine.filter((f) => !taken.has(f.name));
+        foldersNotCarried.push(...mine.filter((f) => taken.has(f.name)).map((f) => f.name));
+        if (carried.length > 0) {
+          await db
+            .update(attachedFolders)
+            .set({ sessionKey: dstKey, updatedAt: new Date() })
+            .where(inArray(attachedFolders.id, carried.map((f) => f.id)));
+        }
+        log.info("chat folders re-keyed on move", {
+          chatId: id, projectId: newProjectId, carried: carried.length, notCarried: foldersNotCarried.length,
+        });
       }
     }
   }
@@ -110,6 +149,9 @@ export const PATCH = apiHandler(async (req, { params }) => {
     ok: true,
     visibility: updates.visibility ?? existing.visibility,
     shareToken,
+    // Present ONLY when a folder was left behind, so the ordinary response shape
+    // is unchanged and a caller can treat the key's presence as the warning.
+    ...(foldersNotCarried.length > 0 ? { foldersNotCarried } : {}),
   });
 });
 

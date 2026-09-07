@@ -262,13 +262,21 @@ type FileEntry = {
   isDirectory: boolean;
   size: number;
   modifiedAt: string | null;
+  /** Content SHA-256, present only when the listing was asked for hashes
+   *  (`withHash`). Folder sync compares by it, because an agent edit that keeps
+   *  the byte length is invisible to a size comparison. */
+  hash?: string;
 };
 
-export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number, limit?: number): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
+/** `withHash` asks the controller for a per-file content SHA-256. Only folder
+ *  sync needs it — the file browser leaves it off, so an ordinary listing never
+ *  pays for reading every file. */
+export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number, limit?: number, withHash?: boolean): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
   if (depth && depth > 1) params.set("depth", String(depth));
   if (limit && limit > 1) params.set("limit", String(limit));
+  if (withHash) params.set("hash", "1");
   if (userId) {
     params.set("userId", userId);
     params.set("token", workspaceToken(userId, sessionId));

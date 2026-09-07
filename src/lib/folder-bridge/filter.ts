@@ -99,11 +99,57 @@ export function oversized(size: number): boolean {
   return size > FOLDER_MAX_FILE_MB * 1024 * 1024;
 }
 
+/** Cyrillic to Latin, applied before the charset strip so a folder named in
+ *  Ukrainian keeps a readable, DISTINCT name instead of collapsing to "" (and
+ *  merging with every other Cyrillic folder into one sandbox directory).
+ *
+ *  Ukrainian readings win where the two alphabets disagree (he / y / i, not
+ *  ge / i / nothing), and the letters Russian does not share with Ukrainian are
+ *  mapped too so a mixed folder set still round-trips. Position-dependent
+ *  official rules ("ye" at the start of a word, "ie" elsewhere) are deliberately
+ *  NOT implemented: this function has to be deterministic and byte-identical on
+ *  the server and in the browser, and one reading per letter is the cheapest way
+ *  to guarantee that.
+ *
+ *  The keys are \u escapes rather than the letters themselves because the release
+ *  gate (`scripts/release-gate.sh`, check 5) forbids Cyrillic anywhere under
+ *  `src/` outside the message catalogues, and this table is code, not copy. Only
+ *  lower-case keys are needed: the name is lower-cased first. */
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  // U+0430..U+043F - a, be, ve, he, de, e, zhe, ze, y, i-short, ka, el, em, en, o, pe.
+  "\u0430": "a", "\u0431": "b", "\u0432": "v", "\u0433": "h", "\u0434": "d",
+  "\u0435": "e", "\u0436": "zh", "\u0437": "z", "\u0438": "y", "\u0439": "i",
+  "\u043a": "k", "\u043b": "l", "\u043c": "m", "\u043d": "n", "\u043e": "o",
+  "\u043f": "p",
+  // U+0440..U+044F - er, es, te, u, ef, kha, tse, che, sha, shcha, hard sign, yeru,
+  // soft sign, e, yu, ya. Both signs drop out: they have no Latin reading.
+  "\u0440": "r", "\u0441": "s", "\u0442": "t", "\u0443": "u", "\u0444": "f",
+  "\u0445": "kh", "\u0446": "ts", "\u0447": "ch", "\u0448": "sh", "\u0449": "shch",
+  "\u044a": "", "\u044b": "y", "\u044c": "", "\u044d": "e", "\u044e": "iu",
+  "\u044f": "ia",
+  // Outside the base block - yo, Ukrainian ye, Ukrainian dotted i, yi, ge-upturn.
+  "\u0451": "e", "\u0454": "ie", "\u0456": "i", "\u0457": "i", "\u0491": "g",
+};
+
 /** Canonical mount/workspace name for a folder: the safe id charset the sandbox
  *  path and Docker mount name allow, lower-cased and length-capped. The SINGLE
  *  source of truth — the API routes, the manage control, and the browser bridge
  *  all call this so the name the client derives to adopt an existing row stays
- *  byte-identical to what the server stored (a drift here 409s a re-pick). */
+ *  byte-identical to what the server stored (a drift here 409s a re-pick).
+ *
+ *  Anything left outside the charset (spaces, punctuation, a script with no
+ *  transliteration) collapses to ONE "-" rather than vanishing, so two folders
+ *  whose names differ only in their separators still differ here. Returns "" only
+ *  when nothing usable is left; every caller already falls back to "folder" or
+ *  rejects it. */
 export function sanitizeFolderName(name: string): string {
-  return name.replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40);
+  return name
+    .toLowerCase()
+    .replace(/[\u0400-\u04ff]/g, (ch) => CYRILLIC_TO_LATIN[ch] ?? "")
+    .replace(/[^a-z0-9_]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    // The 40-char cut can land on a separator; trim again so a stored name never
+    // ends in "-" and two names cut at the same point stay byte-identical.
+    .replace(/-+$/, "");
 }
