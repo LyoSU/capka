@@ -939,7 +939,13 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
           const at = framePoint(e, e.currentTarget);
           pointers.current.set(e.pointerId, at);
           lastPointerType.current = e.pointerType;
-          tap.current = pointers.current.size === 1 ? { at, x: e.clientX, y: e.clientY, type: e.pointerType } : null;
+          // Only the primary button is a click here: a right-click opens the context
+          // menu and a middle-click is whatever the browser makes of it, and neither
+          // should zoom the picture on release.
+          tap.current =
+            pointers.current.size === 1 && (e.pointerType !== "mouse" || e.button === 0)
+              ? { at, x: e.clientX, y: e.clientY, type: e.pointerType }
+              : null;
           gesture.current = readGesture();
           setDragging(pointers.current.size === 1);
           // Touch and pen only. On a desktop the arrows and the header buttons
