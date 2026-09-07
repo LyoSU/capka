@@ -277,6 +277,13 @@ export function DockedPreview({
   const tw = useTranslations("chat.workspace");
   const file = files[index];
   const many = files.length > 1;
+  const kind = previewKind(file.name);
+  // "Open in a new tab" is offered only for what a browser will actually SHOW.
+  // Anything else is served as application/octet-stream under `nosniff`, so the
+  // click downloads the file — two buttons in one row doing the same thing, one
+  // of them under a label that promises otherwise. Download is still right there
+  // for those files, which is what they need anyway.
+  const opensInTab = kind === "image" || kind === "pdf" || kind === "text" || kind === "markdown";
   const go = useCallback(
     (delta: number) => onIndex((index + delta + files.length) % files.length),
     [index, files.length, onIndex],
@@ -324,9 +331,11 @@ export function DockedPreview({
             <HeaderButton onClick={() => go(1)} label={t("next")}><ChevronRight className="h-4 w-4" /></HeaderButton>
           </>
         )}
-        <HeaderButton href={inlineUrl(file)} target="_blank" label={t("openInNewTab")}>
-          <ExternalLink className="h-4 w-4" />
-        </HeaderButton>
+        {opensInTab && (
+          <HeaderButton href={inlineUrl(file)} target="_blank" label={t("openInNewTab")}>
+            <ExternalLink className="h-4 w-4" />
+          </HeaderButton>
+        )}
         <HeaderButton href={downloadUrl(file)} download={file.name} label={t("download")}>
           <Download className="h-4 w-4" />
         </HeaderButton>
@@ -336,7 +345,7 @@ export function DockedPreview({
         </HeaderButton>
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-muted/10">
-        <Viewer key={file.path} file={file} kind={previewKind(file.name)} onClose={onBack} onPage={many ? go : undefined} selectionBar={selectionBar?.(file.name)} />
+        <Viewer key={file.path} file={file} kind={kind} onClose={onBack} onPage={many ? go : undefined} selectionBar={selectionBar?.(file.name)} />
       </div>
     </div>
   );
