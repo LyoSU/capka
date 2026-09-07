@@ -110,12 +110,17 @@ export const POST = apiHandler(async (req: Request, { params }: { params: Promis
   }
 
   try {
-    const { fired, chatId, reason } = await fireAutomation(row, { rawBody });
+    const { fired, chatId, reason, note } = await fireAutomation(row, { rawBody });
     // A skip is a real, reported outcome: the previous run is still working
-    // ("busy") or the day's ceiling is reached ("daily_limit"). The delivery key
-    // stays claimed either way — the call WAS processed, and a retry that fired a
-    // second time would be exactly the duplicate the key exists to prevent.
-    if (!fired) return Response.json({ status: "skipped", reason: reason ?? "busy" }, { status: 202 });
+    // ("busy"), the day's ceiling is reached ("daily_limit"), or the automation's
+    // `run_when` condition did not hold for this event ("condition", with the
+    // gate's one-line reason as `note` — a sender that pushes every event needs to
+    // know its call landed and was judged, not merely that nothing happened). The
+    // delivery key stays claimed either way: the call WAS processed, and a retry
+    // that fired a second time would be exactly the duplicate the key prevents.
+    if (!fired) {
+      return Response.json({ status: "skipped", reason: reason ?? "busy", ...(note ? { note } : {}) }, { status: 202 });
+    }
     return Response.json({ status: "accepted", chatId }, { status: 202 });
   } catch (e) {
     // The firing threw, so nothing was processed. Release the key so the sender's

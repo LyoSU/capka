@@ -24,6 +24,9 @@ export interface EditableAutomation {
   webhookUrl: string | null;
   maxRunsPerDay: number | null;
   threadMode: string;
+  /** The condition sentence checked before each run, or null when every firing
+   *  runs. Empty text and null mean the same thing to the server. */
+  runWhen: string | null;
 }
 
 export function AutomationEditor({
@@ -52,6 +55,7 @@ export function AutomationEditor({
   // Kept as the raw text of the field: empty means "no limit", and coercing to a
   // number here would turn a half-typed value into a saved one.
   const [maxRuns, setMaxRuns] = useState(automation?.maxRunsPerDay ? String(automation.maxRunsPerDay) : "");
+  const [runWhen, setRunWhen] = useState(automation?.runWhen ?? "");
   const [webhookUrl, setWebhookUrl] = useState(automation?.webhookUrl ?? null);
   const [rotating, setRotating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -78,6 +82,10 @@ export function AutomationEditor({
             title: title.trim(),
             prompt: prompt.trim(),
             thread_mode: threadMode,
+            // Emptying the field REMOVES the condition, so an edit always sends
+            // the value (null when blank); on create a blank one is simply left
+            // out, the same bargain the run limit above strikes.
+            ...(runWhen.trim() ? { run_when: runWhen.trim() } : automation ? { run_when: null } : {}),
             // "No limit" is `null` on an edit (clearing the field has to be able
             // to REMOVE a limit) but simply absent on create, where the field has
             // never held a value to clear.
@@ -303,6 +311,24 @@ export function AutomationEditor({
             <p className="text-xs text-muted-foreground">
               {schedule.freq === "webhook" ? t("webhook.tzNote", { tz: schedule.timezone }) : t("tzNote", { tz: schedule.timezone })}
             </p>
+          </div>
+
+          {/* Directly under the schedule, because it qualifies it: the schedule
+              says WHEN a firing happens, this says whether that firing is worth
+              running. Optional and empty by default — an automation with no
+              condition never pays for a gate call. */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="automation-run-when" className="text-sm font-medium">{t("runWhen.label")}</label>
+            <Textarea
+              id="automation-run-when"
+              value={runWhen}
+              onChange={(e) => setRunWhen(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder={t("runWhen.placeholder")}
+              className="resize-y"
+            />
+            <p className="text-xs text-muted-foreground">{t("runWhen.hint")}</p>
           </div>
 
           <div className="space-y-2">

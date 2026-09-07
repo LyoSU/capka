@@ -204,7 +204,7 @@ run("max_runs_per_day and thread_mode single", () => {
     // guard still applies, so the first run's task has to be finished first (no
     // worker drains it here).
     await db.update(tasks).set({ status: "completed" }).where(eq(tasks.id, after.lastTaskId!));
-    expect((await fireAutomation(after, { bypassDailyCap: true })).fired).toBe(true);
+    expect((await fireAutomation(after, { manual: true })).fired).toBe(true);
   });
 
   it("rolls over: yesterday's tallies neither block today nor survive the firing", async () => {

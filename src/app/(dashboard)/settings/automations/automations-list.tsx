@@ -23,6 +23,7 @@ import {
 import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import type { AutomationTrigger } from "@/lib/automations/schedule";
 import { Skeleton } from "@/components/ui/skeleton";
+import { relTime } from "../users/format";
 import { AutomationEditor } from "./automation-editor";
 
 interface Automation {
@@ -44,6 +45,11 @@ interface Automation {
   runsToday: number;
   skippedToday: number;
   threadMode: string;
+  /** The condition checked before each run, or null when every firing runs. */
+  runWhen: string | null;
+  /** The LAST skip and why — not scoped to today, on purpose: "why has this been
+   *  quiet" is asked exactly when the answer is older than today. */
+  lastSkip: { reason: "daily_limit" | "busy" | "condition"; at: string; note?: string } | null;
 }
 
 type Status = "active" | "paused" | "autoPaused";
@@ -241,6 +247,12 @@ export default function AutomationsList() {
                 )}
               </div>
               <p className="truncate text-sm text-muted-foreground">{a.prompt}</p>
+              {/* The condition belongs in the subtitle, next to the instruction:
+                  a row that reads "runs daily" while quietly refusing most of its
+                  firings is the one thing this list must not imply. */}
+              {a.runWhen && (
+                <p className="truncate text-xs text-muted-foreground">{t("runWhen.rowLabel", { condition: a.runWhen })}</p>
+              )}
               {isOverdue(a) ? (
                 <p className="text-xs text-warning-text">{t("overdueHint")}</p>
               ) : (nextRunText(a) || lastRunText(a)) ? (
@@ -258,6 +270,17 @@ export default function AutomationsList() {
               {a.maxRunsPerDay !== null && a.skippedToday > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {t("dailyLimitSkipped", { skipped: a.skippedToday, max: a.maxRunsPerDay })}
+                </p>
+              )}
+              {/* One calm line: WHEN it last declined to run and WHY. A counter
+                  alone cannot answer "why is this quiet", and neither can an
+                  empty row — which is what someone reads as a broken worker. */}
+              {a.lastSkip && (
+                <p className="text-xs text-muted-foreground">
+                  {t("skipped", {
+                    when: relTime(locale, a.lastSkip.at),
+                    reason: t(`skipReason.${a.lastSkip.reason}`),
+                  })}
                 </p>
               )}
               {a.lastChatId && (

@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { automations, chats, messages, telegramLinks, users, tasks } from "@/lib/db/schema";
 import { localDayOf, type AutomationTrigger } from "./schedule";
+import { evaluateRunWhen } from "./run-when";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
@@ -29,6 +30,51 @@ export type AutomationDisabledReason = "owner_suspended" | "project_deleted" | "
  *  payload must not become a 200 KB turn. */
 const MAX_EVENT_CHARS = 8000;
 
+/** Why a firing did not happen, for `automations.last_skip`. `skipped_today`
+ *  counts skips; this says which KIND, because "the day's ceiling", "the previous
+ *  run is still working" and "your condition was not met" are three different
+ *  things to tell the person looking at the list. `note` carries the condition
+ *  gate's one-line reason. */
+export type AutomationSkip = {
+  reason: "daily_limit" | "busy" | "condition";
+  at: string;
+  note?: string;
+};
+
+/**
+ * Record a skip on the row so it is visible, not merely logged.
+ *
+ * `today` is passed for the skips the daily tally counts (the ceiling and the
+ * condition gate) and omitted for an overlap skip, which is a run deferred by
+ * timing rather than one the automation refused.
+ *
+ * When it IS counted the stamped day is compared and re-stamped, exactly as the
+ * fired-run UPDATE does it: Postgres evaluates every SET expression against the
+ * pre-update row, so a day that rolled over since the tallies were read starts
+ * today at this skip instead of adding to yesterday's. The ceiling path used to
+ * increment `skipped_today` with no day check and no re-stamp. Its own guard
+ * makes that almost always equivalent (it only skips when the freshly-read
+ * `runs_day` IS today), so the hole is the narrow race where midnight falls
+ * between that read and this write: the increment then landed on a stale day,
+ * which the list route and the manage collection both report as ZERO — an
+ * invisible skip, which is the one thing `skipped_today` exists to prevent.
+ */
+async function stampSkip(automationId: string, skip: AutomationSkip, today?: string): Promise<void> {
+  await db.update(automations)
+    .set({
+      lastSkip: skip,
+      ...(today
+        ? {
+            runsDay: today,
+            runsToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.runsToday} ELSE 0 END`,
+            skippedToday: sql`CASE WHEN ${automations.runsDay} = ${today}::date THEN ${automations.skippedToday} + 1 ELSE 1 END`,
+          }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(automations.id, automationId));
+}
+
 /** The delimited, labelled block a webhook body is quoted into. Kept here rather
  *  than in the route so the ONE place that decides "this is untrusted" is the same
  *  place that sets `untrusted_ingress` on the row. */
@@ -51,8 +97,11 @@ function quoteEvent(rawBody: string): string {
  * is appended to the automation's one persistent thread.
  *
  * `fired: false` with a `reason` is a SKIP, never a failure: "busy" (the previous
- * run is still live or waiting on the user) or "daily_limit" (max_runs_per_day).
- * Neither touches the failure streak and neither disables the automation.
+ * run is still live or waiting on the user), "daily_limit" (max_runs_per_day) or
+ * "condition" (the row's `run_when` sentence did not hold). None touches the
+ * failure streak and none disables the automation. Every one of them stamps
+ * `last_skip`, so a skip is always visible with its reason rather than only
+ * counted.
  */
 export async function fireAutomation(
   a: AutomationRow,
@@ -61,12 +110,18 @@ export async function fireAutomation(
      *  delimited UNTRUSTED data and marked on the row (`untrusted_ingress`).
      *  Absent for a scheduled or manual firing. */
     rawBody?: string;
-    /** "Run now" from the settings page. The daily cap guards UNATTENDED runaway
-     *  spend; a human is standing in front of this one, and it is the run someone
-     *  makes to test a fix — so the cap deliberately does not apply to it. */
-    bypassDailyCap?: boolean;
+    /** "Run now" from the settings page: a HUMAN is standing in front of this
+     *  firing. Both gates that exist to police unattended runs step aside for it
+     *  — the daily cap (which guards runaway spend) and the `run_when` condition
+     *  (which decides whether an unattended occurrence is worth spending on).
+     *  This is the run someone makes to test a fix, so a cap that blocked it
+     *  would make a capped automation impossible to debug on the day it hit its
+     *  ceiling, and a condition that blocked it would make an unmet condition
+     *  impossible to tell apart from a broken instruction. The overlap guard is
+     *  NOT bypassed: it protects the conversation, not the budget. */
+    manual?: boolean;
   } = {},
-): Promise<{ fired: boolean; chatId?: string; reason?: "busy" | "daily_limit" }> {
+): Promise<{ fired: boolean; chatId?: string; reason?: "busy" | "daily_limit" | "condition"; note?: string }> {
   const single = a.threadMode === "single";
   const today = localDayOf(a.trigger as AutomationTrigger);
 
@@ -75,16 +130,14 @@ export async function fireAutomation(
   // compared against the stamped day, so the rollover needs no job of its own.
   // Two firings racing for the last free slot can both pass — this is a
   // runaway-spend guard, not an invariant; the budget gate below is the hard one.
-  if (a.maxRunsPerDay && !opts.bypassDailyCap) {
+  if (a.maxRunsPerDay && !opts.manual) {
     const [live] = await db.select({ runsDay: automations.runsDay, runsToday: automations.runsToday })
       .from(automations).where(eq(automations.id, a.id));
     if (live && live.runsDay === today && live.runsToday >= a.maxRunsPerDay) {
       // Counted and surfaced, never silent — the settings list, the manage
       // collection and the webhook's 202 all report it. A cap that skipped in
       // silence would be indistinguishable from a scheduler that had died.
-      await db.update(automations)
-        .set({ skippedToday: sql`${automations.skippedToday} + 1`, updatedAt: new Date() })
-        .where(eq(automations.id, a.id));
+      await stampSkip(a.id, { reason: "daily_limit", at: new Date().toISOString() }, today);
       log.info("automation skipped: daily limit reached", { automationId: a.id, max: a.maxRunsPerDay });
       return { fired: false, reason: "daily_limit" };
     }
@@ -98,6 +151,7 @@ export async function fireAutomation(
     // message is appended and enqueueTask either folds it into the queued turn or
     // queues one behind the running one, exactly like a second Telegram message.
     if (prev && (prev.status === "queued" || prev.status === "running") && !single) {
+      await stampSkip(a.id, { reason: "busy", at: new Date().toISOString() });
       log.info("automation skipped: previous run still live", { automationId: a.id, lastTaskId: a.lastTaskId });
       return { fired: false, reason: "busy" };
     }
@@ -116,6 +170,7 @@ export async function fireAutomation(
         ))
         .limit(1);
       if (blocked) {
+        await stampSkip(a.id, { reason: "busy", at: new Date().toISOString() });
         log.info("automation skipped: previous run awaiting user input", { automationId: a.id, lastTaskId: a.lastTaskId });
         return { fired: false, reason: "busy" };
       }
@@ -139,6 +194,35 @@ export async function fireAutomation(
     return { fired: false };
   }
 
+  // The condition gate, LAST of the three refusals and deliberately so. It is the
+  // only one that costs money to evaluate, so it runs after the daily cap and the
+  // overlap guard (no LLM call for a firing that was going to be skipped anyway)
+  // and after the budget reservation succeeded (an over-limit user gets no free
+  // gate calls either). It fails OPEN — see run-when.ts — so a broken model can
+  // never turn a condition into a silently dead automation.
+  //
+  // Quoted here rather than below because the gate must judge the EXACT bytes the
+  // run would have received: one body, quoted once, by the one function that
+  // decides what "untrusted" means.
+  const event = opts.rawBody === undefined ? null : quoteEvent(opts.rawBody);
+  if (a.runWhen && !opts.manual) {
+    const { run, note } = await evaluateRunWhen({
+      condition: a.runWhen, prompt: a.prompt, event, now: new Date(),
+      timezone: (a.trigger as AutomationTrigger).timezone,
+      userId: a.userId, model: a.model, taskId,
+    });
+    if (!run) {
+      // The hold is released by the `finally` below on every path that does not
+      // hand it to a live turn — but there is no `finally` yet at this point, so
+      // this one releases its own. Leaving it would inflate the user's budget
+      // forever with no task row for the zombie reconciler to find.
+      await releaseHold(taskId);
+      await stampSkip(a.id, { reason: "condition", at: new Date().toISOString(), ...(note ? { note } : {}) }, today);
+      log.info("automation skipped: condition not met", { automationId: a.id, note });
+      return { fired: false, reason: "condition", note };
+    }
+  }
+
   const [user] = await db.select({ locale: users.locale }).from(users).where(eq(users.id, a.userId));
   const locale = user?.locale ?? "en";
 
@@ -146,7 +230,6 @@ export async function fireAutomation(
   // whole feature that nobody on this instance wrote. It is fenced, labelled and
   // marked on the message row (untrusted_ingress) so the prompt can never read as
   // an instruction and so every downstream fold knows the turn carries it.
-  const event = opts.rawBody === undefined ? null : quoteEvent(opts.rawBody);
   const content = event ? `${a.prompt}${event}` : a.prompt;
 
   // In `single` mode the thread is looked up, not assumed: a chat the user deleted

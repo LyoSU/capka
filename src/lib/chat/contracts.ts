@@ -58,12 +58,17 @@ export const storedPartSchema = z.discriminatedUnion("type", [
 export type StoredPart = z.infer<typeof storedPartSchema>;
 
 /**
- * What an LLM call bought. "turn" is the reply the user asked for; the other three
- * are the background passes a finished turn spawns. The `usage` ledger stores this
- * verbatim in its `purpose` column, so cost analytics can separate "what the chat
- * cost" from "what the housekeeping cost" without guessing from the model id.
+ * What an LLM call bought. "turn" is the reply the user asked for; the others are
+ * background calls. The `usage` ledger stores this verbatim in its `purpose`
+ * column, so cost analytics can separate "what the chat cost" from "what the
+ * housekeeping cost" without guessing from the model id.
+ *
+ * "run_when" is the odd one out and is deliberately excluded from `AuxRecord`
+ * below: it is an automation's condition gate, which fires BEFORE a turn exists
+ * and often instead of one, so it has a ledger row and no message row to
+ * denormalize onto. See src/lib/automations/run-when.ts.
  */
-export type LlmPurpose = "turn" | "title" | "memory" | "compaction";
+export type LlmPurpose = "turn" | "title" | "memory" | "compaction" | "run_when";
 
 /**
  * A mid-turn instruction the user added while the reply was already streaming —
@@ -118,7 +123,10 @@ export const steerFrame = (text: string) => `The user added while you were worki
 /** One background call's own accounting, denormalized onto the message row so the
  *  (i) popover needs no JOIN — the same bargain `usage`/`costUsd` make. */
 export interface AuxRecord {
-  purpose: Exclude<LlmPurpose, "turn">;
+  /** The purposes that belong to a MESSAGE. "turn" is the message itself, and
+   *  "run_when" never has one (see LlmPurpose) — both are excluded so the
+   *  popover's label map stays exhaustive over what it can actually render. */
+  purpose: Exclude<LlmPurpose, "turn" | "run_when">;
   input: number;
   output: number;
   cached?: number;

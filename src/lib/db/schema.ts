@@ -492,6 +492,13 @@ export const automations = pgTable("automations", {
   title: text("title").notNull(),
   // The user message each run starts with — the whole instruction.
   prompt: text("prompt").notNull(),
+  // Optional condition sentence ("only when the event is a failed payment over
+  // 100 EUR"). Checked by ONE small LLM call right before a firing is
+  // materialized — see src/lib/automations/run-when.ts. A condition that is not
+  // met SKIPS the firing exactly the way the daily cap does (counted, visible,
+  // never a failure); a gate that cannot answer runs the automation anyway, so a
+  // broken condition can never silently kill a schedule. Null = every firing runs.
+  runWhen: text("run_when"),
   // Model of the creating chat; null → default resolution in the runner.
   model: text("model"),
   // {kind:"schedule", cron, timezone} | {kind:"once", at} | {kind:"webhook", timezone}
@@ -517,6 +524,13 @@ export const automations = pgTable("automations", {
   runsDay: date("runs_day"),
   runsToday: integer("runs_today").notNull().default(0),
   skippedToday: integer("skipped_today").notNull().default(0),
+  // The LAST skip, with its reason: {reason:"daily_limit"|"busy"|"condition",
+  // at:ISO, note?}. `skipped_today` counts, this one EXPLAINS — a tally of three
+  // says nothing about whether the day's ceiling, an overlapping run or an unmet
+  // condition refused them, and those three ask completely different things of
+  // the person reading the list. Stamped on every skip path in fireAutomation;
+  // see AutomationSkip in src/lib/automations/runs.ts for the shape.
+  lastSkip: jsonb("last_skip"),
   // Where a firing's messages land. "fresh" = a NEW chat per run (the original
   // behaviour). "single" = one persistent chat, appended to like a Telegram
   // conversation, so the agent keeps the thread's history across runs.

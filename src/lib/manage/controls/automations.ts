@@ -7,7 +7,7 @@ import { nanoid } from "nanoid";
 import { getSetting } from "@/lib/settings";
 import { isValidTimezone } from "@/lib/timezone";
 import { localDayOf, nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
-import type { AutomationDisabledReason } from "@/lib/automations/runs";
+import type { AutomationDisabledReason, AutomationSkip } from "@/lib/automations/runs";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
@@ -88,6 +88,16 @@ const DISABLED_REASON_HINT: Record<AutomationDisabledReason, string> = {
   budget_exhausted: "Turned off after repeatedly running out of spending allowance. Switch it back on once there is room in the budget.",
 };
 
+/** Plain-language counterpart of `last_skip.reason`. The question a quiet
+ *  automation prompts is "why hasn't it run", and the three answers ask for
+ *  completely different things back: wait, raise the ceiling, or fix the
+ *  condition. English here is the source of truth and the fallback. */
+const SKIP_REASON: Record<AutomationSkip["reason"], string> = {
+  daily_limit: "the daily run limit was already reached",
+  busy: "the previous run was still working",
+  condition: "the run condition was not met",
+};
+
 async function mustOwn(ctx: ManageContext, itemId: string) {
   const [row] = await db.select().from(automations)
     .where(and(eq(automations.id, itemId), eq(automations.userId, ctx.userId)));
@@ -110,6 +120,9 @@ export const automationCollection: Collection = {
     "for a webhook it fixes the day a run limit counts against. " +
     "Optional max_runs_per_day caps firings per day (skipped runs are reported, never silent), and thread_mode picks where runs go: " +
     "\"fresh\" (default, a new chat per run) or \"single\" (one ongoing chat the runs are appended to, so the agent keeps the thread's history). " +
+    "Optional run_when is ONE plain sentence describing when a firing is worth running (e.g. \"only when the event is a failed payment over 100 EUR\", " +
+    "\"only on working days\"): before each run a quick model call checks it against the clock and the incoming event, and skips the firing when it does not hold. " +
+    "Leave run_when out unless the user actually described a condition — it costs a small model call on every firing, and an unmet condition is reported as a skip. " +
     "A webhook automation's URL is a credential and is NOT returned here — tell the user it is shown in Settings → Automations.",
   requiredRole: "user",
   auditNoun: "automation",
@@ -129,6 +142,10 @@ export const automationCollection: Collection = {
     webhook: z.boolean().optional(),
     max_runs_per_day: z.number().int().min(1).max(1000).optional(),
     thread_mode: z.enum(["fresh", "single"]).optional(),
+    // A sentence, not an essay: the whole thing is re-sent to a small model on
+    // every firing, and a condition nobody can read in one breath is one the
+    // gate will judge inconsistently.
+    run_when: z.string().trim().max(500, "A run condition must be at most 500 characters.").optional(),
   }).refine((v) => [v.cron, v.once_at, v.webhook || undefined].filter(Boolean).length === 1, {
     message: 'Provide EXACTLY ONE trigger: "cron" for a recurring schedule, "once_at" (a wall-clock ISO datetime) for a one-off, or "webhook": true for one fired by an HTTP call — and always a "timezone" (IANA) with whichever you pick.',
   }),
@@ -148,10 +165,16 @@ export const automationCollection: Collection = {
     const trigger = parseTriggerArgs(args);
     const t = manageT(ctx.locale);
     const { nextDates, perMonth } = humanizeSchedule(trigger, ctx.locale);
+    // The condition is part of what the person is approving — an automation that
+    // will refuse most of its own firings is a different thing to agree to than
+    // one that runs every time, so it goes in the preview, not only in the row.
+    const condition = typeof args.run_when === "string" && args.run_when.trim()
+      ? loc(t, "automation.condition", `Only runs when: ${args.run_when.trim()}`, { condition: args.run_when.trim() })
+      : null;
     return {
       title: loc(t, "automation.addTitle", "Add automation"),
       after: String(args.title),
-      details: trigger.kind === "webhook"
+      details: [trigger.kind === "webhook"
         ? loc(t, "automation.previewWebhook",
             "Runs whenever something calls its private web address, which is shown in Settings → Automations. Each call spends tokens like a normal turn.")
         : trigger.kind === "once"
@@ -159,6 +182,8 @@ export const automationCollection: Collection = {
         : loc(t, "automation.previewRecurring",
             `Next runs: ${nextDates.join(" · ")} — about ${perMonth} ${perMonth === 1 ? "run" : "runs"} per month, each spending tokens like a normal turn.`,
             { dates: nextDates.join(" · "), count: perMonth }),
+        condition,
+      ].filter(Boolean).join(" "),
       body: String(args.prompt),
     };
   },
@@ -178,6 +203,9 @@ export const automationCollection: Collection = {
       // webhook trigger, so a row without one would be a dead endpoint.
       webhookToken: trigger.kind === "webhook" ? mintWebhookToken() : null,
       maxRunsPerDay: typeof args.max_runs_per_day === "number" ? args.max_runs_per_day : null,
+      // Empty → null, never "": a blank string would read as a condition and buy
+      // a model call on every firing to judge nothing.
+      runWhen: typeof args.run_when === "string" && args.run_when.trim() ? args.run_when.trim() : null,
       threadMode: args.thread_mode === "single" ? "single" : "fresh",
       nextRunAt: nextOccurrenceAfter(trigger, new Date()),
     });
@@ -193,10 +221,15 @@ export const automationCollection: Collection = {
         id: a.id,
         title: a.title,
         // A webhook has no next time to show — saying so is what stops the agent
-        // reading a blank subtitle as a broken or paused automation.
-        subtitle: trigger.kind === "webhook"
-          ? loc(t, "automation.webhookSubtitle", "runs on webhook")
-          : a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
+        // reading a blank subtitle as a broken or paused automation. A condition
+        // is appended rather than replacing the timing: "next Monday, but only
+        // if…" is what the row actually promises, and either half alone misleads.
+        subtitle: [
+          trigger.kind === "webhook"
+            ? loc(t, "automation.webhookSubtitle", "runs on webhook")
+            : a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : null,
+          a.runWhen ? loc(t, "automation.conditionSubtitle", `only when: ${a.runWhen}`, { condition: a.runWhen }) : null,
+        ].filter(Boolean).join(" · ") || undefined,
         enabled: a.enabled,
         owned: true,
       };
@@ -252,6 +285,9 @@ export const automationCollection: Collection = {
         row.threadMode === "single"
           ? loc(t, "automation.singleThread", "Every run is added to one ongoing chat.")
           : undefined,
+        row.runWhen
+          ? loc(t, "automation.condition", `Only runs when: ${row.runWhen}`, { condition: row.runWhen })
+          : undefined,
         // The cap and — crucially — what it has already refused today. A skip
         // that only ever appeared in a log would look to the agent (and to the
         // user asking it) exactly like a scheduler that had stopped firing.
@@ -270,6 +306,17 @@ export const automationCollection: Collection = {
         row.lastRunAt
           ? loc(t, "automation.lastRun", `Last run: ${row.lastRunAt.toISOString()}`, { date: row.lastRunAt.toISOString() })
           : loc(t, "automation.neverRan", "Never ran yet"),
+        // The last skip WITH its reason. Deliberately not scoped to today: the
+        // question "why is this quiet" is asked precisely when the answer is
+        // older than today, and a tally that reads zero would then be the only
+        // thing on the row — which looks like a scheduler that stopped firing.
+        (() => {
+          const skip = row.lastSkip as AutomationSkip | null;
+          if (!skip) return undefined;
+          const why = loc(t, `automation.skipReason.${skip.reason}`, SKIP_REASON[skip.reason]);
+          const reason = skip.note ? `${why} (${skip.note})` : why;
+          return loc(t, "automation.lastSkip", `Last skipped ${skip.at}: ${reason}`, { date: skip.at, reason });
+        })(),
         cost?.avg
           ? loc(t, "automation.avgCost", `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} ${Number(cost.runs) === 1 ? "run" : "runs"}`,
               { cost: Number(cost.avg).toFixed(4), runs: Number(cost.runs) })

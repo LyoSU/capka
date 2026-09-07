@@ -186,6 +186,21 @@ describe("POST /api/hooks/automations/[token] — outcomes are 202 with a status
     expect(await res.json()).toEqual({ status: "skipped", reason: "busy" });
   });
 
+  it("reports an unmet run condition as a skip, and passes the gate's reason through", async () => {
+    // The sender pushes every event and cannot see the automation's condition, so
+    // "we judged this one and decided not to run" is information it needs —
+    // otherwise a filtered event is indistinguishable from a call that vanished.
+    fireAutomation.mockResolvedValue({ fired: false, reason: "condition", note: "the amount is under 100 EUR" });
+    const res = await call();
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ status: "skipped", reason: "condition", note: "the amount is under 100 EUR" });
+  });
+
+  it("omits the note when a skip has none, rather than sending an empty one", async () => {
+    fireAutomation.mockResolvedValue({ fired: false, reason: "condition" });
+    expect(await (await call()).json()).toEqual({ status: "skipped", reason: "condition" });
+  });
+
   it("releases the delivery key when the firing throws, so the sender's retry is a first attempt", async () => {
     fireAutomation.mockRejectedValue(new Error("db blip"));
     const res = await call({ headers: { "idempotency-key": "evt-2" } });

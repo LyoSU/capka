@@ -33,6 +33,12 @@ export const GET = apiHandler(async (req: Request) => {
       id: a.id, title: a.title, prompt: a.prompt, trigger: a.trigger,
       enabled: a.enabled, nextRunAt: a.nextRunAt, lastRunAt: a.lastRunAt,
       consecutiveFailures: a.consecutiveFailures,
+      runWhen: a.runWhen,
+      // NOT scoped to today like the tallies below: the point of the last skip is
+      // to explain a quiet automation, and "nothing since Tuesday" is exactly the
+      // case where that question gets asked. The row carries its own timestamp,
+      // so the UI says when rather than implying it was today.
+      lastSkip: a.lastSkip,
       // The full URL, not the token: the URL IS the credential, and handing the
       // owner's own UI anything else just makes it re-derive the origin badly.
       webhookUrl: a.webhookToken ? `${origin}/api/hooks/automations/${a.webhookToken}` : null,

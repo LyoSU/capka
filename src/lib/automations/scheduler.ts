@@ -103,6 +103,11 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
           consecutiveFailures: raw.consecutive_failures, createdAt: raw.created_at, updatedAt: tickTs,
           maxRunsPerDay: raw.max_runs_per_day,
           threadMode: raw.thread_mode, threadChatId: raw.thread_chat_id,
+          // The condition gate reads this on every firing, so an unmapped column
+          // would leave `run_when` inert for scheduled runs while still working
+          // for webhooks and "Run now" — a gate that silently applies to two of
+          // three trigger kinds.
+          runWhen: raw.run_when,
           // runs_day / runs_today are deliberately NOT mapped: node-pg decodes a
           // `date` column to a JS Date while drizzle hands back the string this
           // code compares, and fireAutomation re-reads both fresh anyway. A

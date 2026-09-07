@@ -1628,6 +1628,18 @@
       "onWebhook": "Runs when something calls its web address",
       "openThread": "Open the ongoing chat",
       "dailyLimitSkipped": "{skipped} skipped today — daily limit {max}",
+      "runWhen": {
+        "label": "Only run when…",
+        "placeholder": "e.g. only when the event is a failed payment over 100 EUR",
+        "hint": "Optional. Before each run a quick model call checks this condition against the current time and the incoming event, and skips the run when it does not hold. “Run now” ignores it.",
+        "rowLabel": "Only when: {condition}"
+      },
+      "skipped": "Skipped {when}: {reason}",
+      "skipReason": {
+        "daily_limit": "the daily run limit was reached",
+        "busy": "the previous run was still working",
+        "condition": "the condition was not met"
+      },
       "threadModeLabel": "Where runs go",
       "threadMode": {
         "fresh": "A new chat each run",
