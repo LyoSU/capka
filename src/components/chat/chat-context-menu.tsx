@@ -237,10 +237,15 @@ export function ChatContextMenu({
     );
   }
 
+  // Grouped the way a person thinks about a chat, not the way the API is laid out:
+  // what it is called and who sees it; where it sits in the list; where else it
+  // can go; and, on its own, the one thing that cannot be undone.
   const items: ActionItem[] = [
-    { key: "rename", icon: <Pencil />, label: t("menu.rename"), onSelect: startRename },
+    { key: "share", group: "name", icon: <Share2 />, label: t("menu.share"), onSelect: () => setShareOpen(true) },
+    { key: "rename", group: "name", icon: <Pencil />, label: t("menu.rename"), onSelect: startRename },
     {
       key: "regenerate-title",
+      group: "name",
       icon: <Sparkles />,
       label: t("menu.regenerateTitle"),
       disabled: retitling,
@@ -248,31 +253,35 @@ export function ChatContextMenu({
     },
     {
       key: "pin",
+      group: "list",
       icon: chat.pinned ? <PinOff /> : <Pin />,
       label: chat.pinned ? t("menu.unpin") : t("menu.pin"),
       onSelect: () => patchChat({ pinned: !chat.pinned }),
     },
     {
       key: "archive",
+      group: "list",
       icon: <Archive />,
       label: chat.archived ? t("menu.unarchive") : t("menu.archive"),
       onSelect: () => patchChat({ archived: !chat.archived }),
     },
     {
       key: "move",
+      group: "elsewhere",
       icon: <FolderInput />,
       label: t("menu.moveToProject"),
       onSelect: () => setMoveOpen(true),
     },
     {
       key: "export",
+      group: "elsewhere",
       icon: <Download />,
       label: t("menu.export"),
       onSelect: () => window.open(`/api/chats/${chat.id}/export?format=markdown`, "_blank"),
     },
-    { key: "share", icon: <Share2 />, label: t("menu.share"), onSelect: () => setShareOpen(true) },
     {
       key: "delete",
+      group: "delete",
       icon: <Trash2 />,
       label: tc("delete"),
       variant: "destructive",
