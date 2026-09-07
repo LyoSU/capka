@@ -110,10 +110,12 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
         onClick={() => setOpen((o) => !o)}
         className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-micro hover:bg-hover hover:text-foreground"
       >
-        <span className="flex -space-x-1">
+        <span className="flex -space-x-0.5">
           {rows.slice(0, STACKED_MARKS).map(({ source: s }) => (
             // The ring is the page colour, so overlapping marks read as a stack of
-            // discs rather than one blob.
+            // discs rather than one blob. The overlap is 2px, not the usual 4: these
+            // are letters, not favicons, and a deeper stack covered the right side of
+            // each glyph — an "O" read as a "C".
             <Monogram key={s.url} host={hostOf(s.url) ?? ""} className="ring-2 ring-background" />
           ))}
         </span>
@@ -133,7 +135,10 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
         style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
       >
         <div className="overflow-hidden" inert={!open}>
-          <ul className="mt-1.5 flex list-none flex-col gap-px rounded-lg bg-muted/40 p-1 shadow-hairline">
+          {/* The hairline is a box-shadow drawn OUTSIDE the box, and the wrapper above
+              clips to its own edge — without the 1px margins the outline survived only
+              on the top edge, where the gap left it room. */}
+          <ul className="mx-px mb-px mt-1.5 flex list-none flex-col gap-px rounded-lg bg-muted/40 p-1 shadow-hairline">
             {rows.map(({ ns, source: s }, i) => {
               const host = hostOf(s.url);
               return (

@@ -44,6 +44,7 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Chat: the cited-sources list under a reply keeps its outline on all four sides, and the stacked source marks no longer cover each other's letters.
 - Automations: the daily run limit and the "one ongoing chat" thread are decided under a row lock, so two webhook calls arriving together can no longer both run and both open a chat.
 - Automations: a webhook automation with no `max_runs_per_day` of its own now runs under a platform ceiling of 100 per day (`DEFAULT_WEBHOOK_RUNS_PER_DAY`); set a limit on the automation to override it.
 - Search: results come only from the visible conversation, never from a branch abandoned by an edit or regenerate; the substring pass is skipped when whole-word matches already fill the answer.
