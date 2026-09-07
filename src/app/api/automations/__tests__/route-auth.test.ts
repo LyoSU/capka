@@ -11,9 +11,12 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   return { ...actual, requireActive };
 });
 // db is only reached on the happy path; a chainable stub that resolves to no rows.
+// `where` is awaited directly by the list query and followed by `.limit(1)` by the
+// Telegram-link probe, so it is a promise that also chains.
+const noRows = () => Object.assign(Promise.resolve([]), { limit: () => Promise.resolve([]) });
 vi.mock("@/lib/db", () => ({
   db: {
-    select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+    select: () => ({ from: () => ({ where: noRows }) }),
     update: () => ({ set: () => ({ where: () => Promise.resolve(undefined) }) }),
     delete: () => ({ where: () => ({ returning: () => Promise.resolve([]) }) }),
   },

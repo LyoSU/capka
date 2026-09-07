@@ -7,6 +7,21 @@ import { pool } from "../../db";
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
 const U = "atest-scheduler-user";
+
+// The fire path resolves the owner's model to reserve budget against it. CI has
+// no provider configured, and a schedule firing on a box with no key IS a failed
+// run — so the resolver is stubbed with an own-key user (never gated, never held)
+// rather than the gate being loosened. The budget refusal itself is spied below.
+vi.mock("@/lib/providers/resolve", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/providers/resolve")>();
+  return {
+    ...actual,
+    resolveUserModelInfo: vi.fn(async () => ({
+      model: "atest-model", provider: "openai", modelId: "atest-model",
+      configId: null, isShared: false, modelInput: null, apiStyle: "chat" as const,
+    })),
+  };
+});
 // A second owner, suspended: the eligibility re-check is about the account, so it
 // cannot be exercised on the user every other test here needs active.
 const SUSPENDED = "atest-scheduler-suspended";
