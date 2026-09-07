@@ -769,10 +769,12 @@
   stroke-linecap: round;
   stroke-dasharray: 30 70;
   /* Geometry in CSS, not attributes, so the corner follows the card: the card is
-     `rounded-2xl`, the svg sits 1px inside it, so the stroke's centre line runs
-     at the card's radius minus that inset. A fixed `rx` drew a second, tighter
-     curve beside the card's own corner. */
-  rx: calc(var(--radius-2xl) - 1px);
+     `rounded-2xl` and the svg sits half a pixel OUTSIDE it, on the centre line of
+     the card's own 1px ring (see the -inset in chat-input.tsx), so the stroke's
+     radius is the card's plus that half pixel. A fixed `rx` drew a second,
+     tighter curve beside the card's corner; an inset stroke ran beside the ring
+     with a bright hairline between them. */
+  rx: calc(var(--radius-2xl) + 0.5px);
   /* A thin line with a soft halo from a drop-shadow on the SAME element — not a
      second, wider blurred rect: two rects run two animation clocks and a remount
      of either leaves them out of phase as two dashes. The halo is what lets the

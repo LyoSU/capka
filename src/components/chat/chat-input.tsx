@@ -518,7 +518,11 @@ export function ChatInput({
         <svg
           aria-hidden
           data-on={isLoading || undefined}
-          className="composer-activity pointer-events-none absolute inset-px"
+          // -0.5px, not 0 or 1px: the card's edge is a 1px ring drawn OUTSIDE its
+          // box (`--elev-raised` spread), whose centre line sits half a pixel out.
+          // The stroke is centred there too, so it replaces the ring while it
+          // travels instead of running beside it with a bright hairline between.
+          className="composer-activity pointer-events-none absolute -inset-[0.5px]"
           width="100%"
           height="100%"
           fill="none"
