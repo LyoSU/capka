@@ -384,15 +384,14 @@ export function ChatInput({
               />
               <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
                 <Hint label={t("add")}>
-                  {/* A drawn edge at REST, not just on hover. This was a bare glyph
-                      floating on the composer's own fill: nothing said it was a
-                      control until the pointer was already on it, which is the
-                      "buttons aren't tactile" complaint in one element. `shadow-btn`
-                      is the same hairline every other raised control in the app
-                      wears (see button-variants.ts), so the composer's three
-                      secondary controls now read as one family. Not a Button
-                      because ComposerMenu renders this span as its own trigger. */}
-                  <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-btn transition-micro outline-none hover:bg-hover hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.97] active:bg-hover-strong">
+                  {/* A soft FILL at rest, never an edge. The composer card already
+                      draws the only edge this row needs, and the model and depth
+                      pills beside this control are edgeless — a ringed circle here
+                      read as a frame inside a frame and, in the dark theme, as the
+                      brightest stroke on the screen. A muted disc says "control"
+                      without competing with the text field. Not a Button because
+                      ComposerMenu renders this span as its own trigger. */}
+                  <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-full bg-muted text-muted-foreground transition-micro outline-none hover:bg-hover-strong hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.97]">
                     <Plus className="size-4" />
                   </span>
                 </Hint>
@@ -462,9 +461,13 @@ export function ChatInput({
                   <Hint label={t("dictation.start")}>
                     <Button
                       size="icon"
-                      variant="outline"
+                      variant="ghost"
                       aria-label={t("dictation.start")}
-                      className="size-10 sm:size-9 shrink-0 rounded-full bg-card text-muted-foreground hover:text-foreground active:bg-hover-strong"
+                      // Quiet at rest, like the two pills to its left: the wash and
+                      // full-strength ink arrive on hover. The "+" carries the one
+                      // fill in this row; a second ringed circle out here pulled the
+                      // eye to the least-used control on the screen.
+                      className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground hover:bg-hover hover:text-foreground active:bg-hover-strong"
                       // Keep the caret where the words are going — a button click
                       // would otherwise pull focus out of the composer.
                       onMouseDown={(e) => e.preventDefault()}
