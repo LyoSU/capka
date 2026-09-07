@@ -1078,37 +1078,73 @@
    file) already ships `no-scrollbar`, which is what the two call sites actually use;
    ours was a second name for the same behaviour that nothing referenced. */
 
-/* Streamdown — flatten code block: remove outer card wrapper. Keep the wrapper's
-   gap so the copy button lands correctly: Streamdown floats the actions pill up
-   with a -mt-10 that assumes the header row's height sits above it. */
+/* Streamdown — a code block is ONE card with a header bar, not a card with a pill
+   floating over it. Stock Streamdown draws the body as the card (its own border +
+   radius) and then floats the copy/download pill above that border on a sticky
+   `-mt-10`, so the two controls belonged to nothing: they sat in the margin, off
+   the block's grid, and travelled down the page as it scrolled. Our old rules
+   made that worse by flattening the outer wrapper and hiding the header, which
+   left the pill anchored to an invisible empty row.
+
+   Now the OUTER wrapper is the card (edge, radius, clip) and the header Streamdown
+   already renders is un-hidden and given a real bar: language chip on the left,
+   the two buttons pulled back onto it on the right. Nothing floats, and the header
+   sits a shade above the code (`--card` over the body's `--background`) in both
+   themes, so the bar reads as part of the block rather than a second surface. */
 [data-streamdown="code-block"] {
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
   margin: 0.75rem 0;
-  border-radius: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--card);
+  box-shadow: none;
 }
-/* Hide the language label but keep the row's height: `display:none` would
-   collapse the space the copy button's -mt-10 anchors to, floating the pill up
-   over the code (or the text above the block). `visibility:hidden` keeps the
-   anchor so the pill overlays an empty top-right, the way Streamdown intends. */
 [data-streamdown="code-block-header"] {
-  visibility: hidden;
+  height: 2.25rem;
+  padding-inline: 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+/* The language, as a chip rather than the bare lowercase word Streamdown ships —
+   the same shape the model pill's context figure wears, so a machine-supplied
+   label looks the same wherever one appears. */
+[data-streamdown="code-block-header"] > span {
+  margin-left: 0;
+  border-radius: 0.375rem;
+  background: var(--muted);
+  padding: 0.0625rem 0.375rem;
+  font-size: 11px;
+  line-height: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+/* A fence with no language gets an empty chip otherwise — a grey nub labelling
+   nothing. The bar stays (the buttons live on it). */
+[data-streamdown="code-block-header"] > span:empty {
+  display: none;
 }
 [data-streamdown="code-block-body"] {
-  border-radius: 0.5rem;
+  border: none;
+  border-radius: 0;
   font-size: 0.8125rem;
 }
-/* The floating copy/download pill over code and mermaid blocks. Stock Streamdown
-   dresses it as a bordered near-white card (`bg-sidebar/80`), which over our
-   flattened blocks reads as a random card hovering in empty space — the loudest
-   thing in a panel meant to be quiet. Strip the card; keep the buttons faintly
-   present (not hidden-until-hover: an affordance nobody can see is an affordance
-   nobody finds — and on touch there is no hover to find it with), firming up
-   when the pointer is over the block. Each button keeps its own small hover wash
-   and a page-tinted backdrop so the icons stay legible when the sticky pill
-   travels over code. */
+/* Streamdown wraps the actions in an unlabelled sticky div (`-mt-10`, `top-2`).
+   `:has` is the only handle on it. Static, and pulled up by exactly the header's
+   height, lands the buttons ON the bar instead of over the code. */
+[data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: static;
+  height: 2.25rem;
+  margin-top: -2.25rem;
+  padding-inline-end: 0.375rem;
+}
+/* Strip the pill's own card in both places: over a code block it is now inside a
+   header that already has an edge, and over a mermaid diagram (which keeps the
+   floating arrangement) Streamdown's near-white `bg-sidebar/80` slab was the
+   loudest thing in a panel meant to be quiet. The buttons stay faintly present
+   rather than hidden-until-hover — an affordance nobody can see is one nobody
+   finds, and on touch there is no hover to find it with. */
 [data-streamdown="code-block-actions"],
 [data-streamdown="mermaid-block-actions"] {
   border: none;
@@ -1116,7 +1152,7 @@
   backdrop-filter: none;
   padding: 0;
   gap: 0.125rem;
-  opacity: 0.45;
+  opacity: 0.55;
   transition: opacity 0.15s ease;
 }
 [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
@@ -1125,15 +1161,29 @@
 [data-streamdown="mermaid-block"]:focus-within [data-streamdown="mermaid-block-actions"] {
   opacity: 1;
 }
+/* 24px squares with the 14px glyph Streamdown already renders — the same square
+   the action row under an answer uses, so every icon-only control in the
+   transcript is one size. */
 [data-streamdown="code-block-actions"] > button,
 [data-streamdown="mermaid-block-actions"] > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
   border-radius: 0.375rem;
+  background: transparent;
+}
+/* The mermaid pill still floats over the diagram, so its buttons keep the tinted
+   backdrop that stops the glyphs disappearing into whatever is under them. */
+[data-streamdown="mermaid-block-actions"] > button {
   background: color-mix(in oklab, var(--background) 78%, transparent);
   backdrop-filter: blur(4px);
 }
 [data-streamdown="code-block-actions"] > button:hover,
 [data-streamdown="mermaid-block-actions"] > button:hover {
-  background: var(--hover-strong);
+  background: var(--hover);
 }
 
 /* Streamdown — flatten table wrapper */

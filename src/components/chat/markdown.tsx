@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type CodeHighlighterPlugin, type Components, type PluginConfig, type UrlTransform } from "streamdown";
 import "streamdown/styles.css";
 // KaTeX ships its own stylesheet (fonts + layout). Without it the math plugin
@@ -112,6 +113,17 @@ function readyOf(need: string): string {
 }
 
 export function Markdown({ children, isStreaming, chatId, sources }: { children: string; isStreaming?: boolean; chatId?: string; sources?: NumberedSource[] }) {
+  // Streamdown titles its own copy/download buttons, in English, from a defaults
+  // object — so the two controls in every code block were the last untranslated
+  // words in the transcript. `chat.preview` already carries exactly these three
+  // strings for the Quick Look copy button, in both locales. Memoized because
+  // Streamdown compares this prop by reference.
+  const tPreview = useTranslations("chat.preview");
+  const translations = useMemo(
+    () => ({ copyCode: tPreview("copy"), copied: tPreview("copied"), downloadFile: tPreview("download") }),
+    [tPreview],
+  );
+
   const need = neededPlugins(children);
   // Seeded from what is already downloaded, so scrolling back to an old code block
   // paints it highlighted instead of flashing plain first.
@@ -208,6 +220,7 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
         remarkPlugins={remarkPlugins}
         components={components}
         urlTransform={urlTransform}
+        translations={translations}
       >
         {children}
       </Streamdown>
