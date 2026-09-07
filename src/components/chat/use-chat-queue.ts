@@ -87,6 +87,79 @@ export function visibleQueue({
   return held ? [held, ...rest] : rest;
 }
 
+/**
+ * Fold a queue this tab computed back onto whatever is stored NOW.
+ *
+ * `base` is the queue this tab read before computing, `next` what it wants, `stored`
+ * what is on disk at the moment of writing. Anything in `stored` that this tab never
+ * saw (in neither `base` nor `next`) was written by ANOTHER tab between the two, and
+ * a plain `setItem(next)` would erase it — the same chat open twice, one tab
+ * enqueueing while the other dequeues, and one person's typed message is gone with
+ * no copy anywhere.
+ *
+ * Deliberately asymmetric: an item this tab still wants is kept even if another tab
+ * has since dequeued it. Re-sending is recoverable — the queued id rides into the
+ * POST as the message id, so the server's insert no-ops and the drain drops any item
+ * it finds already in the transcript — whereas losing typed text is not.
+ */
+export function mergeQueue(
+  stored: QueuedMessage[],
+  base: QueuedMessage[],
+  next: QueuedMessage[],
+): QueuedMessage[] {
+  const seen = new Set([...base, ...next].map((m) => m.id));
+  const foreign = stored.filter((m) => !seen.has(m.id));
+  // Identity-stable on the common path: no foreign item means `next` is the answer,
+  // which keeps the useSyncExternalStore snapshot from churning.
+  return foreign.length ? [...next, ...foreign] : next;
+}
+
+/**
+ * One pass of the send queue: each item sent as its own message, in order, so the
+ * server folds the whole burst into a single reply.
+ *
+ * Extracted from ChatPanel because the ORDER of `dequeue` against `send` is the
+ * whole behaviour. It used to dequeue as a send STARTED, which meant a tab closed
+ * during the POST lost the text outright — localStorage no longer held it and the
+ * request had not committed. Dequeuing only AFTER `send` resolves moves the window
+ * to a harmless place: the item survives the crash and is re-drained, and `committed`
+ * is what stops the re-drain from sending it twice (the queued id is the message id,
+ * so its presence in the loaded transcript is proof the POST landed).
+ *
+ * The failure path dequeues too, and must: `send` puts the text back in the COMPOSER
+ * on a hard failure, so leaving it queued as well would show the same message twice
+ * and re-fire it the moment the effect re-ran.
+ */
+export async function drainQueue(
+  batch: readonly QueuedMessage[],
+  io: {
+    /** An open ghost editor parks the whole queue — re-read per item, since a
+     *  burst takes a round-trip each and the pencil can be clicked mid-way. */
+    editing: () => boolean;
+    /** Message ids the transcript already holds, read live. */
+    committed: () => ReadonlySet<string>;
+    dequeue: (id: string) => void;
+    setSending: (m: QueuedMessage | null) => void;
+    send: (text: string, refs: FileRef[], id: string) => Promise<boolean>;
+  },
+): Promise<void> {
+  for (const item of batch) {
+    if (io.editing()) break;
+    if (io.committed().has(item.id)) {
+      // Already landed — this is the item a previous drain sent before its tab
+      // closed, or one a second tab sent. Drop it instead of asking twice.
+      io.dequeue(item.id);
+      continue;
+    }
+    io.setSending(item);
+    const ok = await io.send(item.text, item.refs, item.id);
+    io.dequeue(item.id);
+    // A hard failure stops the burst rather than hammering a failing server; the
+    // rest stay queued and re-drain when the chat is free.
+    if (!ok) break;
+  }
+}
+
 export function useChatQueue(chatId: string) {
   const key = QUEUE_PREFIX + chatId;
 
@@ -110,9 +183,15 @@ export function useChatQueue(chatId: string) {
   // Mirrors a useState setter (value OR updater) so it's a drop-in for the old
   // `setQueued`. The updater reads the live stored value — never a stale closure
   // — so concurrent enqueue/remove/drain all compose against the latest queue.
+  //
+  // Re-read once more at write time and merged: `localStorage.setItem` is a blind
+  // whole-array overwrite, so a second tab that wrote between our read and our write
+  // would be erased. See {@link mergeQueue}.
   const setQueued = useCallback(
     (next: QueuedMessage[] | ((cur: QueuedMessage[]) => QueuedMessage[])) => {
-      write(typeof next === "function" ? next(readQueue(key)) : next);
+      const base = readQueue(key);
+      const wanted = typeof next === "function" ? next(base) : next;
+      write(mergeQueue(readQueue(key), base, wanted));
     },
     [key, write],
   );

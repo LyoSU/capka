@@ -33,7 +33,8 @@ import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { resolveAuxTarget } from "@/lib/providers/resolve";
 import { auxGenerate } from "@/lib/chat/context/aux";
 import { reconcileUsage } from "@/lib/usage";
-import { releaseHold } from "@/lib/billing/limits";
+import { releaseHold, reserveBudget } from "@/lib/billing/limits";
+import { take } from "@/lib/rate-limit";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
@@ -156,6 +157,34 @@ const EMERGENCY_KEEP_RECENT = 10;
  *  build tree regardless. Both are ceilings on ONE listing per finished turn. */
 const WORKSPACE_SCAN_DEPTH = 3;
 const WORKSPACE_SCAN_LIMIT = 2000;
+
+/**
+ * What a turn owes the steers it never folded in, split into the two decisions
+ * that were previously one.
+ *
+ * PERSIST is owed on every terminal status. The steer endpoint answered the client
+ * `ok`, and `messages.metadata.steers` records only the steers that were CONSUMED —
+ * so an unread one is held nowhere once the task row is done. A turn that failed or
+ * was stopped was still spoken to, and losing those words is the one outcome this
+ * feature cannot have.
+ *
+ * ANSWER is owed only by a turn that ended cleanly. A cancelled turn was stopped by
+ * the user, and replying with a turn they did not ask for is the opposite of what
+ * they pressed; a failed turn would send the same words straight back into whatever
+ * just broke. In both cases the persisted message sits on the active path, so the
+ * user's next send carries it — nothing is lost, it is merely not auto-answered.
+ *
+ * A SUSPENDED turn (awaiting approval or an answer) is owed NEITHER: its unread
+ * steers are carried into the continuation task instead (see `carriedSteers`), and
+ * persisting them here would say the same words twice.
+ */
+export function lateSteerPlan(input: {
+  status: "completed" | "failed" | "cancelled";
+  suspended: boolean;
+}): { persist: boolean; answer: boolean } {
+  if (input.suspended) return { persist: false, answer: false };
+  return { persist: true, answer: input.status === "completed" };
+}
 
 /**
  * Run an agent task to completion. Invoked by the worker for a claimed task
@@ -325,7 +354,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // realtime. Created up front so the catch path can still finalize it. We track
   // the live activity + tool count so the channel can show a status header while
   // streaming and a collapsed "✅ N tools · Ts" log once done.
-  const sink = makeDeliverySink(payload.origin, taskId);
+  const sink = makeDeliverySink(payload.origin, taskId, payload.notifyMode);
   // Same human-readable step labels the web UI uses ("Running a command…"),
   // localized to the originating channel's language.
   const stepsT = getTranslator(payload.origin?.locale, "steps");
@@ -2093,18 +2122,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A steer is folded in by `prepareStep`, and `prepareStep` runs before a step —
     // so a steer that arrives while the model is writing the LAST step (or during a
     // turn that called no tools at all) reaches no prompt: there is no next step to
-    // fold it into. Those are the user's words, and silently dropping them is the
-    // one outcome this feature cannot have. So they become an ordinary follow-up
-    // turn — one user message carrying them, exactly as if the user had sent it the
-    // moment the reply landed.
+    // fold it into. Those are the user's words, the endpoint has already told the
+    // client it took them, and silently dropping them is the one outcome this
+    // feature cannot have. So they become an ordinary user message, exactly as if
+    // the user had sent it the moment the reply landed.
     //
-    // `completed` only, deliberately. A CANCELLED turn was stopped by the user, and
-    // answering them with a turn they did not ask for is the opposite of what they
-    // pressed. A FAILED turn would send the same words straight back into whatever
-    // just broke. A SUSPENDED one is waiting on the user's approval, and a queued
-    // turn would run over the very question being asked — its steers are carried by
-    // the continuation instead (see `carriedSteers`).
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer) {
+    // Keeping the words and ANSWERING them are two decisions, not one — see
+    // `lateSteerPlan` for which terminal status earns which.
+    const steerPlan = lateSteerPlan({ status: finalStatus, suspended: Boolean(awaitingApproval || awaitingAnswer) });
+    if (steerPlan.persist) {
       try {
         const unread = [...carriedSteers, ...(await readSteers(taskId)).slice(steersRead)];
         if (unread.length) {
@@ -2115,19 +2141,52 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             platform: payload.origin?.platform ?? "web",
           });
           await db.update(chats).set({ activeLeafId: followUpId, updatedAt: new Date() }).where(eq(chats.id, chatId));
-          // No budget hold: the same path automations take. The turn reconciles its
-          // real spend at finalize either way, and refusing a hold here would strand
-          // the message with nothing to answer it.
-          await enqueueTask({
-            id: nanoid(), chatId, userId,
-            payload: { requestModel: payload.requestModel, projectId: payload.projectId, uiMessages: [], origin: payload.origin },
-          });
-          tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: unread.length });
+          if (!steerPlan.answer) {
+            // The words are kept and sit on the active path; the user's own next
+            // send is what asks for a reply to them.
+            tlog.info("late steers kept as a message; this turn does not answer them", { count: unread.length, status: finalStatus });
+          } else {
+            // A paid turn the user did not send through the chat route, so it passes
+            // the SAME two gates that route does: the per-user flood bucket (same
+            // key, so the two share one budget) and the shared-key budget
+            // reservation. Without them, a user at their cap could start an extra
+            // turn at the end of every reply just by steering.
+            const followUpTaskId = nanoid();
+            const flood = take(`chat:${userId}`);
+            const reservation = flood.ok
+              ? await reserveBudget({ userId, taskId: followUpTaskId, onSharedKey: isShared, modelId, provider, configId })
+              : null;
+            if (!reservation?.allowed) {
+              // A refusal costs the user nothing they typed: the message above is
+              // already persisted, and their next ordinary send is what surfaces the
+              // limit in their own language (the chat route's 429).
+              tlog.warn("late steers kept as a message but not answered: gate refused", {
+                count: unread.length,
+                reason: flood.ok ? `budget:${reservation?.window ?? "unknown"}` : "rate_limited",
+              });
+            } else {
+              let handedOff = false;
+              try {
+                const { created } = await enqueueTask({
+                  id: followUpTaskId, chatId, userId,
+                  payload: { requestModel: payload.requestModel, projectId: payload.projectId, uiMessages: [], origin: payload.origin },
+                });
+                handedOff = created;
+                tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: unread.length });
+              } finally {
+                // A turn that folded into an existing one does not own our hold, and
+                // neither does a throw between the reservation and the enqueue —
+                // release it or it inflates the user's budget forever with no task
+                // row for the zombie reconciler to find.
+                if (!handedOff) await releaseHold(followUpTaskId);
+              }
+            }
+          }
         }
       } catch (e) {
         // Never fail a finished turn over its epilogue — the reply is already
         // delivered and this is recovery of a message, not of the answer.
-        tlog.warn("could not queue the late steers as a follow-up turn", { err: errMsg(e) });
+        tlog.warn("could not keep the late steers", { err: errMsg(e) });
       }
     }
     // One structured line per finished run — the happy path used to leave no

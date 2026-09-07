@@ -26,7 +26,7 @@ import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useAttachments, DRAFT_FILES_PREFIX } from "@/components/chat/use-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
-import { useChatQueue, visibleQueue, type QueuedMessage } from "@/components/chat/use-chat-queue";
+import { useChatQueue, visibleQueue, drainQueue, type QueuedMessage } from "@/components/chat/use-chat-queue";
 import { useShareImport } from "@/components/chat/use-share-import";
 import { ImportCard } from "@/components/chat/import-card";
 import { SourceGlyph } from "@/components/chat/import-card";
@@ -611,6 +611,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // off ids (not off `send()` resolving) is what keeps the message from being
   // drawn twice for the length of the round-trip.
   const messageIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
+  // The same set, read LIVE by the drain loop: its closure was captured when the
+  // burst started, and what it needs to know is whether an item has landed by now.
+  const messageIdsRef = useRef(messageIds);
+  messageIdsRef.current = messageIds;
 
   // Ids this panel has drawn as a ghost, so the real bubble can skip its
   // entrance animation and solidify in place instead of blinking. Bounded by how
@@ -644,26 +648,16 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     if (editingId) return;
     const batch = queued;
     dispatchingRef.current = true;
-    void (async () => {
-      for (const item of batch) {
-        // Re-checked every iteration, not just at the top: a burst takes a
-        // round-trip per message, which is plenty of time to click the pencil on
-        // one still waiting. Stop at this boundary — the rest stay queued and
-        // re-drain once the editor closes.
-        if (editingIdRef.current) break;
-        // Dequeue this one as we start it — NOT the whole batch up-front. A reload
-        // mid-drain then keeps the not-yet-started items in localStorage (the
-        // whole point of persisting the queue), and the stable id keeps the
-        // in-flight one idempotent if it raced through to the server.
-        setQueued((q) => q.filter((m) => m.id !== item.id));
-        setSending(item);
-        const ok = await send(item.text, item.refs, item.id);
-        // A hard failure put the text back in the composer; stop the burst rather
-        // than hammering a failing server — the rest stay queued and re-drain when
-        // the chat is free, one attempt each (no retry loop: each is dequeued).
-        if (!ok) break;
-      }
-    })().finally(() => { dispatchingRef.current = false; setSending(null); });
+    // The loop itself lives in `drainQueue` — the order of its dequeue against its
+    // send is the behaviour, and it is the one part of this panel worth testing on
+    // its own.
+    void drainQueue(batch, {
+      editing: () => editingIdRef.current !== null,
+      committed: () => messageIdsRef.current,
+      dequeue: (id) => setQueued((q) => q.filter((m) => m.id !== id)),
+      setSending,
+      send,
+    }).finally(() => { dispatchingRef.current = false; setSending(null); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued, historyLoaded, editingId]);
 
