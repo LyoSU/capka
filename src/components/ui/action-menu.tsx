@@ -202,7 +202,7 @@ function ActionSheet({
             const needsSeparator = separatorBefore(it, items[i - 1]);
             return (
               <React.Fragment key={it.key}>
-                {needsSeparator && <div className="my-1 h-px bg-border" />}
+                {needsSeparator && <div className="my-1.5 h-px bg-border" />}
                 <button
                   type="button"
                   disabled={it.disabled}
@@ -212,7 +212,7 @@ function ActionSheet({
                     it.onSelect();
                   }}
                   className={cn(
-                    "flex min-h-[3rem] items-center gap-3 rounded-xl px-4 text-[15px] outline-none transition-colors focus-visible:bg-hover active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
+                    "flex min-h-12 items-center gap-3 rounded-lg px-3 text-[15px] leading-5 outline-none transition-colors focus-visible:bg-hover active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
                     it.variant === "destructive"
                       ? "text-destructive [&_svg]:text-destructive"
                       : "text-foreground [&_svg]:text-muted-foreground",

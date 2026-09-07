@@ -185,11 +185,18 @@ export function usePreviewDock(onRequestOpen?: () => void): PreviewDockCtx | nul
   const cb = useRef(onRequestOpen);
   cb.current = onRequestOpen;
   const register = ctx?.register;
+  // A host with no way to make itself appear must NOT register, and this is the
+  // one place that can tell. Registering anyway would take ownership of the
+  // preview — the provider would mark it docked and skip the dialog — and then
+  // fail to open the column, so clicking a file in the transcript would do
+  // nothing at all, visibly. Falling back to the dialog is a worse layout and an
+  // infinitely better outcome than a dead click.
+  const canOpen = !!onRequestOpen;
   useEffect(() => {
-    if (!register) return;
+    if (!register || !canOpen) return;
     register(() => cb.current?.());
     return () => register(null);
-  }, [register]);
+  }, [register, canOpen]);
   return ctx;
 }
 

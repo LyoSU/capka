@@ -113,7 +113,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
         {showSearch && (
           <div className="relative w-48 shrink-0">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="h-9 pl-8" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="pl-8" />
           </div>
         )}
       </div>

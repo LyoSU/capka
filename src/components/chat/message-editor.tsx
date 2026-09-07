@@ -129,22 +129,19 @@ export function MessageEditor({
             optional step, saving is the one being confirmed. */}
         <Button
           variant="ghost"
-          size="sm"
-          className="mr-auto h-9 gap-1.5"
+          className="mr-auto"
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip className="h-4 w-4" />
           <span className={isMobile ? "sr-only" : undefined}>{t("input.attach")}</span>
         </Button>
-        <Button variant="ghost" size="sm" className="h-9" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel}>
           {tCommon("cancel")}
         </Button>
         {/* Held while a file is still in flight, exactly like the composer's send:
             saving now would point the message at a file the sandbox doesn't have
             yet, and the model would be handed a name with nothing behind it. */}
         <Button
-          size="sm"
-          className="h-9"
           onClick={save}
           disabled={attachments.hasUploading}
           title={attachments.hasUploading ? t("input.uploadingWait") : undefined}

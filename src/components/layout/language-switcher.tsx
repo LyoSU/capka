@@ -53,7 +53,7 @@ export function LanguageSwitcher() {
           key={loc}
           value={loc}
           aria-label={localeNames[loc]}
-          className="h-7 px-3 text-xs"
+          className="px-3 text-xs"
         >
           {localeNames[loc]}
         </ToggleGroupItem>

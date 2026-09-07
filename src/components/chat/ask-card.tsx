@@ -253,14 +253,14 @@ function Pager({ page, total, onGo, disabled }: {
  *  - The selected state is a SOLID fill, not the 10% wash it used to be. This is a
  *    blocking decision that resumes suspended work, so "did my tap register?" must
  *    have no ambiguity; a faint tint on a pale surface leaves room for doubt.
- *  - `min-h-10 sm:min-h-8`: the old `py-1` chip stood ~26px tall. That clears the
+ *  - `min-h-10 sm:min-h-9`: the old `py-1` chip stood ~26px tall. That clears the
  *    WCAG 2.1 AA floor but is a genuinely uncomfortable target for the single most
  *    consequential tap in the product, so touch gets a 40px row and the pointer
- *    case stays compact.
+ *    case sits on the app's control rung.
  */
 const chipClass = (active: boolean, filled: boolean) =>
   [
-    "relative inline-flex min-h-10 items-center rounded-full px-3.5 text-sm transition-micro sm:min-h-8",
+    "relative inline-flex min-h-10 items-center rounded-full px-3.5 text-sm transition-micro sm:min-h-9",
     active
       ? // A multi-select fills each chip itself (bg-primary): several can be on at
         // once, and one glider cannot mark three. A single choice leaves the chip
@@ -355,7 +355,7 @@ function Field({ field, value, onSet, onToggle, onEnter }: {
       ) : (
         <Input
           type={field.kind === "number" ? "number" : "text"}
-          className="mt-2 h-10 sm:h-8"
+          className="mt-2 h-10 sm:h-9"
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onSet(field.id, e.target.value)}
           onKeyDown={(e) => {

@@ -432,7 +432,7 @@ function SkillRow({
             <Hint label={t("delete")}>
               <AlertDialogTrigger
                 render={
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: skill.name })}>
+                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: skill.name })}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 }

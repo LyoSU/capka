@@ -33,7 +33,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
 - Chat menu: actions are grouped (share, rename, regenerate title | pin, archive | move to project, export | delete) in the sidebar row, the header "⋯" and the touch sheet alike.
-- Menus: every dropdown and action menu is roomier (16px radius, 44px rows, 15px text, 20px icons, inset rules between groups), matching the menus people know from other assistants.
+- One control/row/surface scale across the app, written down in `globals.css`: controls 36px (inputs, selects and buttons alike), list rows 40px with 15px text and 20px icons, floating surfaces (menus, popovers, select lists, dialogs) 16px radius with rules inset to the padding.
 - Chat, desktop: opening a file shows it inside the files panel beside the conversation instead of a dialog over it; Escape returns to the file list, closing the panel puts the file away. Phones keep the full-screen viewer.
 - Chat: the jump rail at the right edge is quieter (hairline marks, dimmer at rest, full weight on keyboard focus) and its list aligns every row's text on one edge with the full message on hover.
 - Chat: thinking levels are named Off / Low / Medium / High (Вимкнено / Низький / Середній / Високий); the explanations under the slider are unchanged.

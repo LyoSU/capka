@@ -63,7 +63,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
           />
         </svg>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" sideOffset={8} className="max-w-56 p-2.5 text-xs">
+      <PopoverContent side="top" align="end" sideOffset={8} className="max-w-56 text-xs">
         <div className="font-medium text-popover-foreground">{t("contextFull", { pct })}</div>
         {/* What this means for the reader, not the number behind it. The exact
             token pair is telemetry: useful to whoever pays for the key, noise to

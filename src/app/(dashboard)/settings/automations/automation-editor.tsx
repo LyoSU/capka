@@ -300,7 +300,7 @@ export function AutomationEditor({
                           only thing anyone does with this is copy it, and a real
                           input is what makes select-all work on every platform. */}
                       <Input readOnly value={webhookUrl} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
-                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={copyUrl} aria-label={t("webhook.copy")} title={t("webhook.copy")}>
+                      <Button variant="outline" size="icon" className="shrink-0" onClick={copyUrl} aria-label={t("webhook.copy")} title={t("webhook.copy")}>
                         <Copy className="h-3.5 w-3.5" />
                       </Button>
                     </div>

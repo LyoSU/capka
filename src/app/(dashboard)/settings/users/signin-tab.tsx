@@ -164,7 +164,7 @@ export function SignInTab() {
                     <Button
                       variant="outline"
                       size="icon"
-                      className="h-9 w-9 shrink-0"
+                      className="shrink-0"
                       onClick={copyRedirect}
                       aria-label={copied ? t("copied") : t("copyRedirect")}
                     >

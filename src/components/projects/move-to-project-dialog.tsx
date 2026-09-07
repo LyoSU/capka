@@ -101,7 +101,7 @@ export function MoveToProjectDialog({
               type="button"
               onClick={() => setChoice(null)}
               className={cn(
-                "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors",
+                "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
                 choice === null ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
               )}
             >
@@ -121,7 +121,7 @@ export function MoveToProjectDialog({
                 type="button"
                 onClick={() => setChoice(p.id)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors",
+                  "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
                   choice === p.id ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
                 )}
               >

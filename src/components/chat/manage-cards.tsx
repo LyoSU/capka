@@ -128,7 +128,7 @@ function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnec
     <a
       href={action.url}
       onClick={onClick}
-      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
     >
       <Plug className="h-3.5 w-3.5" />
       {action.label}

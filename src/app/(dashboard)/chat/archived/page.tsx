@@ -138,8 +138,7 @@ export default function ArchivedChatsPage() {
                   <div className="flex shrink-0 gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
+                      size="icon-sm"
                       disabled={busyId === chat.id}
                       onClick={() => unarchive(chat.id)}
                       aria-label={t("archived.restore")}
@@ -149,8 +148,8 @@ export default function ArchivedChatsPage() {
                     </Button>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
+                      size="icon-sm"
+                      className="text-destructive"
                       disabled={busyId === chat.id}
                       onClick={() => setDeleteId(chat.id)}
                       aria-label={t("archived.delete")}

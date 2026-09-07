@@ -180,7 +180,7 @@ export function ProjectHub({
             identity and the page's navigation ran together as one dense block. */}
         <div className="mb-6">
           <div className="flex items-center gap-1">
-            <SidebarTrigger className="-ml-1 size-8 shrink-0 md:hidden" />
+            <SidebarTrigger className="-ml-1 size-9 shrink-0 md:hidden" />
             <Link
               href="/projects"
               className="-ml-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -322,7 +322,7 @@ export function ProjectHub({
                something to tell the user. A plain fraction of the viewport subtracts
                no chrome it has to keep guessing at, and the page scrolls to reveal
                the rest. min-h keeps it usable on a short laptop window. */
-            <div className="h-[60dvh] min-h-80 overflow-hidden rounded-xl bg-card shadow-hairline">
+            <div className="h-[60dvh] min-h-80 overflow-hidden rounded-2xl bg-card shadow-hairline">
               <WorkspaceBrowser
                 target={target}
                 folderSync={folderSync}
@@ -384,7 +384,7 @@ function OverviewTab({
           icon={FolderKanban}
           title={t("empty")}
           hint={t("emptyExplainer")}
-          className="rounded-xl border border-dashed"
+          className="rounded-2xl border border-dashed"
         >
           <Button size="sm" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
             <Plus className="h-4 w-4" />
@@ -740,5 +740,5 @@ function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; loc
  *  hairline, not the shadow. Depth stays reserved for things that genuinely cover
  *  other content (`--elev-overlay`). */
 function ChatList({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline">{children}</div>;
+  return <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-hairline">{children}</div>;
 }

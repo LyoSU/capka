@@ -81,13 +81,13 @@ export function ComposerMenu({
     else if (r === "failed") toast(t("reconnectFailed"));
   };
 
-  const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-hover disabled:opacity-60";
-  const icon = "h-4 w-4 shrink-0 text-muted-foreground";
+  const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[15px] leading-5 text-foreground transition-colors hover:bg-hover disabled:opacity-60";
+  const icon = "size-5 shrink-0 text-muted-foreground";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className="outline-none">{children}</PopoverTrigger>
-      <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-1.5">
+      <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
         <button type="button" className={item} onClick={() => { onUpload(); setOpen(false); }}>
           <FileUp className={icon} />
           {t("uploadFiles")}
@@ -97,14 +97,14 @@ export function ComposerMenu({
           folders.supported ? (
             <>
               <button type="button" className={item} onClick={connect} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <FolderPlus className={icon} />}
+                {busy ? <Loader2 className="size-5 shrink-0 animate-spin" /> : <FolderPlus className={icon} />}
                 {t("connect")}
               </button>
 
               {folders.folders.map((f) => {
                 const lapsed = folders.needReconnect.includes(f.id);
                 return (
-                  <div key={f.id} className="flex items-center gap-2 px-2 py-1 text-sm">
+                  <div key={f.id} className="flex items-center gap-3 px-3 py-1 text-sm">
                     <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate">{f.name}</span>
                     {lapsed && (
@@ -132,7 +132,7 @@ export function ComposerMenu({
               {/* Also while the FIRST folder is copying: there is no chip yet to carry
                   the state, and that first sync is the longest one a person sits through. */}
               {(folders.folders.length > 0 || folders.phase === "syncing") && (
-                <div className="px-2 pt-1 text-xs text-muted-foreground">
+                <div className="px-3 pt-1 text-xs text-muted-foreground">
                   {folders.phase === "syncing" ? (
                     <>
                       <span>{folders.progress ? t(`progress.${folders.progress.phase}`, { done: folders.progress.done, total: folders.progress.total }) : t("syncing")}</span>
@@ -159,11 +159,11 @@ export function ComposerMenu({
           ) : (
             <>
               <button type="button" className={item} onClick={importFolder} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <FolderUp className={icon} />}
+                {busy ? <Loader2 className="size-5 shrink-0 animate-spin" /> : <FolderUp className={icon} />}
                 {t("importFolder")}
               </button>
               {imported && (imported.count > 0 ? (
-                <div className="px-2 pt-1 text-xs text-muted-foreground">
+                <div className="px-3 pt-1 text-xs text-muted-foreground">
                   {t("imported", { n: imported.count, name: imported.name })}{" "}
                   <a
                     href={`/api/sandbox/files/download-all?${targetQuery(folders.target)}&paths=${encodeURIComponent(imported.name)}`}
@@ -176,9 +176,9 @@ export function ComposerMenu({
               ) : (
                 // Nothing survived the filter (all skipped/oversized) — no folder was
                 // created, so don't offer a zip link to a path that doesn't exist.
-                <div className="px-2 pt-1 text-xs text-muted-foreground">{t("nothingImported")}</div>
+                <div className="px-3 pt-1 text-xs text-muted-foreground">{t("nothingImported")}</div>
               ))}
-              <div className="px-2 pt-1 text-xs text-muted-foreground/70">{t("unsupportedBrowser")}</div>
+              <div className="px-3 pt-1 text-xs text-muted-foreground/70">{t("unsupportedBrowser")}</div>
             </>
           )
         )}
@@ -190,9 +190,9 @@ export function ComposerMenu({
           </button>
         )}
 
-        {err && <div className="px-2 pt-1 text-xs text-destructive">{err}</div>}
+        {err && <div className="px-3 pt-1 text-xs text-destructive">{err}</div>}
 
-        <div className="my-1 border-t border-border" />
+        <div className="my-1.5 border-t border-border" />
 
         {/* Doors, not actions: each opens the settings page that owns the thing. */}
         {[

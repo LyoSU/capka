@@ -226,7 +226,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
         </PopoverTrigger>
 
         {/* Desktop: the same `control`, anchored above the pill. */}
-        <PopoverContent side="top" align="end" className="w-64 p-3.5">
+        <PopoverContent side="top" align="end" className="w-64">
           {control}
         </PopoverContent>
       </Popover>

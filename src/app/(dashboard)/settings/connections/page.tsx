@@ -363,7 +363,7 @@ export default function ConnectionsPage() {
                     type="number"
                     value={s.value}
                     onChange={(e) => s.update(e.target.value)}
-                    className="h-8 w-32 text-right tabular-nums"
+                    className="w-32 text-right tabular-nums"
                     {...attrs}
                   />
                   <span className="text-[13px] text-muted-foreground">{unit}</span>

@@ -22,17 +22,17 @@ export function ThemeSwitcher() {
       {/* `Hint` renders each item in place (no wrapper node), so the group's
           first/last rounding and roving focus still see three direct children. */}
       <Hint label={t("system")}>
-        <ToggleGroupItem value="system" className="h-7 w-7">
+        <ToggleGroupItem value="system">
           <Monitor className="h-4 w-4" />
         </ToggleGroupItem>
       </Hint>
       <Hint label={t("light")}>
-        <ToggleGroupItem value="light" className="h-7 w-7">
+        <ToggleGroupItem value="light">
           <Sun className="h-4 w-4" />
         </ToggleGroupItem>
       </Hint>
       <Hint label={t("dark")}>
-        <ToggleGroupItem value="dark" className="h-7 w-7">
+        <ToggleGroupItem value="dark">
           <Moon className="h-4 w-4" />
         </ToggleGroupItem>
       </Hint>

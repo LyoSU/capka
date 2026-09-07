@@ -391,7 +391,7 @@ export function SetupWizard({
                         })
                       )}
                     >
-                      <SelectTrigger id="provider" className="h-auto w-full rounded-xl border-transparent bg-muted/60 py-2.5">
+                      <SelectTrigger id="provider" className="h-11 w-full rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px]">
                         <SelectValue />
                       </SelectTrigger>
               <SelectContent>
@@ -461,7 +461,7 @@ export function SetupWizard({
                       variant="field"
                       // The wizard runs a larger field scale (h-11/rounded-xl)
                       // than the rest of the app; without this the picker keeps
-                      // the standard h-8 and sits well short of the inputs
+                      // the standard control rung and sits short of the inputs
                       // stacked directly above it.
                       className={INPUT_CLASS}
                       value={defaultModel}

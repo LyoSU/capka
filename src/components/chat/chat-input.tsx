@@ -357,7 +357,7 @@ export function ChatInput({
               />
               <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
                 <Hint label={t("add")}>
-                  <span className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
+                  <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
                     <Plus className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
                   </span>
                 </Hint>
@@ -399,7 +399,7 @@ export function ChatInput({
                   <Button
                     size="icon"
                     variant="outline"
-                    className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                    className="size-10 sm:size-9 shrink-0 rounded-xl transition-transform active:scale-90"
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send/stop.
                     onMouseDown={(e) => e.preventDefault()}
@@ -415,7 +415,7 @@ export function ChatInput({
                     variant="ghost"
                     aria-pressed
                     aria-label={t("dictation.stop")}
-                    className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full animate-pulse-fast bg-primary/10 text-primary transition-transform hover:bg-primary/15 hover:text-primary active:scale-90"
+                    className="size-10 sm:size-9 shrink-0 rounded-full animate-pulse-fast bg-primary/10 text-primary transition-transform hover:bg-primary/15 hover:text-primary active:scale-90"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={dictation.stop}
                   >
@@ -429,7 +429,7 @@ export function ChatInput({
                       size="icon"
                       variant="ghost"
                       aria-label={t("dictation.start")}
-                      className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                      className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground transition-transform hover:text-foreground active:scale-90"
                       // Keep the caret where the words are going — a button click
                       // would otherwise pull focus out of the composer.
                       onMouseDown={(e) => e.preventDefault()}
@@ -444,7 +444,7 @@ export function ChatInput({
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button
                     size="icon"
-                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full transition-transform active:scale-90"
+                    className="group/send size-10 sm:size-9 shrink-0 rounded-full transition-transform active:scale-90"
                     disabled={!canSend}
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send.

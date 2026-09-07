@@ -13,10 +13,12 @@ const toggleVariants = cva(
         default: "bg-transparent",
         outline: "border border-input bg-transparent hover:bg-hover",
       },
+      // Same rungs as Button — a segmented control sits in the same rows as a
+      // select or an input, so it cannot be a size of its own.
       size: {
-        default: "h-8 min-w-8 px-2",
-        sm: "h-7 min-w-7 rounded-[min(var(--radius-md),12px)] px-1.5 text-[0.8rem]",
-        lg: "h-9 min-w-9 px-2.5",
+        default: "h-9 min-w-9 px-2.5",
+        sm: "h-8 min-w-8 rounded-md px-2",
+        lg: "h-10 min-w-10 px-3",
       },
     },
     defaultVariants: {

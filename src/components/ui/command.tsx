@@ -73,8 +73,8 @@ function CommandInput({
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
-    <div data-slot="command-input-wrapper" className="flex h-14 items-center gap-3 border-b border-border px-4">
-      <SearchIcon className="size-[18px] shrink-0 text-muted-foreground" />
+    <div data-slot="command-input-wrapper" className="flex h-14 items-center gap-3 border-b border-border px-5">
+      <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
@@ -139,7 +139,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn("mx-2 my-1.5 h-px bg-border", className)}
+      className={cn("my-1.5 h-px bg-border", className)}
       {...props}
     />
   )
@@ -158,13 +158,13 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-lg px-3 text-[15px] outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-4 data-selected:[&_svg]:text-foreground",
+        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-lg px-3 text-[15px] outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-5 data-selected:[&_svg]:text-foreground",
         className
       )}
       {...props}
     >
       {children}
-      <CheckIcon className="ml-auto hidden group-data-[checked=true]/command-item:block" />
+      <CheckIcon className="ml-auto hidden size-4 group-data-[checked=true]/command-item:block" />
     </CommandPrimitive.Item>
   )
 }

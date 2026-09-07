@@ -428,7 +428,7 @@ export default function UsagePage() {
                   {data.byUser.length > 5 && (
                     <div className="relative w-44">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="h-8 pl-8 text-xs" />
+                      <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="pl-8" />
                     </div>
                   )}
                 </div>
@@ -553,7 +553,7 @@ function FiltersControl({
     <Popover>
       <PopoverTrigger
         className={cn(
-          "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm shadow-btn transition-micro hover:bg-hover disabled:opacity-50",
+          "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm shadow-btn transition-micro hover:bg-hover disabled:opacity-50",
           activeCount > 0 && "bg-hover-strong",
         )}
         disabled={!opts}
@@ -566,7 +566,7 @@ function FiltersControl({
           </span>
         )}
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" className="w-64 space-y-3 p-3">
+      <PopoverContent side="bottom" align="end" className="w-64 space-y-3">
         <FilterSelect
           label={t("filterMember")}
           value={filters.userId}

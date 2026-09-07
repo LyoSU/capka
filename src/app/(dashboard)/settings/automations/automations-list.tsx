@@ -315,14 +315,14 @@ export default function AutomationsList() {
               {/* Run and edit sit before the switch: they are what someone came to
                   do with an automation, while the switch is what they do to it. */}
               <Button
-                variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"
                 onClick={() => runNow(a)} disabled={running === a.id}
                 aria-label={t("runAria", { name: a.title })} title={t("runNow")}
               >
                 <Play className="h-4 w-4" />
               </Button>
               <Button
-                variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground"
                 onClick={() => setEditing(a)}
                 aria-label={t("editAria", { name: a.title })} title={t("edit")}
               >
@@ -332,7 +332,7 @@ export default function AutomationsList() {
               <AlertDialog>
                 <AlertDialogTrigger
                   render={
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: a.title })}>
+                    <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: a.title })}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   }

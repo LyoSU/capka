@@ -26,9 +26,10 @@ export function IconPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <Hint label={t("changeIcon")}>
         <PopoverTrigger
-          // Square on the field scale (h-8/rounded-lg): it always sits beside an
-          // Input, and at h-9/rounded-md it read as a taller, boxier neighbour.
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
+          // Square on the control rung (size-9/rounded-lg): it always sits beside
+          // an Input, so it tracks whatever height that rung is — a different
+          // number here reads as a taller, boxier neighbour.
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <ProviderGlyph slug={value ?? fallback} size={16} />
         </PopoverTrigger>
@@ -46,7 +47,7 @@ export function IconPicker({
                   setOpen(false);
                 }}
                 aria-pressed={active}
-                className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
+                className={`flex size-8 items-center justify-center rounded-md border transition-colors ${
                   active
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-transparent text-muted-foreground hover:bg-hover"

@@ -205,7 +205,7 @@ export function UserDialog({
                 disabled={busy}
                 items={{ admin: t("roles.admin"), user: t("roles.user"), viewer: t("roles.viewer") }}
               >
-                <SelectTrigger className="h-8 w-44 text-sm" aria-label={t("changeRole")}>
+                <SelectTrigger className="w-44" aria-label={t("changeRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -235,7 +235,7 @@ export function UserDialog({
                   disabled={busy}
                   items={Object.fromEntries([[DEFAULT_TIER, defaultTierLabel], ...tiers.map((x) => [x.id, tierItemLabel(x)])])}
                 >
-                  <SelectTrigger className="h-8 w-44 text-sm" aria-label={t("tierLabel")}>
+                  <SelectTrigger className="w-44" aria-label={t("tierLabel")}>
                     <SelectValue className="truncate" />
                   </SelectTrigger>
                   <SelectContent>
@@ -433,7 +433,7 @@ export function UserDialog({
   );
 }
 
-// A label/value row. `min-h-8` holds one rhythm whether the value is plain text,
+// A label/value row. `min-h-11` holds one rhythm whether the value is plain text,
 // a badge or a select, and the label is the part that gives way when space runs
 // short — a clipped control (the tier name losing its last letters) reads as a
 // rendering bug, a shortened label doesn't.

@@ -118,7 +118,7 @@ export function ChatSecrets({
         {secrets.length > 0 && (
           <ul className="space-y-1">
             {secrets.map((s) => (
-              <li key={s.name} className="flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-1.5 text-sm">
+              <li key={s.name} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2 text-sm">
                 <span className="flex-1 truncate font-mono text-xs text-foreground">{s.name}</span>
                 <button
                   type="button"
@@ -154,7 +154,7 @@ export function ChatSecrets({
             autoComplete="new-password"
             disabled={busy}
           />
-          <Button type="submit" size="sm" className="w-full" disabled={busy || !name.trim() || !value}>
+          <Button type="submit" className="w-full" disabled={busy || !name.trim() || !value}>
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {t("save")}
           </Button>

@@ -267,7 +267,7 @@ function DefaultsSection({ items, t, onOpen }: { items: InvItem[]; t: T; onOpen:
         <div className="space-y-4 pt-1">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchCapability")} className="h-9 pl-8" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchCapability")} className="pl-8" />
           </div>
           {matches.length === 0 && <p className="text-sm text-muted-foreground">{t("noMatches")}</p>}
           <DefaultsGroup title={t("skills")} items={skillItems} t={t} onOpen={onOpen} />

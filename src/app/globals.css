@@ -77,6 +77,34 @@
   --shadow-panel: var(--elev-panel);
   --shadow-raised: var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
+  /* ── One UI scale ────────────────────────────────────────────────────────
+     Every control, list row and floating surface in the app is built from the
+     table below. Look here before inventing a height or a padding at a call
+     site; if something needs a number that isn't here, the table is wrong, not
+     the exception. The rungs are 4px apart and the type sizes are 12/14/15/16.
+
+     Controls — button, input, textarea, select trigger, toggle
+       xs        h-6   px-2    text-xs   rounded-md  svg size-3.5
+       sm        h-8   px-2.5  text-sm   rounded-md  svg size-4
+       default   h-9   px-3    text-sm   rounded-lg  svg size-4
+       lg        h-10  px-4    text-sm   rounded-lg  svg size-4
+       icon-only square on the same rungs: size-6 / size-8 / size-9 / size-10
+
+     List rows — menu item, select item, command item, action-sheet row
+       40px tall (py-2.5 + text-[15px]/leading-5), gap-3, px-3, rounded-lg,
+       svg size-5. A trailing check/chevron sits at size-4.
+       Group label: px-3 py-1.5 text-xs. Rule: my-1.5 h-px, inset to the
+       surface padding (no negative margin).
+
+     Floating surfaces — dropdown, popover, select popup, palette, dialog
+       rounded-2xl. p-2 when the body is a list of rows, p-4 when it is prose
+       or a form. Row radius (lg) is the surface radius minus that padding, so
+       the corners stay concentric.
+       Off the ladder on purpose: the tooltip (rounded-md, px-2.5 py-1.5,
+       text-xs) is a passing hint, not a surface; the badge is a label, not a
+       control; the sign-in and setup screens run their own larger field scale
+       (h-11/rounded-xl) because they are single-column, one-task pages.
+     ─────────────────────────────────────────────────────────────────────── */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

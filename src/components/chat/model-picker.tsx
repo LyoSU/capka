@@ -836,7 +836,7 @@ function ModelList({
         </div>
       )}
       <div className="flex items-center gap-2 border-b px-3 py-2.5">
-        <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <Search className="size-4 shrink-0 text-muted-foreground" />
         <input
           value={search}
           onChange={(e) => { onSearch(e.target.value); onActiveIndex(0); }}
@@ -1088,7 +1088,7 @@ interface ModelPickerProps {
   /** "pill" — the slim chat trigger; "field" — a form input. Default "field". */
   variant?: "pill" | "field";
   /** Field variant only: re-scale the trigger for a host that isn't on the app's
-   *  standard field scale — the setup wizard runs a larger one (h-11/rounded-xl).
+   *  standard control rung — the setup wizard runs a larger one (h-11/rounded-xl).
    *  Merged with `cn`, so an override actually replaces the default height or
    *  radius instead of both classes landing and CSS order deciding. */
   className?: string;
@@ -1502,11 +1502,11 @@ export function ModelPicker({
           aria-haspopup="listbox"
           aria-expanded={open}
           className={cn(
-            // The app's field scale, same as Input and SelectTrigger — h-8 and
-            // rounded-lg. It used to be h-9/rounded-md, which put every form
-            // holding a model picker 4px and one radius step out of line with
-            // its own inputs.
-            "flex h-8 w-full items-center gap-2 rounded-lg border bg-transparent px-3 text-sm transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+            // The app's control rung, same as Input and SelectTrigger — h-9,
+            // px-3, rounded-lg. Whatever those two are, this is: a form holding
+            // a model picker must not sit a step out of line with its own
+            // inputs. The rungs live in globals.css.
+            "flex h-9 w-full items-center gap-2 rounded-lg border bg-transparent px-3 text-sm transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
             clearable && value && !state.loading && "pr-9",
             className,
           )}
@@ -1552,7 +1552,7 @@ export function ModelPicker({
           ref={popoverRef}
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
-          className="z-50 flex overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
+          className="z-50 flex overflow-hidden rounded-2xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
         >
           {renderList("vertical")}
         </div>,
