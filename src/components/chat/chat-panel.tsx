@@ -150,8 +150,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // resolves this against the live model list (provider disconnected, or the
   // model removed from the catalog → not available). Default available:true so
   // we never block before the list settles. When it settles unavailable, the
-  // composer is replaced with a "pick another model" notice — sending to a dead
-  // model just produces a failed turn, so we stop it at the source.
+  // composer refuses to send and says so in a strip above its footer — sending
+  // to a dead model just produces a failed turn, so we stop it at the source.
   // The picker also hands back what the resolved model can take natively
   // (provider + per-model input modalities) — the same signal the runner uses
   // server-side — so we can warn, at attach time, that a staged file won't be
@@ -642,6 +642,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // order; the ref guards the async gap before isLoading flips.
   useEffect(() => {
     if (!historyLoaded || isLoading || dispatchingRef.current || queued.length === 0) return;
+    // The same gate the composer's send button has: a model that went away while
+    // these were queued would turn each of them into a failed turn. They stay
+    // queued and go out once another model is picked.
+    if (modelGone) return;
     // An open editor parks the whole queue, not just the message being edited:
     // the user is mid-sentence about what they want to say next, and firing the
     // messages around it would settle that question for them.

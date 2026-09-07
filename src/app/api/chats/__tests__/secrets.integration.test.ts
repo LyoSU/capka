@@ -11,8 +11,15 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   // The routes gate mutations with `requireWriter`, which calls the module-internal
   // `requireSession` — not this mock — and reaches for `headers()` outside a request.
-  // Answer both with the same session so the role a test sets is the one the route sees.
-  return { ...actual, requireSession, requireWriter: requireSession };
+  // The stand-in keeps the real rule (a viewer is refused), so a route that slid
+  // back to plain `requireSession` would still be caught by a viewer-role test.
+  const { ForbiddenError } = await import("@/lib/errors");
+  const requireWriter = async () => {
+    const ctx = await requireSession();
+    if (!["admin", "user"].includes(ctx.role)) throw new ForbiddenError();
+    return ctx;
+  };
+  return { ...actual, requireSession, requireWriter };
 });
 
 /**
@@ -86,14 +93,25 @@ run("/api/chats/[id]/secrets", () => {
   });
 
   it("re-saving a name replaces the credential instead of stacking a second one", async () => {
-    await post("cs-mine", { name: "TOKEN", value: "first" });
-    await post("cs-mine", { name: "TOKEN", value: "second" });
+    // Both values clear the length floor, and both saves are asserted: a first save
+    // refused as too short would leave a lone second row and make this pass for the
+    // wrong reason.
+    expect((await post("cs-mine", { name: "TOKEN", value: "first-value" })).status).toBe(200);
+    expect((await post("cs-mine", { name: "TOKEN", value: "second-value" })).status).toBe(200);
     expect((await (await get("cs-mine")).json()).secrets).toHaveLength(1);
 
     // The injection reads one value for one name, so "replaced" has to be true of
     // the decrypted environment, not merely of the row count.
     const { loadSecretEnv } = await import("@/lib/chat/secrets");
-    expect(await loadSecretEnv("cs-mine")).toEqual({ TOKEN: "second" });
+    expect(await loadSecretEnv("cs-mine")).toEqual({ TOKEN: "second-value" });
+  });
+
+  it("a viewer can see the names but cannot store or delete", async () => {
+    expect((await post("cs-mine", { name: "TOKEN", value: "first-value" })).status).toBe(200);
+    requireSession.mockResolvedValue({ userId: U, role: "viewer", status: "active" });
+    expect((await post("cs-mine", { name: "OTHER", value: "second-value" })).status).toBe(403);
+    expect((await del("cs-mine", { name: "TOKEN" })).status).toBe(403);
+    expect((await get("cs-mine")).status).toBe(200);
   });
 
   it("refuses a name that cannot be a variable, and an empty value", async () => {

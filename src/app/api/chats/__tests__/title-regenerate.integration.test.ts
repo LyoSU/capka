@@ -20,8 +20,15 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   // The routes gate mutations with `requireWriter`, which calls the module-internal
   // `requireSession` — not this mock — and reaches for `headers()` outside a request.
-  // Answer both with the same session so the role a test sets is the one the route sees.
-  return { ...actual, requireSession, requireWriter: requireSession };
+  // The stand-in keeps the real rule (a viewer is refused), so a route that slid
+  // back to plain `requireSession` would still be caught by a viewer-role test.
+  const { ForbiddenError } = await import("@/lib/errors");
+  const requireWriter = async () => {
+    const ctx = await requireSession();
+    if (!["admin", "user"].includes(ctx.role)) throw new ForbiddenError();
+    return ctx;
+  };
+  return { ...actual, requireSession, requireWriter };
 });
 // No provider is reachable from a test run, and resolving one would demand a
 // configured connection this suite has no business creating.
