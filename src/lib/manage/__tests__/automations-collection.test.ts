@@ -29,9 +29,19 @@ describe("parseTriggerArgs", () => {
   it("rejects a once_at already in the past", () => {
     expect(() => parseTriggerArgs({ once_at: "2000-01-01T00:00:00", timezone: "Europe/Kyiv" })).toThrow(/past/i);
   });
+  it("builds a webhook trigger, which needs the timezone for the daily run limit", () => {
+    expect(parseTriggerArgs({ webhook: true, timezone: "Europe/Kyiv" })).toEqual(
+      { kind: "webhook", timezone: "Europe/Kyiv" });
+    // No clock, but still a day boundary to count runs against — so the zone is
+    // as required here as it is for cron.
+    expect(() => parseTriggerArgs({ webhook: true })).toThrow(/timezone/i);
+  });
   it("rejects both/neither", () => {
-    expect(() => parseTriggerArgs({})).toThrow(/cron or once_at/);
+    expect(() => parseTriggerArgs({})).toThrow(/cron, once_at, or webhook/);
     expect(() => parseTriggerArgs({ cron: "0 9 * * 1", timezone: "x", once_at: "2026-08-01T12:00:00Z" })).toThrow();
+    // Two trigger kinds at once is the same mistake as none: which one wins would
+    // decide when someone's automation actually runs.
+    expect(() => parseTriggerArgs({ cron: "0 9 * * 1", timezone: "Europe/Kyiv", webhook: true })).toThrow(/exactly one/i);
   });
   it("rejects an interval under the minimum", () => {
     // "every 5 minutes" with min 60 → friendly error naming the minimum

@@ -1,21 +1,32 @@
 import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { automations } from "@/lib/db/schema";
 import { nanoid } from "nanoid";
 import { getSetting } from "@/lib/settings";
 import { isValidTimezone } from "@/lib/timezone";
-import { nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
+import { localDayOf, nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
 import type { AutomationDisabledReason } from "@/lib/automations/runs";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
 /** Model-facing args are FLAT (weak models fumble nested unions): recurring =
- *  cron+timezone, one-off = once_at. Exactly one form must be present. */
+ *  cron+timezone, one-off = once_at, event-driven = webhook:true. Exactly one
+ *  form must be present, and all three require the timezone — a webhook has no
+ *  clock, but it still needs a day boundary for `max_runs_per_day`. */
 export function parseTriggerArgs(args: Record<string, unknown>): AutomationTrigger {
   const cron = typeof args.cron === "string" ? args.cron : undefined;
   const onceAt = typeof args.once_at === "string" ? args.once_at : undefined;
-  if (cron && onceAt) throw new Error("Give either a recurring schedule (cron) or a one-off moment (once_at), not both.");
+  const webhook = args.webhook === true;
+  if ([cron, onceAt, webhook || undefined].filter(Boolean).length > 1) {
+    throw new Error("Give exactly one trigger: a recurring schedule (cron), a one-off moment (once_at), or webhook: true.");
+  }
+  if (webhook) {
+    const timezone = typeof args.timezone === "string" ? args.timezone : "";
+    if (!isValidTimezone(timezone)) throw new Error("A valid IANA timezone is required with webhook (e.g. Europe/Kyiv). Use the user's timezone setting — it defines the day a daily run limit counts against.");
+    return { kind: "webhook", timezone };
+  }
   if (cron) {
     const timezone = typeof args.timezone === "string" ? args.timezone : "";
     if (!isValidTimezone(timezone)) throw new Error("A valid IANA timezone is required with cron (e.g. Europe/Kyiv). Use the user's timezone setting.");
@@ -34,7 +45,14 @@ export function parseTriggerArgs(args: Record<string, unknown>): AutomationTrigg
     if (!nextOccurrenceAfter(trigger, new Date())) throw new Error("once_at is already in the past.");
     return trigger;
   }
-  throw new Error("A schedule is required: cron or once_at.");
+  throw new Error("A trigger is required: cron, once_at, or webhook: true.");
+}
+
+/** A webhook automation's credential. The URL IS the secret, so it is minted here
+ *  (24 random bytes, url-safe) and NEVER shown to the model — `debug` only tells
+ *  it where the person can read the URL. Also used by the rotate route. */
+export function mintWebhookToken(): string {
+  return randomBytes(24).toString("base64url");
 }
 
 export function assertMinInterval(trigger: AutomationTrigger, minMinutes: number): void {
@@ -81,13 +99,18 @@ export const automationCollection: Collection = {
   id: "automations",
   title: "Automations",
   description:
-    "Scheduled agent runs: the platform runs a saved instruction on a schedule (or once at a set time) with no tab open. Each run opens a new chat; results also go to Telegram when linked. Offer this when the user describes a recurring intent.",
+    "Unattended agent runs: the platform runs a saved instruction with no tab open — on a schedule, once at a set time, or whenever something calls the automation's private webhook URL. Each run opens a new chat (or appends to one ongoing chat); results also go to Telegram when linked. Offer this when the user describes a recurring intent, or wants another system to be able to trigger a run.",
   usage:
-    "add args: {title, prompt, cron, timezone} for a recurring schedule, or {title, prompt, once_at, timezone} for a one-off. " +
+    "add args: {title, prompt, cron, timezone} for a recurring schedule, {title, prompt, once_at, timezone} for a one-off, or " +
+    "{title, prompt, webhook: true, timezone} for one fired by an HTTP call. " +
     "title and prompt are ALWAYS required — title is a short label the user sees in the automations list; prompt is the FULL instruction " +
     "the agent will run each time, written as if starting a fresh conversation. " +
-    "timezone is ALWAYS required (IANA, e.g. Europe/Kyiv — use the user's timezone setting): cron is a 5-field expression evaluated in it, and " +
-    "once_at is a wall-clock ISO datetime like \"2026-07-02T22:15:00\" (NO trailing Z / offset) read in that timezone, so \"22:15\" means the user's 22:15.",
+    "timezone is ALWAYS required (IANA, e.g. Europe/Kyiv — use the user's timezone setting): cron is a 5-field expression evaluated in it, " +
+    "once_at is a wall-clock ISO datetime like \"2026-07-02T22:15:00\" (NO trailing Z / offset) read in that timezone, so \"22:15\" means the user's 22:15, and " +
+    "for a webhook it fixes the day a run limit counts against. " +
+    "Optional max_runs_per_day caps firings per day (skipped runs are reported, never silent), and thread_mode picks where runs go: " +
+    "\"fresh\" (default, a new chat per run) or \"single\" (one ongoing chat the runs are appended to, so the agent keeps the thread's history). " +
+    "A webhook automation's URL is a credential and is NOT returned here — tell the user it is shown in Settings → Automations.",
   requiredRole: "user",
   auditNoun: "automation",
   settingsPath: "/settings/automations",
@@ -103,8 +126,11 @@ export const automationCollection: Collection = {
     cron: z.string().optional(),
     timezone: z.string().optional(),
     once_at: z.string().optional(),
-  }).refine((v) => Boolean(v.cron) !== Boolean(v.once_at), {
-    message: 'Provide EITHER "cron" for a recurring schedule OR "once_at" (a wall-clock ISO datetime) for a one-off, not both — and always a "timezone" (IANA) with whichever you pick.',
+    webhook: z.boolean().optional(),
+    max_runs_per_day: z.number().int().min(1).max(1000).optional(),
+    thread_mode: z.enum(["fresh", "single"]).optional(),
+  }).refine((v) => [v.cron, v.once_at, v.webhook || undefined].filter(Boolean).length === 1, {
+    message: 'Provide EXACTLY ONE trigger: "cron" for a recurring schedule, "once_at" (a wall-clock ISO datetime) for a one-off, or "webhook": true for one fired by an HTTP call — and always a "timezone" (IANA) with whichever you pick.',
   }),
   canAdd: async () => ((await getSetting("automations_enabled")) ?? "true") === "true",
   validateAdd: async (ctx, args) => {
@@ -125,7 +151,10 @@ export const automationCollection: Collection = {
     return {
       title: loc(t, "automation.addTitle", "Add automation"),
       after: String(args.title),
-      details: trigger.kind === "once"
+      details: trigger.kind === "webhook"
+        ? loc(t, "automation.previewWebhook",
+            "Runs whenever something calls its private web address, which is shown in Settings → Automations. Each call spends tokens like a normal turn.")
+        : trigger.kind === "once"
         ? loc(t, "automation.previewOnce", `Runs once: ${nextDates[0]}.`, { date: nextDates[0] })
         : loc(t, "automation.previewRecurring",
             `Next runs: ${nextDates.join(" · ")} — about ${perMonth} ${perMonth === 1 ? "run" : "runs"} per month, each spending tokens like a normal turn.`,
@@ -145,6 +174,11 @@ export const automationCollection: Collection = {
       // (null → default resolution in the runner). See the `model` column comment.
       model: ctx.model ?? null,
       trigger,
+      // Minted with the row, not lazily: the URL is what the automation IS for a
+      // webhook trigger, so a row without one would be a dead endpoint.
+      webhookToken: trigger.kind === "webhook" ? mintWebhookToken() : null,
+      maxRunsPerDay: typeof args.max_runs_per_day === "number" ? args.max_runs_per_day : null,
+      threadMode: args.thread_mode === "single" ? "single" : "fresh",
       nextRunAt: nextOccurrenceAfter(trigger, new Date()),
     });
     return { itemTitle: String(args.title) };
@@ -153,11 +187,16 @@ export const automationCollection: Collection = {
     const t = manageT(ctx.locale);
     const rows = await db.select().from(automations).where(eq(automations.userId, ctx.userId));
     return rows.map((a) => {
-      const { nextDates } = humanizeSchedule(a.trigger as AutomationTrigger, ctx.locale);
+      const trigger = a.trigger as AutomationTrigger;
+      const { nextDates } = humanizeSchedule(trigger, ctx.locale);
       return {
         id: a.id,
         title: a.title,
-        subtitle: a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
+        // A webhook has no next time to show — saying so is what stops the agent
+        // reading a blank subtitle as a broken or paused automation.
+        subtitle: trigger.kind === "webhook"
+          ? loc(t, "automation.webhookSubtitle", "runs on webhook")
+          : a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
         enabled: a.enabled,
         owned: true,
       };
@@ -187,7 +226,8 @@ export const automationCollection: Collection = {
   debug: async (ctx, itemId) => {
     const row = await mustOwn(ctx, itemId);
     const t = manageT(ctx.locale);
-    const { nextDates } = humanizeSchedule(row.trigger as AutomationTrigger, ctx.locale);
+    const trigger = row.trigger as AutomationTrigger;
+    const { nextDates } = humanizeSchedule(trigger, ctx.locale);
     const stateKey = !row.enabled ? "disabled" : row.consecutiveFailures > 0 ? "failing" : "ok";
     const reasonHint = DISABLED_REASON_HINT[row.disabledReason as AutomationDisabledReason];
     // Real average cost per run (spec §4.6 — the honest counterpart of the
@@ -202,7 +242,31 @@ export const automationCollection: Collection = {
       itemTitle: row.title,
       state: loc(t, `state.${stateKey}`, stateKey),
       detail: [
+        // Never the token itself — the URL is the credential, and a model that
+        // has read it can be talked into repeating it. Point at where the person
+        // reads it instead.
+        trigger.kind === "webhook"
+          ? loc(t, "automation.webhookDetail", "Fired by an HTTP call to its private web address (shown to the user in Settings → Automations, never here).")
+          : undefined,
         nextDates[0] && row.enabled ? loc(t, "automation.nextRun", `Next run: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
+        row.threadMode === "single"
+          ? loc(t, "automation.singleThread", "Every run is added to one ongoing chat.")
+          : undefined,
+        // The cap and — crucially — what it has already refused today. A skip
+        // that only ever appeared in a log would look to the agent (and to the
+        // user asking it) exactly like a scheduler that had stopped firing.
+        // The tallies belong to the stamped `runs_day`, so a row whose day has
+        // rolled over reads as zero — showing yesterday's five as "used today"
+        // would be a wrong number presented as a fact.
+        row.maxRunsPerDay
+          ? (() => {
+              const fresh = row.runsDay === localDayOf(trigger);
+              const used = fresh ? row.runsToday : 0;
+              const skipped = fresh ? row.skippedToday : 0;
+              return loc(t, "automation.dailyLimit", `Daily limit: ${row.maxRunsPerDay} runs (used ${used}, skipped ${skipped} today)`,
+                { max: row.maxRunsPerDay, used, skipped });
+            })()
+          : undefined,
         row.lastRunAt
           ? loc(t, "automation.lastRun", `Last run: ${row.lastRunAt.toISOString()}`, { date: row.lastRunAt.toISOString() })
           : loc(t, "automation.neverRan", "Never ran yet"),

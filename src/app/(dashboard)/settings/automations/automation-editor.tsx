@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Copy, Loader2, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,12 @@ export interface EditableAutomation {
   title: string;
   prompt: string;
   trigger: AutomationTrigger;
+  /** The full callable address of a webhook automation, or null. Built by the
+   *  list route from the instance's public origin — never re-derived here, so a
+   *  tab open on some other hostname can't hand out an unreachable URL. */
+  webhookUrl: string | null;
+  maxRunsPerDay: number | null;
+  threadMode: string;
 }
 
 export function AutomationEditor({
@@ -42,6 +48,12 @@ export function AutomationEditor({
       Intl.DateTimeFormat().resolvedOptions().timeZone,
     ));
   const [scheduleTouched, setScheduleTouched] = useState(false);
+  const [threadMode, setThreadMode] = useState(automation?.threadMode === "single" ? "single" : "fresh");
+  // Kept as the raw text of the field: empty means "no limit", and coercing to a
+  // number here would turn a half-typed value into a saved one.
+  const [maxRuns, setMaxRuns] = useState(automation?.maxRunsPerDay ? String(automation.maxRunsPerDay) : "");
+  const [webhookUrl, setWebhookUrl] = useState(automation?.webhookUrl ?? null);
+  const [rotating, setRotating] = useState(false);
   const [saving, setSaving] = useState(false);
 
   if (!automation && !open) return null;
@@ -50,6 +62,9 @@ export function AutomationEditor({
     setScheduleTouched(true);
     setSchedule((s) => ({ ...s, ...patch }));
   };
+
+  const limit = Number(maxRuns);
+  const validLimit = maxRuns.trim() === "" ? null : Number.isInteger(limit) && limit >= 1 && limit <= 1000 ? limit : undefined;
 
   const save = async () => {
     setSaving(true);
@@ -62,6 +77,11 @@ export function AutomationEditor({
           body: JSON.stringify({
             title: title.trim(),
             prompt: prompt.trim(),
+            thread_mode: threadMode,
+            // "No limit" is `null` on an edit (clearing the field has to be able
+            // to REMOVE a limit) but simply absent on create, where the field has
+            // never held a value to clear.
+            ...(validLimit !== null ? { max_runs_per_day: validLimit } : automation ? { max_runs_per_day: null } : {}),
             // On edit, an untouched custom schedule is left out of the body
             // entirely — sending it back through the simple builder would flatten
             // an expression this editor never claimed to understand. On create
@@ -91,7 +111,39 @@ export function AutomationEditor({
     Array.from({ length: 28 }, (_, i) => [String(i + 1), String(i + 1)]),
   );
   const canSave = title.trim().length > 0 && prompt.trim().length > 0 &&
-    (schedule.freq !== "once" || schedule.at.length >= 16);
+    (schedule.freq !== "once" || schedule.at.length >= 16) && validLimit !== undefined;
+
+  const copyUrl = async () => {
+    if (!webhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      toast.success(t("webhook.copied"));
+    } catch {
+      toast.error(t("webhook.copyFailed"));
+    }
+  };
+
+  // Rotating retires the old address immediately, so the replacement comes back
+  // in the response and lands in this open dialog — closing to reload the list
+  // would hand someone a dead URL and no way to read the new one.
+  const rotate = async () => {
+    if (!automation) return;
+    setRotating(true);
+    try {
+      const res = await fetch(`/api/automations/${automation.id}/rotate-token`, { method: "POST" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.webhookUrl) {
+        toast.error(body?.error || t("webhook.rotateFailed"));
+        return;
+      }
+      setWebhookUrl(body.webhookUrl);
+      toast.success(t("webhook.rotated"));
+    } catch {
+      toast.error(t("webhook.rotateFailed"));
+    } finally {
+      setRotating(false);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -146,9 +198,10 @@ export function AutomationEditor({
               <ToggleGroupItem value="weekly">{t("freq.weekly")}</ToggleGroupItem>
               <ToggleGroupItem value="monthly">{t("freq.monthly")}</ToggleGroupItem>
               <ToggleGroupItem value="once">{t("freq.once")}</ToggleGroupItem>
+              <ToggleGroupItem value="webhook">{t("freq.webhook")}</ToggleGroupItem>
             </ToggleGroup>
 
-            {schedule.freq !== "custom" && (
+            {schedule.freq !== "custom" && schedule.freq !== "webhook" && (
               <div className="flex flex-wrap items-end gap-3 pt-1">
                 {schedule.freq === "once" ? (
                   <div className="flex flex-col gap-1.5">
@@ -212,10 +265,76 @@ export function AutomationEditor({
               </div>
             )}
 
+            {schedule.freq === "webhook" && (
+              <div className="space-y-2 pt-1">
+                <p className="text-xs text-muted-foreground">{t("webhook.hint")}</p>
+                {webhookUrl ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      {/* Read-only and selectable rather than a styled block: the
+                          only thing anyone does with this is copy it, and a real
+                          input is what makes select-all work on every platform. */}
+                      <Input readOnly value={webhookUrl} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
+                      <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={copyUrl} aria-label={t("webhook.copy")} title={t("webhook.copy")}>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t("webhook.secretWarning")}</p>
+                    <Button variant="ghost" size="sm" onClick={rotate} disabled={rotating}>
+                      {rotating
+                        ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                      {t("webhook.rotate")}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">{t("webhook.rotateHint")}</p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("webhook.pendingSave")}</p>
+                )}
+              </div>
+            )}
+
             {/* Which clock the time above is read in. Without this line "09:00"
                 is ambiguous the moment someone travels or the instance is hosted
-                elsewhere — and the trigger keeps its own zone, not the reader's. */}
-            <p className="text-xs text-muted-foreground">{t("tzNote", { tz: schedule.timezone })}</p>
+                elsewhere — and the trigger keeps its own zone, not the reader's.
+                A webhook has no time to read, but the same zone still decides
+                which calendar day its run limit counts against — so it says so
+                rather than showing a note about times that don't exist. */}
+            <p className="text-xs text-muted-foreground">
+              {schedule.freq === "webhook" ? t("webhook.tzNote", { tz: schedule.timezone }) : t("tzNote", { tz: schedule.timezone })}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("threadModeLabel")}</p>
+            <ToggleGroup
+              value={[threadMode]}
+              onValueChange={(v) => v.length && setThreadMode(v[0] as string)}
+              variant="outline"
+              size="sm"
+              className="flex-wrap justify-start"
+            >
+              <ToggleGroupItem value="fresh">{t("threadMode.fresh")}</ToggleGroupItem>
+              <ToggleGroupItem value="single">{t("threadMode.single")}</ToggleGroupItem>
+            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">
+              {threadMode === "single" ? t("threadMode.singleHint") : t("threadMode.freshHint")}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="automation-max-runs" className="text-sm font-medium">{t("maxRunsLabel")}</label>
+            <Input
+              id="automation-max-runs"
+              type="number"
+              min={1}
+              max={1000}
+              value={maxRuns}
+              onChange={(e) => setMaxRuns(e.target.value)}
+              placeholder={t("maxRunsPlaceholder")}
+              className="w-32"
+            />
+            <p className="text-xs text-muted-foreground">{t("maxRunsHint")}</p>
           </div>
         </div>
 

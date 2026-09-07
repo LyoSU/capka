@@ -12,6 +12,9 @@ All notable changes to Capka are documented here. Format follows
 - Chats waiting on the user (approval card, agent question, failed reply) are grouped at the top of the sidebar with their own marker and a count in the tab title. Derived from each chat's last message: answering clears an approval or question, opening the chat clears a failure.
 - Telegram: messages sent in quick succession (2.5 s of quiet, 12 s at most, 20 messages or 100 KB) are grouped into one turn instead of a reply to the first fragment followed by a follow-up. Requires a platform restart to take effect.
 - Search (Cmd+K) now also finds text inside messages, yours and the assistant's, with a highlighted snippet; opening a hit scrolls to that message. Tab starts a new chat with the typed text.
+- Automations can be triggered by a webhook: a private URL per automation (`POST /api/hooks/automations/<token>`, the URL is the credential; `Idempotency-Key` de-duplicates for 24 h; the body is quoted into the run as untrusted data). Rotate the address from Settings → Automations.
+- Automations: optional daily run limit — runs past it are skipped and counted visibly in Settings and in the webhook's 202, never silently. "Run now" is not limited.
+- Automations: "one ongoing chat" mode appends every run to the same conversation instead of opening a new chat per run.
 
 ### Security
 

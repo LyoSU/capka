@@ -6,16 +6,22 @@ import { DateTime } from "luxon";
  *  across transitions). `once` = a single wall-clock moment interpreted in that
  *  same IANA timezone (so "22:15" means 22:15 for the USER, not for the UTC
  *  server the worker runs on); after it passes the automation is done (the
- *  scheduler flips it to disabled, see runs). Discriminated by `kind` so Phase-2
- *  event triggers (webhook) fit the same jsonb column without a migration. */
+ *  scheduler flips it to disabled, see runs). `webhook` = fired by an HTTP call
+ *  to the row's unguessable URL, never by the clock — it still carries a
+ *  timezone, because that is what defines the day boundary `max_runs_per_day`
+ *  counts against. Discriminated by `kind` so all three share the jsonb column. */
 export type AutomationTrigger =
   | { kind: "schedule"; cron: string; timezone: string }
-  | { kind: "once"; at: string; timezone: string };
+  | { kind: "once"; at: string; timezone: string }
+  | { kind: "webhook"; timezone: string };
 
-/** Next firing strictly after `after`, or null when there are no more
- *  (a `once` whose moment has passed). Throws on an invalid cron/timezone —
- *  callers validate at add time, so a throw here is a programming error. */
+/** Next firing strictly after `after`, or null when there are no more (a `once`
+ *  whose moment has passed, or a `webhook`, which has no clock at all — that
+ *  null is what keeps its next_run_at NULL and the row out of the scheduler's
+ *  claim). Throws on an invalid cron/timezone — callers validate at add time,
+ *  so a throw here is a programming error. */
 export function nextOccurrenceAfter(trigger: AutomationTrigger, after: Date): Date | null {
+  if (trigger.kind === "webhook") return null;
   if (trigger.kind === "once") {
     const at = onceInstant(trigger);
     return at.getTime() > after.getTime() ? at : null;
@@ -34,6 +40,17 @@ export function onceInstant(trigger: { at: string; timezone?: string }): Date {
   const dt = DateTime.fromISO(trigger.at, { zone: trigger.timezone || "UTC" });
   if (!dt.isValid) throw new Error(`Invalid once_at "${trigger.at}" (${dt.invalidReason ?? "unparseable"}).`);
   return dt.toJSDate();
+}
+
+/** The owner's local calendar date ("2026-09-07"), which is the day
+ *  `max_runs_per_day` counts against and the day `runs_day` stamps. Every kind
+ *  carries a timezone — the webhook kind exists with one for exactly this reason
+ *  — and a legacy row missing it reads as UTC, reproducing the old server-local
+ *  behaviour rather than throwing. Read wherever a stamped day is compared to
+ *  today, so a stale tally is never shown as if it were today's. */
+export function localDayOf(trigger: { timezone?: string }, now: Date = new Date()): string {
+  const zoned = DateTime.fromJSDate(now).setZone(trigger.timezone || "UTC");
+  return (zoned.isValid ? zoned : DateTime.fromJSDate(now).toUTC()).toISODate()!;
 }
 
 /** The next `n` occurrences after `after` — for the add-preview ("here are the

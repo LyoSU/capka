@@ -149,3 +149,135 @@ run("fireAutomation / recordAutomationOutcome", () => {
     expect(after.disabledReason).toBe("budget_exhausted");
   });
 });
+
+// The daily cap and the standing thread live in SQL — a stamped day compared in a
+// single UPDATE, and a message chained onto a chat's live leaf. A mocked db could
+// only assert that the code called itself; these need a real one.
+run("max_runs_per_day and thread_mode single", () => {
+  const U2 = "atest-user-2";
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'B','b@test.local') ON CONFLICT (id) DO NOTHING`, [U2]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U2]);
+  });
+  afterAll(async () => {
+    const { rows } = await pool.query<{ chat_id: string }>(`SELECT chat_id FROM tasks WHERE user_id = $1`, [U2]);
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [U2]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U2]);
+    for (const { chat_id } of rows) await pool.query(`DELETE FROM chats WHERE id = $1`, [chat_id]);
+    await pool.query(`DELETE FROM chats WHERE user_id = $1`, [U2]);
+    await pool.query(`DELETE FROM "user" WHERE id = $1`, [U2]);
+  });
+
+  it("the cap skips a firing, counts the skip, and is NOT a failure", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations, tasks } = await import("@/lib/db/schema");
+    const { fireAutomation } = await import("../runs");
+    const { localDayOf } = await import("../schedule");
+
+    const capId = nanoid();
+    await db.insert(automations).values({
+      id: capId, userId: U2, title: "Capped", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 * * * *", timezone: "UTC" },
+      maxRunsPerDay: 1,
+    });
+    const [first] = await db.select().from(automations).where(eq(automations.id, capId));
+    expect((await fireAutomation(first)).fired).toBe(true);
+
+    const [stamped] = await db.select().from(automations).where(eq(automations.id, capId));
+    expect(stamped.runsToday).toBe(1);
+    expect(stamped.runsDay).toBe(localDayOf(stamped.trigger as { timezone: string }));
+
+    // The cap is checked BEFORE the overlap guard, so a capped automation reports
+    // the ceiling and not "the previous run is still live". The reason the webhook
+    // returns and the settings list shows has to be the real one.
+    expect(await fireAutomation(stamped)).toEqual({ fired: false, reason: "daily_limit" });
+
+    const [after] = await db.select().from(automations).where(eq(automations.id, capId));
+    expect(after.skippedToday).toBe(1);
+    expect(after.enabled).toBe(true);            // a ceiling never disables
+    expect(after.consecutiveFailures).toBe(0);   // and never counts as a failure
+
+    // Bypassed for a human pressing "Run now": that run is attended, and a cap
+    // that blocked it would make a capped automation impossible to test on the
+    // very day it needs testing. The bypass is about the CAP only — the overlap
+    // guard still applies, so the first run's task has to be finished first (no
+    // worker drains it here).
+    await db.update(tasks).set({ status: "completed" }).where(eq(tasks.id, after.lastTaskId!));
+    expect((await fireAutomation(after, { bypassDailyCap: true })).fired).toBe(true);
+  });
+
+  it("rolls over: yesterday's tallies neither block today nor survive the firing", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { fireAutomation } = await import("../runs");
+
+    const rollId = nanoid();
+    await db.insert(automations).values({
+      id: rollId, userId: U2, title: "Rolled", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 * * * *", timezone: "UTC" },
+      maxRunsPerDay: 1,
+    });
+    // A day the automation had already exhausted. Nothing runs at midnight to
+    // clear this — the next firing's own UPDATE is what resets it.
+    await pool.query(
+      `UPDATE automations SET runs_day = current_date - 1, runs_today = 9, skipped_today = 4 WHERE id = $1`,
+      [rollId],
+    );
+    const [row] = await db.select().from(automations).where(eq(automations.id, rollId));
+    expect((await fireAutomation(row)).fired).toBe(true);
+
+    const [after] = await db.select().from(automations).where(eq(automations.id, rollId));
+    expect(after.runsToday).toBe(1);     // not 10 — the stamped day changed
+    expect(after.skippedToday).toBe(0);  // yesterday's skips are not today's
+  });
+
+  it("single mode appends to ONE chat, quotes a webhook body as untrusted, and does not skip a live run", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations, chats, messages } = await import("@/lib/db/schema");
+    const { fireAutomation } = await import("../runs");
+
+    const singleId = nanoid();
+    await db.insert(automations).values({
+      id: singleId, userId: U2, title: "Standing thread", prompt: "check in",
+      trigger: { kind: "webhook", timezone: "UTC" }, threadMode: "single",
+      webhookToken: nanoid(),
+    });
+    const [a1] = await db.select().from(automations).where(eq(automations.id, singleId));
+    const first = await fireAutomation(a1, { rawBody: '{"x":1}' });
+    expect(first.fired).toBe(true);
+
+    const [afterFirst] = await db.select().from(automations).where(eq(automations.id, singleId));
+    expect(afterFirst.threadChatId).toBe(first.chatId);
+    const [chat] = await db.select().from(chats).where(eq(chats.id, first.chatId!));
+    expect(chat.title).toBe("Standing thread"); // a standing thread gets no date suffix
+
+    const opening = await db.select().from(messages).where(eq(messages.chatId, first.chatId!));
+    expect(opening).toHaveLength(1);
+    expect(opening[0].content).toContain("check in");
+    expect(opening[0].content).toContain("untrusted data");
+    expect(opening[0].content).toContain('"x": 1'); // JSON body pretty-printed
+    // The mark, not just the wording: every downstream fold reads this column.
+    expect(opening[0].untrustedIngress).toBe(true);
+
+    // Its task is still queued. In `fresh` mode that skips the occurrence; here it
+    // must append and let the turn fold, which is the whole point of a thread.
+    const second = await fireAutomation(afterFirst);
+    expect(second).toEqual({ fired: true, chatId: first.chatId });
+    const [chatAfter] = await db.select().from(chats).where(eq(chats.id, first.chatId!));
+    const [leaf] = await db.select().from(messages).where(eq(messages.id, chatAfter.activeLeafId!));
+    expect(leaf.parentId).toBe(opening[0].id); // chained, so the tree stays linear
+    expect(leaf.untrustedIngress).toBe(false); // no body on this firing
+
+    // A deleted thread must not wedge the automation: the next firing opens a new
+    // one rather than failing on a dangling id.
+    await pool.query(`DELETE FROM tasks WHERE chat_id = $1`, [first.chatId]);
+    await pool.query(`DELETE FROM chats WHERE id = $1`, [first.chatId]);
+    const [orphaned] = await db.select().from(automations).where(eq(automations.id, singleId));
+    const third = await fireAutomation(orphaned);
+    expect(third.fired).toBe(true);
+    expect(third.chatId).not.toBe(first.chatId);
+    const [reopened] = await db.select().from(automations).where(eq(automations.id, singleId));
+    expect(reopened.threadChatId).toBe(third.chatId);
+  });
+});

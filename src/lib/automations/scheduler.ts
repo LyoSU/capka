@@ -40,6 +40,9 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
     // watching. next_run_at is deliberately untouched: the row is off, and its due
     // time is recomputed from `now` if a human ever enables it again. Reactivation
     // does NOT re-arm it — the person sees the reason and decides.
+    // Webhook rows are outside this statement's reach (next_run_at IS NULL never
+    // satisfies `<= now`), which is why the hook route repeats the same check and
+    // writes the same reason itself — see src/app/api/hooks/automations.
     await client.query(
       `UPDATE automations a
           SET enabled = false,
@@ -81,7 +84,15 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
       }
       await client.query(
         `UPDATE automations SET next_run_at = $2, enabled = $3, updated_at = $4 WHERE id = $1`,
-        [raw.id, next, next !== null, tickTs], // once-triggers naturally finish here
+        // once-triggers naturally finish here: no next occurrence means done, so
+        // the row switches itself off. A webhook trigger ALSO has no next
+        // occurrence and must not be read that way — it is only ever fired by an
+        // HTTP call, so "no clock" is its normal state, not its end. Its
+        // next_run_at is NULL, which already keeps it out of the claim above; this
+        // is the second lock on the same door, because the failure mode (an
+        // automation switching itself off the first tick after it was created) is
+        // silent and the door is one predicate away from opening.
+        [raw.id, next, next !== null || trigger.kind === "webhook", tickTs],
       );
       claimed.push({
         row: {
@@ -90,6 +101,12 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
           userId: raw.user_id, projectId: raw.project_id, lastTaskId: raw.last_task_id,
           lastRunAt: raw.last_run_at, nextRunAt: raw.next_run_at,
           consecutiveFailures: raw.consecutive_failures, createdAt: raw.created_at, updatedAt: tickTs,
+          maxRunsPerDay: raw.max_runs_per_day,
+          threadMode: raw.thread_mode, threadChatId: raw.thread_chat_id,
+          // runs_day / runs_today are deliberately NOT mapped: node-pg decodes a
+          // `date` column to a JS Date while drizzle hands back the string this
+          // code compares, and fireAutomation re-reads both fresh anyway. A
+          // mapped-but-wrongly-typed field behind an `as` cast is a trap.
         } as AutomationRow,
         tickTs,
       });

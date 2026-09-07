@@ -9,7 +9,11 @@ import type { AutomationTrigger } from "@/lib/automations/schedule";
  * someone's Monday report to every morning, and nothing on screen would look
  * broken. Kept pure so it can be tested that way.
  */
-export type Freq = "daily" | "weekly" | "monthly" | "once";
+/** `webhook` sits in the same list as the frequencies because to the person
+ *  filling this in it answers the same question — "when does this run?" — and
+ *  splitting it into a separate trigger-kind control asks them to learn a
+ *  distinction the product does not need them to have. */
+export type Freq = "daily" | "weekly" | "monthly" | "once" | "webhook";
 
 export interface ScheduleForm {
   /** `custom` is the honest escape hatch: automations created in chat can carry
@@ -35,6 +39,7 @@ export function toForm(trigger: AutomationTrigger, browserTz: string): ScheduleF
     freq: "custom", time: "09:00", weekday: "1", dayOfMonth: "1",
     at: "", cron: "", timezone: trigger.timezone || browserTz,
   };
+  if (trigger.kind === "webhook") return { ...base, freq: "webhook" };
   if (trigger.kind === "once") {
     // Stored as wall-clock ISO; datetime-local wants it without the seconds.
     return { ...base, freq: "once", at: trigger.at.slice(0, 16) };
@@ -53,8 +58,11 @@ export function toForm(trigger: AutomationTrigger, browserTz: string): ScheduleF
 
 /** The form back into the flat {cron|once_at, timezone} shape the API validates
  *  — the same dialect the manage tool speaks, so both reach one validator. */
-export function toTriggerArgs(f: ScheduleForm): { cron?: string; once_at?: string; timezone: string } {
+export function toTriggerArgs(f: ScheduleForm): { cron?: string; once_at?: string; webhook?: boolean; timezone: string } {
   const [h, m] = f.time.split(":").map(Number);
+  // A webhook still sends the timezone: it has no clock, but the daily run limit
+  // needs a day boundary, and this form is the only place that knows the user's.
+  if (f.freq === "webhook") return { webhook: true, timezone: f.timezone };
   if (f.freq === "once") return { once_at: `${f.at}:00`, timezone: f.timezone };
   if (f.freq === "weekly") return { cron: `${m} ${h} * * ${f.weekday}`, timezone: f.timezone };
   if (f.freq === "monthly") return { cron: `${m} ${h} ${f.dayOfMonth} * *`, timezone: f.timezone };

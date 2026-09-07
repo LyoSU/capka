@@ -1590,7 +1590,8 @@
         "daily": "Daily",
         "weekly": "Weekly",
         "monthly": "Monthly",
-        "once": "Once"
+        "once": "Once",
+        "webhook": "On a web address"
       },
       "weekday": {
         "w0": "Sunday",
@@ -1619,7 +1620,33 @@
       "create": "Create",
       "createTitle": "New automation",
       "createHint": "A scheduled task the assistant runs on its own.",
-      "created": "Automation created"
+      "created": "Automation created",
+      "onWebhook": "Runs when something calls its web address",
+      "openThread": "Open the ongoing chat",
+      "dailyLimitSkipped": "{skipped} skipped today — daily limit {max}",
+      "threadModeLabel": "Where runs go",
+      "threadMode": {
+        "fresh": "A new chat each run",
+        "single": "One ongoing chat",
+        "freshHint": "Every run starts a fresh conversation.",
+        "singleHint": "Every run is added to the same conversation, so the assistant can refer back to earlier runs."
+      },
+      "maxRunsLabel": "Daily run limit",
+      "maxRunsPlaceholder": "No limit",
+      "maxRunsHint": "The most times this may run in one day. Runs past the limit are skipped and shown here — they are not failures. “Run now” is never limited.",
+      "webhook": {
+        "hint": "This automation runs whenever something sends a request to its own private web address.",
+        "pendingSave": "The web address appears here once you save.",
+        "copy": "Copy the address",
+        "copied": "Address copied",
+        "copyFailed": "Couldn't copy the address",
+        "secretWarning": "Anyone who has this address can start a run. Treat it like a password and share it only with the system that should trigger it.",
+        "rotate": "Replace the address",
+        "rotateHint": "The current address stops working immediately. Anything already using it needs the new one.",
+        "rotated": "New address created",
+        "rotateFailed": "Couldn't create a new address",
+        "tzNote": "The daily run limit resets at midnight in {tz}"
+      }
     },
     "connectors": {
       "title": "Connectors",

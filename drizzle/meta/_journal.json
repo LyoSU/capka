@@ -526,6 +526,13 @@
       "when": 1788729533279,
       "tag": "0074_flashy_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1788764846581,
+      "tag": "0075_friendly_jean_grey",
+      "breakpoints": true
     }
   ]
 }

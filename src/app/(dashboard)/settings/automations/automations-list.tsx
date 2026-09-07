@@ -5,7 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, ExternalLink, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, ExternalLink, Pencil, Play, Plus, Trash2, Webhook } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -34,7 +34,16 @@ interface Automation {
   nextRunAt: string | null;
   lastRunAt: string | null;
   consecutiveFailures: number;
+  /** In `single` thread mode this is the ongoing thread; otherwise the chat the
+   *  last run opened. Resolved server-side — see the list route. */
   lastChatId: string | null;
+  webhookUrl: string | null;
+  maxRunsPerDay: number | null;
+  /** Both counters are already scoped to the owner's local TODAY by the list
+   *  route; a stamped day in the past arrives here as zero. */
+  runsToday: number;
+  skippedToday: number;
+  threadMode: string;
 }
 
 type Status = "active" | "paused" | "autoPaused";
@@ -130,6 +139,9 @@ export default function AutomationsList() {
     a.enabled && !!a.nextRunAt && Date.now() - Date.parse(a.nextRunAt) > OVERDUE_GRACE_MS;
 
   const nextRunText = (a: Automation) => {
+    // A webhook has no next time at all, and saying "runs on a web address" is
+    // what stops an empty line reading as a broken or paused automation.
+    if (a.trigger.kind === "webhook") return a.enabled ? t("onWebhook") : null;
     // Show the ACTUAL next_run_at the scheduler stored — not a client-side cron
     // recompute, which would mask a stuck worker (and, for a one-off, silently
     // re-derive the wall time in the browser's zone instead of the trigger's).
@@ -198,7 +210,11 @@ export default function AutomationsList() {
         return (
           <div key={a.id} className="flex items-start gap-3 border-t py-4">
             <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
-              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
+              {/* The icon carries the trigger kind, so a list of both reads at a
+                  glance without every row spelling it out in words. */}
+              {a.trigger.kind === "webhook"
+                ? <Webhook className="h-3.5 w-3.5 text-muted-foreground" />
+                : <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />}
             </div>
             <div className="min-w-0 flex-1 space-y-0.5">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -236,9 +252,17 @@ export default function AutomationsList() {
               {status === "autoPaused" && (
                 <p className="text-xs text-warning-text">{t("autoPausedHint")}</p>
               )}
+              {/* A cap that refused runs today has to SAY so. Silently skipping
+                  is indistinguishable from a worker that stopped firing, which is
+                  the thing the "Not running" badge above exists to warn about. */}
+              {a.maxRunsPerDay !== null && a.skippedToday > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("dailyLimitSkipped", { skipped: a.skippedToday, max: a.maxRunsPerDay })}
+                </p>
+              )}
               {a.lastChatId && (
                 <Link href={`/chat/${a.lastChatId}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                  <ExternalLink className="h-3 w-3" /> {t("openLastRun")}
+                  <ExternalLink className="h-3 w-3" /> {a.threadMode === "single" ? t("openThread") : t("openLastRun")}
                 </Link>
               )}
             </div>

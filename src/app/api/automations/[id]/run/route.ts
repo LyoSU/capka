@@ -16,6 +16,11 @@ import { audit } from "@/lib/governance/audit";
  * `next_run_at` is deliberately untouched — this is an extra run, not a
  * rescheduling — and the overlap guard inside fireAutomation still applies, so a
  * run started while the previous one is live is refused rather than queued.
+ *
+ * The daily run limit is BYPASSED here on purpose. It exists to stop unattended
+ * spend running away; a person is standing in front of this one, and it is the
+ * run someone makes to check a fix — a cap that blocked it would make a
+ * capped automation impossible to debug on the day it hit its ceiling.
  */
 export const POST = apiHandler(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { userId } = await requireActive();
@@ -23,7 +28,7 @@ export const POST = apiHandler(async (_req: Request, { params }: { params: Promi
   const [row] = await db.select().from(automations).where(and(eq(automations.id, id), eq(automations.userId, userId)));
   if (!row) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const { fired, chatId } = await fireAutomation(row);
+  const { fired, chatId } = await fireAutomation(row, { bypassDailyCap: true });
   // A skip is not a failure: the previous run is still working (or waiting on an
   // answer). Say which, so the UI can explain instead of showing an error.
   if (!fired) return Response.json({ ok: false, reason: "busy" }, { status: 409 });

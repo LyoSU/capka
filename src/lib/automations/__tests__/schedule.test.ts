@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "../schedule";
+import { localDayOf, nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "../schedule";
 
 const kyivWeekly: AutomationTrigger = { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" };
 
@@ -64,5 +64,37 @@ describe("nextOccurrences", () => {
 
   it("once yields at most one occurrence", () => {
     expect(nextOccurrences({ kind: "once", at: "2026-08-01T12:00:00Z", timezone: "Europe/Kyiv" }, 3, new Date("2026-07-01T00:00:00Z"))).toHaveLength(1);
+  });
+});
+
+describe("webhook trigger", () => {
+  // The row's next_run_at comes from this function, and NULL is what keeps a
+  // webhook automation out of the scheduler's claim (`next_run_at <= now` is
+  // never true for NULL). A date here would make every webhook row fire on a
+  // clock it never asked for.
+  it("has no next occurrence, ever", () => {
+    expect(nextOccurrenceAfter({ kind: "webhook", timezone: "Europe/Kyiv" }, new Date())).toBeNull();
+    expect(nextOccurrences({ kind: "webhook", timezone: "Europe/Kyiv" }, 3)).toEqual([]);
+  });
+});
+
+describe("localDayOf — the day a run limit counts against", () => {
+  // 22:30 UTC is already tomorrow in Kyiv and still today in New York. The whole
+  // point of carrying a timezone on every trigger kind (webhook included) is that
+  // the cap rolls over on the OWNER's midnight, not the server's.
+  const at = new Date("2026-07-01T22:30:00Z");
+
+  it("reads the date in the trigger's zone, not the server's", () => {
+    expect(localDayOf({ timezone: "Europe/Kyiv" }, at)).toBe("2026-07-02");
+    expect(localDayOf({ timezone: "America/New_York" }, at)).toBe("2026-07-01");
+  });
+
+  it("falls back to UTC for a legacy row with no zone, rather than throwing", () => {
+    expect(localDayOf({}, at)).toBe("2026-07-01");
+    expect(localDayOf({ timezone: "" }, at)).toBe("2026-07-01");
+  });
+
+  it("falls back to UTC on an unparseable zone", () => {
+    expect(localDayOf({ timezone: "Not/AZone" }, at)).toBe("2026-07-01");
   });
 });

@@ -1,5 +1,5 @@
 import {
-  pgTable, text, boolean, timestamp, integer, jsonb, index, uniqueIndex, bigint, numeric,
+  pgTable, text, boolean, timestamp, date, integer, jsonb, index, uniqueIndex, bigint, numeric,
   primaryKey, check, foreignKey, customType, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -494,9 +494,38 @@ export const automations = pgTable("automations", {
   prompt: text("prompt").notNull(),
   // Model of the creating chat; null → default resolution in the runner.
   model: text("model"),
-  // {kind:"schedule", cron, timezone} | {kind:"once", at} — see AutomationTrigger.
+  // {kind:"schedule", cron, timezone} | {kind:"once", at} | {kind:"webhook", timezone}
+  // — see AutomationTrigger.
   trigger: jsonb("trigger").notNull(),
   enabled: boolean("enabled").notNull().default(true),
+  // The credential for a webhook trigger: the URL IS the secret (no signature, no
+  // Authorization header), so it is unguessable (24 random bytes) and unique, and
+  // the hook route's every refusal is the same 404 — a distinguishable answer would
+  // turn this column into an oracle. Null for schedule/once rows.
+  webhookToken: text("webhook_token").unique(),
+  // Ceiling on firings per local day, null = no ceiling. Enforced in
+  // fireAutomation for the scheduler and the webhook; a human pressing "Run now"
+  // bypasses it deliberately (see runs.ts).
+  maxRunsPerDay: integer("max_runs_per_day"),
+  // The cap's counters, kept as a stamped day + two tallies rather than counted
+  // from tasks on every firing. The day is the OWNER's local date (the trigger
+  // carries the timezone — including the webhook kind, precisely so this boundary
+  // is defined), and a firing whose stamped day differs resets both tallies in the
+  // same statement that stamps last_task_id. `skipped_today` exists because a cap
+  // hit must never be silent: it is what the settings list, the manage collection
+  // and the webhook's 202 report.
+  runsDay: date("runs_day"),
+  runsToday: integer("runs_today").notNull().default(0),
+  skippedToday: integer("skipped_today").notNull().default(0),
+  // Where a firing's messages land. "fresh" = a NEW chat per run (the original
+  // behaviour). "single" = one persistent chat, appended to like a Telegram
+  // conversation, so the agent keeps the thread's history across runs.
+  threadMode: text("thread_mode").notNull().default("fresh"), // "fresh" | "single"
+  // The persistent chat of a "single" automation, created lazily on the first
+  // firing. Deliberately NOT a FK: a deleted chat must leave the automation
+  // working (the next firing simply opens a new thread), not cascade it away or
+  // wedge on a dangling reference.
+  threadChatId: text("thread_chat_id"),
   nextRunAt: timestamp("next_run_at"),
   lastRunAt: timestamp("last_run_at"),
   // The task the last firing enqueued: overlap guard (skip firing while it's
@@ -516,8 +545,31 @@ export const automations = pgTable("automations", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   index("idx_automations_user_id").on(table.userId),
-  // The scheduler's whole query: due, enabled rows.
+  // The scheduler's whole query: due, enabled rows. Webhook rows carry
+  // next_run_at = NULL and are therefore never claimed by it.
   index("idx_automations_due").on(table.nextRunAt).where(sql`enabled = true`),
+]);
+
+/**
+ * Idempotency keys seen on an automation's webhook, so a sender that retries
+ * (every real webhook producer does) fires the automation once.
+ *
+ * Insert-first: the hook route inserts ON CONFLICT DO NOTHING and reads "no row
+ * returned" as "duplicate" — a read-then-write would race two concurrent
+ * retries past each other. The composite primary key IS that uniqueness.
+ *
+ * The module that populates this table owns its bound: the hook route prunes
+ * rows older than 24h in the same request, which is also what makes the 24h
+ * window in the spec true rather than aspirational.
+ */
+export const automationWebhookDeliveries = pgTable("automation_webhook_deliveries", {
+  automationId: text("automation_id").notNull().references(() => automations.id, { onDelete: "cascade" }),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.automationId, table.idempotencyKey] }),
+  // The prune's whole query.
+  index("idx_automation_webhook_deliveries_created_at").on(table.createdAt),
 ]);
 
 /** A folder attached to a sandbox session (key = projectId ?? chatId — chats in a

@@ -24,6 +24,10 @@ import { PATCH, DELETE } from "@/app/api/automations/[id]/route";
 import { POST as RUN } from "@/app/api/automations/[id]/run/route";
 
 const params = Promise.resolve({ id: "a1" });
+// The list handler reads the request's headers to derive the instance's public
+// origin (for a webhook automation's URL), so it gets a real Request like every
+// other handler here — not a bare call.
+const listReq = () => new Request("http://x/api/automations");
 const patchWith = (body: unknown) =>
   PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify(body) }), { params });
 
@@ -33,7 +37,7 @@ describe("automations routes — require an ACTIVE account (not just a session)"
     // per-call at await time — avoids vitest flagging an eager unhandled rejection.
     requireActive.mockImplementation(() => Promise.reject(new ForbiddenError("Your account is awaiting administrator approval.")));
 
-    const list = await GET();
+    const list = await GET(listReq());
     expect(list.status).toBe(403);
 
     const patch = await patchWith({ enabled: true });
@@ -64,7 +68,7 @@ describe("automations routes — require an ACTIVE account (not just a session)"
 
   it("an active account passes the gate and reaches the handler", async () => {
     requireActive.mockImplementation(() => Promise.resolve({ userId: "u1", role: "user", status: "active" }));
-    const list = await GET();
+    const list = await GET(listReq());
     expect(list.status).toBe(200);
     expect(requireActive).toHaveBeenCalled();
   });

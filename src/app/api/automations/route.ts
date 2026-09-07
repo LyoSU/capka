@@ -3,9 +3,11 @@ import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { automations, tasks } from "@/lib/db/schema";
 import { automationCollection } from "@/lib/manage/controls/automations";
+import { localDayOf, type AutomationTrigger } from "@/lib/automations/schedule";
+import { getPublicUrl } from "@/lib/url";
 import { audit } from "@/lib/governance/audit";
 
-export const GET = apiHandler(async () => {
+export const GET = apiHandler(async (req: Request) => {
   // Automations spend the shared key unattended, so a pending/rejected account may
   // not even list them — requireActive, matching the MCP/skill mutation routes.
   const { userId } = await requireActive();
@@ -17,12 +19,35 @@ export const GET = apiHandler(async () => {
     ? await db.select({ id: tasks.id, chatId: tasks.chatId }).from(tasks).where(inArray(tasks.id, lastTaskIds))
     : [];
   const chatByTask = new Map(taskChats.map((t) => [t.id, t.chatId]));
-  const out = rows.map((a) => ({
-    id: a.id, title: a.title, prompt: a.prompt, trigger: a.trigger,
-    enabled: a.enabled, nextRunAt: a.nextRunAt, lastRunAt: a.lastRunAt,
-    consecutiveFailures: a.consecutiveFailures,
-    lastChatId: a.lastTaskId ? chatByTask.get(a.lastTaskId) ?? null : null,
-  }));
+  // Derived once per request, and derived HERE rather than in the browser: this is
+  // the origin the instance is actually reachable at (PUBLIC_URL, else the proxy's
+  // forwarded host), so the URL a user copies is the one a third-party system can
+  // call — not whatever host that particular tab happens to be open on.
+  const origin = getPublicUrl({ headers: req.headers });
+  const out = rows.map((a) => {
+    const trigger = a.trigger as AutomationTrigger;
+    // Only today's tallies are today's: a stamped day in the past means zero, not
+    // a stale count presented as current usage.
+    const fresh = a.runsDay === localDayOf(trigger);
+    return {
+      id: a.id, title: a.title, prompt: a.prompt, trigger: a.trigger,
+      enabled: a.enabled, nextRunAt: a.nextRunAt, lastRunAt: a.lastRunAt,
+      consecutiveFailures: a.consecutiveFailures,
+      // The full URL, not the token: the URL IS the credential, and handing the
+      // owner's own UI anything else just makes it re-derive the origin badly.
+      webhookUrl: a.webhookToken ? `${origin}/api/hooks/automations/${a.webhookToken}` : null,
+      maxRunsPerDay: a.maxRunsPerDay,
+      runsToday: fresh ? a.runsToday : 0,
+      skippedToday: fresh ? a.skippedToday : 0,
+      threadMode: a.threadMode,
+      // In `single` mode "open last run" means the ongoing thread, which is where
+      // every run's output actually is — the last task's chat is that same chat,
+      // but the thread id is still right before the first run has happened.
+      lastChatId: a.threadMode === "single"
+        ? a.threadChatId
+        : a.lastTaskId ? chatByTask.get(a.lastTaskId) ?? null : null,
+    };
+  });
   return Response.json({ automations: out });
 });
 
