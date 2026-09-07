@@ -2220,6 +2220,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 reason: flood.ok ? `budget:${reservation?.window ?? "unknown"}` : "rate_limited",
               });
             } else {
+              // ACCEPTED WINDOW, not a closed one. `kept.activated` is a moment, not
+              // a lock: a concurrent send that has inserted its message but not yet
+              // moved the leaf lets the CAS above win, and then takes the leaf. This
+              // follow-up may therefore run against the newer active path while that
+              // send enqueues its own turn, costing one extra paid turn. Closing it
+              // needs this enqueue inside the same transaction as the CAS and
+              // `chat/route.ts` taking the same per-chat lock — more machinery than a
+              // duplicate turn in a race the person has to hit within milliseconds.
+              // The two cheap guards that bound it stay: `enqueueTask` coalesces onto
+              // an existing queued turn, and the budget reservation above is charged
+              // either way.
               let handedOff = false;
               try {
                 const { created } = await enqueueTask({

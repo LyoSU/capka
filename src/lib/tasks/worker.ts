@@ -86,8 +86,8 @@ export async function awaitWithin(
 }
 
 /**
- * Run the two halves of a shutdown against ONE shared budget, and report whether
- * the Telegram stop finished.
+ * Run the two halves of a shutdown against ONE shared budget, and report which
+ * of them finished.
  *
  * Order matters and so does the second wait. Tasks already running must not
  * queue behind a slow burst flush, so the stop only gets `firstWaitMs` before
@@ -97,11 +97,15 @@ export async function awaitWithin(
  * of the budget unspent. So once the drain is done, anything still pending gets
  * the time left before `hardDeadline`.
  *
- * `stopping` must already handle its own rejection (the caller owns the error
- * report); it is awaited twice here, and a raw rejecting promise would surface
- * the second await as an unhandled rejection.
+ * Every wait here is bounded by `hardDeadline`, the drain included: it has its
+ * own grace window today (which is the shorter of the two), but a helper whose
+ * deadline binds only one of its two waits is a deadline in name only.
  *
- * Pure (clock and sleep injectable) so both waits are testable without real time.
+ * Neither promise may reject: both are awaited more than once or after their
+ * timeout, so the caller owns its own error reporting (a rejection counts here
+ * as "finished" and is otherwise swallowed).
+ *
+ * Pure (clock and sleep injectable) so every wait is testable without real time.
  */
 export async function stopThenDrain(
   stopping: Promise<unknown>,
@@ -110,13 +114,13 @@ export async function stopThenDrain(
   hardDeadline: number,
   now: () => number = Date.now,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
-): Promise<boolean> {
+): Promise<{ stopped: boolean; drainFinished: boolean }> {
   const stoppedEarly = await awaitWithin(stopping, firstWaitMs, sleep);
-  await drainTasks();
-  if (stoppedEarly) return true;
+  const drainFinished = await awaitWithin(drainTasks(), Math.max(0, hardDeadline - now()), sleep);
+  if (stoppedEarly) return { stopped: true, drainFinished };
   const left = hardDeadline - now();
-  if (left <= 0) return false;
-  return awaitWithin(stopping, left, sleep);
+  if (left <= 0) return { stopped: false, drainFinished };
+  return { stopped: await awaitWithin(stopping, left, sleep), drainFinished };
 }
 
 interface WorkerState {
@@ -370,18 +374,28 @@ export async function startWorker(): Promise<void> {
     const stopping = (await import("@/lib/telegram/bot"))
       .stopBot()
       .catch((e) => log.error("telegram stop on shutdown failed", { err: String(e) }));
-    const stopped = await stopThenDrain(
+    const { stopped, drainFinished } = await stopThenDrain(
       stopping,
       // Also wait on fire-and-forget aux work (title/memory/compaction) so a
       // deploy doesn't kill an in-flight LLM call mid-write and lose the
-      // spend/checkpoint.
+      // spend/checkpoint. Its own failure is reported here, once: stopThenDrain
+      // bounds this wait and must not be handed a promise that rejects.
       async () => {
-        const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS);
+        const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS)
+          .catch((e) => {
+            log.error("worker drain failed", { signal, err: String(e) });
+            return { drained: false, remaining: -1 };
+          });
         log.info("worker drain complete", { signal, workerId: s.workerId, drained, remaining });
       },
       TELEGRAM_STOP_FIRST_WAIT_MS,
       signalAt + SHUTDOWN_BUDGET_MS,
     );
+    if (!drainFinished)
+      log.warn("task drain did not finish inside the shutdown budget — exiting anyway", {
+        signal,
+        budgetMs: SHUTDOWN_BUDGET_MS,
+      });
     if (!stopped)
       log.warn("telegram stop did not finish inside the shutdown budget — exiting anyway", {
         signal,

@@ -48,16 +48,16 @@ describe("stopThenDrain", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  // Resolves to the virtual elapsed ms at which the shutdown stopped waiting.
+  // Records the outcome plus the virtual elapsed ms at which the shutdown
+  // stopped waiting — the deadline claim is about WHEN it returns, so the moment
+  // is the assertion, not just the verdict.
   function run(stopping: Promise<unknown>, drainTasks: () => Promise<unknown>) {
     const t0 = Date.now();
-    let stopped: boolean | undefined;
-    let elapsed: number | undefined;
+    let out: { stopped: boolean; drainFinished: boolean; elapsed: number } | undefined;
     const done = stopThenDrain(stopping, drainTasks, FIRST_WAIT, t0 + BUDGET).then((r) => {
-      stopped = r;
-      elapsed = Date.now() - t0;
+      out = { ...r, elapsed: Date.now() - t0 };
     });
-    return { done, at: () => ({ stopped, elapsed }) };
+    return { done, at: () => out };
   }
 
   it("keeps waiting for a slow stop once an idle drain has returned", async () => {
@@ -67,7 +67,7 @@ describe("stopThenDrain", () => {
     await vi.advanceTimersByTimeAsync(BUDGET);
     await r.done;
     // Waited the full 10s the flush needed — not cut off at the 3s handover.
-    expect(r.at()).toEqual({ stopped: true, elapsed: 10_000 });
+    expect(r.at()).toEqual({ stopped: true, drainFinished: true, elapsed: 10_000 });
   });
 
   it("gives up at the hard deadline when the stop never finishes", async () => {
@@ -76,7 +76,7 @@ describe("stopThenDrain", () => {
     await vi.advanceTimersByTimeAsync(BUDGET + 10_000);
     await r.done;
     // Exits with the telemetry reserve intact, rather than hanging into SIGKILL.
-    expect(r.at()).toEqual({ stopped: false, elapsed: BUDGET });
+    expect(r.at()).toEqual({ stopped: false, drainFinished: true, elapsed: BUDGET });
   });
 
   it("starts the task drain at the handover instead of queueing it behind the stop", async () => {
@@ -96,17 +96,18 @@ describe("stopThenDrain", () => {
     await vi.advanceTimersByTimeAsync(BUDGET);
     await r.done;
     // The drain still owns its own time; the stop adds nothing after it.
-    expect(r.at()).toEqual({ stopped: true, elapsed: 25_000 });
+    expect(r.at()).toEqual({ stopped: true, drainFinished: true, elapsed: 25_000 });
   });
 
-  it("returns immediately when the drain already used the whole budget", async () => {
-    // 3s handover + a 28s drain is already past the 30s deadline.
+  it("stops waiting on the drain AT the deadline, not after it", async () => {
+    // 3s handover + a 28s drain would run to 31s; the deadline is 30s, and the
+    // drain is bounded by it too — otherwise the deadline binds only the stop.
     const r = run(new Promise(() => {}), async () => { await new Promise((res) => setTimeout(res, 28_000)); });
 
     await vi.advanceTimersByTimeAsync(BUDGET + 10_000);
     await r.done;
-    // Nothing left to give the stop, and no negative wait either: it returns as
-    // soon as the drain does.
-    expect(r.at()).toEqual({ stopped: false, elapsed: FIRST_WAIT + 28_000 });
+    // Returns exactly at the deadline, with nothing left to give the stop and no
+    // negative wait.
+    expect(r.at()).toEqual({ stopped: false, drainFinished: false, elapsed: BUDGET });
   });
 });
