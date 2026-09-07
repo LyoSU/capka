@@ -67,22 +67,26 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
       </div>
 
       {/* key={type} remounts the list when the type changes, so the rows
-          re-run their staggered entrance — switching tabs feels alive. */}
-      <div key={type} className="overflow-hidden rounded-xl border border-border bg-card">
+          re-run their staggered entrance — switching tabs feels alive.
+
+          No box. These three rows used to sit in a bordered card, which drew a
+          frame around the emptiest screen in the app and made three suggestions
+          look like a form to fill in. They are hints, not a section: each row
+          carries its own hover fill and nothing carries an edge, so the greeting
+          above them stays the only thing on the page with any weight. */}
+      <div key={type} className="flex flex-col">
         {actions.map(({ key: a, icon: ActionIcon }, i) => (
           <button
             key={a}
             type="button"
             onClick={() => onPick(t(`${type}.${a}.prompt`))}
             style={{ animationDelay: `${i * 55}ms` }}
-            // Same press rule as the recent-chats rows: a full-width row inside a
-            // clipped, rounded container darkens rather than shrinks — a scale
-            // pulls its fill clear of the frame and reads as a cropped rectangle.
-            className={`group/sg animate-step-in flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] leading-5 transition-colors hover:bg-hover active:bg-hover-strong ${
-              i > 0 ? "border-t" : ""
-            }`}
+            // Darkens rather than shrinks, the same press rule as the recent-chats
+            // rows: a full-width row is wide enough that a scale reads as the whole
+            // list flinching, not as one control being pressed.
+            className="group/sg animate-step-in flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[15px] leading-5 transition-colors hover:bg-hover active:bg-hover-strong"
           >
-            <ActionIcon className="size-5 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
+            <ActionIcon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
             <span className="flex-1">{t(`${type}.${a}.label`)}</span>
             <ArrowRight className="size-3.5 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/sg:translate-x-0 group-hover/sg:opacity-100" />
           </button>
