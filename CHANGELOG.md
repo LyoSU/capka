@@ -22,6 +22,10 @@ All notable changes to Capka are documented here. Format follows
 - Automations: "Notify: only when there is something to report" (`notify_mode: when_needed`) gives the run a `nothing_to_report` tool; a run that calls it ends without a Telegram message, a notification or an unread mark, and shows as one muted row in the chat that unfolds into the full turn (steps and reply). Quiet runs are counted per day in Settings.
 - Automations: per-automation "Also send to Telegram" switch (`deliver_telegram`, default on); off keeps results in the web chat only.
 
+### Changed
+
+- Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
+
 ### Fixed
 
 - `GET /api/tasks?chatId=` reports the chat's running turn instead of the newest row, so Stop cancels the streaming reply and steering works while a follow-up is queued behind it.

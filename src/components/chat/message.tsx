@@ -11,6 +11,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
+import { withHardBreaks } from "@/lib/chat/user-markdown";
 import { staggerIndex } from "@/lib/chat/motion";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
@@ -2067,8 +2068,11 @@ function UserBubble({
           {/* When the turn is files-only, the thumbnails are the content — skip the
               empty "…" bubble. */}
           {(text || !hasFiles) && (
-            <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-[15px] shadow-panel">
-              {text || "…"}
+            <div className="chat-prose inline-block max-w-full break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-left text-[15px] shadow-panel">
+              {/* The same renderer as a reply, so what the person typed in Markdown
+                  (a list, **bold**, a fence) reads the way they meant it. Hard breaks
+                  keep their Enter as a new line — see withHardBreaks. */}
+              <Markdown>{withHardBreaks(text || "…")}</Markdown>
             </div>
           )}
           <div className="mt-1 flex items-center gap-1">
