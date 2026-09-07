@@ -52,6 +52,7 @@ All notable changes to Capka are documented here. Format follows
 - Folder sync: a run that stood aside for another window's lease shows "another window is syncing" instead of "synced just now"; a failed lease request stops the sync rather than running it unprotected; folders waiting to be reconnected are named in the status instead of being hidden behind the last-synced time.
 - Folder sync: "Reconnect" distinguishes a lapsed permission (one click) from a folder this browser has never linked ("Choose the folder again"), and refuses a different folder picked by mistake; a same-named folder attached from another chat is recognised by its handle, a genuinely different one takes a `-2` suffix.
 - Folder sync: the first sync after connecting a folder shows progress in the "+" menu.
+- Files: "open in a new tab" shows text and Markdown files (served as `text/plain`) instead of downloading them; the link is offered only for what a browser will display.
 - Chat: the microphone button did nothing in development builds (React strict mode disposed the dictation engine on mount); production was unaffected.
 - `GET /api/tasks?chatId=` reports the chat's running turn instead of the newest row, so Stop cancels the streaming reply and steering works while a follow-up is queued behind it.
 - Cancelling a queued turn removes it and releases its budget hold immediately instead of leaving it waiting until the current reply ends.
