@@ -74,6 +74,9 @@ export function WorkspacePanel({
   // chat, so the answer follows the conversation rather than the tab.
   const { open: openPreview } = usePreview();
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  // Pointer over the resize handle. The handle draws no line of its own here (see
+  // below); the panel's border is the line, and this is what tints it.
+  const [handleHot, setHandleHot] = useState(false);
   // `onOpen`/`onClose` are fresh arrows every render of the parent; the restore
   // must not re-run because of that.
   const onOpenRef = useRef(onOpen);
@@ -186,13 +189,24 @@ export function WorkspacePanel({
           : "pointer-events-none translate-x-full md:w-0 md:translate-x-0 md:border-l-0",
         // Chasing the pointer 300ms late reads as a broken drag, not a smooth one.
         resize.dragging && "transition-none",
+        // The border IS the handle's line: brighter under the pointer, brand
+        // while dragging — the same two states the nav's hairline shows.
+        open && handleHot && !resize.dragging && "md:border-l-foreground/40",
+        open && resize.dragging && "md:border-l-primary",
       )}
     >
       {/* Inside the panel, not straddling its border: the box clips its own
           overflow so the sliding animation doesn't leak, and half a handle would
-          be the half that gets cut. */}
+          be the half that gets cut. Being inside, the handle's own hairline would
+          sit 4px from the panel's border and read as a doubled edge — so it draws
+          none (`after:hidden`) and the border above takes the hover/drag colour. */}
       {open && (
-        <div {...resize.handleProps} className={cn(RESIZE_HANDLE_CLASS, "absolute inset-y-0 left-0")} />
+        <div
+          {...resize.handleProps}
+          onPointerEnter={() => setHandleHot(true)}
+          onPointerLeave={() => setHandleHot(false)}
+          className={cn(RESIZE_HANDLE_CLASS, "absolute inset-y-0 left-0 after:hidden")}
+        />
       )}
       {/* The browser stays mounted under the viewer so coming back lands in the
           folder you left, not at the workspace root. */}
