@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { awaitWithin } from "../worker";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { awaitWithin, stopThenDrain } from "../worker";
 
 // Shutdown order is: stop the Telegram bot (which flushes message bursts, so it
 // can do file downloads and DB writes) → drain in-flight tasks for 25s → flush
@@ -35,5 +35,78 @@ describe("awaitWithin", () => {
   it("counts a rejection as finished, so a failing stop does not burn the budget", async () => {
     const sleep = vi.fn(() => new Promise<void>(() => {}));
     await expect(awaitWithin(Promise.reject(new Error("stop failed")), 3_000, sleep)).resolves.toBe(true);
+  });
+});
+
+// Fixed slots threw away the rest of the grace period: on an idle worker the
+// drain returns at once, so a burst flush still downloading a Telegram album was
+// killed ~3s into a 35s window. The two halves share ONE budget instead.
+describe("stopThenDrain", () => {
+  const FIRST_WAIT = 3_000;
+  const BUDGET = 30_000;
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  // Resolves to the virtual elapsed ms at which the shutdown stopped waiting.
+  function run(stopping: Promise<unknown>, drainTasks: () => Promise<unknown>) {
+    const t0 = Date.now();
+    let stopped: boolean | undefined;
+    let elapsed: number | undefined;
+    const done = stopThenDrain(stopping, drainTasks, FIRST_WAIT, t0 + BUDGET).then((r) => {
+      stopped = r;
+      elapsed = Date.now() - t0;
+    });
+    return { done, at: () => ({ stopped, elapsed }) };
+  }
+
+  it("keeps waiting for a slow stop once an idle drain has returned", async () => {
+    const stopping = new Promise((r) => setTimeout(r, 10_000)); // a big album download
+    const r = run(stopping, async () => {}); // nothing in flight: drain is instant
+
+    await vi.advanceTimersByTimeAsync(BUDGET);
+    await r.done;
+    // Waited the full 10s the flush needed — not cut off at the 3s handover.
+    expect(r.at()).toEqual({ stopped: true, elapsed: 10_000 });
+  });
+
+  it("gives up at the hard deadline when the stop never finishes", async () => {
+    const r = run(new Promise(() => {}), async () => {});
+
+    await vi.advanceTimersByTimeAsync(BUDGET + 10_000);
+    await r.done;
+    // Exits with the telemetry reserve intact, rather than hanging into SIGKILL.
+    expect(r.at()).toEqual({ stopped: false, elapsed: BUDGET });
+  });
+
+  it("starts the task drain at the handover instead of queueing it behind the stop", async () => {
+    const order: string[] = [];
+    const stopping = new Promise<void>((r) => setTimeout(() => { order.push("stop finished"); r(); }, 10_000));
+    const r = run(stopping, async () => { order.push(`drain started at ${Date.now() % 100_000}`); });
+
+    await vi.advanceTimersByTimeAsync(BUDGET);
+    await r.done;
+    expect(order[0]).toMatch(/^drain started/); // ran while the stop was still going
+    expect(order[1]).toBe("stop finished");
+  });
+
+  it("does not wait a second time when the stop finished inside the first wait", async () => {
+    const r = run(Promise.resolve(), async () => { await new Promise((res) => setTimeout(res, 25_000)); });
+
+    await vi.advanceTimersByTimeAsync(BUDGET);
+    await r.done;
+    // The drain still owns its own time; the stop adds nothing after it.
+    expect(r.at()).toEqual({ stopped: true, elapsed: 25_000 });
+  });
+
+  it("returns immediately when the drain already used the whole budget", async () => {
+    // 3s handover + a 28s drain is already past the 30s deadline.
+    const r = run(new Promise(() => {}), async () => { await new Promise((res) => setTimeout(res, 28_000)); });
+
+    await vi.advanceTimersByTimeAsync(BUDGET + 10_000);
+    await r.done;
+    // Nothing left to give the stop, and no negative wait either: it returns as
+    // soon as the drain does.
+    expect(r.at()).toEqual({ stopped: false, elapsed: FIRST_WAIT + 28_000 });
   });
 });
