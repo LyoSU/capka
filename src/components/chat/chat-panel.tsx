@@ -980,6 +980,18 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               <h1 className="animate-claw-greet mt-5 font-display text-balance text-center text-fluid-display font-medium tracking-tight text-foreground">
                 {greeting ?? t("panel.greeting")}
               </h1>
+              {/* Where this chat will live. The greeting state has no header, so
+                  without this line a project chat and a loose one look identical
+                  until the first reply — and the person types into the wrong one. */}
+              {projectId && projectName && (
+                <Link
+                  href={`/projects/${projectId}`}
+                  className="animate-claw-greet mt-4 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{t("panel.newChatInProject", { name: projectName })}</span>
+                </Link>
+              )}
             </div>
 
             {importCardEl}

@@ -242,6 +242,7 @@
       "retry": "Retry",
       "navigation": "Chat navigation",
       "telegramReadOnly": "This is a Telegram chat. Reply there",
+      "newChatInProject": "New chat in the project “{name}”",
       "telegramBusy": "The bot is working on this chat…",
       "stopBot": "Stop",
       "continueHere": "Continue in a web chat",

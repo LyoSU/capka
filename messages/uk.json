@@ -242,6 +242,7 @@
       "retry": "Повторити",
       "navigation": "Навігація чатом",
       "telegramReadOnly": "Це Telegram-чат, відповідайте там",
+      "newChatInProject": "Новий чат у проєкті «{name}»",
       "telegramBusy": "Бот працює над цим чатом…",
       "stopBot": "Зупинити",
       "continueHere": "Продовжити у вебі",
