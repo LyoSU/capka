@@ -78,10 +78,10 @@
   --shadow-raised: var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
   /* ── One UI scale ────────────────────────────────────────────────────────
-     Every control, list row and floating surface in the app is built from the
-     table below. Look here before inventing a height or a padding at a call
+     Every control, list row and surface in the app is built from the table
+     below. Look here before inventing a height, a padding or a radius at a call
      site; if something needs a number that isn't here, the table is wrong, not
-     the exception. The rungs are 4px apart and the type sizes are 12/14/15/16.
+     the exception. The rungs are 4px apart.
 
      Controls — button, input, textarea, select trigger, toggle
        xs        h-6   px-2    text-xs   rounded-md  svg size-3.5
@@ -96,14 +96,45 @@
        Group label: px-3 py-1.5 text-xs. Rule: my-1.5 h-px, inset to the
        surface padding (no negative margin).
 
-     Floating surfaces — dropdown, popover, select popup, palette, dialog
-       rounded-2xl. p-2 when the body is a list of rows, p-4 when it is prose
-       or a form. Row radius (lg) is the surface radius minus that padding, so
-       the corners stay concentric.
-       Off the ladder on purpose: the tooltip (rounded-md, px-2.5 py-1.5,
-       text-xs) is a passing hint, not a surface; the badge is a label, not a
-       control; the sign-in and setup screens run their own larger field scale
-       (h-11/rounded-xl) because they are single-column, one-task pages.
+     Radius, by what the box IS — never by taste at the call site
+       rounded-sm   a glyph-sized chip, ~16-20px — the ladder bottoms out here
+       rounded-md   a control below the default rung, a small inline tile
+       rounded-lg   a control on the default rung, a row inside a surface
+       rounded-xl   a box lying FLAT on the page and holding ONE thing: a
+                    settings card, a note, a banner, a dashed empty state, a
+                    single-line status bar
+       rounded-2xl  a container of ROWS, and anything floating or raised above
+                    the page: dropdown, popover, select popup, dialog, command
+                    palette, Card, a `bg-card` panel with a shadow
+       A row is one step below its surface (2xl minus 8px of padding lands on
+       lg), so the corners stay concentric. A row that lifts while dragged is
+       still a row: it keeps lg and gains only a shadow.
+
+     Surface padding: p-2 when the body is a list of rows, p-4 when it is prose
+     or a form.
+
+     Row inset, by where the row lives — all three land near a 16-20px left edge
+       inside a p-2 surface (menu, palette)      px-3
+       full-bleed in a clipped container (list)  px-4
+       boxless on the page (settings groups)     -mx-3 + px-3, so the hover
+                                                 fill bleeds past the text
+
+     Type ladder — 10 / 11 / 12 / 13 / 14 / 15 / 16px, nothing between
+       text-[10px]  numeric chips inside a pill (counters, badges) — never prose
+       text-[11px]  meta and captions
+       text-xs      secondary text, group labels, key caps
+       text-[13px]  dense secondary text and inline code
+       text-sm      the default for controls and body copy in dense areas
+       text-[15px]  list rows and anything a person reads at length
+       text-base    input value text on touch (md:text-sm above it)
+       Half-steps (11.5, 12.5, 13.5px) are not steps; they read as a rendering
+       accident next to the real ones.
+
+     Off the ladder on purpose: the tooltip (rounded-md, px-2.5 py-1.5,
+     text-xs) is a passing hint, not a surface; the badge is a label, not a
+     control; the sign-in and setup screens run their own larger field scale
+     (h-11/rounded-xl, card rounded-4xl) because they are single-column,
+     one-task pages.
      ─────────────────────────────────────────────────────────────────────── */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);

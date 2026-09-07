@@ -79,7 +79,7 @@ function Shortcut({ keys }: { keys: string[] }) {
   return (
     <span
       data-slot="kbd"
-      className="ml-0.5 inline-flex items-center gap-px bg-background/15 px-1.5 py-0.5 font-mono text-[0.6875rem] leading-none text-background/80"
+      className="ml-0.5 inline-flex items-center gap-px bg-background/15 px-1.5 py-0.5 font-mono text-[11px] leading-none text-background/80"
     >
       {keys.map((key) => MODIFIERS[key]?.[mac ? 0 : 1] ?? key).join(mac ? "" : "+")}
     </span>

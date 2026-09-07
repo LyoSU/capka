@@ -79,7 +79,7 @@ export default function ProjectsPage() {
           // Rows in the shape of the real ones, inside the real container: the list
           // lands in place instead of replacing a centred spinner from a different
           // height.
-          <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline" aria-hidden>
+          <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-hairline" aria-hidden>
             {Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="space-y-2 px-4 py-3.5">
                 <Skeleton className="h-4 w-40" />
@@ -116,7 +116,7 @@ export default function ProjectsPage() {
              — the same object rendered in two materials made the two pages read as
              two different apps. Not shadow-panel: that adds two soft drop-shadow
              layers, and a list of rows sits IN the page rather than floating over it. */
-          <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline">
+          <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-hairline">
             {projects.map((project) => (
               <div
                 key={project.id}

@@ -409,7 +409,7 @@ export function CommandPalette() {
       </CommandList>
       {/* The three keys the palette answers to, named once at the foot. It is what
           tells a first-time reader this is a launcher and not a search box. */}
-      <div className="flex items-center gap-4 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+      <div className="flex items-center gap-4 border-t border-border px-5 py-2.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><CommandKbd>↑↓</CommandKbd>{t("hints.navigate")}</span>
         <span className="flex items-center gap-1.5"><CommandKbd>↵</CommandKbd>{t("hints.open")}</span>
         {/* Named only once there is text to carry over, so the resting palette

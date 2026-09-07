@@ -21,7 +21,7 @@ export function ChartTooltip({ pos, children }: { pos: number; children: React.R
   return (
     <div
       style={{ left: `${p * 100}%`, transform: `translateX(-${p * 100}%)` }}
-      className="pointer-events-none absolute -top-7 z-10 max-w-full truncate rounded-md bg-popover px-2 py-1 text-[11px] shadow-panel"
+      className="pointer-events-none absolute -top-7 z-10 max-w-full truncate rounded-md bg-popover px-2.5 py-1.5 text-xs shadow-panel"
     >
       {children}
     </div>

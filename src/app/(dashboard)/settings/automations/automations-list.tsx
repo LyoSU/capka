@@ -231,7 +231,7 @@ export default function AutomationsList() {
         const status = statusOf(a);
         return (
           <div key={a.id} className="flex items-start gap-3 border-t py-4">
-            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
+            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/70">
               {/* The icon carries the trigger kind, so a list of both reads at a
                   glance without every row spelling it out in words. */}
               {a.trigger.kind === "webhook"

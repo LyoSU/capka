@@ -325,7 +325,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
 function GroupAvatar({ group }: { group: Group }) {
   const Icon = group.kind === "personal" ? UserRound : Users;
   return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.55rem] bg-muted">
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
       <Icon className="h-4 w-4 text-muted-foreground" />
     </div>
   );
@@ -397,7 +397,7 @@ function SkillRow({
   const noDescription = !skill.description?.trim();
   return (
     <div className="flex items-start gap-3 py-4">
-      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/70">
+      <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/70">
         <Puzzle className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1 space-y-0.5">

@@ -74,7 +74,7 @@ export function ConnectionRow({
     <div
       ref={rowRef}
       data-dragging={dragging}
-      className="py-1.5 transition-shadow data-[dragging=true]:relative data-[dragging=true]:z-10 data-[dragging=true]:rounded-xl data-[dragging=true]:bg-card data-[dragging=true]:opacity-90 data-[dragging=true]:shadow-raised"
+      className="py-1.5 transition-shadow data-[dragging=true]:relative data-[dragging=true]:z-10 data-[dragging=true]:rounded-lg data-[dragging=true]:bg-card data-[dragging=true]:opacity-90 data-[dragging=true]:shadow-raised"
     >
       <Collapsible open={expanded} onOpenChange={onExpandedChange}>
         <div className="flex items-center gap-1.5 px-2.5 py-2">

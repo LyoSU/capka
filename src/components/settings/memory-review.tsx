@@ -58,7 +58,7 @@ function Side({ side, keeping, onKeep }: { side: ConflictSide; keeping: boolean;
     <div className="min-w-0 flex-1 space-y-1.5">
       <Statement value={side.statement} reveal={reveal} />
       <TrustBadge trust={side.trust} value={side.statement} />
-      <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+      <p className="text-xs leading-relaxed text-muted-foreground">
         {t("savedOn", { date: formatDay(side.at, locale) })}
       </p>
       <Button
@@ -132,7 +132,7 @@ export function MemoryConflicts({ conflicts, onChanged }: { conflicts: ConflictV
 
   return (
     <SettingsSection title={t("conflictTitle")} description={t("conflictHint")}>
-      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">
+      <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-panel">
         {conflicts.map((c) => (
           <Conflict key={c.claim.id} conflict={c} onChanged={onChanged} />
         ))}
@@ -186,7 +186,7 @@ function Suggestion({ item, onChanged }: { item: ArchivedView; onChanged: () => 
     <FactRow>
       <Statement value={item.statement} reveal={reveal}>
         {item.state === "conflict" && (
-          <div className="mt-1 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning-text">
+          <div className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-warning-text">
             <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warning-text" />
             {/* The other half, or the bare word when the ledger recorded a contested
                 slot with no head left to point at. Keeping this SUPERSEDES that, so
@@ -199,7 +199,7 @@ function Suggestion({ item, onChanged }: { item: ArchivedView; onChanged: () => 
             {item.conflictsWith ? (
               <div className="min-w-0">
                 <p>{t("conflictReplacesOn", { date: formatDay(item.conflictsWith.at, locale) })}</p>
-                <Statement value={item.conflictsWith.statement} className="text-[11.5px] leading-relaxed" />
+                <Statement value={item.conflictsWith.statement} className="text-xs leading-relaxed" />
               </div>
             ) : (
               <p>{t("reviewConflict")}</p>
@@ -235,7 +235,7 @@ export function MemoryArchive({ archive, expiresAt, onChanged }: {
       title={t("archiveTitle")}
       description={t("archiveHint", { date: formatDay(expiresAt, locale) })}
     >
-      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">
+      <div className="divide-y overflow-hidden rounded-2xl bg-card shadow-panel">
         {groupBySource(archive, (p) => sourceText(p.source)).map((run) => (
           <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
             {/* A link, for the reader who does not recognise a suggestion and wants to go

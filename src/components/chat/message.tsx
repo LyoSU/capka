@@ -825,9 +825,9 @@ function StepFileChip({ path, name, chatId }: { path: string; name: string; chat
       onClick={() => open([file], 0)}
       title={t("openFile", { name })}
       aria-label={t("openFile", { name })}
-      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-[13.5px] underline decoration-border-strong underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-[13px] underline decoration-border-strong underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
     >
-      <FileThumb file={file} className="h-4 w-4 shrink-0 overflow-hidden rounded-[3px]" />
+      <FileThumb file={file} className="size-4 shrink-0 overflow-hidden rounded-sm" />
       <span className="truncate">{name}</span>
     </button>
   );
@@ -1070,7 +1070,7 @@ function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error"
   if (d.category === "mcp" && d.brand?.color) {
     return (
       <span
-        className="animate-step-in grid h-4 w-4 place-items-center rounded-[5px] text-[9px] font-bold leading-none text-white"
+        className="animate-step-in grid size-4 place-items-center rounded-sm text-[10px] font-bold leading-none text-white"
         style={{ backgroundColor: d.brand.color }}
       >
         {d.brand.letter}
@@ -1176,7 +1176,7 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
           When we know WHICH file it is, it gets a thumbnail and opens the file. */}
       {fileChip ??
         (d.detail && (
-          <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-[13.5px]">
+          <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-[13px]">
             {d.detail}
           </span>
         ))}

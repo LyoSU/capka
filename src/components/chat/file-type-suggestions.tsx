@@ -68,7 +68,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
 
       {/* key={type} remounts the list when the type changes, so the rows
           re-run their staggered entrance — switching tabs feels alive. */}
-      <div key={type} className="overflow-hidden rounded-xl border border-border bg-card">
+      <div key={type} className="overflow-hidden rounded-2xl border border-border bg-card">
         {actions.map(({ key: a, icon: ActionIcon }, i) => (
           <button
             key={a}
@@ -78,11 +78,11 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             // Same press rule as the recent-chats rows: a full-width row inside a
             // clipped, rounded container darkens rather than shrinks — a scale
             // pulls its fill clear of the frame and reads as a cropped rectangle.
-            className={`group/sg animate-step-in flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-hover active:bg-hover-strong ${
+            className={`group/sg animate-step-in flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] leading-5 transition-colors hover:bg-hover active:bg-hover-strong ${
               i > 0 ? "border-t" : ""
             }`}
           >
-            <ActionIcon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
+            <ActionIcon className="size-5 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
             <span className="flex-1">{t(`${type}.${a}.label`)}</span>
             <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/sg:translate-x-0 group-hover/sg:opacity-100" />
           </button>

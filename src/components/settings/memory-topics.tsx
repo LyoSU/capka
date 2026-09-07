@@ -96,7 +96,7 @@ export function chatHref(source: FactSource): string | null {
  *  sentence, and slicing a link out of the middle of one means `t.rich` and a second
  *  shape for translators to keep in step, for a target a few pixels wider. */
 export function SourceCaption({ children, href }: { children: React.ReactNode; href?: string | null }) {
-  const className = "px-4 pt-2.5 text-[11.5px] leading-relaxed text-muted-foreground";
+  const className = "px-4 pt-2.5 text-xs leading-relaxed text-muted-foreground";
   if (!href) return <p className={className}>{children}</p>;
   return (
     <p className={className}>
@@ -153,7 +153,7 @@ const TRUST_KEY = {
 export function TrustBadge({ trust, value }: { trust: TrustTag; value: StatementView }) {
   const t = useTranslations("settings.memory");
   return (
-    <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+    <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs leading-relaxed text-muted-foreground">
       {/* The document's name travels as a VALUE, never interpolated here: Ukrainian
           declines the words around a quoted title. */}
       <span>{trust.kind === "untrusted_document" ? t(TRUST_KEY[trust.kind], { name: trust.name }) : t(TRUST_KEY[trust.kind])}</span>
@@ -311,7 +311,7 @@ export function Statement({
           aria-expanded={shown}
           aria-controls={textId}
           onClick={toggle}
-          className="shrink-0 rounded-md text-[11.5px] font-normal text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="shrink-0 rounded-md text-xs font-normal text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {shown ? t("hide") : t("reveal")}
           {!shown && <span className="sr-only"> — {t("sensitiveBlurred")}</span>}
@@ -452,7 +452,7 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
                   aria-expanded={open}
                   aria-controls={panelId}
                   onClick={() => setOpen((v) => !v)}
-                  className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <ChevronRight
                     aria-hidden
@@ -461,9 +461,9 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
                   {t("showHistory")}
                 </button>
                 {open && (
-                  <div id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                  <div id={panelId} className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     <p>{t("replacedOn", { date: formatDay(fact.previous.at, locale) })}</p>
-                    <Statement value={fact.previous.statement} className="text-[11.5px] leading-relaxed" />
+                    <Statement value={fact.previous.statement} className="text-xs leading-relaxed" />
                   </div>
                 )}
               </>
@@ -511,7 +511,7 @@ function FactLines({ facts, total, onChanged }: { facts: FactView[]; total: numb
           more than two hundred facts under it is a subject that needs splitting, which is
           the assistant's job and not a paginator's. */}
       {total > facts.length && (
-        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           {t("showingSome", { shown: facts.length, total })}
         </p>
       )}
@@ -624,7 +624,7 @@ function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
         ) : (
           <span />
         )}
-        <span className="col-start-1 row-start-2 block whitespace-nowrap text-[12.5px] text-muted-foreground sm:col-start-3 sm:row-start-1">
+        <span className="col-start-1 row-start-2 block whitespace-nowrap text-xs text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("updatedOn", { date: formatDay(topic.updatedAt, locale) })}
         </span>
         <ChevronRight
@@ -850,7 +850,7 @@ export function MemoryTopicDetail({
               {/* Said HERE and nowhere else on the page: it explains the tag on the rows
                   directly under it, and the reader asks what a tag means at the moment they
                   first see one. */}
-              <p className="max-w-prose text-[12.5px] leading-relaxed text-muted-foreground">
+              <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">
                 {t("trustExplainer")}
               </p>
               <FactLines facts={topic.facts} total={topic.factsTotal} onChanged={onChanged} />

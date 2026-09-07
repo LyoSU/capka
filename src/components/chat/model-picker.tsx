@@ -875,7 +875,7 @@ function ModelList({
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
             {filters.size > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-medium leading-none text-primary-foreground tabular-nums">
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground tabular-nums">
                 {filters.size}
               </span>
             )}
@@ -1005,7 +1005,7 @@ function ModelList({
                       </span>
                       {showConnChip && <ConnChip icon={model.configIcon} label={model.configLabel} />}
                       {isCurrent && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("active")}</span>
                       )}
                       <PriceMeter model={model} />
                     </span>

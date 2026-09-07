@@ -24,7 +24,7 @@ function Monogram({ host, className = "" }: { host: string; className?: string }
   return (
     <span
       aria-hidden
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[9px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[10px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
     >
       {letter ?? <Globe className="h-2.5 w-2.5" />}
     </span>
@@ -154,7 +154,7 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
                         <span key={n} className={`${NUMBER_PILL} h-4 min-w-4 bg-background px-1 text-[10px]`}>{n}</span>
                       ))}
                     </span>
-                    <span className="hidden shrink-0 font-mono text-[10.5px] text-muted-foreground sm:inline">{host ?? s.url}</span>
+                    <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground sm:inline">{host ?? s.url}</span>
                   </a>
                 </li>
               );

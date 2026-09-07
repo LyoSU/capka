@@ -92,7 +92,7 @@ export default function ArchivedChatsPage() {
           </Link>
 
           {state === "loading" ? (
-            <div className="divide-y overflow-hidden rounded-xl border bg-card" aria-hidden>
+            <div className="divide-y overflow-hidden rounded-2xl border bg-card" aria-hidden>
               {Array.from({ length: 4 }, (_, i) => (
                 <div key={i} className="space-y-2 px-4 py-3.5">
                   <Skeleton className="h-4 w-48" />
@@ -116,7 +116,7 @@ export default function ArchivedChatsPage() {
           ) : (
             /* One grouped card with hairlines, like the projects list — eight
                separately bordered rows read as eight unrelated things. */
-            <div className="divide-y overflow-hidden rounded-xl border bg-card">
+            <div className="divide-y overflow-hidden rounded-2xl border bg-card">
               {chats.map((chat) => (
                 <div
                   key={chat.id}

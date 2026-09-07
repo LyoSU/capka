@@ -35,7 +35,7 @@ export function ShowMore({ shown, total, onMore }: { shown: number; total: numbe
       <button
         type="button"
         onClick={onMore}
-        className="rounded-lg px-3 py-1.5 text-sm shadow-btn transition-micro hover:bg-hover active:scale-[0.98]"
+        className="h-9 rounded-lg px-3 text-sm shadow-btn transition-micro hover:bg-hover active:scale-[0.98]"
       >
         {t("showMore")}
       </button>
