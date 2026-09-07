@@ -28,12 +28,15 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
+- Chat: thinking levels are named Off / Low / Medium / High (Вимкнено / Низький / Середній / Високий); the explanations under the slider are unchanged.
+- Chat, phone: the model overlay no longer opens the keyboard by itself, and the thinking slider steps aside while a search is being typed.
 - Chat: the paperclip became a "+" menu (files, folder, secrets, and shortcuts to skills, connectors and plugins); connected folders show as chips on the rail above the composer card with their sync state and a reconnect action, and the model and thinking controls moved to the right of the footer beside the send button.
 - Chat: a new chat opened inside a project says so under the greeting (a pill with the project name), instead of looking like a loose chat until the first reply.
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
 
+- Chat: the microphone button did nothing in development builds (React strict mode disposed the dictation engine on mount); production was unaffected.
 - `GET /api/tasks?chatId=` reports the chat's running turn instead of the newest row, so Stop cancels the streaming reply and steering works while a follow-up is queued behind it.
 - Cancelling a queued turn removes it and releases its budget hold immediately instead of leaving it waiting until the current reply ends.
 

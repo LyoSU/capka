@@ -188,7 +188,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
         <PopoverTrigger
           disabled={disabled}
           aria-label={`${t("label")}: ${t(`amount.${current}`)}`}
-          className="flex h-9 items-center gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
+          className="flex h-9 items-center gap-1.5 rounded-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
         >
           {/* The glyph carries the meaning at a glance: bars that grow with depth.
               aria-hidden — the trigger's own label already says it in words. */}

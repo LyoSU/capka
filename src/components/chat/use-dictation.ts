@@ -548,7 +548,14 @@ export function useDictation({
     engine.syncValue(value);
   }, [engine, value]);
 
-  useEffect(() => () => engine.dispose(), [engine]);
+  // The engine lives in a ref for the component's whole life, and React's dev
+  // strict mode runs every effect twice — mount, cleanup, mount — with the SAME
+  // ref. A cleanup that disposed the engine left a permanently dead one behind:
+  // every later `start()` returned on its first line and the microphone button
+  // did nothing in development while working fine in production. Stopping is all
+  // an unmount needs (the recognition run is released, the cap timer cleared),
+  // and a stopped engine can start again.
+  useEffect(() => () => engine.stop(), [engine]);
 
   const start = useCallback(() => {
     textareaRef.current?.focus();

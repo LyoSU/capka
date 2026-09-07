@@ -852,7 +852,10 @@ function ModelList({
             else if (e.key === "Escape") { onClose(); }
           }}
           placeholder={t("search")}
-          autoFocus
+          // Desktop only. On the phone overlay a focused field opens the keyboard
+          // over half the screen before the person has decided to type, and the
+          // thinking slider at the foot ends up wedged against it.
+          autoFocus={orientation !== "horizontal"}
           role="combobox"
           aria-expanded
           aria-controls={listboxId}
@@ -1166,6 +1169,9 @@ export function ModelPicker({
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  // The phone overlay's search field has the keyboard: while it is focused the
+  // thinking slider at the foot has no room and is not the thing being done.
+  const [typing, setTyping] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -1191,6 +1197,9 @@ export function ModelPicker({
 
   const close = useCallback(() => {
     setOpen(false);
+    // A field removed while focused never blurs, so the flag is reset here rather
+    // than left to a blur event that will not come.
+    setTyping(false);
     triggerRef.current?.focus();
   }, []);
 
@@ -1566,7 +1575,13 @@ export function ModelPicker({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex flex-1 flex-col min-h-0">{renderList("horizontal")}</div>
+          <div
+            className="flex flex-1 flex-col min-h-0"
+            onFocusCapture={(e) => { if (e.target instanceof HTMLInputElement) setTyping(true); }}
+            onBlurCapture={(e) => { if (e.target instanceof HTMLInputElement) setTyping(false); }}
+          >
+            {renderList("horizontal")}
+          </div>
           {/* `extra` — the thinking control, on phones only.
               Model and thinking depth are one decision ("how the assistant answers"),
               and on a narrow screen they cannot both sit in the composer row. Putting
@@ -1574,7 +1589,7 @@ export function ModelPicker({
               open ONE place that holds both, instead of two adjacent 40px targets
               competing with attach and send. Below the list, not above it: choosing a
               model is the primary act here and must stay at the top. */}
-          {extra && (
+          {extra && !typing && (
             <div className="border-t px-4 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3.5">{extra}</div>
           )}
         </div>,
