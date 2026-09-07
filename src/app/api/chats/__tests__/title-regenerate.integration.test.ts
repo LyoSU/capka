@@ -18,7 +18,10 @@ const { requireSession, generateChatTitle, resolveAuxTarget, resolveUserModelInf
 
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
-  return { ...actual, requireSession };
+  // The routes gate mutations with `requireWriter`, which calls the module-internal
+  // `requireSession` — not this mock — and reaches for `headers()` outside a request.
+  // Answer both with the same session so the role a test sets is the one the route sees.
+  return { ...actual, requireSession, requireWriter: requireSession };
 });
 // No provider is reachable from a test run, and resolving one would demand a
 // configured connection this suite has no business creating.
@@ -27,7 +30,10 @@ vi.mock("@/lib/chat/title", () => ({ generateChatTitle }));
 vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent }));
 vi.mock("@/lib/usage", () => ({ recordUsage }));
 
-const TARGET = { model: {}, provider: "openai", modelId: "gpt-x", configId: "cfg1", isShared: true };
+// The config id has to be a real row: the route now reserves budget before calling
+// the model, and a hold references `provider_configs` by foreign key.
+const CFG = "title-regen-cfg";
+const TARGET = { model: {}, provider: "openai", modelId: "gpt-x", configId: CFG, isShared: true };
 
 /**
  * POST /api/chats/[id]/title re-derives a chat's name on demand.
@@ -43,11 +49,16 @@ run("POST /api/chats/[id]/title", () => {
     for (const [id, email] of [[U, "title-regen@test.local"], [OTHER, "title-regen-other@test.local"]]) {
       await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'T',$2) ON CONFLICT (id) DO NOTHING`, [id, email]);
     }
+    await pool.query(
+      `INSERT INTO provider_configs (id, user_id, provider) VALUES ($1,$2,'openai') ON CONFLICT (id) DO NOTHING`,
+      [CFG, U],
+    );
   });
 
   afterAll(async () => {
     const { pool } = await import("@/lib/db");
     await pool.query(`DELETE FROM chats WHERE user_id = ANY($1)`, [[U, OTHER]]);
+    await pool.query(`DELETE FROM provider_configs WHERE id = $1`, [CFG]);
     await pool.query(`DELETE FROM "user" WHERE id = ANY($1)`, [[U, OTHER]]);
   });
 
