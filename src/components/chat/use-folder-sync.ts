@@ -5,8 +5,15 @@ import type { PcFolder, SyncProgress } from "@/lib/folder-bridge/bridge";
 import type { Manifest } from "@/lib/folder-bridge/plan";
 import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
 
-export type FolderSyncPhase = "idle" | "syncing" | "error";
+/** "busy-elsewhere": every folder in this run was held by another window's sync, so
+ *  nothing was reconciled — distinct from "idle", which claims a finished sync. */
+export type FolderSyncPhase = "idle" | "syncing" | "error" | "busy-elsewhere";
 export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: number; bytes: number } };
+/** Why a folder is disconnected: "prompt" — the handle is here and only the
+ *  permission lapsed (one click re-grants it); "gone" — this browser has no handle at
+ *  all (another browser, cleared site data), so the person has to show the folder again. */
+export type ReconnectKind = "prompt" | "gone";
+export type ReconnectResult = "ok" | "failed" | "cancelled" | "wrong-folder";
 
 /**
  * Turn-scoped sync for a chat's PC folders. The composer calls pushAll() before a
@@ -25,6 +32,8 @@ export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: n
 export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget; ensureChat: () => Promise<void> }) {
   const [folders, setFolders] = useState<PcFolder[]>([]);
   const [needReconnect, setNeedReconnect] = useState<string[]>([]);
+  // Why each of those is disconnected — the two cases need different actions.
+  const [reconnectKind, setReconnectKind] = useState<Record<string, ReconnectKind>>({});
   const [phase, setPhase] = useState<FolderSyncPhase>("idle");
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [skipped, setSkipped] = useState(0);
@@ -49,6 +58,8 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
   canAttachRef.current = canAttach;
   const needReconnectRef = useRef(needReconnect);
   needReconnectRef.current = needReconnect;
+  const reconnectKindRef = useRef(reconnectKind);
+  reconnectKindRef.current = reconnectKind;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/folders?${targetQuery(target)}`).catch(() => null);
@@ -58,11 +69,13 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
     setFolders(pc);
     const { reconnect } = await import("@/lib/folder-bridge/bridge");
     const lapsed: string[] = [];
+    const kinds: Record<string, ReconnectKind> = {};
     for (const f of pc) {
       const state = await reconnect(f.id).catch(() => "gone" as const);
-      if (state !== "ok") lapsed.push(f.id);
+      if (state !== "ok") { lapsed.push(f.id); kinds[f.id] = state; }
     }
     setNeedReconnect(lapsed);
+    setReconnectKind(kinds);
   }, [target]);
 
   useEffect(() => {
@@ -88,14 +101,21 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
       // (fail-closed) rather than keep streaming workspace files to/from the PC.
       if (!canAttachRef.current) return;
       const live = foldersRef.current.filter((f) => !needReconnectRef.current.includes(f.id));
-      if (live.length === 0) return;
+      // Nothing could run: every folder is waiting to be reconnected. Leave the
+      // last-synced time where it is — moving it would tell the person their files
+      // are up to date when not one of them was looked at.
+      if (live.length === 0) { setPhase("idle"); return; }
       setPhase("syncing");
       try {
         const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
         let totalConflicts = 0;
         let totalSkipped = 0;
+        let reconciled = 0; // folders this run actually walked
+        let busyElsewhere = 0; // folders another window held a lease on
         for (const f of live) {
           const r = await sync(target, f, setProgress);
+          if (r.skippedByLease) { busyElsewhere++; continue; }
+          reconciled++;
           totalConflicts += r.conflicts;
           totalSkipped += r.skipped;
         }
@@ -105,10 +125,14 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
           for (const f of live) { const m = syncedManifest(f.id); if (m) next[f.name] = m; }
           return next;
         });
-        setConflicts(totalConflicts);
-        setSkipped(totalSkipped);
-        setLastSyncedAt(Date.now());
-        setPhase("idle");
+        // A run that reconciled nothing reports nothing: keep the previous counts and
+        // timestamp rather than overwriting honest numbers with zeros.
+        if (reconciled > 0) {
+          setConflicts(totalConflicts);
+          setSkipped(totalSkipped);
+          setLastSyncedAt(Date.now());
+        }
+        setPhase(reconciled === 0 && busyElsewhere > 0 ? "busy-elsewhere" : "idle");
       } catch (e) {
         console.error("[folders] sync failed:", e);
         setPhase("error");
@@ -124,18 +148,37 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
   // runs inside the bridge, after the picker opens (keeps the user gesture) but
   // before the row is created.
   const connect = useCallback(async (): Promise<ConnectResult> => {
+    // A first sync copies the whole folder and is the longest wait this feature asks
+    // for, so it drives the same phase and progress the turn-scoped sync uses. It
+    // starts only once real work begins: the directory picker is open before that,
+    // and "Syncing…" underneath an open picker would be describing nothing.
+    let started = false;
     try {
       const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
-      const folder = await pickAndCreate(target, { ensureChat });
+      const folder = await pickAndCreate(target, {
+        ensureChat,
+        onProgress: (p) => { started = true; setPhase("syncing"); setProgress(p); },
+      });
       if (folder) { setLastSyncedAt(Date.now()); await refresh(); }
+      if (started) setPhase("idle");
       return { ok: true };
     } catch (e) {
+      // The row may already exist even though the first sync failed (it is created
+      // before the sync runs). List again so the folder shows up as a chip instead of
+      // vanishing — the person picked it, it is attached, and the next turn retries.
+      await refresh().catch(() => {});
       // The ceiling error carries counts so the UI can localize (see FolderTooLargeError).
       if (e instanceof Error && e.name === "FolderTooLargeError") {
+        // Not a sync failure: the menu says what is too large, so leave the status
+        // line alone rather than adding a second, vaguer complaint beside it.
+        if (started) setPhase("idle");
         const m = e as Error & { count?: number; bytes?: number };
         return { ok: false, tooLarge: { count: m.count ?? 0, bytes: m.bytes ?? 0 } };
       }
+      if (started) setPhase("error");
       return { ok: false, error: e instanceof Error ? e.message : "Could not attach the folder." };
+    } finally {
+      setProgress(null);
     }
   }, [target, ensureChat, refresh]);
 
@@ -146,12 +189,29 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
     return importFolderFallback(target);
   }, [target, ensureChat]);
 
-  const reconnectOne = useCallback(async (id: string) => {
-    const { requestReconnect } = await import("@/lib/folder-bridge/bridge");
-    if (await requestReconnect(id)) {
-      setNeedReconnect((prev) => prev.filter((x) => x !== id));
-      await syncAll();
+  // Two different repairs behind one button. "prompt": the handle is still here and
+  // the browser only wants the permission granted again. "gone": there is no handle
+  // in this browser at all, so re-asking for permission does nothing — the person has
+  // to point at the folder once more. The caller gets the outcome so it can say what
+  // happened instead of the button doing nothing.
+  const reconnectOne = useCallback(async (id: string): Promise<ReconnectResult> => {
+    const folder = foldersRef.current.find((f) => f.id === id);
+    if (!folder) return "failed";
+    const { requestReconnect, relink } = await import("@/lib/folder-bridge/bridge");
+    if (reconnectKindRef.current[id] === "gone") {
+      const r = await relink(folder).catch(() => "failed" as const);
+      if (r !== "ok") return r;
+    } else if (!(await requestReconnect(id).catch(() => false))) {
+      return "failed";
     }
+    // Update the ref as well as the state: syncAll runs on the next line and reads
+    // the ref, which React has not re-rendered yet — without this the folder we just
+    // reconnected is filtered straight back out of the run.
+    needReconnectRef.current = needReconnectRef.current.filter((x) => x !== id);
+    setNeedReconnect(needReconnectRef.current);
+    setReconnectKind((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    await syncAll();
+    return "ok";
   }, [syncAll]);
 
   const remove = useCallback(async (id: string) => {
@@ -162,7 +222,7 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
   }, [refresh]);
 
   return {
-    target, folders, needReconnect, phase, progress, skipped, lastSyncedAt, conflicts, supported, canAttach, synced,
+    target, folders, needReconnect, reconnectKind, phase, progress, skipped, lastSyncedAt, conflicts, supported, canAttach, synced,
     pushAll: syncAll, pullAll: syncAll, connect, importFallback, reconnect: reconnectOne, remove, refresh,
   };
 }

@@ -50,6 +50,10 @@ export interface DirHandle {
   getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<DirHandle>;
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FileHandle>;
   removeEntry(name: string, opts?: { recursive?: boolean }): Promise<void>;
+  /** True when both handles point at the same directory on disk — the only reliable
+   *  way to tell "the person re-picked this very folder" from "a different folder
+   *  whose name happens to sanitize the same". Absent on older browsers. */
+  isSameEntry?(other: DirHandle): Promise<boolean>;
   queryPermission?(d: { mode: "read" | "readwrite" }): Promise<PermissionState>;
   requestPermission?(d: { mode: "read" | "readwrite" }): Promise<PermissionState>;
 }

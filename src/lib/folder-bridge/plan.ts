@@ -10,13 +10,34 @@
 export type Entry = { mtime: number; size: number; hash?: string };
 export type Manifest = Record<string, Entry>;
 
+/** A losing version to keep beside the winner. `source` is the side the losing
+ *  bytes still live on (read them there), `keepAs` is the path to keep them under. */
+export type ConflictCopy = { path: string; keepAs: string; source: "local" | "remote" };
+
 export type SyncPlan = {
   upload: string[]; // local → server
   download: string[]; // server → local
   deleteRemote: string[]; // deleted locally since base
   deleteLocal: string[]; // deleted on server since base
   conflicts: { path: string; winner: "local" | "remote" }[]; // both changed; last-writer-wins by mtime
+  conflictCopies: ConflictCopy[]; // the losing versions, preserved before the winner overwrites
 };
+
+/** The name a losing version is kept under: "report.docx" → "report.conflict-2026-09-07-1432.docx".
+ *  Dated so two conflicts on the same file never collide, and so the person can tell
+ *  at a glance which copy is which. Extension preserved so it still opens. Pure. */
+export function conflictName(path: string, at: Date): string {
+  const slash = path.lastIndexOf("/");
+  const dir = path.slice(0, slash + 1); // "" when there is no slash
+  const base = path.slice(slash + 1);
+  const dot = base.lastIndexOf(".");
+  // dot at 0 is a dotfile (".env"), not an extension — keep the whole name as the stem.
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}`;
+  return `${dir}${stem}.conflict-${stamp}${ext}`;
+}
 
 /** Same file content? Compare by hash when both sides carry one (the reliable
  *  signal); otherwise fall back to size (the server manifest is mtime+size only). */
@@ -35,8 +56,9 @@ function changed(entry: Entry, base: Entry | undefined): boolean {
  *  them completely alone (no delete that drops a real copy, no download that would
  *  clobber the user's larger local file). Without this, a file that grows past the
  *  cap on one side gets deleted on the other. */
-export function planSync(local: Manifest, remote: Manifest, base: Manifest | null, excluded?: Set<string>): SyncPlan {
-  const plan: SyncPlan = { upload: [], download: [], deleteRemote: [], deleteLocal: [], conflicts: [] };
+export function planSync(local: Manifest, remote: Manifest, base: Manifest | null, excluded?: Set<string>, now: number = Date.now()): SyncPlan {
+  const plan: SyncPlan = { upload: [], download: [], deleteRemote: [], deleteLocal: [], conflicts: [], conflictCopies: [] };
+  const stampedAt = new Date(now);
   const paths = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(base ?? {})]);
 
   for (const path of paths) {
@@ -49,7 +71,15 @@ export function planSync(local: Manifest, remote: Manifest, base: Manifest | nul
       if (sameContent(l, r)) continue; // already in sync
       const lc = changed(l, b);
       const rc = changed(r, b);
-      if (lc && rc) plan.conflicts.push({ path, winner: l.mtime >= r.mtime ? "local" : "remote" });
+      if (lc && rc) {
+        // Both sides edited the same file. The newer mtime decides which version stays
+        // THE file — but the two mtimes come from two different clocks (the computer's
+        // and the sandbox host's), so the decision can be wrong. Never let it destroy
+        // the other version: the loser is kept beside the winner under a dated name.
+        const winner = l.mtime >= r.mtime ? "local" : "remote";
+        plan.conflicts.push({ path, winner });
+        plan.conflictCopies.push({ path, keepAs: conflictName(path, stampedAt), source: winner === "local" ? "remote" : "local" });
+      }
       else if (lc) plan.upload.push(path);
       else plan.download.push(path); // only remote changed (or neither vs base but they differ — treat as remote)
     } else if (l && !r) {
@@ -69,6 +99,7 @@ export function planSync(local: Manifest, remote: Manifest, base: Manifest | nul
   // Deterministic output (stable diffs, predictable execution order).
   for (const k of ["upload", "download", "deleteRemote", "deleteLocal"] as const) plan[k].sort();
   plan.conflicts.sort((a, b) => a.path.localeCompare(b.path));
+  plan.conflictCopies.sort((a, b) => a.path.localeCompare(b.path));
   return plan;
 }
 
@@ -83,12 +114,25 @@ export type DirPlan = {
  *  otherwise it is a *new* dir on the other side. This is what stops a folder deleted
  *  on the PC from being resurrected by the blind server→PC mirror (see the bridge):
  *  in-base + gone-locally = deleteRemote, not createLocal. A brand-new empty local dir
- *  has no server-side mkdir path, so it is intentionally a no-op. Pure. */
-export function planDirs(local: string[], remote: string[], base: string[] | null): DirPlan {
+ *  has no server-side mkdir path, so it is intentionally a no-op.
+ *
+ *  `keepPaths` are the files this same sync is about to write (uploads, downloads,
+ *  conflict copies). Every directory holding one of them survives on BOTH sides: the
+ *  assistant writing a new file into a directory the person deleted on their computer
+ *  would otherwise have the file downloaded and its directory deleted in the same run,
+ *  and the copy erased again on the next one. Pure. */
+export function planDirs(local: string[], remote: string[], base: string[] | null, keepPaths?: string[]): DirPlan {
   const L = new Set(local), R = new Set(remote), B = new Set(base ?? []);
+  // Every ancestor directory of a file this sync will write.
+  const keep = new Set<string>();
+  for (const p of keepPaths ?? []) {
+    const parts = p.split("/");
+    for (let i = 1; i < parts.length; i++) keep.add(parts.slice(0, i).join("/"));
+  }
   const plan: DirPlan = { createLocal: [], deleteRemote: [], deleteLocal: [] };
   for (const d of new Set([...L, ...R, ...B])) {
     const l = L.has(d), r = R.has(d), b = B.has(d);
+    if (keep.has(d)) { if (r && !l && !b) plan.createLocal.push(d); continue; } // holds a file being written — never delete
     if (r && !l) (b ? plan.deleteRemote : plan.createLocal).push(d); // gone on PC: delete if known, else mirror down
     else if (l && !r && b) plan.deleteLocal.push(d); // gone on server since base → propagate to PC
   }

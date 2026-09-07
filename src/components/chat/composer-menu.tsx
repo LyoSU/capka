@@ -3,8 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
+import { toast } from "sonner";
 import {
-  FileUp, FolderPlus, FolderUp, Folder, RefreshCw, Download, Loader2, X,
+  FileUp, FolderPlus, FolderUp, Folder, FolderOpen, RefreshCw, Download, Loader2, X,
   KeyRound, BookOpen, Blocks, Puzzle, ChevronRight,
 } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -71,6 +72,15 @@ export function ComposerMenu({
     setBusy(false);
   };
 
+  // Same two repairs as the chips: re-grant a lapsed permission, or point at the
+  // folder again when this browser has no handle for it. Never fail silently.
+  const reconnect = async (id: string, name: string) => {
+    if (!folders) return;
+    const r = await folders.reconnect(id);
+    if (r === "wrong-folder") toast(t("wrongFolder", { name }));
+    else if (r === "failed") toast(t("reconnectFailed"));
+  };
+
   const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-hover disabled:opacity-60";
   const icon = "h-4 w-4 shrink-0 text-muted-foreground";
 
@@ -98,9 +108,18 @@ export function ComposerMenu({
                     <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate">{f.name}</span>
                     {lapsed && (
-                      <button type="button" onClick={() => folders.reconnect(f.id)} className="inline-flex items-center gap-0.5 text-xs text-amber-600 hover:underline dark:text-amber-500">
-                        <RefreshCw className="h-3 w-3" />
-                        {t("reconnect")}
+                      <button type="button" onClick={() => reconnect(f.id, f.name)} className="inline-flex items-center gap-0.5 text-xs text-amber-600 hover:underline dark:text-amber-500">
+                        {folders.reconnectKind[f.id] === "gone" ? (
+                          <>
+                            <FolderOpen className="h-3 w-3" />
+                            {t("chooseAgain")}
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3" />
+                            {t("reconnect")}
+                          </>
+                        )}
                       </button>
                     )}
                     <button type="button" onClick={() => folders.remove(f.id)} aria-label={t("disconnect")} className="text-muted-foreground/70 transition-colors hover:text-foreground">
@@ -110,7 +129,9 @@ export function ComposerMenu({
                 );
               })}
 
-              {folders.folders.length > 0 && (
+              {/* Also while the FIRST folder is copying: there is no chip yet to carry
+                  the state, and that first sync is the longest one a person sits through. */}
+              {(folders.folders.length > 0 || folders.phase === "syncing") && (
                 <div className="px-2 pt-1 text-xs text-muted-foreground">
                   {folders.phase === "syncing" ? (
                     <>
@@ -123,6 +144,12 @@ export function ComposerMenu({
                     </>
                   ) : folders.phase === "error" ? (
                     <span className="text-destructive">{t("syncFailed")}</span>
+                  ) : folders.phase === "busy-elsewhere" ? (
+                    t("busyElsewhere")
+                  ) : folders.needReconnect.length > 0 ? (
+                    // Honest before flattering: a folder waiting to be reconnected did
+                    // not sync, so the last-synced time must not stand in for it.
+                    <span className="text-amber-600 dark:text-amber-500">{t("reconnectNeeded", { n: folders.needReconnect.length })}</span>
                   ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) }) : ""}
                   {folders.conflicts > 0 && <span className="text-warning-text"> · {t("conflicts", { n: folders.conflicts })}</span>}
                   {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground/70">{t("skipped", { n: folders.skipped })}</span>}

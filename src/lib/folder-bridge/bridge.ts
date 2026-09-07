@@ -200,13 +200,16 @@ async function loadState(folderId: string): Promise<{ files: Manifest; dirs: str
  *  `ensureChat` (a fresh chat has no DB row yet) runs AFTER the picker so the
  *  showDirectoryPicker call stays inside the user gesture, but BEFORE the POST so
  *  the row the folder references exists. */
-export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: string; ensureChat?: () => Promise<void> }): Promise<PcFolder | null> {
+export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: string; ensureChat?: () => Promise<void>; onProgress?: (p: SyncProgress) => void }): Promise<PcFolder | null> {
   let handle: DirHandle;
   try {
     handle = await window.showDirectoryPicker!({ mode: "readwrite" });
   } catch {
     return null; // user cancelled the picker
   }
+  // The first sync is the longest wait this feature ever asks for, and the scan below
+  // is already part of it — start reporting here rather than at the first upload.
+  opts?.onProgress?.({ phase: "scanning", done: 0, total: 0 });
   // Refuse an oversized folder up front (after filtering out node_modules/models/etc)
   // rather than grinding through a hopeless first sync — the ceiling protects the
   // sandbox quota and the user's patience. Checked here, at the user gesture, so the
@@ -225,22 +228,43 @@ export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: str
   // folder may already be attached from a sibling chat. Re-picking it should
   // re-link the handle locally + sync, not fail — so adopt an existing row.
   const listed = await fetch(`/api/folders?${targetQuery(target)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  const match = (listed?.folders as PcFolder[] | undefined)?.find?.((f) => (f as { kind?: string }).kind !== "host" && f.name === name);
-  if (match) {
-    await saveHandle(match.id, handle);
-    await sync(target, match);
-    return match;
+  const rows = ((listed?.folders as (PcFolder & { kind?: string })[] | undefined) ?? []).filter((f) => f.kind !== "host");
+
+  // Which row this directory already belongs to is decided by the HANDLE, not by the
+  // name. The name was the first key until the sanitizer changed — transliteration
+  // turned "My Reports" from "myreports" into "my-reports" — and every folder attached
+  // under the older rule then stopped matching itself: re-picking it made a second row
+  // syncing one directory into two workspace folders. isSameEntry is the one identity
+  // that survives a rename on either side, so it is asked first and across every row.
+  for (const row of rows) {
+    const stored = await loadHandle(row.id).catch(() => undefined);
+    if (!stored || !handle.isSameEntry) continue;
+    if (!(await handle.isSameEntry(stored).catch(() => false))) continue;
+    await saveHandle(row.id, handle);
+    await sync(target, row, opts?.onProgress);
+    return row;
+  }
+
+  // No stored handle claims this directory. The name is all that is left, and in a
+  // browser that never linked the row it cannot tell "the same folder again" from a
+  // different folder that sanitizes the same — so a name clash takes a free name
+  // rather than adopting blind. A duplicate folder costs an upload; adopting the
+  // wrong row makes the next sync read the whole manifest as deleted files.
+  let attachName = name;
+  if (rows.some((f) => f.name === name)) {
+    const taken = new Set(rows.map((f) => f.name));
+    for (let i = 2; taken.has(attachName); i++) attachName = `${name}-${i}`;
   }
 
   const res = await fetch("/api/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...targetBody(target), name }),
+    body: JSON.stringify({ ...targetBody(target), name: attachName }),
   });
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Could not attach the folder.");
   const { folder } = (await res.json()) as { folder: PcFolder };
   await saveHandle(folder.id, handle);
-  await sync(target, folder);
+  await sync(target, folder, opts?.onProgress);
   return folder;
 }
 
@@ -265,6 +289,29 @@ export async function requestReconnect(folderId: string): Promise<boolean> {
   return state === "granted";
 }
 
+/** Point a folder row at a directory on THIS computer again. For a row whose handle
+ *  is gone entirely (another browser, cleared site data) there is nothing to
+ *  re-permission — the person has to show us the folder once more, so this opens the
+ *  picker (call it from a user gesture).
+ *
+ *  The picked directory must be the folder the row already stands for: linking a
+ *  different one would make the very next sync read every file in the row's manifest
+ *  as deleted and remove it from the workspace. The name is the only thing we can
+ *  check (there is no handle left to compare against), so a mismatch is refused. A
+ *  row that took a "-2" suffix at attach time still matches its own folder. */
+export async function relink(folder: PcFolder): Promise<"ok" | "cancelled" | "wrong-folder"> {
+  let handle: DirHandle;
+  try {
+    handle = await window.showDirectoryPicker!({ mode: "readwrite" });
+  } catch {
+    return "cancelled";
+  }
+  const picked = sanitizeFolderName(handle.name) || "folder";
+  if (folder.name !== picked && !new RegExp(`^${picked}-\\d+$`).test(folder.name)) return "wrong-folder";
+  await saveHandle(folder.id, handle);
+  return "ok";
+}
+
 /** The last-synced manifest for a folder (its files' paths → mtime/size/hash),
  *  or null before the first sync. Drives the file browser's per-file sync badges:
  *  a workspace file present here (and matching size) is in sync with the PC copy. */
@@ -279,30 +326,39 @@ export async function forget(folderId: string): Promise<void> {
   await dropHandle(folderId).catch(() => {});
 }
 
+/** What one folder's sync did. `skippedByLease` means another window (or another
+ *  member of the project) is syncing this folder right now and we stood aside — the
+ *  caller must NOT show that as "synced just now", because nothing was reconciled. */
+export type SyncOutcome = { synced: number; conflicts: number; skipped: number; skippedByLease?: boolean };
+
 /** Full bidirectional reconcile between the local folder and /workspace/<name>.
  *  push (before a message) and pull (after the turn) are the same sync at
  *  different times — a sync is idempotent, so running it both ends is safe. */
-export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<{ synced: number; conflicts: number; skipped: number }> {
+export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<SyncOutcome> {
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
   // Take the server-side sync lease BEFORE touching any file, so a second tab or
   // project member can't run destructive operations against this folder at the
   // same time (the state CAS only guards the manifest row, not the files). If it's
-  // already held, skip quietly — the in-flight sync covers this one (sync is
-  // idempotent). The lease self-expires, and we release it in `finally`.
+  // already held, skip — the in-flight sync covers this one (sync is idempotent),
+  // and the caller is told so it doesn't report this run as a completed sync.
+  // Any OTHER failure (network, 500, a body without a token) is fail-closed: an
+  // unleased sync is exactly the concurrent-write hazard the lease exists to stop,
+  // so we refuse to run rather than run unprotected. The lease self-expires, and we
+  // release it in `finally`.
   const leaseRes = await fetch(`/api/folders/${folder.id}/lease`, { method: "POST" }).catch(() => null);
-  if (leaseRes && leaseRes.status === 409) return { synced: 0, conflicts: 0, skipped: 0 };
-  const leaseToken = leaseRes && leaseRes.ok ? ((await leaseRes.json()) as { token?: string }).token ?? null : null;
+  if (leaseRes?.status === 409) return { synced: 0, conflicts: 0, skipped: 0, skippedByLease: true };
+  if (!leaseRes?.ok) throw new Error("Could not reserve the folder for syncing.");
+  const leaseToken = ((await leaseRes.json().catch(() => ({}))) as { token?: string }).token ?? null;
+  if (!leaseToken) throw new Error("Could not reserve the folder for syncing.");
   try {
     return await runSync(handle);
   } finally {
-    if (leaseToken) {
-      await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
-    }
+    await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
   }
 
-  async function runSync(handle: DirHandle): Promise<{ synced: number; conflicts: number; skipped: number }> {
+  async function runSync(handle: DirHandle): Promise<SyncOutcome> {
   // Load the merge ancestor FRESH from the shared row (source of truth across
   // tabs/members) plus its revision for the optimistic write below. A missing/empty
   // base makes this sync a safe union (no data loss, just forgets deletes once).
@@ -315,12 +371,27 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // "didn't look", not a delete. The planner leaves them untouched entirely.
   const excluded = new Set([...localExcluded, ...remoteExcluded]);
   const plan = planSync(local, remote, base, excluded);
-  const dirPlan = planDirs(localDirs, remoteDirs, dbase);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
+  const keptCopies = plan.conflictCopies.map((c) => c.keepAs);
+  // A directory holding any file this run writes must survive on both sides (D5).
+  const dirPlan = planDirs(localDirs, remoteDirs, dbase, [...plan.upload, ...plan.download, ...localWins, ...remoteWins, ...keptCopies]);
 
-  await uploadBatch(target, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel), onProgress);
+  // Keep the losing version of every conflict BEFORE anything overwrites it. The
+  // losing bytes are read from the side they still live on and written to the
+  // computer under the dated conflict name, then uploaded with everything else — so
+  // the copy exists on both sides by the end of this run. (Writing it only on the
+  // computer would put it in the new ancestor while the workspace lacks it, and the
+  // next sync would read that as a deletion and remove it again.)
+  for (const c of plan.conflictCopies) {
+    const losing = c.source === "local"
+      ? await readLocalFile(handle, c.path)
+      : await downloadFromWorkspace(target, folder.name, c.path);
+    await writeLocalFile(handle, c.keepAs, losing);
+  }
+
+  await uploadBatch(target, folder.name, [...plan.upload, ...localWins, ...keptCopies], (rel) => readLocalFile(handle, rel), onProgress);
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
   await runPool(downloads, 6, async (path) => {

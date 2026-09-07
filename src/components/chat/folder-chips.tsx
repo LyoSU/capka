@@ -1,7 +1,8 @@
 "use client";
 
 import { useTranslations, useLocale } from "next-intl";
-import { Folder, RefreshCw, X, Loader2, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
+import { Folder, FolderOpen, RefreshCw, X, Loader2, AlertCircle } from "lucide-react";
 import { Hint } from "@/components/ui/tooltip";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
 
@@ -20,16 +21,29 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
   const locale = useLocale();
   if (folders.folders.length === 0) return null;
 
-  const status =
-    folders.phase === "syncing"
-      ? folders.progress
+  // One honest line, in the order that matters to the person: what is happening now,
+  // then what is stopping a sync, and only then "everything is up to date". A folder
+  // waiting to be reconnected outranks the last-synced time — that time is about the
+  // folders that DID sync, and reading it as "all done" is exactly the wrong idea.
+  const status = (() => {
+    if (folders.phase === "syncing") {
+      return folders.progress
         ? t(`progress.${folders.progress.phase}`, { done: folders.progress.done, total: folders.progress.total })
-        : t("syncing")
-      : folders.phase === "error"
-        ? t("syncFailed")
-        : folders.lastSyncedAt
-          ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) })
-          : "";
+        : t("syncing");
+    }
+    if (folders.phase === "error") return t("syncFailed");
+    if (folders.phase === "busy-elsewhere") return t("busyElsewhere");
+    if (folders.needReconnect.length > 0) return t("reconnectNeeded", { n: folders.needReconnect.length });
+    return folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) }) : "";
+  })();
+
+  // The button says what it will do, and says something when it can't do it — a
+  // "Reconnect" that silently does nothing is how this looked broken before.
+  const reconnect = async (id: string, name: string) => {
+    const r = await folders.reconnect(id);
+    if (r === "wrong-folder") toast(t("wrongFolder", { name }));
+    else if (r === "failed") toast(t("reconnectFailed"));
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-1 pb-2">
@@ -51,15 +65,26 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
             )}
             <span className="truncate">{f.name}</span>
             {lapsed ? (
-              // Permission lapsed (a reload, a browser restart): the chip says so and
-              // offers the one action that fixes it, in the same amber the menu uses.
+              // Disconnected: the chip says so and offers the action that fixes it, in
+              // the same amber the menu uses. Which action depends on why — a lapsed
+              // permission is one click, a folder this browser has never seen needs
+              // the person to point at it again.
               <button
                 type="button"
-                onClick={() => folders.reconnect(f.id)}
+                onClick={() => reconnect(f.id, f.name)}
                 className="inline-flex shrink-0 items-center gap-0.5 rounded-md px-1 text-xs text-amber-600 hover:underline dark:text-amber-500"
               >
-                <RefreshCw className="h-3 w-3" aria-hidden />
-                {t("reconnect")}
+                {folders.reconnectKind[f.id] === "gone" ? (
+                  <>
+                    <FolderOpen className="h-3 w-3" aria-hidden />
+                    {t("chooseAgain")}
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3" aria-hidden />
+                    {t("reconnect")}
+                  </>
+                )}
               </button>
             ) : (
               status && <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">· {status}</span>

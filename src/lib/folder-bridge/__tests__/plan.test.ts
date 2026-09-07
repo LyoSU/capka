@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planSync, planDirs, type Manifest } from "../plan";
+import { planSync, planDirs, conflictName, type Manifest } from "../plan";
 
 // Helper: an entry with a hash (content identity) + mtime for LWW.
 const e = (hash: string, mtime = 1, size = hash.length) => ({ hash, mtime, size });
@@ -155,5 +155,100 @@ describe("planDirs — directory 3-way (presence-based, no content)", () => {
 
   it("sorts nested dirs parent-before-child for safe recursive apply", () => {
     expect(planDirs([], ["a/b", "a"], ["a/b", "a"])).toMatchObject({ deleteRemote: ["a", "a/b"] });
+  });
+});
+
+describe("planSync — a conflict never destroys the losing version", () => {
+  // Last-writer-wins decides which version stays THE file, but the two mtimes come
+  // from two different clocks, so the decision can be wrong. The loser must survive
+  // beside the winner — these assert the plan CARRIES that copy, since the bridge
+  // only executes what the plan says.
+  const at = Date.UTC(2026, 8, 7, 14, 32); // used only through conflictName below
+  const base: Manifest = { "a.txt": e("A", 1) };
+
+  it("keeps the remote version when the local one wins", () => {
+    const plan = planSync({ "a.txt": e("L", 5) }, { "a.txt": e("R", 3) }, base, undefined, at);
+    expect(plan.conflicts).toEqual([{ path: "a.txt", winner: "local" }]);
+    expect(plan.conflictCopies).toEqual([
+      { path: "a.txt", keepAs: conflictName("a.txt", new Date(at)), source: "remote" },
+    ]);
+  });
+
+  it("keeps the local version when the remote one wins", () => {
+    const plan = planSync({ "a.txt": e("L", 3) }, { "a.txt": e("R", 5) }, base, undefined, at);
+    expect(plan.conflicts).toEqual([{ path: "a.txt", winner: "remote" }]);
+    expect(plan.conflictCopies).toEqual([
+      { path: "a.txt", keepAs: conflictName("a.txt", new Date(at)), source: "local" },
+    ]);
+  });
+
+  it("plans one copy per conflicting file and none when there is no conflict", () => {
+    const twoBase: Manifest = { "a.txt": e("A", 1), "b.txt": e("B", 1), "c.txt": e("C", 1) };
+    const plan = planSync(
+      { "a.txt": e("L", 5), "b.txt": e("L2", 2), "c.txt": e("C", 1) },
+      { "a.txt": e("R", 3), "b.txt": e("R2", 9), "c.txt": e("C", 1) },
+      twoBase,
+      undefined,
+      at,
+    );
+    expect(plan.conflictCopies.map((c) => c.path)).toEqual(["a.txt", "b.txt"]);
+    expect(plan.conflictCopies.map((c) => c.source)).toEqual(["remote", "local"]);
+  });
+
+  it("plans no copies for a clean sync", () => {
+    expect(planSync({ "a.txt": e("A") }, {}, {}).conflictCopies).toEqual([]);
+  });
+});
+
+describe("conflictName — a dated name beside the original", () => {
+  const at = new Date(2026, 8, 7, 14, 32); // local time: what the person sees on their PC
+
+  it("keeps the extension so the copy still opens", () => {
+    expect(conflictName("report.docx", at)).toBe("report.conflict-2026-09-07-1432.docx");
+  });
+
+  it("keeps the copy in the same directory", () => {
+    expect(conflictName("a/b/report.docx", at)).toBe("a/b/report.conflict-2026-09-07-1432.docx");
+  });
+
+  it("handles a name with no extension", () => {
+    expect(conflictName("README", at)).toBe("README.conflict-2026-09-07-1432");
+  });
+
+  it("treats a dotfile as a whole name, not an extension", () => {
+    expect(conflictName(".env", at)).toBe(".env.conflict-2026-09-07-1432");
+  });
+
+  it("pads month, day, hour and minute", () => {
+    expect(conflictName("x.txt", new Date(2026, 0, 3, 4, 5))).toBe("x.conflict-2026-01-03-0405.txt");
+  });
+});
+
+describe("planDirs — a directory holding a file this sync writes is never deleted", () => {
+  // The assistant creates docs/new.md while the person deleted docs/ on their PC.
+  // Without the guard the file is downloaded and its directory is deleted on the
+  // server in the same run, and the next sync deletes the local copy too.
+  it("does not delete a server dir that holds a file being downloaded", () => {
+    expect(planDirs([], ["docs"], ["docs"], ["docs/new.md"])).toMatchObject({ deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("does not delete a local dir that holds a file being uploaded", () => {
+    expect(planDirs(["docs"], [], ["docs"], ["docs/new.md"])).toMatchObject({ deleteLocal: [], deleteRemote: [] });
+  });
+
+  it("protects every ancestor, not just the immediate parent", () => {
+    expect(planDirs([], ["a", "a/b"], ["a", "a/b"], ["a/b/new.md"])).toMatchObject({ deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("still deletes a sibling dir that holds nothing being written", () => {
+    expect(planDirs([], ["docs", "old"], ["docs", "old"], ["docs/new.md"]).deleteRemote).toEqual(["old"]);
+  });
+
+  it("keeps a conflict copy's directory alive", () => {
+    expect(planDirs([], ["docs"], ["docs"], ["docs/a.conflict-2026-09-07-1432.txt"]).deleteRemote).toEqual([]);
+  });
+
+  it("behaves as before when nothing is being written", () => {
+    expect(planDirs([], ["docs"], ["docs"], []).deleteRemote).toEqual(["docs"]);
   });
 });
