@@ -34,8 +34,8 @@ export function JumpPill({
   show: boolean;
   tone: JumpTone;
   /** Room the footer occupies, so the pill rests just on top of it. The same
-   *  measurement the scroll area reserves, lifted by the keyboard inset alongside
-   *  the composer it belongs to. */
+   *  measurement the scroll area reserves. The keyboard inset is NOT folded in
+   *  here — see the transform below. */
   bottom: number;
   onClick: () => void;
   label: string;
@@ -44,8 +44,24 @@ export function JumpPill({
   const isNew = tone === "new";
   return (
     <div
-      className="pointer-events-none absolute left-1/2 z-10 -translate-x-1/2"
-      style={{ bottom: `calc(${bottom + 4}px + var(--kb, 0px))` }}
+      // The keyboard inset rides the same property, duration and curve as the
+      // footer this pill rests on (`transition-transform duration-200 ease-out`
+      // there), so the two move as one object. It used to be added into `bottom`,
+      // which nothing transitions: the inset changed in a single frame while the
+      // composer glided over 200ms, so CLOSING the keyboard dropped the pill the
+      // whole inset at once and it landed inside the composer card until the
+      // glide caught up. Measured in a harness at a 300px inset: the 36px gap
+      // became −264px on the first frame and recovered by ~60ms. Centring moves
+      // into the same transform because a `-translate-x-1/2` class beside an
+      // inline transform is simply overwritten.
+      // No motion-reduce opt-out here on purpose: the global reset in globals.css
+      // flattens every transition to 0.01ms, so this and the footer go instant
+      // together. An opt-out on one of the two is how they would desync.
+      className="pointer-events-none absolute left-1/2 z-10 transition-transform duration-200 ease-out"
+      style={{
+        bottom: `${bottom + 4}px`,
+        transform: "translate(-50%, calc(-1 * var(--kb, 0px)))",
+      }}
     >
       {/* Announced politely, and ONLY for a turn that arrived on its own. The live
           region is deliberately not wrapped around the whole pill: the `live` tone

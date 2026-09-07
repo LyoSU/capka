@@ -44,6 +44,7 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Chat: the "scroll down" pill no longer lands on top of the composer when the on-screen keyboard closes.
 
 - Folder sync: an edit that kept a file's byte length is now detected (`GET /api/sandbox/files` forwards `hash=1` to the controller, so the planner compares content hashes instead of sizes).
 - Folder sync: a folder named in Cyrillic keeps a readable, distinct name in the workspace (`Звіти` → `zvity`) instead of collapsing to `folder` and merging with every other Cyrillic folder. Latin names keep their separators as `-` (`My Reports` → `my-reports`).
