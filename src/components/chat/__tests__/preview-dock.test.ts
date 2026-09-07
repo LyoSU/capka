@@ -32,6 +32,33 @@ describe("a file opened from the chat brings the column with it", () => {
     expect(preview).toMatch(/\}, \[register, canOpen\]\);/);
   });
 
+  it("full-window is a rung on the same ladder, not a second way out", () => {
+    const preview = read("src/components/chat/file-preview.tsx");
+    // Escape and the backdrop go back to the COLUMN for a promoted preview, and
+    // all the way out only for a dialog that is the sole host. Wiring both to
+    // `onClose` is the easy mistake: Escape would then throw away the file
+    // instead of shrinking it.
+    expect(preview).toMatch(/onOpenChange=\{\(o\) => !o && \(onRestore \?\? onClose\)\(\)\}/);
+    // The size control restores to the column when there is one to restore to.
+    expect(preview).toMatch(/onClick=\{onRestore \?\? \(\(\) => setFullscreen\(\(f\) => !f\)\)\}/);
+  });
+
+  it("the column stops drawing the file while the window owns it", () => {
+    const panel = read("src/components/chat/workspace-panel.tsx");
+    // Two live viewers would fetch the same file twice and only one be looked at.
+    expect(panel).toMatch(/preview && dock && !dock\.maximized/);
+    const preview = read("src/components/chat/file-preview.tsx");
+    // …but the dock's own state stays, because that is what remembers which file
+    // this chat has open. Going full-window must not read as having closed it.
+    expect(preview).toMatch(/state: docked \? state : null/);
+  });
+
+  it("full-window is not remembered across files", () => {
+    const preview = read("src/components/chat/file-preview.tsx");
+    const from = preview.indexOf("const open = useCallback(");
+    expect(preview.slice(from, preview.indexOf("}, []);", from))).toMatch(/setMaximized\(false\)/);
+  });
+
   it("opening asks the registered host to appear before handing it the file", () => {
     const preview = read("src/components/chat/file-preview.tsx");
     const from = preview.indexOf("const open = useCallback(");

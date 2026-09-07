@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Chat: the sidebar and the files panel resize by dragging the edge they share with the conversation (arrow keys, Home/End; double-click resets); widths are remembered per browser, and the conversation never drops below 28rem. Shoving a handle well past its minimum closes that column, and re-opening it restores the width it had.
 - Chat: highlight a passage of an open text or Markdown file to quote it, explain it, or ask about it in the composer; the prompt names the file.
+- Chat: a file shown in the files panel can be taken full-window from its header and put back; Escape steps back to the panel. Opening a file anew always lands in the panel.
 - Chat: whether the files panel was open, and which file was shown in it, is remembered per chat in the browser (50 most recent chats) and restored on the next desktop visit; a file that is gone since is forgotten quietly.
 - Chat: a "⋯" menu in the chat header with the same actions as the sidebar row (rename, regenerate title, pin, archive, move, export, share, delete). `GET /api/chats/[id]` returns the row to its owner.
 - Steer a running reply: Alt+Enter in the composer (or the new action on a queued message) folds your text into the turn already in progress at its next step, without stopping it. Capped at 10 steers of 4000 characters per turn; a turn that finishes first falls back to sending the message normally.

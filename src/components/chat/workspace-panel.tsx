@@ -219,7 +219,10 @@ export function WorkspacePanel({
         folderSync={folderSync}
         onClose={onClose}
       />
-      {preview && dock && (
+      {/* While the preview is full-window the dialog owns it, so the column does
+          NOT draw a second copy: two live viewers would fetch the same file
+          twice, and only one of them would ever be looked at. */}
+      {preview && dock && !dock.maximized && (
         <DockedPreview
           className="md:w-(--workspace-w) md:shrink-0"
           files={preview.files}
@@ -227,6 +230,7 @@ export function WorkspacePanel({
           onIndex={dock.setIndex}
           onBack={dock.close}
           onClose={onClose}
+          onMaximize={dock.maximize}
           selectionBar={selectionBar}
         />
       )}

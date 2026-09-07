@@ -159,6 +159,11 @@ type PreviewState = { files: PreviewFile[]; index: number };
 type PreviewDockCtx = {
   register: (host: (() => void) | null) => void;
   state: PreviewState | null;
+  /** True while the docked preview is showing full-window instead of in the
+   *  column. The state stays with the PREVIEW, not the column, so paging through
+   *  a set keeps the size the reader asked for. */
+  maximized: boolean;
+  maximize: () => void;
   setIndex: (i: number) => void;
   close: () => void;
 };
@@ -206,6 +211,11 @@ export function PreviewProvider({ children }: { children: React.ReactNode }) {
   // when it opens: a window crossing the breakpoint mid-read shouldn't tear the
   // viewer out from under the reader and re-open it somewhere else.
   const [docked, setDocked] = useState(false);
+  // Full-window, for a wide table or a long report that a 20rem column cramps.
+  // Deliberately NOT remembered across files: opening a file from the transcript
+  // always lands in the column, because a sticky answer here would quietly
+  // restore the covers-the-chat default that docking exists to replace.
+  const [maximized, setMaximized] = useState(false);
   const host = useRef<(() => void) | null>(null);
   const isMobile = useIsMobile();
   const isMobileRef = useRef(isMobile);
@@ -217,27 +227,48 @@ export function PreviewProvider({ children }: { children: React.ReactNode }) {
     // there anyway, so the dialog is still the honest shape.
     const dock = isMobileRef.current ? null : host.current;
     setDocked(!!dock);
+    setMaximized(false);
     dock?.();
     setState({ files, index: Math.max(0, Math.min(index, files.length - 1)) });
   }, []);
-  const close = useCallback(() => setState(null), []);
+  const close = useCallback(() => {
+    setState(null);
+    setMaximized(false);
+  }, []);
+  const maximize = useCallback(() => setMaximized(true), []);
+  const restore = useCallback(() => setMaximized(false), []);
   const setIndex = useCallback((i: number) => setState((s) => (s ? { ...s, index: i } : s)), []);
   const register = useCallback((fn: (() => void) | null) => {
     host.current = fn;
   }, []);
 
   const ctx = useMemo(() => ({ open }), [open]);
+  // `state` stays non-null while maximized even though the column is not drawing
+  // it: the column is what remembers which file is open for this chat, and going
+  // full-window must not read as having closed the file.
   const dockCtx = useMemo<PreviewDockCtx>(
-    () => ({ register, state: docked ? state : null, setIndex, close }),
-    [register, docked, state, setIndex, close],
+    () => ({ register, state: docked ? state : null, maximized, maximize, setIndex, close }),
+    [register, docked, state, maximized, maximize, setIndex, close],
   );
 
   return (
     <PreviewContext.Provider value={ctx}>
       <PreviewDockContext.Provider value={dockCtx}>
         {children}
-        {state && !docked && (
-          <FilePreview files={state.files} index={state.index} onIndex={setIndex} onClose={close} />
+        {/* One dialog, two jobs. For a host with no column it is the whole
+            viewer. For the docked column it is the full-window size, promoted
+            by the reader — so its restore control goes back to the column
+            rather than to a smaller dialog, and Escape steps down one rung of
+            the same ladder the column already uses. */}
+        {state && (!docked || maximized) && (
+          <FilePreview
+            files={state.files}
+            index={state.index}
+            onIndex={setIndex}
+            onClose={close}
+            forceFullscreen={docked && maximized}
+            onRestore={docked && maximized ? restore : undefined}
+          />
         )}
       </PreviewDockContext.Provider>
     </PreviewContext.Provider>
@@ -259,6 +290,7 @@ export function DockedPreview({
   onIndex,
   onBack,
   onClose,
+  onMaximize,
   selectionBar,
   className,
 }: {
@@ -269,6 +301,8 @@ export function DockedPreview({
   onBack: () => void;
   /** Put the whole column away. */
   onClose: () => void;
+  /** Show this file full-window instead. Omitted where there is nowhere to grow. */
+  onMaximize?: () => void;
   /** Built per file by the host, which is the thing that owns the composer. */
   selectionBar?: (fileName: string) => React.ReactNode;
   className?: string;
@@ -339,6 +373,14 @@ export function DockedPreview({
         <HeaderButton href={downloadUrl(file)} download={file.name} label={t("download")}>
           <Download className="h-4 w-4" />
         </HeaderButton>
+        {/* Grows the file to the whole window without leaving the app: a tab
+            hands the file to the browser, this keeps Markdown rendered and the
+            file set pageable. */}
+        {onMaximize && (
+          <HeaderButton onClick={onMaximize} label={t("fullscreen")}>
+            <Maximize2 className="h-4 w-4" />
+          </HeaderButton>
+        )}
         <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
         <HeaderButton onClick={onClose} label={t("close")}>
           <X className="h-4 w-4" />
@@ -358,14 +400,21 @@ function FilePreview({
   index,
   onIndex,
   onClose,
+  forceFullscreen = false,
+  onRestore,
 }: {
   files: PreviewFile[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
+  /** Open already full-window: this dialog was promoted from a docked column. */
+  forceFullscreen?: boolean;
+  /** Where "smaller" goes when there is a column to go back to. Present only for
+   *  a promoted preview; without it the toggle is the dialog's own two sizes. */
+  onRestore?: () => void;
 }) {
   const t = useTranslations("chat.preview");
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(forceFullscreen);
   const file = files[index];
   const many = files.length > 1;
   const go = useCallback(
@@ -389,7 +438,9 @@ function FilePreview({
   const { labelKey } = fileKind(file.name);
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    // Escape and the backdrop step down ONE rung: back to the column for a
+    // promoted preview, all the way out for a dialog that is the only host.
+    <Dialog open onOpenChange={(o) => !o && (onRestore ?? onClose)()}>
       <DialogContent
         showCloseButton={false}
         className={cn(
@@ -420,7 +471,7 @@ function FilePreview({
               <HeaderButton onClick={() => go(1)} label={t("next")}><ChevronRight className="h-4 w-4" /></HeaderButton>
             </div>
           )}
-          <HeaderButton onClick={() => setFullscreen((f) => !f)} label={fullscreen ? t("exitFullscreen") : t("fullscreen")}>
+          <HeaderButton onClick={onRestore ?? (() => setFullscreen((f) => !f))} label={fullscreen ? t("exitFullscreen") : t("fullscreen")}>
             {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </HeaderButton>
           <HeaderButton href={downloadUrl(file)} download={file.name} label={t("download")}>
