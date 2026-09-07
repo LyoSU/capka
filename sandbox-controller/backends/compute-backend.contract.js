@@ -30,6 +30,27 @@ export function runComputeBackendContract(makeBackend) {
       await b.destroy(handle);
     });
 
+    // The fifth argument of exec(): per-command environment, which is how a chat's
+    // stored secrets reach a command without ever appearing in the command string
+    // (and therefore without appearing in any log that records the command).
+    // Asserted on a CHILD process, not on the exec's own shell, because that is the
+    // property the feature depends on — the backend wraps every command in
+    // `setsid bash -c`, so an Env that did not survive one fork would be useless.
+    it("exec() passes env to the command and its children", async () => {
+      const b = makeBackend();
+      const { handle } = await b.create({
+        sessionId: "ct-s4", userId: "u1", wsHostPath: "/tmp/ws", sharedHostPath: "/tmp/sh",
+        networkMode: "none", memoryBytes: 384 * 1024 * 1024, nanoCpus: 1e9,
+      });
+      const r = await b.exec(handle, "bash -c 'printf %s \"$CT_TOKEN\"'", 10000, undefined, { CT_TOKEN: "ct-value" });
+      expect(r.stdout).toContain("ct-value");
+      // Control: the same command without the env sees nothing, so the assertion
+      // above cannot pass on a backend that ignores the argument entirely.
+      const plain = await b.exec(handle, "bash -c 'printf %s \"$CT_TOKEN\"'", 10000);
+      expect(plain.stdout).not.toContain("ct-value");
+      await b.destroy(handle);
+    });
+
     // A cancelled turn must stop the WORK, not just stop waiting for it. This is
     // the only test that can prove that: the platform-side plumbing and the kill
     // script are both easy to get "green" against a mock while the real process

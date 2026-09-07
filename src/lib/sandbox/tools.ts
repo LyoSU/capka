@@ -4,6 +4,7 @@ import { execCommand, deleteFile, deleteSharedFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
 import { lineCount } from "@/lib/chat/edit-stats";
+import { redactSecrets } from "@/lib/chat/secrets";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
  *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
@@ -160,7 +161,25 @@ export async function loadSandboxTools(
    *  `ensureSession` is memoized, so without dropping that memo every remaining
    *  command in the turn fails identically against a sandbox nobody will rebuild. */
   onSandboxGone?: () => void,
+  /** The chat's stored credentials, resolved lazily on the first command of the turn.
+   *  Absent for a run with no chat (and for every caller that predates the feature),
+   *  in which case nothing is injected and nothing is redacted. */
+  secrets?: () => Promise<Record<string, string>>,
 ) {
+  // ONE resolution per turn, memoized on the promise rather than the value: two tools
+  // running concurrently must not each decrypt the same rows, and the very common
+  // case (a chat with no secrets) must not pay a query per command.
+  let secretEnv: Promise<Record<string, string>> | null = null;
+  const resolveSecrets = (): Promise<Record<string, string>> => {
+    if (!secrets) return Promise.resolve({});
+    // A failure here is not a failed command: the turn continues without the
+    // variables, and whatever needed them fails on its own with a readable error.
+    secretEnv ??= secrets().catch((e) => {
+      console.warn("[sandbox] chat secrets unavailable:", e instanceof Error ? e.message : e);
+      return {};
+    });
+    return secretEnv;
+  };
   // Best-effort lease: a job that outlives the turn keeps the container alive only
   // while the controller knows it's there. A failed lease is not a failed job — it
   // just falls back to plain idle eviction — so this never rejects into a tool call.
@@ -176,8 +195,21 @@ export async function loadSandboxTools(
   // job is deliberately NOT given it — it is meant to outlive the turn.
   const run = async (cmd: string, timeout?: number, signal?: AbortSignal) => {
     await ensureSession();
+    // Injected on EVERY command and redacted out of EVERY result, in this one
+    // function — which is what makes the guarantee hold for tools nobody thought
+    // about while writing this: bash, python, read_file, grep, the background-job
+    // start and its log tail all go through here, so none of them can leak a value
+    // by forgetting to opt in. The tee'd capture log inside the workspace keeps the
+    // raw bytes — it is the user's own container, not the transcript — and the model
+    // can only reach it by reading the file, which is another trip through here.
+    const env = await resolveSecrets();
     try {
-      return await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal);
+      const result = await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal, env);
+      return {
+        ...result,
+        stdout: redactSecrets(result.stdout, env),
+        stderr: redactSecrets(result.stderr, env),
+      };
     } catch (e) {
       // The disk-quota block (HTTP 413) is the one exec failure the agent can fix
       // on its own — by freeing space with delete_path. Surface it as a normal

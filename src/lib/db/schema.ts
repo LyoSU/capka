@@ -184,6 +184,35 @@ export const chats = pgTable("chats", {
   index("idx_chats_sidebar").on(table.userId, table.archived, table.pinned, table.updatedAt, table.id),
 ]);
 
+/**
+ * A credential the user handed the agent FOR ONE CHAT, whose value the model never sees.
+ *
+ * Write-only by construction: the value is stored encrypted under the master key, injected
+ * into the sandbox as an environment variable on every command of this chat, and redacted
+ * out of command output before that output reaches the transcript. Only the NAME is ever
+ * read back — by the list endpoint and by the system prompt — which is why there is no
+ * "reveal" path anywhere in this codebase.
+ *
+ * Cascade on the chat IS the inverse: a secret cannot outlive the conversation it was
+ * scoped to, so deleting a chat takes its credentials with it and no retention pass is
+ * needed. `user_id` is the owner at the time of writing (for the audit trail); the
+ * ownership check on every route goes through the CHAT, not through this column.
+ */
+export const chatSecrets = pgTable("chat_secrets", {
+  id: text("id").primaryKey(),
+  chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Env-var shaped, normalised before it ever gets here (see chat/secrets.ts). */
+  name: text("name").notNull(),
+  /** Ciphertext (`iv:tag:data`), never a plaintext value. */
+  valueEnc: text("value_enc").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // One value per name per chat — the upsert target, so re-saving a name replaces
+  // the credential instead of stacking a second one the injection would pick from.
+  uniqueIndex("idx_chat_secrets_chat_name").on(table.chatId, table.name),
+]);
+
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(),
   chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
@@ -225,6 +254,12 @@ export const messages = pgTable("messages", {
   index("idx_messages_parent_id").on(table.parentId),
   // Sidebar unread probe: assistant messages newer than last_read_at per chat.
   index("idx_messages_chat_role_created").on(table.chatId, table.role, table.createdAt),
+  // The lexical lane of message search. The expression is written out here EXACTLY
+  // as `api/search/route.ts` writes it — `to_tsvector('simple', content)` — because
+  // an expression index only serves a predicate that matches it character for
+  // character: a different config name, or a cast, and the planner falls back to a
+  // sequential scan over every message in the instance while the index sits unused.
+  index("idx_messages_content_fts").using("gin", sql`to_tsvector('simple', ${table.content})`),
 ]);
 
 /**

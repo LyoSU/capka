@@ -30,6 +30,7 @@ import { getModelCannotReason, getModelContextLength, getModelEfforts } from "@/
 import { availableAmounts, clampAmount, parseThinkAmount } from "@/lib/models/thinking";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
+import { listSecretNames, loadSecretEnv } from "@/lib/chat/secrets";
 import { publishTaskEvent } from "./events";
 import type { TaskPayload } from "./runner";
 
@@ -298,7 +299,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // `ensureSession` builds a fresh container against the same (bind-mounted, and
   // therefore surviving) workspace instead of retrying against a dead handle.
   const sandbox = caps.sandbox
-    ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode, () => { sessionEnsured = null; })
+    ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode, () => { sessionEnsured = null; },
+        // Thread-scoped credentials, injected into every command of this chat and
+        // redacted out of every result. A THUNK, not a value: a chat with no
+        // secrets — nearly all of them — must not pay a decrypt round-trip for a
+        // turn that never touches the sandbox.
+        chatId ? () => loadSecretEnv(chatId) : undefined)
     : empty;
   // The turn's citation counter: search-shaped connector results number their
   // records through it, so `[N]` stays unique across every search call of the
@@ -479,6 +485,13 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // that used to ride along here is deleted, and one projection decides the rest.
     const memoryManifest = userSpaceId ? await buildMemoryManifest({ userSpaceId, projectSpaceId }) : "";
 
+    // Names only, and only when the sandbox is on the turn — the values are read
+    // once, elsewhere, by the tool layer that injects them. One extra query per
+    // turn, which is the same price the workspace snapshot above already pays.
+    const secretNames = caps.sandbox && chatId
+      ? (await listSecretNames(chatId)).map((s) => s.name)
+      : [];
+
     const prompt = buildSystemPrompt({
       project,
       memoryManifest,
@@ -494,6 +507,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       // Asked of the tool set itself, never re-derived: the paragraph must appear
       // exactly when the tool it names is on the turn.
       quietRun: !!quietTools.nothing_to_report,
+      secretNames,
       networkMode,
       profile,
       orgInstructions,

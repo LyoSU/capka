@@ -23,9 +23,11 @@ All notable changes to Capka are documented here. Format follows
 - Automations: per-automation "Also send to Telegram" switch (`deliver_telegram`, default on); off keeps results in the web chat only.
 - Chat: a microphone button in the composer dictates into the message with the browser's own speech engine (Chrome/Edge send the audio to Google, Safari to Apple; nothing reaches Capka's server; Firefox has no engine and shows no button). Ten-minute cap, one-step undo.
 - Chat: "Regenerate title" in a chat's menu re-derives the name from the active branch (first question, latest reply) with the background model; a hand-typed rename still sticks until asked.
+- Chat: stored credentials per chat (key icon in the composer). A value is encrypted at rest, set as an environment variable on every sandbox command of that chat, named but never shown to the model, and redacted out of command output as `[secret:NAME]`. Injection needs the controller image from this release; an older controller runs commands without the variables.
 
 ### Changed
 
+- Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed

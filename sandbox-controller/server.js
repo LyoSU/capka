@@ -529,8 +529,25 @@ const server = createServer(async (req, res) => {
           code: "SHARED_FULL",
         });
       }
-      const { command, timeout } = await parseBody(req);
+      const { command, timeout, env } = await parseBody(req);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
+      // Per-command environment (the chat's stored secrets). Validated HERE rather
+      // than trusted from the platform: this ends up in a container's process
+      // environment, so a non-string value or a name with a `=` in it would either
+      // throw inside dockerode or smuggle a second variable into the exec. Bounded
+      // in count and size for the same reason every other body field is.
+      const execEnv = {};
+      if (env !== undefined && env !== null) {
+        if (typeof env !== "object" || Array.isArray(env)) return jsonRes(res, 400, { error: "env must be an object" });
+        const names = Object.keys(env);
+        if (names.length > 32) return jsonRes(res, 400, { error: "env has too many entries (max 32)" });
+        for (const name of names) {
+          const value = env[name];
+          if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return jsonRes(res, 400, { error: "invalid env name" });
+          if (typeof value !== "string" || value.length > 8192) return jsonRes(res, 400, { error: "invalid env value" });
+          execEnv[name] = value;
+        }
+      }
       // Validate the caller timeout: a finite ms value, clamped to a sane band.
       // Garbage (NaN, negative, absurdly large) falls back to / is bounded by the
       // default so it can't disable the cap or pin a worker open indefinitely.
@@ -545,7 +562,7 @@ const server = createServer(async (req, res) => {
       const cancel = new AbortController();
       res.on("close", () => { if (!res.writableEnded) cancel.abort(); });
       try {
-        const result = await backend.exec(session.handle, command, execTimeout, cancel.signal);
+        const result = await backend.exec(session.handle, command, execTimeout, cancel.signal, execEnv);
         return jsonRes(res, 200, result);
       } catch (e) {
         if (/no such container|is not running/i.test(e.message)) {

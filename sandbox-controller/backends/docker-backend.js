@@ -250,8 +250,9 @@ export class DockerBackend {
 
   /** Run `command` in the session container. `signal` aborts it EARLY — the
    *  caller's HTTP request went away (a cancelled turn), and the command must go
-   *  with it. */
-  async exec(handle, command, timeoutMs = this.execTimeoutMs, signal) {
+   *  with it. `env` is extra environment for this exec only (the chat's stored
+   *  secrets), validated by the caller. */
+  async exec(handle, command, timeoutMs = this.execTimeoutMs, signal, env) {
     const container = this.docker.getContainer(handle);
 
     // Run the command in its own session so a timeout kills the whole process
@@ -274,6 +275,8 @@ export class DockerBackend {
       `rm -f ${pidFile} 2>/dev/null; ` +
       `exit $__rc`;
 
+    const envPairs = Object.entries(env || {}).map(([k, v]) => `${k}=${v}`);
+
     let execObj;
     try {
       execObj = await container.exec({
@@ -282,6 +285,12 @@ export class DockerBackend {
         AttachStderr: true,
         User: this.sandboxUser,
         WorkingDir: "/workspace",
+        // Only when there is something to add: an empty `Env: []` is not the same
+        // request Docker has been receiving, and this path has no reason to change
+        // for the (overwhelmingly common) chat that stores no secrets. The wrapper's
+        // `setsid bash -c "$__cmd"` is a CHILD of this exec, so it and anything it
+        // forks — a background job included — inherit these variables.
+        ...(envPairs.length > 0 ? { Env: envPairs } : {}),
       });
     } catch (e) {
       // The container died after create() checked it — an OOM kill, or an entrypoint

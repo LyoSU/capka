@@ -115,6 +115,12 @@ export function buildSystemPrompt(opts: {
    *  tool. Per-RUN (the same chat's next turn may be a person typing in it), so
    *  it lives in the volatile tail and never touches a cached prefix. */
   quietRun?: boolean;
+  /** Names — never values — of the credentials the user stored for THIS chat. They
+   *  exist as environment variables inside the sandbox, so the model has to be told
+   *  they are there and told, in the same breath, never to print one. Per-CHAT and
+   *  changeable at any moment, so it rides the volatile tail: a cached prefix would
+   *  keep naming a secret the person has since removed. */
+  secretNames?: string[];
   /** Effective sandbox egress for this session (resolved in the task runner).
    *  Drives the network line in the sandbox prompt so the model knows whether it
    *  can reach the internet. Conversation-stable, so it stays in the cached
@@ -239,6 +245,15 @@ export function buildSystemPrompt(opts: {
       // automation's chat is one the person can also type in, and its next turn
       // has no quiet tool to call.
       opts.quietRun ? QUIET_PROMPT : undefined,
+      // Gated on `sandbox` because an environment variable exists only where commands
+      // run: naming a credential to a model that has no sandbox this turn would offer
+      // it something it cannot use and invite it to ask the user for the value instead.
+      caps.sandbox && opts.secretNames?.length
+        ? `## Stored credentials
+The user saved these for this chat, and each one is already set as an environment variable inside the sandbox: ${opts.secretNames.join(", ")}.
+Use them through the variable — \`$NAME\` in a shell command, \`os.environ["NAME"]\` in Python — never by typing a value.
+You have not been shown any of these values and never will be. Never print, echo, log, or write one into a file, and never ask the user to paste one into the chat: it is already there.`
+        : undefined,
       caps.manage && opts.concierge
         ? `## First run
 This is the operator's FIRST message right after finishing setup. Warmly welcome them in one or two sentences, then offer to help set up the optional things you can do via the \`manage\` tool: their interface language, Telegram delivery, and adding a first connector or skill. Keep it brief — don't dump a list or a wall of options. If they already asked a real question, answer it first and add the offer at the end.`

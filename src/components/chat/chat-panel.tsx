@@ -37,6 +37,7 @@ import { modelSupportsModality, mimeToModality, type Modality } from "@/lib/prov
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { ThinkingPicker } from "@/components/chat/thinking-picker";
+import { ChatSecrets } from "@/components/chat/chat-secrets";
 import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
@@ -747,6 +748,13 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
   // Both densities, one host: the composer footer. `md:hidden` / `hidden md:*`
   // decide which is live, so exactly one is ever interactive.
+  // Credentials for THIS chat. One instance, outside the two density branches, so
+  // the popover's open state and its loaded list survive a viewport resize — and so
+  // there is exactly one component fetching the list per chat. `readOnly` already
+  // drops the whole block: a Telegram chat is answered from Telegram, so there is no
+  // composer here to hang a credential off.
+  const secretsEl = readOnly ? null : <ChatSecrets chatId={chatId} ensureChat={ensureChat} />;
+
   const controlsEl = readOnly ? null : (
     <>
       {compactControlsEl}
@@ -754,6 +762,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
         <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
         {thinkingEl}
       </div>
+      {secretsEl}
     </>
   );
 

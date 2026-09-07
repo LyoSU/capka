@@ -547,6 +547,13 @@
       "when": 1788772250759,
       "tag": "0077_smiling_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788773804547,
+      "tag": "0078_wonderful_captain_cross",
+      "breakpoints": true
     }
   ]
 }

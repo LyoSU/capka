@@ -183,6 +183,24 @@ describe("DockerBackend (mocked dockerode)", () => {
     await expect(p).resolves.toMatchObject({ exitCode: 137 });
   });
 
+  // The chat-secrets injection is one line of plumbing in exec(), and if it is
+  // dropped the feature fails SILENTLY: every command still runs, the variable is
+  // simply unset, and the model reports an authentication error from whatever it
+  // called. The negative half is the load-bearing one — an unconditional `Env: []`
+  // would pass an "Env is present" assertion while telling us nothing.
+  it("exec() puts the caller's env on the exec, and omits Env entirely without one", async () => {
+    const { container, exec } = inFlightContainer();
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1" });
+
+    b.exec("c1", "echo hi", 30000, undefined, { STRIPE_KEY: "sk-live-x", OTHER: "b" }).catch(() => {});
+    await vi.waitFor(() => expect(exec.mock.calls.length).toBe(1));
+    expect(exec.mock.calls[0][0].Env).toEqual(["STRIPE_KEY=sk-live-x", "OTHER=b"]);
+
+    b.exec("c1", "echo hi", 30000).catch(() => {});
+    await vi.waitFor(() => expect(exec.mock.calls.length).toBe(2));
+    expect(exec.mock.calls[1][0]).not.toHaveProperty("Env");
+  });
+
   it("exec() that finishes on its own never issues a kill", async () => {
     const { container, cmds, streams } = inFlightContainer();
     const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1" });

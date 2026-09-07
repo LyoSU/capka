@@ -266,6 +266,18 @@
       "connectionDownRetry": "Try again",
       "contextHint": "When it fills up, I'll summarize the earlier part so we can keep going."
     },
+    "secrets": {
+      "label": "Saved credentials",
+      "title": "Credentials for this chat",
+      "hint": "The assistant can use these but never sees them. The value never appears in the chat.",
+      "namePlaceholder": "Name, for example Stripe key",
+      "valuePlaceholder": "Paste the value",
+      "save": "Save",
+      "remove": "Remove {name}",
+      "nameInvalid": "Use a name that starts with a letter, like Stripe key.",
+      "saveFailed": "Could not save it. Please try again.",
+      "removeFailed": "Could not remove it. Please try again."
+    },
     "menu": {
       "rename": "Rename",
       "regenerateTitle": "Regenerate title",

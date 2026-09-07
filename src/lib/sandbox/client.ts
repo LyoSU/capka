@@ -196,7 +196,16 @@ export async function markBusy(sessionId: string, ms?: number) {
   }>;
 }
 
-export async function execCommand(sessionId: string, command: string, timeout?: number, signal?: AbortSignal) {
+export async function execCommand(
+  sessionId: string,
+  command: string,
+  timeout?: number,
+  signal?: AbortSignal,
+  /** Extra environment for THIS command only — the chat's stored secrets. Never
+   *  logged and never echoed back: the controller puts it on the exec and forgets
+   *  it, so it exists in the container's process environment and nowhere else. */
+  env?: Record<string, string>,
+) {
   // The client abort must OUTLIVE the controller's own exec cap, or a long exec is
   // killed here (fetch abort) before the controller returns its result. The controller
   // clamps exec to ≤300s, so budget that ceiling + a 15s buffer regardless of what the
@@ -205,7 +214,10 @@ export async function execCommand(sessionId: string, command: string, timeout?: 
   const clientTimeout = Math.min(timeout ?? 300_000, 300_000) + 15_000;
   // `signal` is the turn's: a cancelled turn must not leave a command running in
   // the sandbox for the rest of that budget (see the abort note in sendRequest).
-  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }, clientTimeout, signal) as Promise<{
+  // `env` is omitted entirely when empty, so a chat with no secrets sends the exact
+  // body it always did and an older controller keeps working unchanged.
+  const body = env && Object.keys(env).length > 0 ? { command, timeout, env } : { command, timeout };
+  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", body, clientTimeout, signal) as Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;
