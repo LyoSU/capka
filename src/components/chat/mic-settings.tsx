@@ -106,7 +106,7 @@ export function MicSettings({ lang, onLangChange }: { lang: string; onLangChange
       <Hint label={t("microphone")}>
         <PopoverTrigger
           aria-label={t("microphone")}
-          className="inline-flex h-10 w-6 items-center justify-center rounded-lg text-muted-foreground/70 transition-colors hover:text-foreground data-popup-open:text-foreground sm:h-9 sm:w-5"
+          className="inline-flex h-10 w-6 items-center justify-center rounded-lg text-muted-foreground transition-micro hover:bg-hover hover:text-foreground data-popup-open:bg-hover-strong data-popup-open:text-foreground active:scale-[0.97] sm:h-9 sm:w-5"
         >
           <ChevronDown className="size-3.5" />
         </PopoverTrigger>

@@ -1447,7 +1447,11 @@ export function ModelPicker({
           // is the only place a screen reader (or a long-press tooltip) can learn
           // which model is active.
           aria-label={compact ? `${t("selectModel")}: ${displayName || placeholderText}` : undefined}
-          className={`flex h-9 min-w-0 items-center text-sm transition-colors hover:text-foreground ${
+          // 13px, not 14: this pill and the thinking pill beside it are composer
+          // CHROME sitting under a 15px text field, and at the field's own size
+          // they competed with the words being typed. The name keeps `font-medium`
+          // (below) so the step down in size is not also a step down in weight.
+          className={`flex h-9 min-w-0 items-center text-[13px] transition-micro hover:text-foreground ${
             compact ? "gap-1 px-1.5" : "gap-2.5 px-3"
           }`}
         >
@@ -1481,7 +1485,7 @@ export function ModelPicker({
                 <span className="size-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
               {currentModel && currentModel.context > 0 && (
-                <Hint label={t("context")}><span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
+                <Hint label={t("context")}><span className="rounded bg-muted px-1 py-px text-[12px] leading-4 text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
               )}
               {/* Shared-key chip: shown when the whole offering is the shared key,
                   or (in a mixed own+shared picker) when the SELECTED model runs on

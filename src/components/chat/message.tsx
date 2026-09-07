@@ -1657,6 +1657,15 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
   );
 }
 
+/** Every control under a finished answer: one 32px square, one 16px glyph.
+ *  The row used to be five hand-written class strings at three different sizes
+ *  (px-1.5 py-1 buttons beside p-0.5 chevrons), so the icons sat on no shared
+ *  baseline and the hit targets ranged from 20px to 28px. Quiet at rest — no
+ *  edge, no fill; the wash and full-strength ink arrive on hover — but the
+ *  square is always there to aim at. */
+const ACTION_BTN =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-micro outline-none hover:bg-hover hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.97] active:bg-hover-strong disabled:pointer-events-none disabled:opacity-40";
+
 /** Hover-revealed "copy" action for an assistant reply. Swaps to a check for a
  *  beat on success and fires a light haptic — quiet until the user reaches for it. */
 function CopyButton({ text }: { text: string }) {
@@ -1675,9 +1684,9 @@ function CopyButton({ text }: { text: string }) {
       <button
         type="button"
         onClick={onCopy}
-        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+        className={ACTION_BTN}
       >
-        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+        {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
       </button>
     </Hint>
   );
@@ -1703,9 +1712,9 @@ function BranchSwitcher({
           type="button"
           onClick={() => onSwitch(messageId, "prev")}
           disabled={disabled || index <= 0}
-          className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+          className={ACTION_BTN}
         >
-          <ChevronLeft className="size-3.5" />
+          <ChevronLeft className="size-4" />
         </button>
       </Hint>
       <span className="tabular-nums">{index + 1}/{count}</span>
@@ -1714,9 +1723,9 @@ function BranchSwitcher({
           type="button"
           onClick={() => onSwitch(messageId, "next")}
           disabled={disabled || index >= count - 1}
-          className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+          className={ACTION_BTN}
         >
-          <ChevronRight className="size-3.5" />
+          <ChevronRight className="size-4" />
         </button>
       </Hint>
     </div>
@@ -1734,9 +1743,9 @@ function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork
         type="button"
         onClick={() => onFork(messageId)}
         disabled={disabled}
-        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+        className={ACTION_BTN}
       >
-        <GitBranch className="size-3.5" />
+        <GitBranch className="size-4" />
       </button>
     </Hint>
   );
@@ -2298,8 +2307,8 @@ function MessageDetails({
     // not a setting.
     <Popover onOpenChange={(open) => !open && setMore(false)}>
       <Hint label={t("show")}>
-        <PopoverTrigger className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground">
-          <Info className="size-3.5" />
+        <PopoverTrigger className={`${ACTION_BTN} data-[popup-open]:bg-hover-strong data-[popup-open]:text-foreground`}>
+          <Info className="size-4" />
         </PopoverTrigger>
       </Hint>
       {/* Wide enough that the longest admin row (a background pass with its
@@ -2822,9 +2831,9 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                     type="button"
                     onClick={onRegenerate}
                     disabled={actionsDisabled}
-                    className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                    className={ACTION_BTN}
                   >
-                    <RotateCcw className="size-3.5" />
+                    <RotateCcw className="size-4" />
                   </button>
                 </Hint>
               )}

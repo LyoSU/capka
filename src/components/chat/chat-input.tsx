@@ -379,8 +379,16 @@ export function ChatInput({
               />
               <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
                 <Hint label={t("add")}>
-                  <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
-                    <Plus className="size-4.5 sm:size-4" />
+                  {/* A drawn edge at REST, not just on hover. This was a bare glyph
+                      floating on the composer's own fill: nothing said it was a
+                      control until the pointer was already on it, which is the
+                      "buttons aren't tactile" complaint in one element. `shadow-btn`
+                      is the same hairline every other raised control in the app
+                      wears (see button-variants.ts), so the composer's three
+                      secondary controls now read as one family. Not a Button
+                      because ComposerMenu renders this span as its own trigger. */}
+                  <span className="inline-flex size-10 sm:size-9 items-center justify-center rounded-xl bg-card text-muted-foreground shadow-btn transition-micro outline-none hover:bg-hover hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.97] active:bg-hover-strong">
+                    <Plus className="size-4" />
                   </span>
                 </Hint>
               </ComposerMenu>
@@ -421,7 +429,7 @@ export function ChatInput({
                   <Button
                     size="icon"
                     variant="outline"
-                    className="size-10 sm:size-9 shrink-0 rounded-xl transition-transform active:scale-90"
+                    className="size-10 sm:size-9 shrink-0 rounded-xl"
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send/stop.
                     onMouseDown={(e) => e.preventDefault()}
@@ -437,7 +445,7 @@ export function ChatInput({
                     variant="ghost"
                     aria-pressed
                     aria-label={t("dictation.stop")}
-                    className="size-10 sm:size-9 shrink-0 rounded-full animate-pulse-fast bg-primary/10 text-primary transition-transform hover:bg-primary/15 hover:text-primary active:scale-90"
+                    className="size-10 sm:size-9 shrink-0 rounded-full animate-pulse-fast bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={dictation.stop}
                   >
@@ -449,15 +457,15 @@ export function ChatInput({
                   <Hint label={t("dictation.start")}>
                     <Button
                       size="icon"
-                      variant="ghost"
+                      variant="outline"
                       aria-label={t("dictation.start")}
-                      className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                      className="size-10 sm:size-9 shrink-0 rounded-full bg-card text-muted-foreground hover:text-foreground active:bg-hover-strong"
                       // Keep the caret where the words are going — a button click
                       // would otherwise pull focus out of the composer.
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={dictation.start}
                     >
-                      <Mic className="size-4.5 sm:size-4" />
+                      <Mic className="size-4" />
                     </Button>
                   </Hint>
                   <MicSettings lang={dictationLang} onLangChange={setDictationLang} />
@@ -466,7 +474,7 @@ export function ChatInput({
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button
                     size="icon"
-                    className="group/send size-10 sm:size-9 shrink-0 rounded-full transition-transform active:scale-90"
+                    className="group/send size-10 sm:size-9 shrink-0 rounded-full"
                     disabled={!canSend}
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send.
@@ -475,9 +483,9 @@ export function ChatInput({
                     onClick={() => submit()}
                   >
                     {uploading ? (
-                      <Loader2 className="size-4.5 animate-spin sm:size-4" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <ArrowUp className="size-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:size-4" />
+                      <ArrowUp className="size-4 transition-transform group-hover/send:-translate-y-0.5" />
                     )}
                   </Button>
                 </Hint>
