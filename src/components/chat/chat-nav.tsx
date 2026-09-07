@@ -99,25 +99,27 @@ export function ChatNav({
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`flex max-h-[70dvh] flex-col items-end gap-2 overflow-hidden rounded-lg py-2 outline-none transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-ring ${
+        className={`group/rail flex max-h-[70dvh] flex-col items-end gap-[7px] overflow-hidden rounded-lg py-2 outline-none transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-ring ${
           open ? "pointer-events-none opacity-0" : "group-hover:pointer-events-none group-hover:opacity-0"
         }`}
       >
         {items.map((it) => (
           <span
             key={it.id}
-            // The inactive marks sit at exactly the floor and no higher. /25 was
-            // far below the 3:1 that non-text UI needs — the rail's only "where am
-            // I" cue was invisible to low-vision users — but the full
-            // `--muted-foreground` that replaced it measures 6.6:1 light / 6.0:1
-            // dark, which is TEXT weight: nine near-black dashes shouting from an
-            // otherwise empty margin for something you read at a glance. /70
-            // measures 3.3:1 light and 3.6:1 dark, so the rail reads as quiet
-            // furniture and still clears the floor. Narrower too, which costs no
-            // contrast and widens the gap against the active mark — position reads
-            // from width first, weight second.
-            className={`h-1.5 rounded-full transition-[width,background-color] duration-150 ${
-              it.id === activeId ? "w-6 bg-foreground" : "w-2.5 bg-muted-foreground/70"
+            // Quiet at rest, on purpose. This rail is glanced at, not read: the
+            // marks say "you are about here" and nothing else, and at text weight
+            // they were the loudest thing in an otherwise empty margin. So the
+            // resting marks are hairlines at /40 (inactive) and /70 (active) —
+            // below the 3:1 non-text floor — and the rail carries its full weight
+            // only when it is the thing being operated: keyboard focus on the
+            // trigger (`group-focus-visible/rail`) restores /70 and the solid
+            // active mark, and every action the rail offers is equally available
+            // from the jump list, whose text is AA. Position reads from width
+            // first (the active mark is twice as long), weight second.
+            className={`h-[3px] rounded-full transition-[width,background-color] duration-150 ${
+              it.id === activeId
+                ? "w-4 bg-foreground/70 group-focus-visible/rail:bg-foreground"
+                : "w-2 bg-muted-foreground/40 group-focus-visible/rail:bg-muted-foreground/70"
             }`}
           />
         ))}
@@ -128,7 +130,7 @@ export function ChatNav({
           buttons stay out of the tab order until the list is actually shown. */}
       <nav
         aria-label={label}
-        className={`absolute right-0 top-1/2 flex max-h-[70dvh] w-80 max-w-[60vw] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto rounded-2xl bg-popover p-2.5 shadow-overlay transition-opacity duration-150 ${
+        className={`absolute right-0 top-1/2 flex max-h-[70dvh] w-72 max-w-[60vw] -translate-y-1/2 flex-col gap-px overflow-y-auto rounded-2xl bg-popover p-2 shadow-overlay transition-opacity duration-150 ${
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >
@@ -139,7 +141,7 @@ export function ChatNav({
             spans exactly a row. */}
         <span
           aria-hidden
-          className={`pointer-events-none absolute left-2.5 right-2.5 rounded-lg transition-[top,height,background-color,opacity] duration-200 [transition-timing-function:var(--ease-strong)] ${
+          className={`pointer-events-none absolute left-2 right-2 rounded-lg transition-[top,height,background-color,opacity] duration-200 [transition-timing-function:var(--ease-strong)] ${
             hot != null && hot !== activeIndex ? "bg-hover" : "bg-hover-strong"
           } ${glide ? "opacity-100" : "opacity-0"}`}
           style={glide ? { top: glide.top, height: glide.height } : undefined}
@@ -157,16 +159,18 @@ export function ChatNav({
               }}
               onMouseEnter={() => setHot(i)}
               onFocus={() => setHot(i)}
-              className="relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-micro"
+              // The full text rides on `title`: the row shows one truncated line,
+              // and a long first sentence is exactly the one you need whole to
+              // tell two similar turns apart.
+              title={it.text || undefined}
+              className="relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left transition-micro"
             >
-              {/* Same weight as the rail's marks — here the row's own text already
-                  says which turn it is, so the bullet is orientation, not label. */}
-              <span
-                className={`h-1.5 shrink-0 rounded-full transition-[width,background-color] ${
-                  active ? "w-5 bg-foreground" : "w-2.5 bg-muted-foreground/70"
-                }`}
-              />
-              <span className={`truncate text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>
+              {/* No bullet beside the text: the rail's marks were repeated here
+                  once, and because the active one is longer, every row's text
+                  started at a different x — a ragged left edge in a list whose
+                  whole job is to be scanned down. The glider marks the active row;
+                  the text weight says it again. */}
+              <span className={`truncate text-[13px] ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                 {it.text || "…"}
               </span>
             </button>
