@@ -5,7 +5,12 @@ import { uploadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
 import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
-import { ignoredPath, oversized, sanitizeFolderName } from "@/lib/folder-bridge/filter";
+import { ignoredPath, oversized } from "@/lib/folder-bridge/filter";
+
+/** Every folder name any version of `sanitizeFolderName` ever produced fits this. */
+const FOLDER_NAME = /^[a-z0-9_-]{1,40}$/;
+/** A relative file path that starts at the root or has a ".." segment. */
+const CLIMBS = /^\/|(^|\/)\.\.(\/|$)/;
 
 // Bulk upload for PC-folder sync: MANY files in one request, written under
 // /workspace/<name>/<relpath>. Each file's form name is its path relative to the
@@ -31,9 +36,14 @@ export const POST = apiHandler(async (req: Request) => {
   if (!name || files.length === 0) return Response.json({ error: "Missing name or files" }, { status: 400 });
   // The lease check below looks the folder row up by name, while the controller
   // resolves the write path — so "docs/." would miss the row for "docs" and still land
-  // in /workspace/docs. Only the canonical spelling is accepted: the sanitizer's
-  // charset has no "/" or ".", so every alias of a stored name fails this test.
-  if (name !== sanitizeFolderName(name)) return Response.json({ error: "Invalid folder name" }, { status: 400 });
+  // in /workspace/docs, and a file named "../docs2/a.txt" would land in docs2. Both
+  // halves of the path are therefore held to the stored charset: the name has never
+  // been allowed a "/" or a ".", and a relative file path may not climb. This is a
+  // charset test, NOT `name === sanitizeFolderName(name)`: rows attached before the
+  // sanitizer learned to collapse separators (a "--" inside, a trailing "-") are
+  // canonical for THEIR rule and must keep syncing.
+  if (!FOLDER_NAME.test(name)) return Response.json({ error: "Invalid folder name" }, { status: 400 });
+  if (files.some((f) => CLIMBS.test(f.name))) return Response.json({ error: "Invalid file path" }, { status: 400 });
 
   const { sessionKey: key } = await resolveWorkspaceTarget({ userId, chatId, projectId });
 

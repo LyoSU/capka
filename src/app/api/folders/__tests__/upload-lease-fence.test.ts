@@ -103,16 +103,43 @@ describe("POST /api/folders/upload — the sync lease fence", () => {
 
   // The row is found by name while the controller resolves the path, so "docs/." would
   // miss the row for "docs" and still write into /workspace/docs — under its lease.
-  it("400s a folder name that is not the canonical spelling, before any lookup", async () => {
+  it("400s a folder name outside the stored charset, before any lookup", async () => {
     h.setRow({ token: "t1", live: true });
-    const form = new FormData();
-    form.append("chatId", "c1");
-    form.append("name", "docs/.");
-    form.append("files", new File(["hello"], "a.txt"));
-    const r = await POST(new Request("http://x/api/folders/upload", { method: "POST", body: form }));
-    expect(r.status).toBe(400);
+    for (const alias of ["docs/.", "docs/", "./docs", "Docs", "docs.", "a".repeat(41)]) {
+      const form = new FormData();
+      form.append("chatId", "c1");
+      form.append("name", alias);
+      form.append("files", new File(["hello"], "a.txt"));
+      const r = await POST(new Request("http://x/api/folders/upload", { method: "POST", body: form }));
+      expect(r.status, alias).toBe(400);
+    }
     expect(h.calls).toEqual([]);
     expect(h.uploaded).toEqual([]);
+  });
+
+  // Rows attached before the sanitizer collapsed separators are not canonical for the
+  // CURRENT rule ("a--b" → "a-b") but were for theirs; requiring re-sanitization would
+  // 400 every one of their syncs forever.
+  it("accepts a legacy name the current sanitizer would spell differently", async () => {
+    const form = new FormData();
+    form.append("chatId", "c1");
+    form.append("name", "a--b-");
+    form.append("files", new File(["hello"], "a.txt"));
+    const r = await POST(new Request("http://x/api/folders/upload", { method: "POST", body: form }));
+    expect(r.status).toBe(200);
+    expect(h.uploaded).toEqual(["a--b-/a.txt"]);
+  });
+
+  // The other half of the path: the row is found by `name`, the file lands at
+  // `name/rel`, so a climbing `rel` writes into a sibling folder under ITS lease.
+  it("400s a file path that climbs out of the folder", async () => {
+    for (const rel of ["../docs2/a.txt", "sub/../../x", "/etc/passwd", ".."]) {
+      const r = await POST(req(undefined, [rel]));
+      expect(r.status, rel).toBe(400);
+    }
+    expect(h.uploaded).toEqual([]);
+    // A dot inside a segment is an ordinary file name.
+    expect((await POST(req(undefined, ["sub/..hidden", "a..b.txt"]))).status).toBe(200);
   });
 
   it("409s a batch whose token is not the holder's", async () => {
