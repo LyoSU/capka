@@ -190,7 +190,7 @@ function flushAlbum(groupId: string): void {
 }
 
 // Burst grouping (see burst.ts for the windows and why they're these values):
-// consecutive messages from one chat become ONE turn, so the agent answers the
+// consecutive messages from one SENDER become ONE turn, so the agent answers the
 // whole request instead of its first fragment.
 const bursts = createBurstCollector<Context, TgFile>(async (_chatId, batch) => {
   try {
@@ -202,12 +202,18 @@ const bursts = createBurstCollector<Context, TgFile>(async (_chatId, batch) => {
   }
 });
 
-/** Buffer one piece of the sender's burst. The typing action goes out on every
- *  piece rather than only after enqueue: the quiet window would otherwise be
- *  dead air, and Telegram's indicator lapses after a few seconds anyway. */
+/** Buffer one piece of the sender's burst. Keyed by chat AND sender: an already
+ *  linked user is served in a group too (ensureUser only refuses provisioning
+ *  outside a private chat), so a chat-only key would merge two people's texts
+ *  and files into one turn and bill the whole batch to whoever sent last.
+ *
+ *  The typing action goes out on every piece rather than only after enqueue: the
+ *  quiet window would otherwise be dead air, and Telegram's indicator lapses
+ *  after a few seconds anyway. It stays per piece, not per key — a chat action
+ *  is addressed to the CHAT, so there is no per-sender indicator to keep. */
 function bufferBurst(ctx: Context, text: string, files: TgFile[]): void {
   void ctx.replyWithChatAction("typing").catch(() => {});
-  bursts.add(ctx.chat!.id, { ctx, text, files });
+  bursts.add(ctx.chat!.id, ctx.from!.id, { ctx, text, files });
 }
 
 /**
@@ -399,7 +405,7 @@ async function buildBot(): Promise<Bot | null> {
     // Anything still buffered was typed INTO the current chat, so send it there
     // before re-pinning — otherwise it would surface in the fresh chat, out of
     // the context it was written in.
-    await bursts.drain(ctx.chat.id);
+    await bursts.drain(ctx.chat.id, ctx.from!.id);
     const link = await ensureUser(ctx);
     if (!link) return;
     const id = nanoid();
@@ -793,6 +799,7 @@ export async function startBot(): Promise<void> {
 export async function stopBot(): Promise<void> {
   const s = botState();
   const bot = s.bot;
+  const token = s.token;
   // Give up poll leadership first so a standby (or our own restart) can re-poll.
   releasePollerLock();
   // Clear the singleton up front so a concurrent startBot() can't observe the
@@ -805,7 +812,6 @@ export async function stopBot(): Promise<void> {
   // afterwards and reinstate the old bot.
   s.botPromise = null;
   s.polling = false;
-  s.token = "";
   if (bot) {
     try {
       await bot.stop();
@@ -816,6 +822,17 @@ export async function stopBot(): Promise<void> {
       });
     }
   }
+  // Nothing is polling any more, so no new piece can arrive: flush whatever a
+  // burst window still holds. Buffered pieces live in memory only, so returning
+  // without this leaves an already-received message with no task, no reply and
+  // no error — the user's text simply disappears across a restart. Done AFTER
+  // stop() but BEFORE the token is dropped: the flush ingests, and ingesting a
+  // file needs the token to download it.
+  await bursts.drainAll().catch((e) => log.error("telegram burst drain on stop failed", { err: String(e) }));
+  // Only if nobody rebuilt the bot behind us while we stopped and drained
+  // (restartBot's startBot, a racing getBot) — clearing then would wipe a live
+  // token and break file downloads until the next rebuild.
+  if (s.token === token) s.token = "";
 }
 
 /** Apply a newly-saved token: fully stop the old bot, then start a fresh one. */

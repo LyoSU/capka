@@ -44,6 +44,9 @@ All notable changes to Capka are documented here. Format follows
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed
+- Telegram: in a group, messages from two linked people no longer merge into one turn credited to whoever sent last.
+- Telegram: stopping or redeploying the platform flushes a half-collected message burst into the queue instead of dropping it.
+- Automations: a "tell me only when there is something to say" run shows no live draft in Telegram while it works; it either sends one final message or nothing.
 - Chat: the "scroll down" pill no longer lands on top of the composer when the on-screen keyboard closes.
 - Chat: clicking a picture in the viewer zooms in where the pointer is, as its cursor has been promising, and clicking again zooms back out; a large capture goes straight to 1:1. Double-tap still zooms on touch.
 - Folder sync: an edit that kept a file's byte length is now detected (`GET /api/sandbox/files` forwards `hash=1` to the controller, so the planner compares content hashes instead of sizes).

@@ -291,6 +291,14 @@ export async function startWorker(): Promise<void> {
     clearTimeout(parityFirstRun);
     clearInterval(parityTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
+    // Stop the Telegram bot FIRST: it stops polling (so no update is pulled into a
+    // process that is leaving), hands the poller lock to a standby, and flushes
+    // every open message burst into the queue as durable rows the next instance
+    // picks up. Without this a SIGTERM inside a burst window dropped the person's
+    // already-received messages with no task, no reply and no error. Safe when no
+    // bot is configured (every step null-checks); imported lazily so processes
+    // that never poll do not load the bot.
+    await (await import("@/lib/telegram/bot")).stopBot().catch((e) => log.error("telegram stop on shutdown failed", { err: String(e) }));
     // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.
     const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS);

@@ -5,14 +5,18 @@
  * "and compare it with last month", then a screenshot. With one update per turn
  * the agent answers the first fragment alone and the rest fold into a single
  * follow-up turn behind it, so it answers a question nobody finished asking.
- * This collector holds pieces per Telegram chat and hands the caller ONE turn
- * covering the whole burst.
+ * This collector holds pieces per SENDER per Telegram chat and hands the caller
+ * ONE turn covering the whole burst. Per sender, not per chat: in a group two
+ * linked people can be typing at once, and merging their pieces would attribute
+ * one person's text and files to the other's Capka account.
  *
  * Deliberately generic over the context/file types: no grammY here, so the
  * window and cap decisions are unit-testable with fake timers.
  *
- * In-memory by design. A process restart drops at most one un-flushed burst's
- * text — nothing was enqueued, charged, or saved yet, so the user just retypes.
+ * In-memory by design, but not lossy on a planned shutdown: `drainAll()` flushes
+ * every open burst, and the bot calls it after it stops polling. Only a crash
+ * (or a kill -9) drops un-flushed text — nothing was enqueued, charged, or saved
+ * yet, so the user just retypes.
  */
 
 /** Silence that closes a burst. Long enough to catch the follow-up thought
@@ -40,6 +44,9 @@ export function joinBurstText(texts: string[]): string {
 }
 
 type Entry<C, F> = {
+  /** The chat this burst belongs to, so a flush keyed by sender can still tell
+   *  the caller WHERE the batch goes. */
+  chatId: number;
   /** The LAST piece's context — see the comment in `close()`. */
   ctx: C;
   texts: string[];
@@ -53,26 +60,33 @@ type Entry<C, F> = {
 };
 
 export type BurstCollector<C, F> = {
-  /** Buffer one piece, arming or sliding this chat's window. */
-  add(chatId: number, piece: BurstPiece<C, F>): void;
-  /** Close this chat's burst NOW and await its flush; a no-op when nothing is
-   *  buffered. Used before an action that would change where the buffered text
-   *  belongs (`/new` re-pins the active chat). */
-  drain(chatId: number): Promise<void>;
+  /** Buffer one piece, arming or sliding this SENDER's window in this chat. */
+  add(chatId: number, senderId: number, piece: BurstPiece<C, F>): void;
+  /** Close this sender's burst in this chat NOW and await its flush; a no-op
+   *  when nothing is buffered. Used before an action that would change where the
+   *  buffered text belongs (`/new` re-pins the sender's active chat — which is
+   *  also why it drains only that sender, never a co-member's burst). */
+  drain(chatId: number, senderId: number): Promise<void>;
+  /** Close and flush EVERY open burst, awaiting them all. For shutdown: the
+   *  pieces exist only here, so returning without this loses the user's
+   *  messages with no task and no error to show for them. */
+  drainAll(): Promise<void>;
 };
 
 export function createBurstCollector<C, F>(
   onFlush: (chatId: number, batch: BurstBatch<C, F>) => void | Promise<void>,
 ): BurstCollector<C, F> {
-  // Bound: one entry per Telegram chat with an OPEN burst. Every exit path
-  // (quiet window, hard ceiling, either cap, drain) goes through `close()`,
-  // which deletes the entry — so the map only ever holds chats mid-burst.
-  const open = new Map<number, Entry<C, F>>();
+  // Bound: one entry per (chat, sender) with an OPEN burst. Every exit path
+  // (quiet window, hard ceiling, either cap, drain, drainAll) goes through
+  // `close()`, which deletes the entry — so the map only ever holds senders
+  // mid-burst.
+  const open = new Map<string, Entry<C, F>>();
+  const keyOf = (chatId: number, senderId: number) => `${chatId}:${senderId}`;
 
-  function close(chatId: number): BurstBatch<C, F> | null {
-    const e = open.get(chatId);
+  function close(key: string): { chatId: number; batch: BurstBatch<C, F> } | null {
+    const e = open.get(key);
     if (!e) return null;
-    open.delete(chatId);
+    open.delete(key);
     clearTimeout(e.quiet);
     clearTimeout(e.hard);
     // The LAST piece's context, deliberately: `ingest` stores
@@ -82,54 +96,62 @@ export function createBurstCollector<C, F>(
     // pick for the first reader that would: an answer arriving after the whole
     // burst belongs under its closing message, and the highest id also reads as
     // a watermark for "everything up to here has been ingested".
-    return { ctx: e.ctx, text: joinBurstText(e.texts), files: e.files };
+    return { chatId: e.chatId, batch: { ctx: e.ctx, text: joinBurstText(e.texts), files: e.files } };
   }
 
-  function fire(chatId: number): Promise<void> {
-    const batch = close(chatId);
-    if (!batch) return Promise.resolve();
-    return Promise.resolve(onFlush(chatId, batch));
+  function fire(key: string): Promise<void> {
+    const closed = close(key);
+    if (!closed) return Promise.resolve();
+    return Promise.resolve(onFlush(closed.chatId, closed.batch));
   }
 
   /** Timer-driven flush: no caller is awaiting it, so a rejection must not
    *  escape as unhandled. The callback owns its own reporting. */
-  function fireDetached(chatId: number): void {
-    void fire(chatId).catch(() => {});
+  function fireDetached(key: string): void {
+    void fire(key).catch(() => {});
   }
 
   return {
-    add(chatId, piece) {
-      const existing = open.get(chatId);
+    add(chatId, senderId, piece) {
+      const key = keyOf(chatId, senderId);
+      const existing = open.get(key);
       const e: Entry<C, F> =
         existing ??
         {
+          chatId,
           ctx: piece.ctx,
           texts: [],
           files: [],
           bytes: 0,
           pieces: 0,
-          quiet: setTimeout(() => fireDetached(chatId), BURST_QUIET_MS),
-          hard: setTimeout(() => fireDetached(chatId), BURST_MAX_MS),
+          quiet: setTimeout(() => fireDetached(key), BURST_QUIET_MS),
+          hard: setTimeout(() => fireDetached(key), BURST_MAX_MS),
         };
-      if (!existing) open.set(chatId, e);
+      if (!existing) open.set(key, e);
       e.ctx = piece.ctx;
       e.texts.push(piece.text);
       e.files.push(...piece.files);
       e.bytes += Buffer.byteLength(piece.text, "utf8");
       e.pieces += 1;
       if (e.pieces >= BURST_MAX_PIECES || e.bytes >= BURST_MAX_TEXT_BYTES) {
-        fireDetached(chatId);
+        fireDetached(key);
         return;
       }
       if (existing) {
         // Sliding window: the newest piece restarts the silence countdown, but
         // never the hard ceiling.
         clearTimeout(e.quiet);
-        e.quiet = setTimeout(() => fireDetached(chatId), BURST_QUIET_MS);
+        e.quiet = setTimeout(() => fireDetached(key), BURST_QUIET_MS);
       }
     },
-    drain(chatId) {
-      return fire(chatId);
+    drain(chatId, senderId) {
+      return fire(keyOf(chatId, senderId));
+    },
+    async drainAll() {
+      // Snapshot the keys first: each `fire` deletes its own entry, and the
+      // flush callback can buffer again (an ingest failure that re-queues), so
+      // iterating the live map would either skip or loop.
+      await Promise.all([...open.keys()].map((k) => fire(k)));
     },
   };
 }

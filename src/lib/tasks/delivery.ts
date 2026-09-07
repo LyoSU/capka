@@ -124,8 +124,28 @@ export interface DeliverySink {
 
 const NOOP_SINK: DeliverySink = { push() {}, async finish() {}, async sendFiles() {} };
 
-export function makeDeliverySink(origin: TaskOrigin | undefined, taskId?: string): DeliverySink {
-  if (origin?.platform === "telegram") return new TelegramSink(origin.telegramChatId, origin.locale, taskId);
+/**
+ * Whether a run may show the live draft preview at all.
+ *
+ * A draft is VISIBLE the moment it is sent — it is ephemeral, not invisible. So
+ * a `when_needed` automation run cannot stream one: that run may end by calling
+ * `nothing_to_report`, and the promise for it is no Telegram message at all, not
+ * "a reasoning preview that lapses after 30 seconds". The verdict only exists at
+ * finish(), long after the first draft would have been on screen, and the Bot
+ * API offers no way to withdraw a draft that has been sent (there is no delete
+ * counterpart to `sendRichMessageDraft` — the code only ever re-sends it, and
+ * the quiet branch of finish() can do nothing but let it lapse), so the decision
+ * has to be taken BEFORE streaming. The cost is a monitor run that does have
+ * something to say arriving as one final message with no live preview, which is
+ * the right trade for a channel nobody is watching in real time.
+ */
+export function mayStreamDraft(notifyMode: string | undefined): boolean {
+  return notifyMode !== "when_needed";
+}
+
+export function makeDeliverySink(origin: TaskOrigin | undefined, taskId?: string, notifyMode?: string): DeliverySink {
+  if (origin?.platform === "telegram")
+    return new TelegramSink(origin.telegramChatId, origin.locale, taskId, mayStreamDraft(notifyMode));
   return NOOP_SINK;
 }
 
@@ -399,7 +419,13 @@ class TelegramSink implements DeliverySink {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
-  constructor(private readonly chatId: number, private readonly locale?: string, taskId?: string) {
+  constructor(
+    private readonly chatId: number,
+    private readonly locale?: string,
+    taskId?: string,
+    /** False for a run that may end with nothing to say — see `mayStreamDraft`. */
+    private readonly streamDrafts = true,
+  ) {
     this.draftId = draftIdFrom(`tg:${chatId}:${Date.now()}`);
     if (taskId) registerDraft(chatId, this.draftId, taskId);
     this.t = getTranslator(locale, "telegram");
@@ -416,6 +442,11 @@ class TelegramSink implements DeliverySink {
 
   push(answer: string, reasoning: string, status: StreamStatus): void {
     if (this.closed) return; // a late push after finish must never resurrect drafts
+    // A run that may end quietly shows no preview at all: dropping the push here
+    // (rather than at flush) leaves nothing buffered, nothing scheduled and no
+    // keepalive loop, so `streamed` stays false and finish() skips the draft
+    // bridge too — the turn is either one final message or complete silence.
+    if (!this.streamDrafts) return;
     this.pending = { answer, reasoning, status };
     this.schedule();
   }

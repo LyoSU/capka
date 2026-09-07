@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrammyError, HttpError } from "grammy";
-import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery, taskForDraft, weaveCitations } from "../delivery";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, mayStreamDraft, refusedDelivery, taskForDraft, weaveCitations } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -543,5 +543,64 @@ describe("TelegramSink emission safety", () => {
     await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
 
     expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// A `when_needed` automation run may end with NOTHING to say, so it must never
+// put a draft on screen — the visible preview is the whole of what finding 15
+// was about.
+describe("mayStreamDraft", () => {
+  it("withholds the live preview only for a run that may end quietly", () => {
+    expect(mayStreamDraft("when_needed")).toBe(false);
+    expect(mayStreamDraft("always")).toBe(true);
+    // An ordinary chat turn carries no notify mode at all.
+    expect(mayStreamDraft(undefined)).toBe(true);
+    // Anything unrecognized streams: only the mode that ARMS the quiet tool is
+    // allowed to cost the user their live preview.
+    expect(mayStreamDraft("")).toBe(true);
+  });
+});
+
+describe("TelegramSink for a quiet-capable run", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    api.sendRichMessageDraft.mockClear();
+    api.sendRichMessage.mockClear();
+    api.sendMessage.mockClear();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("sends no draft at all while streaming, and nothing whatsoever when the run is quiet", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 31, locale: "en" }, "task-1", "when_needed");
+    sink.push("", "Checking the inbox", { kind: "thinking" });
+    sink.push("", "Nothing new", { kind: "tool", label: "Running a command…" });
+    await vi.advanceTimersByTimeAsync(120_000); // past every throttle and keepalive
+
+    expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
+
+    await sink.finish({ status: "completed", text: "", quiet: true, toolCount: 2, elapsedMs: 500 });
+    expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
+    expect(api.sendRichMessage).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still delivers the final message when that same run does have something to say", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 32, locale: "en" }, "task-2", "when_needed");
+    sink.push("Two invoices are overdue", "", undefined);
+    await vi.advanceTimersByTimeAsync(900);
+    expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
+
+    await sink.finish({ status: "completed", text: "Two invoices are overdue", toolCount: 1, elapsedMs: 500 });
+    // No draft bridge either — there was no draft on screen to adopt.
+    expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toContain("Two invoices are overdue");
+  });
+
+  it("an always-notify automation run keeps its live preview", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 33, locale: "en" }, "task-3", "always");
+    sink.push("", "Working", { kind: "thinking" });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(1);
   });
 });
