@@ -5,6 +5,7 @@ import { releaseHold } from "@/lib/billing/limits";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import type { MessageMeta } from "@/lib/chat/contracts";
 import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR } from "@/lib/errors/friendly";
+import { log } from "@/lib/log";
 
 /**
  * Durable task queue on Postgres. Tasks are rows; a worker claims them
@@ -73,9 +74,28 @@ export async function notifyTaskEnqueued(id: string): Promise<void> {
   await realtime.publish("task_enqueued", { id });
 }
 
-/** Wake now, unless we're inside a caller's transaction (see notifyTaskEnqueued). */
+/**
+ * Wake now, unless we're inside a caller's transaction (see notifyTaskEnqueued).
+ *
+ * Best-effort, and that is load-bearing rather than laziness. The task row is
+ * already durably inserted by the time this runs, so a lost NOTIFY costs at most
+ * one poll interval of latency — whereas THROWING turned a turn that WILL run into
+ * a caller-visible failure. Every caller reads that throw as "the enqueue did not
+ * happen" and releases the budget hold it reserved for the turn (the chat route,
+ * Telegram, an automation, the runner's late-steer follow-up), and then the poll
+ * picks the row up and runs it with no reservation at all — the budget gate
+ * bypassed by the very error handling meant to protect it.
+ *
+ * Nothing depends on the throw: the transactional callers do not wake through here
+ * at all, they await `notifyTaskEnqueued` after their commit and own its outcome.
+ */
 async function wake(id: string, tx?: QueueTx): Promise<void> {
-  if (!tx) await realtime.publish("task_enqueued", { id });
+  if (tx) return;
+  try {
+    await realtime.publish("task_enqueued", { id });
+  } catch (err) {
+    log.warn("task enqueue wake-up failed; the worker's poll will pick the row up", { id, err: String(err) });
+  }
 }
 
 /**

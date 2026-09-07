@@ -72,12 +72,13 @@ describe("the late-steer follow-up turn passes the same gates as a chat send", (
     expect(release).toBeGreaterThan(enqueue);
   });
 
-  it("keeps the message insert outside the answer decision", () => {
-    // The insert must be reached on every persisting status; only the enqueue is
-    // allowed to be gated on `steerPlan.answer`.
-    const insert = fallback.indexOf("db.insert(messages)");
+  it("keeps the message write outside the answer decision", () => {
+    // The write must be reached on every persisting status; only the enqueue is
+    // allowed to be gated on `steerPlan.answer`. The row itself is written by
+    // `persistUnreadSteers`, which the throwing path calls too.
+    const persist = fallback.indexOf("persistUnreadSteers(");
     const answerGate = fallback.indexOf("steerPlan.answer");
-    expect(insert).toBeGreaterThan(-1);
-    expect(answerGate).toBeGreaterThan(insert);
+    expect(persist).toBeGreaterThan(-1);
+    expect(answerGate).toBeGreaterThan(persist);
   });
 });

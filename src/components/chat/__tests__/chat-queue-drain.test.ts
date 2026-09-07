@@ -31,6 +31,15 @@ describe("mergeQueue", () => {
     const out = mergeQueue([], [msg("a")], [msg("a")]);
     expect(out.map((m) => m.id)).toEqual(["a"]);
   });
+
+  // The accepted limit, pinned so it is a decision rather than an oversight: the
+  // merge can only preserve what it OBSERVES. Two tabs that both read an empty
+  // queue inside the read-write window still end with one item, because neither
+  // read ever saw the other's. Closing that needs a key per item — see the note on
+  // mergeQueue for why that trade was declined.
+  it("cannot recover an item it never observed (no CAS across tabs)", () => {
+    expect(mergeQueue([], [], [msg("mine")]).map((m) => m.id)).toEqual(["mine"]);
+  });
 });
 
 describe("drainQueue", () => {

@@ -101,6 +101,19 @@ export function visibleQueue({
  * has since dequeued it. Re-sending is recoverable — the queued id rides into the
  * POST as the message id, so the server's insert no-ops and the drain drops any item
  * it finds already in the transcript — whereas losing typed text is not.
+ *
+ * NOT a compare-and-swap, and knowingly so. `getItem` and `setItem` here sit in one
+ * synchronous block with nothing awaited between them, but localStorage offers no
+ * atomic swap across tabs, so two tabs interleaving inside that window can still
+ * both observe the same array and the second write erase the first tab's item. The
+ * fix that closes it for real is a key per item, which trades this window for a
+ * storage-schema change: enumerating keys on every read, a separate sequence field
+ * to keep the send order, and a migration for queues already on disk. Declined as
+ * the larger risk of the two — the window is microseconds wide and needs the same
+ * chat open twice with both tabs typing into it, whereas the guaranteed loss this
+ * hook used to have (dequeue before the POST committed) is closed in `drainQueue`.
+ * Recorded here rather than fixed; revisit if the queue ever holds anything a user
+ * cannot simply retype.
  */
 export function mergeQueue(
   stored: QueuedMessage[],

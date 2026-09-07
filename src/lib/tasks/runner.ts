@@ -187,6 +187,41 @@ export function lateSteerPlan(input: {
 }
 
 /**
+ * Write the steers a turn never folded in as an ordinary user message on the
+ * chat's active path.
+ *
+ * Both terminal paths owe this, which is why it is a helper rather than inline: the
+ * normal finalize AND the catch that handles a thrown provider/setup error. Only
+ * the message is common between them — whether the turn also owes an ANSWER is
+ * `lateSteerPlan`'s call, and the catch path never does.
+ *
+ * Left free to throw. Each caller already stands inside its own guard, and
+ * swallowing a database error in here would hide it from both of them.
+ */
+export async function persistUnreadSteers(input: {
+  taskId: string;
+  chatId: string;
+  /** The assistant message this turn wrote — the steer hangs off it. */
+  parentId: string;
+  platform: string;
+  /** Steers inherited from the half of this turn that suspended, if any. */
+  carried: Steer[];
+  /** How far the runner's read cursor got into `tasks.steers`. */
+  read: number;
+}): Promise<{ messageId: string; count: number } | null> {
+  const unread = [...input.carried, ...(await readSteers(input.taskId)).slice(input.read)];
+  if (!unread.length) return null;
+  const messageId = nanoid();
+  await db.insert(messages).values({
+    id: messageId, chatId: input.chatId, parentId: input.parentId, role: "user",
+    content: unread.map((u) => u.text).join("\n\n"),
+    platform: input.platform,
+  });
+  await db.update(chats).set({ activeLeafId: messageId, updatedAt: new Date() }).where(eq(chats.id, input.chatId));
+  return { messageId, count: unread.length };
+}
+
+/**
  * Run an agent task to completion. Invoked by the worker for a claimed task
  * row — independent of any HTTP request, so it keeps running with the user's
  * tab closed. Streams via Postgres realtime, renews its lease via heartbeat,
@@ -2132,19 +2167,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const steerPlan = lateSteerPlan({ status: finalStatus, suspended: Boolean(awaitingApproval || awaitingAnswer) });
     if (steerPlan.persist) {
       try {
-        const unread = [...carriedSteers, ...(await readSteers(taskId)).slice(steersRead)];
-        if (unread.length) {
-          const followUpId = nanoid();
-          await db.insert(messages).values({
-            id: followUpId, chatId, parentId: msgId, role: "user",
-            content: unread.map((u) => u.text).join("\n\n"),
-            platform: payload.origin?.platform ?? "web",
-          });
-          await db.update(chats).set({ activeLeafId: followUpId, updatedAt: new Date() }).where(eq(chats.id, chatId));
+        const kept = await persistUnreadSteers({
+          taskId, chatId, parentId: msgId, platform: payload.origin?.platform ?? "web",
+          carried: carriedSteers, read: steersRead,
+        });
+        if (kept) {
           if (!steerPlan.answer) {
             // The words are kept and sit on the active path; the user's own next
             // send is what asks for a reply to them.
-            tlog.info("late steers kept as a message; this turn does not answer them", { count: unread.length, status: finalStatus });
+            tlog.info("late steers kept as a message; this turn does not answer them", { count: kept.count, status: finalStatus });
           } else {
             // A paid turn the user did not send through the chat route, so it passes
             // the SAME two gates that route does: the per-user flood bucket (same
@@ -2161,7 +2192,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // already persisted, and their next ordinary send is what surfaces the
               // limit in their own language (the chat route's 429).
               tlog.warn("late steers kept as a message but not answered: gate refused", {
-                count: unread.length,
+                count: kept.count,
                 reason: flood.ok ? `budget:${reservation?.window ?? "unknown"}` : "rate_limited",
               });
             } else {
@@ -2172,7 +2203,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                   payload: { requestModel: payload.requestModel, projectId: payload.projectId, uiMessages: [], origin: payload.origin },
                 });
                 handedOff = created;
-                tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: unread.length });
+                tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: kept.count });
               } finally {
                 // A turn that folded into an existing one does not own our hold, and
                 // neither does a throw between the reservation and the enqueue —
@@ -2581,6 +2612,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return; // `finally` still releases the hold and closes the MCP clients
     }
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
+
+    // The same debt the finalize path settles, on the path that used to skip it
+    // outright: a provider or setup error that THROWS after a steer landed still
+    // owes the user those words, and the steer endpoint has already told the client
+    // it took them. `lateSteerPlan` is asked rather than assumed, and for every
+    // status this path can produce it answers persist-without-answering — sending
+    // the same words back into whatever just broke is not a reply.
+    if (lateSteerPlan({ status, suspended: false }).persist) {
+      try {
+        const kept = await persistUnreadSteers({
+          taskId, chatId, parentId: msgId, platform: payload.origin?.platform ?? "web",
+          carried: carriedSteers, read: steersRead,
+        });
+        if (kept) tlog.info("late steers kept as a message after a turn that threw", { count: kept.count, status });
+      } catch (steerError) {
+        // Recovering a message must never break the error handling that is this
+        // path's whole job.
+        tlog.warn("could not keep the late steers after a turn that threw", { err: errMsg(steerError) });
+      }
+    }
+
     // This catch path finalizes the turn WITHOUT rethrowing, so the turn span
     // would otherwise close as "completed". Report the real outcome here.
     setTurnOutcome({
