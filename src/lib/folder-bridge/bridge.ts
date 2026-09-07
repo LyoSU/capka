@@ -130,8 +130,14 @@ async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<vo
 // chunk, rate-limited per request) — NOT the interactive per-file upload route,
 // which caps at ~10/min and would 429 on any real folder.
 const UPLOAD_CHUNK = 100;
-export async function uploadBatch(target: WorkspaceTarget, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
+/** `guard` is checked before each chunk leaves, and it may throw to stop the upload
+ *  (a sync uses it to abort when its folder lease is gone). One request carries a
+ *  whole chunk, so this is the finest granularity an upload has — checking only
+ *  before the first chunk let a lease lost at file 40 of 5,000 push all the rest.
+ *  The per-file half of the check belongs in `read`, which is called per path. */
+export async function uploadBatch(target: WorkspaceTarget, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void, guard?: () => void): Promise<void> {
   for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
+    guard?.();
     const chunk = paths.slice(i, i + UPLOAD_CHUNK);
     const form = new FormData();
     for (const [k, v] of Object.entries(targetBody(target))) form.append(k, v);
@@ -405,14 +411,18 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   const leaseGone = () => leaseTaken || Date.now() >= deadline;
   const beat = setInterval(() => { void renew(); }, leaseRenewMs(lease.expiresAt));
   try {
-    return await runSync(handle);
+    return await runSync(handle, leaseToken);
   } finally {
     clearInterval(beat);
     await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
   }
 
-  async function runSync(handle: DirHandle): Promise<SyncOutcome> {
-  // Called at the start of every phase that writes: no lease, no writing.
+  // `handle` and `token` are passed in rather than captured: this is a hoisted
+  // declaration, so the narrowing the two null checks above did is not carried into
+  // it, and a nullable token in a URL is a type error.
+  async function runSync(handle: DirHandle, token: string): Promise<SyncOutcome> {
+  // Called before every single file mutation, not once per phase: no lease, no
+  // writing. It throws, so it also aborts a pool or a batch mid-flight.
   const guard = () => {
     if (leaseGone()) throw new Error("Another window took over syncing this folder, so this sync stopped.");
   };
@@ -445,33 +455,39 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // the copy exists on both sides by the end of this run. (Writing it only on the
   // computer would put it in the new ancestor while the workspace lacks it, and the
   // next sync would read that as a deletion and remove it again.)
-  guard();
   // Every path either side already knows about. A conflict copy must not land on one
   // of them — the write here and the upload that follows both truncate — and the set
   // grows as we go, so two copies in one run cannot pick the same name either.
   const claimed = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(base), ...localDirs, ...remoteDirs]);
   const keptCopies: string[] = [];
   for (const c of plan.conflictCopies) {
+    guard();
     const keepAs = await resolveConflictName(c.path, new Date(plannedAt), async (n) => claimed.has(n) || await localFileExists(handle, n));
     claimed.add(keepAs);
     const losing = c.source === "local"
       ? await readLocalFile(handle, c.path)
       : await downloadFromWorkspace(target, folder.name, c.path);
+    guard();
     await writeLocalFile(handle, keepAs, losing);
     keptCopies.push(keepAs);
   }
 
-  guard();
-  await uploadBatch(target, folder.name, [...plan.upload, ...localWins, ...keptCopies], (rel) => readLocalFile(handle, rel), onProgress);
+  // Every file mutation below is guarded individually, not once per phase: a lease
+  // that lapses at file 40 of 5,000 has to stop the other 4,960, because from that
+  // moment a second tab is reconciling the same folder against its own plan.
+  await uploadBatch(
+    target, folder.name, [...plan.upload, ...localWins, ...keptCopies],
+    (rel) => { guard(); return readLocalFile(handle, rel); }, onProgress, guard,
+  );
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
-  guard();
   await runPool(downloads, 6, async (path) => {
-    await writeLocalFile(handle, path, await downloadFromWorkspace(target, folder.name, path));
+    guard();
+    const blob = await downloadFromWorkspace(target, folder.name, path);
+    guard();
+    await writeLocalFile(handle, path, blob);
     onProgress?.({ phase: "downloading", done: ++di, total: downloads.length });
   });
-  // Deletes are the operations a lost lease turns destructive, so they are checked
-  // per file rather than once per phase.
   await runPool(plan.deleteRemote, 6, (path) => { guard(); return deleteFromWorkspace(target, folder.name, path); });
   await runPool(plan.deleteLocal, 6, (path) => { guard(); return deleteLocalFile(handle, path); });
   // Directory sync (3-way, so a folder deleted on the PC is removed on the server
@@ -498,7 +514,11 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // A sync that lost its lease must not publish an ancestor at all: the run it
   // describes was cut short, and the CAS cannot tell that apart from a complete one.
   guard();
-  const put = await fetch(`/api/folders/${folder.id}/state`, {
+  // The lease token travels with the write: the ancestor is the one row a losing
+  // sync could still win, so the server refuses the swap unless this sync is the
+  // holder (see the route). Without it a run whose lease lapsed could publish a
+  // half-finished manifest over the run that took the folder from it.
+  const put = await fetch(`/api/folders/${folder.id}/state?token=${encodeURIComponent(token)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expectedRev: rev, state: { v: 1, rev: rev + 1, files: merged, dirs: mergedDirs } }),

@@ -30,9 +30,13 @@ export function withHardBreaks(text: string): string {
       continue;
     }
     fenced.push(true);
-    // Closes only on the SAME marker, at least as long as the opener, with nothing
-    // but whitespace after it — so ``` inside a ~~~ block stays content.
-    if (m && m[1][0] === open[0] && m[1].length >= open.length && line.slice(m[0].length).trim() === "") open = null;
+    // Closes only on the SAME marker, at least as long as the opener, followed by
+    // spaces or tabs and nothing else — so ``` inside a ~~~ block stays content.
+    // `.trim()` was too generous here: it also strips Unicode spaces, so a fence run
+    // followed by a no-break space (U+00A0) closed the block for us while the
+    // renderer kept it open, and every code line after it picked up trailing spaces
+    // the person never typed.
+    if (m && m[1][0] === open[0] && m[1].length >= open.length && /^[ \t]*$/.test(line.slice(m[0].length))) open = null;
   }
   return lines
     .map((line, i) => {

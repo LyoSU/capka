@@ -55,4 +55,16 @@ describe("withHardBreaks", () => {
   it("does not open a block on inline code that starts with three backticks", () => {
     expect(withHardBreaks("```a``b``\nnext")).toBe("```a``b``  \nnext");
   });
+
+  // CommonMark lets only spaces and tabs follow a closing fence, but `.trim()` also
+  // strips Unicode spaces — so a no-break space closed the block for us while the
+  // renderer kept it open, and the code after it grew trailing spaces.
+  it("does not let a no-break space close a fence", () => {
+    const src = "~~~\na\n~~~\u00A0\nb\nc";
+    expect(withHardBreaks(src)).toBe(src);
+  });
+
+  it("still closes a fence trailed by spaces and tabs", () => {
+    expect(withHardBreaks("~~~\na\n~~~ \t\nafter\nlast")).toBe("~~~\na\n~~~ \t\nafter  \nlast");
+  });
 });
