@@ -3,9 +3,11 @@
 import { useCallback, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowUp, Info, Loader2, Mic, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Info, Loader2, Mic, Plus, Square } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
-import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
+import { ComposerMenu } from "@/components/chat/composer-menu";
+import { MicSettings } from "@/components/chat/mic-settings";
+import { FolderChips } from "@/components/chat/folder-chips";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
@@ -111,6 +113,9 @@ interface ChatInputProps {
    *  will be answered, and one control living in one place is what lets a user
    *  find it without looking. */
   leading?: ReactNode;
+  /** Opens the credentials dialog from the "+" menu. Absent when this chat
+   *  cannot hold any (read-only). */
+  onOpenSecrets?: () => void;
 }
 
 export function ChatInput({
@@ -131,6 +136,7 @@ export function ChatInput({
   focusSignal,
   folders,
   leading,
+  onOpenSecrets,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const tNotice = useTranslations("chat.notice");
@@ -147,11 +153,18 @@ export function ChatInput({
   // Speech-to-text straight into the composer, on whatever the browser provides.
   // The hook reports `supported: false` where there is no engine, and the button
   // simply isn't rendered — no disabled control, no explanation to read.
-  const onDictationError = useCallback(
-    (kind: DictationErrorKind) =>
-      toast.error(kind === "permission" ? t("dictation.permissionDenied") : t("dictation.failed")),
-    [t],
-  );
+  const onDictationError = useCallback((kind: DictationErrorKind) => {
+    if (kind === "pending") return void toast(t("dictation.pending"));
+    const key: Record<Exclude<DictationErrorKind, "pending">, string> = {
+      permission: "dictation.permissionDenied",
+      "no-microphone": "dictation.noMicrophone",
+      network: "dictation.network",
+      language: "dictation.language",
+      insecure: "dictation.insecure",
+      failed: "dictation.failed",
+    };
+    toast.error(t(key[kind]));
+  }, [t]);
   const dictation = useDictation({ textareaRef, value, onChange, lang: locale, onError: onDictationError });
   const { stop: stopDictation } = dictation;
 
@@ -270,6 +283,9 @@ export function ChatInput({
             onRetry={onRetryFile}
             className="px-3 pt-3"
           />
+          {/* Connected folders sit beside the files: what the assistant can see of
+              the person's own machine, in plain sight rather than inside the menu. */}
+          {folders && <FolderChips folders={folders} />}
 
           {/* Quiet heads-up when the picked model can't read a staged file's
               media type natively. Deliberately understated — muted text, an info
@@ -318,7 +334,9 @@ export function ChatInput({
                 aria-hidden
                 className="pointer-events-none absolute inset-x-0 top-0 truncate pr-2 text-base leading-relaxed text-muted-foreground md:text-[15px]"
               >
-                {awaitingInput ? t("awaitingInput") : files.length > 0 ? t("placeholderFiles") : t("placeholder")}
+                {dictation.listening
+                  ? t(dictation.phase === "hearing" ? "dictation.listening" : "dictation.starting")
+                  : awaitingInput ? t("awaitingInput") : files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               </span>
             )}
           </div>
@@ -336,76 +354,14 @@ export function ChatInput({
                   e.target.value = "";
                 }}
               />
-              {folders?.canAttach ? (
-                // Folder access is on for this user → the paperclip opens a small
-                // menu (upload files vs connect a folder from their computer).
-                <AttachFolderMenu folders={folders} onUpload={() => fileInputRef.current?.click()}>
-                  <Hint label={t("attach")}>
-                    <span className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
-                      <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-                    </span>
-                  </Hint>
-                </AttachFolderMenu>
-              ) : (
-                <Hint label={t("attach")}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-                  </Button>
+              <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
+                <Hint label={t("add")}>
+                  <span className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
+                    <Plus className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                  </span>
                 </Hint>
-              )}
+              </ComposerMenu>
             </div>
-
-            {/* Dictation. Absent entirely where the browser has no speech engine
-                — a permanently dead button explains nothing. Listening reads as a
-                soft accent tint and the app's own slow pulse (the global
-                reduced-motion rule freezes it), plus a stop glyph, so the way out
-                is the same shape as every other stop on this screen. */}
-            {dictation.supported && (
-              <div className="flex shrink-0 items-center gap-0.5">
-                <Hint label={dictation.listening ? t("dictation.stop") : t("dictation.start")}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-pressed={dictation.listening}
-                    aria-label={dictation.listening ? t("dictation.stop") : t("dictation.start")}
-                    className={`h-10 w-10 sm:h-8 sm:w-8 rounded-xl transition-transform active:scale-90 ${
-                      dictation.listening
-                        ? "animate-pulse-fast bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    // Keep the caret where the words are going — a button click
-                    // would otherwise pull focus out of the composer.
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={dictation.toggle}
-                  >
-                    {dictation.listening ? (
-                      <Square className="h-4 w-4 fill-current sm:h-3.5 sm:w-3.5" />
-                    ) : (
-                      <Mic className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-                    )}
-                  </Button>
-                </Hint>
-
-                {/* One action puts the composer back exactly as it was. It stands
-                    down the moment the user types, because from then on undoing
-                    would throw their own words away too. */}
-                {dictation.canUndo && (
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md px-1.5 py-1 text-xs text-muted-foreground underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={dictation.undo}
-                  >
-                    {t("dictation.undo")}
-                  </button>
-                )}
-              </div>
-            )}
 
             {leading}
             </div>
@@ -416,10 +372,27 @@ export function ChatInput({
             <div className="flex shrink-0 items-center gap-2">
               {contextUsage && <ContextMeter used={contextUsage.used} window={contextUsage.window} />}
 
-              {/* While a reply streams: Send (queues the next turn) when there's
-                  something to send, otherwise Stop. Idle: always Send. Send stays
+              {/* One action puts the composer back exactly as it was. It stands
+                  down the moment the user types, because from then on undoing
+                  would throw their own words away too. */}
+              {dictation.canUndo && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md px-1.5 py-1 text-xs text-muted-foreground underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={dictation.undo}
+                >
+                  {t("dictation.undo")}
+                </button>
+              )}
+
+              {/* One slot, four states. While a reply streams and the box is empty:
+                  Stop. While dictating: the dictation's own stop, tinted and pulsing
+                  (the global reduced-motion rule freezes it). Empty box, engine
+                  available: the microphone — voice is what an empty composer can
+                  still take, so it sits where the thumb already goes. Otherwise: Send,
                   disabled until any in-flight upload settles. */}
-              {isLoading && !hasContent ? (
+              {isLoading && !hasContent && !dictation.listening ? (
                 <Hint label={t("stop")}>
                   <Button
                     size="icon"
@@ -433,6 +406,38 @@ export function ChatInput({
                     <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                   </Button>
                 </Hint>
+              ) : dictation.listening ? (
+                <Hint label={t("dictation.stop")}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-pressed
+                    aria-label={t("dictation.stop")}
+                    className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full animate-pulse-fast bg-primary/10 text-primary transition-transform hover:bg-primary/15 hover:text-primary active:scale-90"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={dictation.stop}
+                  >
+                    <Square className="h-4 w-4 fill-current sm:h-3.5 sm:w-3.5" />
+                  </Button>
+                </Hint>
+              ) : !hasContent && dictation.supported && !awaitingInput ? (
+                <div className="flex shrink-0 items-center">
+                  <Hint label={t("dictation.start")}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t("dictation.start")}
+                      className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-full text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                      // Keep the caret where the words are going — a button click
+                      // would otherwise pull focus out of the composer.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={dictation.start}
+                    >
+                      <Mic className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                    </Button>
+                  </Hint>
+                  <MicSettings />
+                </div>
               ) : (
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button

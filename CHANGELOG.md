@@ -21,13 +21,14 @@ All notable changes to Capka are documented here. Format follows
 - `POST /api/chat` responses carry `deduped: true` when the message folded into a turn that was already queued.
 - Automations: "Notify: only when there is something to report" (`notify_mode: when_needed`) gives the run a `nothing_to_report` tool; a run that calls it ends without a Telegram message, a notification or an unread mark, and shows as one muted row in the chat that unfolds into the full turn (steps and reply). Quiet runs are counted per day in Settings.
 - Automations: per-automation "Also send to Telegram" switch (`deliver_telegram`, default on); off keeps results in the web chat only.
-- Chat: a microphone button in the composer dictates into the message with the browser's own speech engine (Chrome/Edge send the audio to Google, Safari to Apple; nothing reaches Capka's server; Firefox has no engine and shows no button). Ten-minute cap, one-step undo.
+- Chat: dictation — the microphone takes the send button's place while the message is empty and dictates with the browser's own speech engine (Chrome/Edge send the audio to Google, Safari to Apple; nothing reaches Capka's server; Firefox has no engine and shows no button). Ten-minute cap, one-step undo, a placeholder that says whether the microphone is heard, plain-language messages for a missing permission, no microphone, no network or a non-HTTPS page, and a level meter showing which microphone the browser uses.
 - Chat: "Regenerate title" in a chat's menu re-derives the name from the active branch (first question, latest reply) with the background model; a hand-typed rename still sticks until asked.
-- Chat: stored credentials per chat (key icon in the composer). A value is encrypted at rest, set as an environment variable on every sandbox command of that chat, named but never shown to the model, and redacted out of command output as `[secret:NAME]`. Injection needs the controller image from this release; an older controller runs commands without the variables.
+- Chat: stored secrets per chat ("+" menu in the composer). A value is encrypted at rest, set as an environment variable on every sandbox command of that chat, named but never shown to the model, and redacted out of command output as `[secret:NAME]`. Injection needs the controller image from this release; an older controller runs commands without the variables.
 
 ### Changed
 
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
+- Chat: the paperclip became a "+" menu (files, folder, secrets, and shortcuts to skills, connectors and plugins); connected folders show as chips above the composer with their sync state and a reconnect action.
 - Chat: a user's own messages render as Markdown (lists, bold, links, code fences) the same way replies do; a single Enter still reads as a line break.
 
 ### Fixed

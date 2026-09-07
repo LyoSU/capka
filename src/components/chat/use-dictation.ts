@@ -21,6 +21,10 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
  */
 export const DICTATION_MAX_MS = 10 * 60 * 1000;
 
+/** How long "starting" may last before the composer tells the person to look for
+ *  the browser's microphone prompt. */
+export const PENDING_HINT_MS = 4000;
+
 /* ------------------------------------------------------------------ *
  * The slice of the Web Speech API we actually touch.
  * Typing it ourselves (rather than leaning on lib.dom) keeps the engine
@@ -51,12 +55,33 @@ export interface SpeechRecognitionLike {
   onresult: ((event: SpeechResultEventLike) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
+  /** Audio capture actually began — the permission prompt is behind us. Optional:
+   *  the fake in the suite never fires it, and the first result implies it. */
+  onaudiostart?: (() => void) | null;
 }
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
-/** What the UI has to say out loud when dictation gives up. */
-export type DictationErrorKind = "permission" | "failed";
+/**
+ * What the UI has to say out loud. Every value maps to one plain sentence for the
+ * person, because "nothing happens" is the failure mode a silent microphone leaves
+ * them with: a browser that never got the permission, no microphone at all, a speech
+ * service it cannot reach, a page served over plain HTTP, a language the engine does
+ * not have. `pending` is not a failure — the browser is still asking for permission —
+ * but after a few seconds of that the person deserves to be told where to look.
+ */
+export type DictationErrorKind =
+  | "permission"
+  | "pending"
+  | "no-microphone"
+  | "network"
+  | "language"
+  | "insecure"
+  | "failed";
+
+/** Where a dictation session is: not running, waiting for audio (permission prompt,
+ *  device warm-up), or actually hearing. Drives the composer's placeholder. */
+export type DictationPhase = "idle" | "starting" | "hearing";
 
 /**
  * The vendor-prefixed constructor, read off `globalThis` rather than `window`:
@@ -139,6 +164,7 @@ export interface DictationHost {
 
 export interface DictationEngine {
   listening(): boolean;
+  phase(): DictationPhase;
   canUndo(): boolean;
   start(): void;
   stop(): void;
@@ -174,8 +200,15 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   let barren = 0;
   let capTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+  let phase: DictationPhase = "idle";
 
   const listening = () => wanted;
+  const phaseOf = () => phase;
+  const setPhase = (next: DictationPhase) => {
+    if (phase === next) return;
+    phase = next;
+    host.changed();
+  };
   const canUndo = () => snapshot !== null;
 
   const dictated = () => appendPhrase(carried, appendPhrase(settled, draft));
@@ -231,9 +264,11 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     r.interimResults = true;
     let heard = false;
 
+    r.onaudiostart = () => setPhase("hearing");
     r.onresult = (event) => {
       heard = true;
       barren = 0;
+      setPhase("hearing");
       // Recompute the whole run from its results rather than tracking deltas:
       // the engine revises earlier phrases as it hears more, and `results` is
       // always the authoritative list for the run in progress.
@@ -257,6 +292,14 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       terminal = true;
       if (code === "not-allowed" || code === "service-not-allowed") {
         host.failed("permission");
+      } else if (code === "audio-capture") {
+        host.failed("no-microphone");
+      } else if (code === "network") {
+        // Chrome's engine is a remote service; without a route to it there is no
+        // recognition at all, which is worth saying in those words.
+        host.failed("network");
+      } else if (code === "language-not-supported") {
+        host.failed("language");
       } else if (code !== "no-speech") {
         // Silence is not a failure worth a message — it just ends the session.
         host.failed("failed");
@@ -299,6 +342,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     const was = wanted;
     wanted = false;
     terminal = false;
+    phase = "idle";
     clearCap();
     release();
     paint();
@@ -308,13 +352,21 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   const start = () => {
     if (disposed || wanted) return;
     if (!host.create && !speechRecognitionCtor()) return;
+    // The constructor exists on plain HTTP too, and `start()` then fails in a way
+    // that looks like a dead button. Say the real reason before touching it.
+    if ((globalThis as { isSecureContext?: boolean }).isSecureContext === false) {
+      host.failed("insecure");
+      return;
+    }
     baseline();
     wanted = true;
     terminal = false;
     barren = 0;
+    phase = "starting";
     if (!run()) {
       wanted = false;
       snapshot = null;
+      phase = "idle";
       host.failed("failed");
       host.changed();
       return;
@@ -331,6 +383,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     if (!wanted) return;
     wanted = false;
     terminal = true;
+    phase = "idle";
     clearCap();
     release();
     paint();
@@ -343,6 +396,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     if (wanted) {
       wanted = false;
       terminal = true;
+      phase = "idle";
       clearCap();
       release();
     }
@@ -382,11 +436,12 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   const dispose = () => {
     disposed = true;
     wanted = false;
+    phase = "idle";
     clearCap();
     release();
   };
 
-  return { listening, canUndo, start, stop, undo, syncValue, dispose };
+  return { listening, phase: phaseOf, canUndo, start, stop, undo, syncValue, dispose };
 }
 
 /* ------------------------------------------------------------------ *
@@ -406,6 +461,7 @@ export interface UseDictationOptions {
 export interface UseDictationResult {
   supported: boolean;
   listening: boolean;
+  phase: DictationPhase;
   canUndo: boolean;
   start: () => void;
   stop: () => void;
@@ -423,7 +479,7 @@ export function useDictation({
   // Resolved in an effect, not at render: the server has no speech engine, so
   // reading it during render would render a button the client then removes.
   const [supported, setSupported] = useState(false);
-  const [state, setState] = useState({ listening: false, canUndo: false });
+  const [state, setState] = useState<{ listening: boolean; phase: DictationPhase; canUndo: boolean }>({ listening: false, phase: "idle", canUndo: false });
 
   // Everything the engine reads back out of React, kept fresh without making the
   // engine itself depend on a render.
@@ -453,7 +509,7 @@ export function useDictation({
       },
       changed: () => {
         const engine = engineRef.current!;
-        setState({ listening: engine.listening(), canUndo: engine.canUndo() });
+        setState({ listening: engine.listening(), phase: engine.phase(), canUndo: engine.canUndo() });
       },
       failed: (kind) => latest.current.onError?.(kind),
       lang: () => speechLangFor(latest.current.lang),
@@ -464,6 +520,15 @@ export function useDictation({
   useEffect(() => {
     setSupported(isDictationSupported());
   }, []);
+
+  // Still "starting" after a few seconds means the browser is waiting on the person
+  // — a permission prompt they have not seen, or one the OS is holding — and from
+  // the composer that is indistinguishable from a dead button. Say where to look.
+  useEffect(() => {
+    if (state.phase !== "starting") return;
+    const timer = setTimeout(() => latest.current.onError?.("pending"), PENDING_HINT_MS);
+    return () => clearTimeout(timer);
+  }, [state.phase]);
 
   // Park the caret after the text we just inserted. This runs after React has
   // written `value` onto the controlled textarea, which is the only moment the
@@ -497,5 +562,5 @@ export function useDictation({
     else start();
   }, [engine, start]);
 
-  return { supported, listening: state.listening, canUndo: state.canUndo, start, stop, undo, toggle };
+  return { supported, listening: state.listening, phase: state.phase, canUndo: state.canUndo, start, stop, undo, toggle };
 }

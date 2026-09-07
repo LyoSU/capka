@@ -3,28 +3,39 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { KeyRound, Loader2, X } from "lucide-react";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Loader2, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type StoredSecret = { name: string };
 
 /**
- * A place to hand the assistant a password or an API key for THIS chat.
+ * A place to hand the assistant a password or an API key for THIS chat. Opened
+ * from the composer's "+" menu; the dialog owns no trigger of its own.
  *
  * The value goes straight to the server and never comes back: it is stored encrypted,
  * set as an environment variable inside this chat's sandbox, and stripped out of any
- * command output before the assistant reads it. That is why this control shows a list
+ * command output before the assistant reads it. That is why this dialog shows a list
  * of NAMES with no reveal affordance anywhere — there is nothing to reveal, and an
  * "eye" icon would promise otherwise.
  *
- * The field is cleared the moment a save succeeds, so a shoulder-surfer or a screen
- * share sees an empty box rather than a credential parked in the DOM.
+ * The field is cleared the moment a save succeeds, and again when the dialog closes,
+ * so a shoulder-surfer or a screen share sees an empty box rather than a credential
+ * parked in the DOM.
  */
-export function ChatSecrets({ chatId, ensureChat }: { chatId: string; ensureChat: () => Promise<void> }) {
+export function ChatSecrets({
+  chatId,
+  ensureChat,
+  open,
+  onOpenChange,
+}: {
+  chatId: string;
+  ensureChat: () => Promise<void>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const t = useTranslations("chat.secrets");
-  const [open, setOpen] = useState(false);
   const [secrets, setSecrets] = useState<StoredSecret[]>([]);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
@@ -41,14 +52,16 @@ export function ChatSecrets({ chatId, ensureChat }: { chatId: string; ensureChat
       const data = (await res.json()) as { secrets: StoredSecret[] };
       setSecrets(data.secrets ?? []);
     } catch {
-      // Offline or a dropped request: the badge simply doesn't appear. Nothing the
+      // Offline or a dropped request: the list simply stays as it was. Nothing the
       // person can act on, so nothing is said.
     }
   }, [chatId]);
 
-  // Once on mount, because the dot on the trigger has to be right before anyone
-  // opens it, and again whenever the popover opens so a second tab's change shows.
-  useEffect(() => { void load(); }, [load]);
+  // Fetched on every open, not once: a second tab may have added or removed one.
+  useEffect(() => {
+    if (open) void load();
+    else setValue("");
+  }, [open, load]);
 
   const save = async () => {
     if (!name.trim() || !value) return;
@@ -95,35 +108,17 @@ export function ChatSecrets({ chatId, ensureChat }: { chatId: string; ensureChat
   };
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) void load();
-        // Never leave a typed credential sitting in state behind a closed popover.
-        else setValue("");
-      }}
-    >
-      <PopoverTrigger
-        aria-label={t("label")}
-        className="relative flex h-9 items-center rounded-full px-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground data-popup-open:text-foreground"
-      >
-        <KeyRound className="h-4 w-4" aria-hidden />
-        {secrets.length > 0 && (
-          // A dot, not a count: "you have credentials here" is the whole message, and
-          // a number invites the reader to wonder which ones.
-          <span aria-hidden className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-        )}
-      </PopoverTrigger>
-
-      <PopoverContent side="top" align="start" sideOffset={8} className="w-72 p-3">
-        <p className="text-sm font-medium text-foreground">{t("title")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("hint")}</p>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("hint")}</DialogDescription>
+        </DialogHeader>
 
         {secrets.length > 0 && (
-          <ul className="mt-3 space-y-1">
+          <ul className="space-y-1">
             {secrets.map((s) => (
-              <li key={s.name} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm">
+              <li key={s.name} className="flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-1.5 text-sm">
                 <span className="flex-1 truncate font-mono text-xs text-foreground">{s.name}</span>
                 <button
                   type="button"
@@ -139,10 +134,7 @@ export function ChatSecrets({ chatId, ensureChat }: { chatId: string; ensureChat
           </ul>
         )}
 
-        <form
-          className="mt-3 space-y-2"
-          onSubmit={(e) => { e.preventDefault(); void save(); }}
-        >
+        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -167,7 +159,7 @@ export function ChatSecrets({ chatId, ensureChat }: { chatId: string; ensureChat
             {t("save")}
           </Button>
         </form>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }

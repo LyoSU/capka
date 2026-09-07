@@ -267,8 +267,8 @@
       "contextHint": "When it fills up, I'll summarize the earlier part so we can keep going."
     },
     "secrets": {
-      "label": "Saved credentials",
-      "title": "Credentials for this chat",
+      "label": "Saved secrets",
+      "title": "Secrets for this chat",
       "hint": "The assistant can use these but never sees them. The value never appears in the chat.",
       "namePlaceholder": "Name, for example Stripe key",
       "valuePlaceholder": "Paste the value",
@@ -420,7 +420,25 @@
       "send": "Send message",
       "queue": "Queue message",
       "queueOrSteer": "Queue message — Alt+Enter adds it to the current reply",
+      "add": "Add",
+      "menu": {
+        "secrets": "Secrets for this chat",
+        "skills": "Skills",
+        "connectors": "Connectors",
+        "plugins": "Plugins"
+      },
       "dictation": {
+        "starting": "Waiting for the microphone…",
+        "listening": "Listening… speak, the words land here",
+        "pending": "The browser is still asking for microphone access. Look for the prompt by the address bar.",
+        "noMicrophone": "No microphone found. Plug one in or pick it in your system settings, then try again.",
+        "network": "Speech recognition needs an internet connection right now. Check the connection and try again.",
+        "language": "The browser's speech engine does not support this language.",
+        "insecure": "Dictation works only over HTTPS or on localhost.",
+        "microphone": "Microphone",
+        "microphoneDefault": "System default microphone",
+        "level": "Microphone level",
+        "microphoneHint": "Dictation uses the microphone your system has as default. To change it, pick another input in the system sound settings.",
         "start": "Dictate",
         "stop": "Stop dictating",
         "undo": "Undo dictation",

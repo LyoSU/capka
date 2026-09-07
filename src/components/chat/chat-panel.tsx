@@ -510,6 +510,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // one rather than doubling it. Cleared when the turn ends — by then the message's
   // own metadata carries them.
   const [pendingSteers, setPendingSteers] = useState<{ id: string; text: string }[]>([]);
+  const [secretsOpen, setSecretsOpen] = useState(false);
   useEffect(() => {
     if (!isLoading) setPendingSteers([]);
   }, [isLoading]);
@@ -748,12 +749,13 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
   // Both densities, one host: the composer footer. `md:hidden` / `hidden md:*`
   // decide which is live, so exactly one is ever interactive.
-  // Credentials for THIS chat. One instance, outside the two density branches, so
-  // the popover's open state and its loaded list survive a viewport resize — and so
-  // there is exactly one component fetching the list per chat. `readOnly` already
-  // drops the whole block: a Telegram chat is answered from Telegram, so there is no
-  // composer here to hang a credential off.
-  const secretsEl = readOnly ? null : <ChatSecrets chatId={chatId} ensureChat={ensureChat} />;
+  // Credentials for THIS chat: a dialog opened from the composer's "+" menu. One
+  // instance for both densities (a dialog portals out anyway), so its loaded list
+  // survives a viewport resize. `readOnly` drops it: a Telegram chat is answered
+  // from Telegram, so there is no composer here to hang a credential off.
+  const secretsEl = readOnly ? null : (
+    <ChatSecrets chatId={chatId} ensureChat={ensureChat} open={secretsOpen} onOpenChange={setSecretsOpen} />
+  );
 
   const controlsEl = readOnly ? null : (
     <>
@@ -846,6 +848,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       folders={folderSync}
       focusSignal={starterFocus}
       leading={controlsEl}
+      onOpenSecrets={readOnly ? undefined : () => setSecretsOpen(true)}
     />
   );
 
