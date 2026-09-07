@@ -18,6 +18,7 @@ import { getPublicUrl } from "@/lib/url";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { uploadFile } from "@/lib/sandbox/client";
 import { modelChoices } from "@/lib/telegram/model-menu";
+import { createBurstCollector } from "@/lib/telegram/burst";
 import { provisionTelegramUser } from "@/lib/auth";
 import type { FileRef } from "@/lib/constants";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -182,7 +183,31 @@ function flushAlbum(groupId: string): void {
   const p = albums.get(groupId);
   if (!p) return;
   albums.delete(groupId);
-  void ingest(p.ctx, p.text, p.files);
+  // Into the burst collector, not straight into `ingest`: a caption, its album
+  // and the sentence typed right after it are one request, so they must become
+  // one turn.
+  bufferBurst(p.ctx, p.text, p.files);
+}
+
+// Burst grouping (see burst.ts for the windows and why they're these values):
+// consecutive messages from one chat become ONE turn, so the agent answers the
+// whole request instead of its first fragment.
+const bursts = createBurstCollector<Context, TgFile>(async (_chatId, batch) => {
+  try {
+    await ingest(batch.ctx, batch.text, batch.files);
+  } catch (e) {
+    // No grammY middleware frame around a timer-driven flush, so bot.catch
+    // can't see this one.
+    log.error("telegram burst ingest failed", { err: String(e) });
+  }
+});
+
+/** Buffer one piece of the sender's burst. The typing action goes out on every
+ *  piece rather than only after enqueue: the quiet window would otherwise be
+ *  dead air, and Telegram's indicator lapses after a few seconds anyway. */
+function bufferBurst(ctx: Context, text: string, files: TgFile[]): void {
+  void ctx.replyWithChatAction("typing").catch(() => {});
+  bursts.add(ctx.chat!.id, { ctx, text, files });
 }
 
 /**
@@ -344,6 +369,10 @@ async function buildBot(): Promise<Bot | null> {
   });
 
   bot.command("new", async (ctx) => {
+    // Anything still buffered was typed INTO the current chat, so send it there
+    // before re-pinning — otherwise it would surface in the fresh chat, out of
+    // the context it was written in.
+    await bursts.drain(ctx.chat.id);
     const link = await ensureUser(ctx);
     if (!link) return;
     const id = nanoid();
@@ -486,7 +515,7 @@ async function buildBot(): Promise<Bot | null> {
       const { onAskText } = await import("./ask-collect");
       if (await onAskText(bot, ctx.chat.id, link.userId, ctx.message.text)) return;
     }
-    await ingest(ctx, ctx.message.text, []);
+    bufferBurst(ctx, ctx.message.text, []);
   });
 
   // Any message carrying a file the assistant can use: photo, document, video,
@@ -502,7 +531,7 @@ async function buildBot(): Promise<Bot | null> {
         bufferAlbum(ctx, ctx.message.media_group_id, text, files);
         return;
       }
-      await ingest(ctx, text, files);
+      bufferBurst(ctx, text, files);
     },
   );
 
