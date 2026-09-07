@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Chat UI polish: sidebar rows carry hierarchy in tone rather than one flat size, composer and message-action buttons have a rest state and the app's own press curve, a code block's copy/download sit on a header bar inside the block (and are now localized), text-file tiles show their type instead of a 4px content peek, and the composer draws a line around itself while a turn runs.
+
 ## [0.41.0] - 2026-09-07
 
 ### Added
