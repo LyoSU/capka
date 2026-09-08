@@ -240,6 +240,46 @@ describe("dictation engine", () => {
     expect(h.value()).toBe("first sentence second sentence");
   });
 
+  it("keeps one copy of the phrase Chrome on Android reports twice", () => {
+    const h = harness("");
+    h.engine.start();
+    // Android answers each phrase with two events; the second lists the phrase
+    // twice, both copies final.
+    h.live().say({ text: "mobile", final: true });
+    h.live().say({ text: "mobile", final: true }, { text: "mobile", final: true });
+    expect(h.value()).toBe("mobile");
+
+    h.live().end();
+    h.live().say({ text: "phone", final: true }, { text: "phone", final: true });
+    expect(h.value()).toBe("mobile phone");
+  });
+
+  it("keeps one copy of what Safari re-lists after a pause, piecewise or whole", () => {
+    const h = harness("");
+    h.engine.start();
+    // Segments first, then the same words again as one result.
+    h.live().say({ text: "hello" }, { text: "world" }, { text: "hello world" });
+    expect(h.value()).toBe("hello world");
+    // A result that carries the whole run so far plus new words replaces it.
+    h.live().say({ text: "hello world", final: true }, { text: "hello world how are you" });
+    expect(h.value()).toBe("hello world how are you");
+  });
+
+  it("does not say the run's phrases again after the user edits mid-dictation", () => {
+    const h = harness("");
+    h.engine.start();
+    h.live().say({ text: "hello world", final: true });
+    expect(h.value()).toBe("hello world");
+
+    // A keystroke while listening: what was heard so far is ordinary text now,
+    // and the run — which would report "hello world" again — is reopened.
+    h.type("hello world!");
+    expect(h.runs()).toBe(2);
+    expect(h.engine.listening()).toBe(true);
+    h.live().say({ text: "how are you", final: true });
+    expect(h.value()).toBe("hello world! how are you");
+  });
+
   it("undoes the whole dictation back to the text and caret it started from", () => {
     const h = harness("Draft note", 5);
     h.engine.start();

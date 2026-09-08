@@ -273,12 +273,10 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   /** Text left of the caret when this dictation started, and text right of it. */
   let before = "";
   let after = "";
-  /** Finalised phrases from recognition runs that have already ended. */
+  /** What recognition runs that have already ended said. */
   let carried = "";
-  /** Finalised phrases from the run in progress. */
-  let settled = "";
-  /** The phrase the engine is still revising. Replaced wholesale each event. */
-  let draft = "";
+  /** What the run in progress has said so far. Recomputed wholesale each event. */
+  let spoken = "";
 
   /** The composer exactly as it was before this dictation. `null` → nothing to undo. */
   let snapshot: { value: string; start: number; end: number } | null = null;
@@ -305,7 +303,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   };
   const canUndo = () => snapshot !== null;
 
-  const dictated = () => appendPhrase(carried, appendPhrase(settled, draft));
+  const dictated = () => appendPhrase(carried, spoken);
 
   /** Re-render the composer from the current speech state. */
   const paint = () => {
@@ -326,8 +324,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     before = value.slice(0, start);
     after = value.slice(end);
     carried = "";
-    settled = "";
-    draft = "";
+    spoken = "";
   };
 
   const clearCap = () => {
@@ -368,18 +365,26 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       setPhase("hearing");
       // Recompute the whole run from its results rather than tracking deltas:
       // the engine revises earlier phrases as it hears more, and `results` is
-      // always the authoritative list for the run in progress.
-      let finals = "";
-      let interim = "";
+      // always the authoritative list for the run in progress. Whether a
+      // result is final or still a guess makes no difference to what the
+      // composer shows, so the two are not kept apart — which also sidesteps
+      // Safari, where `isFinal` may never come.
+      let text = "";
       const list = event.results;
       for (let i = 0; i < list.length; i++) {
-        const result = list[i];
-        const text = result?.[0]?.transcript ?? "";
-        if (result?.isFinal) finals = appendPhrase(finals, text);
-        else interim = appendPhrase(interim, text);
+        const piece = (list[i]?.[0]?.transcript ?? "").trim();
+        if (!piece) continue;
+        // Engines say things twice. Chrome on Android reports each finished
+        // phrase as two results with the same text; Safari re-lists what it
+        // heard once the speaker pauses, sometimes as one result carrying the
+        // whole run so far. A result that only repeats what this run already
+        // said is the engine's, not the speaker's — the one thing this eats is
+        // a phrase deliberately said twice with a pause between, which
+        // dictation does not do.
+        if (piece === text || text.endsWith(" " + piece)) continue;
+        text = piece.startsWith(text + " ") ? piece : appendPhrase(text, piece);
       }
-      settled = finals;
-      draft = interim;
+      spoken = text;
       paint();
     };
 
@@ -405,14 +410,12 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
 
     r.onend = () => {
       // Chrome ends a run of its own accord after a pause, well before the user
-      // is done talking. Carry the finalised text over and open the next run so
-      // the session looks continuous — unless something told us to stop.
-      // Fold the revision-in-progress in too, not just the finalised phrases: a
-      // run that ends without finalising its last words would otherwise drop the
-      // sentence the user just spoke.
-      carried = appendPhrase(carried, appendPhrase(settled, draft));
-      settled = "";
-      draft = "";
+      // is done talking (on Android, after every phrase). Carry what it said
+      // over — guesses included, or a run that ends before firming up its last
+      // words would drop the sentence just spoken — and open the next run so
+      // the session looks continuous, unless something told us to stop.
+      carried = appendPhrase(carried, spoken);
+      spoken = "";
       // A run that heard nothing and ended immediately would otherwise reopen
       // forever; three in a row means the engine is refusing, not pausing.
       barren = heard ? 0 : barren + 1;
@@ -501,8 +504,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     before = "";
     after = "";
     carried = "";
-    settled = "";
-    draft = "";
+    spoken = "";
     written = restore.value;
     host.emit(restore.value, restore.start, restore.end);
     host.changed();
@@ -523,9 +525,13 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       before = value.slice(0, start);
       after = value.slice(end);
       carried = "";
-      settled = "";
-      draft = "";
+      spoken = "";
       written = value;
+      // The run in progress keeps reporting every phrase it has heard so far,
+      // and those phrases are now part of `before`. Open a fresh run so the
+      // next event starts from nothing instead of saying them all again.
+      release();
+      if (!run()) finish();
     }
     host.changed();
   };
