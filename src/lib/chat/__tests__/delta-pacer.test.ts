@@ -254,4 +254,47 @@ describe("createDeltaPacer", () => {
     const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
     expect(median).toBeLessThan(100);
   });
+
+  // The other half of the same missing property. Even releasing one word at a
+  // time, the pacer only smooths WITHIN a batch: it drains the queue to empty on
+  // every batch, so a hiccup upstream reaches the screen at full length. And the
+  // runner's flushes are not evenly spaced — `doFlush` awaits `saveSnapshot`
+  // inside the serialized flush chain, so about once a second one interval
+  // carries a Postgres UPDATE on top of the 100ms timer. A buffer with nothing
+  // in hand has nothing to cover that with.
+  it("covers a hiccup in the stream: a longer pause between server flushes does not reach the screen", () => {
+    const at: number[] = [];
+    const p = createDeltaPacer(() => at.push(Date.now()));
+    for (let i = 0; i < 40; i++) {
+      p.enqueue(text(words(2)));
+      vi.advanceTimersByTime(i % 10 === 9 ? 260 : 100);
+    }
+    const gaps = at.slice(1).map((t, i) => t - at[i]).slice(3);
+    const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(median * 2);
+  });
+
+  // Building the reserve costs tick spacing, and that price is only worth paying
+  // where the budget is about one word. On a fast model a tick already affords
+  // several, so spacing them further buys nothing — its gaps are even without a
+  // reserve — and makes each release a bigger clump, which is the very thing the
+  // pacer is for.
+  it("does not slow its frames on a fast model, where a tick already affords several words", () => {
+    const applied: string[] = [];
+    const p = createDeltaPacer((e: Ev) => applied.push(e.delta));
+    // 300 chars/s in 100ms batches, run past the warm-up…
+    for (let i = 0; i < 20; i++) {
+      p.enqueue(text(words(5)));
+      vi.advanceTimersByTime(100);
+    }
+    // …then count the releases over one second of the steady state.
+    applied.length = 0;
+    for (let i = 0; i < 10; i++) {
+      p.enqueue(text(words(5)));
+      vi.advanceTimersByTime(100);
+    }
+    // 1s at the 50ms floor is 20 releases; anything near 12 means the tick was
+    // stretched to 80ms and the words came in larger groups instead.
+    expect(applied.length).toBeGreaterThanOrEqual(16);
+  });
 });

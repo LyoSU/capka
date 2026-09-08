@@ -21,7 +21,18 @@ export type PacedDelta = { delta: string; messageId?: string };
 
 const INITIAL_CPS = 128;       // reading pace before the model's own rate is known
 const MIN_CPS = 40;            // floor so a stalled estimate never freezes the tail
-const CATCH_UP_MS = 400;       // backlog is drained within about this long
+const CATCH_UP_MS = 400;       // the backlog is brought to HOLD_MS within about this long
+// Text kept in hand, measured as how long the model takes to produce it. The
+// runner's flushes are not evenly spaced — `doFlush` awaits `saveSnapshot`
+// inside the serialized flush chain, so about once a second one interval
+// carries a Postgres UPDATE on top of the 100ms timer — and this reserve is
+// what covers such a gap instead of passing it to the screen. It costs the
+// reader nothing: the first word still leaves on the first tick (the reserve is
+// built by running slightly under the model's rate, not by holding text back),
+// and the tail is drained by `flush()` when the turn ends.
+const HOLD_MS = 300;
+const SHORT_TICK_STRETCH = 1.6; // how much slower to tick while the reserve is short
+const WORD_BUDGET = 12;         // a tick's budget past which it is already several words
 const MAX_WORD_EXTEND = 24;    // finish the word at the cut, unless it's not a word (CJK, base64)
 const TICK_MIN_MS = 50;        // 20 fps while the message is short
 const TICK_MAX_MS = 250;       // the old coalescer's cadence, once it is long
@@ -62,7 +73,20 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
   const tickMs = () => {
     const t = Math.min(1, Math.max(0, (shown - SHORT_CHARS) / (LONG_CHARS - SHORT_CHARS)));
     const ms = TICK_MIN_MS + t * (TICK_MAX_MS - TICK_MIN_MS);
-    return inFence ? Math.max(ms, CODE_TICK_MS) : ms;
+    const base = inFence ? Math.max(ms, CODE_TICK_MS) : ms;
+    // Short of the reserve: space the ticks out. Lowering `speed` cannot do it —
+    // the release quantum is a whole word, and at an ordinary model's rate one
+    // word per minimum tick already IS its full rate, so the reserve could never
+    // build however low the target went. Spacing is the only lever left, and it
+    // is a gentle one: 1.6× at the floor is 80ms, still finer than the 100ms
+    // stream being smoothed.
+    //
+    // Only where a tick's budget is about a word, though. A fast model already
+    // affords several per tick, so spacing them buys nothing there — those gaps
+    // are even with no reserve at all — while each release becomes a bigger
+    // clump, which is the thing this whole module exists to avoid.
+    const short = backlog < incoming * HOLD_MS && speed * base < WORD_BUDGET;
+    return short ? base * SHORT_TICK_STRETCH : base;
   };
 
   const note = (part: string) => {
@@ -140,10 +164,15 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
     const now = Date.now();
     const elapsed = Math.max(1, now - lastTickAt);
     lastTickAt = now;
-    // Target = what the model produces + whatever it takes to drain the backlog
-    // soon; smoothed 2:1 toward the target and never more than doubled in one
-    // tick, so the cadence changes without a visible lurch.
-    const target = incoming + backlog / CATCH_UP_MS;
+    // Target = what the model produces, plus whatever brings the backlog to the
+    // buffer we mean to keep — draining what exceeds it, and running under the
+    // model's rate while it is missing (the term goes negative on its own, so
+    // there is no second branch). Draining to EMPTY, which this did, is what
+    // left nothing in hand: a buffer with no reserve can only smooth within one
+    // batch, so a longer pause upstream reached the screen at full length.
+    // Smoothed 2:1 toward the target and never more than doubled in one tick, so
+    // the cadence changes without a visible lurch.
+    const target = incoming + (backlog - incoming * HOLD_MS) / CATCH_UP_MS;
     speed = Math.min((2 * target + speed) / 3, speed * 2);
     speed = Math.max(speed, MIN_CPS / 1000);
     release(Math.max(1, Math.floor(speed * elapsed)));
