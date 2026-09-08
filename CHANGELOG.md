@@ -14,6 +14,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 - Memory no longer stores the assistant's own self-description (name, abilities, promises) as facts about the user: the background fact sweep and `memory_fact_write` both keep a fact's subject to the person or the project.
 - Inline math written as `$…$` now typesets instead of showing raw LaTeX; a price like `$5 and $10` is still read as text.
+- A reply whose first formula, code fence or diagram appears while it is still being written now gets the matching renderer even when an earlier reply in the same page already downloaded it — before, such a reply kept showing raw LaTeX or unhighlighted code until the page was reloaded.
 - Dictation no longer repeats phrases (Chrome for Android reported each one twice; Safari re-lists what it heard after a pause), and editing the composer while dictating no longer re-inserts what was already heard.
 - Streamed replies arrive word by word at an even cadence instead of in clumps of two or three: at an ordinary model's pace the client pacer released a whole server batch per tick, so the cadence on screen was the 100 ms publish interval, and an uneven publish (the periodic snapshot write) passed straight through to the reader.
 

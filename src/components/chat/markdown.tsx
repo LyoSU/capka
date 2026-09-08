@@ -134,16 +134,33 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
   );
 
   const need = neededPlugins(children);
-  // Seeded from what is already downloaded, so scrolling back to an old code block
-  // paints it highlighted instead of flashing plain first.
-  const [ready, setReady] = useState(() => readyOf(need));
+  // Read from what is already downloaded on every render, not seeded once into
+  // state. `loaded` is module-level, so a plugin is often already there the first
+  // time THIS message asks for one — an earlier reply in the transcript downloaded
+  // it. Held in state, this value could only be refreshed by a chunk landing, and
+  // the `name in loaded` path below has no promise to hang that on: a reply that
+  // mounted before its first formula arrived then rendered raw LaTeX for the rest
+  // of the page's life. Recomputing cannot drift, and it keeps the reason the value
+  // was seeded in the first place — scrolling back to an old code block paints it
+  // highlighted instead of flashing plain. `bump` only asks for the re-render; the
+  // string identity is what Streamdown's memo compares, so a render that changes
+  // nothing re-parses nothing.
+  const [, bump] = useState(0);
+  const ready = readyOf(need);
 
   useEffect(() => {
     if (!need) return;
     let alive = true;
     for (const name of need.split(" ") as PluginName[]) {
       if (name in loaded) continue;
-      load(name).then(() => alive && setReady(readyOf(need))).catch(() => {});
+      // A failed chunk is not fatal — the text renders unhighlighted or as raw
+      // LaTeX and the next render retries (see `load`) — but it must not be
+      // SILENT: swallowing it made "the formula did not typeset" and "the
+      // download 404'd" indistinguishable from the outside, which is an hour of
+      // reading render code for a network error.
+      load(name)
+        .then(() => alive && bump((n) => n + 1))
+        .catch((err) => console.error(`[markdown] ${name} plugin failed to load`, err));
     }
     return () => { alive = false; };
   }, [need]);
