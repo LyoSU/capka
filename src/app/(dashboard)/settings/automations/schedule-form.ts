@@ -22,7 +22,7 @@ export interface ScheduleForm {
    *  expressions stay untouched until the user picks a simple frequency. */
   freq: Freq | "custom";
   time: string;        // "HH:MM" for daily/weekly/monthly
-  weekday: string;     // "0".."6", Sunday-based like cron
+  weekdays: string[];  // "0".."6", Sunday-based like cron; sorted, at least one for `weekly`
   dayOfMonth: string;  // "1".."28"
   at: string;          // datetime-local value for `once`
   cron: string;        // the original expression, when freq === "custom"
@@ -36,7 +36,7 @@ const numeric = (v: string | undefined) => !!v && /^\d+$/.test(v);
  *  can write are recognized; everything else stays `custom`. */
 export function toForm(trigger: AutomationTrigger, browserTz: string): ScheduleForm {
   const base: ScheduleForm = {
-    freq: "custom", time: "09:00", weekday: "1", dayOfMonth: "1",
+    freq: "custom", time: "09:00", weekdays: ["1"], dayOfMonth: "1",
     at: "", cron: "", timezone: trigger.timezone || browserTz,
   };
   if (trigger.kind === "webhook") return { ...base, freq: "webhook" };
@@ -49,7 +49,14 @@ export function toForm(trigger: AutomationTrigger, browserTz: string): ScheduleF
   if (!numeric(m) || !numeric(h) || mon !== "*") return { ...base, cron: trigger.cron };
   const time = `${pad(Number(h))}:${pad(Number(m))}`;
   if (dom === "*" && dow === "*") return { ...base, freq: "daily", time };
-  if (dom === "*" && numeric(dow) && Number(dow) <= 6) return { ...base, freq: "weekly", time, weekday: dow };
+  // A list of days ("1,3,5") is still "weekly" to the person reading it — the
+  // pills show which days — so it is the one list shape this form understands.
+  // Ranges and steps ("1-5", "*/2") stay custom: they would round-trip as a
+  // different string, and the stored expression is the one to keep.
+  if (dom === "*" && dow.split(",").every((d) => numeric(d) && Number(d) <= 6)) {
+    const weekdays = [...new Set(dow.split(",").map(Number))].sort((a, b) => a - b).map(String);
+    return { ...base, freq: "weekly", time, weekdays };
+  }
   // Days 29-31 are left to the raw expression: a "monthly" picker that silently
   // skips February is worse than showing the cron it really is.
   if (numeric(dom) && dow === "*" && Number(dom) <= 28) return { ...base, freq: "monthly", time, dayOfMonth: dom };
@@ -64,7 +71,7 @@ export function toTriggerArgs(f: ScheduleForm): { cron?: string; once_at?: strin
   // needs a day boundary, and this form is the only place that knows the user's.
   if (f.freq === "webhook") return { webhook: true, timezone: f.timezone };
   if (f.freq === "once") return { once_at: `${f.at}:00`, timezone: f.timezone };
-  if (f.freq === "weekly") return { cron: `${m} ${h} * * ${f.weekday}`, timezone: f.timezone };
+  if (f.freq === "weekly") return { cron: `${m} ${h} * * ${f.weekdays.join(",")}`, timezone: f.timezone };
   if (f.freq === "monthly") return { cron: `${m} ${h} ${f.dayOfMonth} * *`, timezone: f.timezone };
   return { cron: `${m} ${h} * * *`, timezone: f.timezone };
 }

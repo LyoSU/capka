@@ -18,6 +18,7 @@ export interface EditableAutomation {
   id: string;
   title: string;
   prompt: string;
+  enabled: boolean;
   trigger: AutomationTrigger;
   /** The full callable address of a webhook automation, or null. Built by the
    *  list route from the instance's public origin — never re-derived here, so a
@@ -34,6 +35,20 @@ export interface EditableAutomation {
   /** The condition sentence checked before each run, or null when every firing
    *  runs. Empty text and null mean the same thing to the server. */
   runWhen: string | null;
+}
+
+/** "Europe/Kyiv (GMT+3)" — the offset is what lets someone tell two zones with
+ *  the same city-less name apart, and it is read at the current instant so DST
+ *  shows the offset that applies today. */
+function zoneLabel(tz: string): string {
+  try {
+    const offset = new Intl.DateTimeFormat("en", { timeZone: tz, timeZoneName: "shortOffset" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value;
+    return offset ? `${tz} (${offset})` : tz;
+  } catch {
+    return tz;
+  }
 }
 
 export function AutomationEditor({
@@ -56,12 +71,28 @@ export function AutomationEditor({
   // can seed straight from props without an effect syncing them afterwards.
   const [title, setTitle] = useState(automation?.title ?? "");
   const [prompt, setPrompt] = useState(automation?.prompt ?? "");
+  // Only an existing automation has a switch: creation has no `enabled` to send
+  // (a new one is always on), so the header shows one on edit alone.
+  const [enabled, setEnabled] = useState(automation?.enabled ?? true);
   const [schedule, setSchedule] = useState<ScheduleForm>(() =>
     toForm(
       automation?.trigger ?? { kind: "schedule", cron: "0 9 * * *", timezone: "" },
       Intl.DateTimeFormat().resolvedOptions().timeZone,
     ));
   const [scheduleTouched, setScheduleTouched] = useState(false);
+  // The zone is the browser's unless the row already has one, and almost no one
+  // needs to change it — so the picker stays folded behind one link until asked.
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [pickingZone, setPickingZone] = useState(false);
+  // The zone list is built once per dialog: ~400 Intl lookups is cheap on mount
+  // and pointless on every render. A stored zone Intl no longer lists (an alias
+  // like Europe/Kiev) is kept at the top so the picker never shows a blank value.
+  const [zones] = useState<Record<string, string>>(() => {
+    const all = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+    const current = automation?.trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!all.includes(current)) all.unshift(current);
+    return Object.fromEntries(all.map((z) => [z, zoneLabel(z)]));
+  });
   const [threadMode, setThreadMode] = useState(automation?.threadMode === "single" ? "single" : "fresh");
   const [notifyMode, setNotifyMode] = useState(automation?.notifyMode === "when_needed" ? "when_needed" : "always");
   // Absent on a NEW automation, and the default is on — the same bargain the row
@@ -99,6 +130,10 @@ export function AutomationEditor({
             thread_mode: threadMode,
             notify_mode: notifyMode,
             deliver_telegram: deliverTelegram,
+            // Sent only when the switch actually moved: `enabled: true` on the
+            // server also recomputes the run horizon, which an unrelated edit of
+            // an already-active automation must not trigger.
+            ...(automation && enabled !== automation.enabled ? { enabled } : {}),
             // Emptying the field REMOVES the condition, so an edit always sends
             // the value (null when blank); on create a blank one is simply left
             // out, the same bargain the run limit above strikes.
@@ -129,14 +164,17 @@ export function AutomationEditor({
     }
   };
 
-  const weekdayItems = Object.fromEntries(
-    Array.from({ length: 7 }, (_, i) => [String(i), t(`weekday.w${i}`)]),
+  const freqItems = Object.fromEntries(
+    (["daily", "weekly", "monthly", "once", "webhook"] as Freq[]).map((f) => [f, t(`freq.${f}`)]),
   );
+  // Monday first: cron counts from Sunday, but nobody's week does.
+  const weekdayOrder = ["1", "2", "3", "4", "5", "6", "0"];
   const monthDayItems = Object.fromEntries(
     Array.from({ length: 28 }, (_, i) => [String(i + 1), String(i + 1)]),
   );
   const canSave = title.trim().length > 0 && prompt.trim().length > 0 &&
-    (schedule.freq !== "once" || schedule.at.length >= 16) && validLimit !== undefined;
+    (schedule.freq !== "once" || schedule.at.length >= 16) &&
+    (schedule.freq !== "weekly" || schedule.weekdays.length > 0) && validLimit !== undefined;
 
   const copyUrl = async () => {
     if (!webhookUrl) return;
@@ -173,14 +211,23 @@ export function AutomationEditor({
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-xl">
-        <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+        {/* One row: the title, and — on edit — the enabled switch at the far
+            end, where the eye looks for "is this thing on". The subtitle is
+            for screen readers only; sighted users get the form itself. */}
+        <DialogHeader className="flex-row items-center justify-between gap-4 border-b px-5 py-3.5 pr-12">
           <DialogTitle className="truncate">{automation ? t("editTitle") : t("createTitle")}</DialogTitle>
-          <DialogDescription className="truncate">
+          <DialogDescription className="sr-only">
             {automation ? automation.title : t("createHint")}
           </DialogDescription>
+          {automation && (
+            <label className="flex shrink-0 items-center gap-2.5 text-sm text-muted-foreground">
+              {t("enabledLabel")}
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
+            </label>
+          )}
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-5 pt-4 pb-6 [scrollbar-gutter:stable]">
           {/* `flex flex-col`, not `space-y`: a bare <label> is inline, so it
               would share a line with anything that isn't a block box — which is
               exactly what an <Input> (inline-block) is. Flex items are
@@ -196,98 +243,97 @@ export function AutomationEditor({
               id="automation-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              rows={7}
+              rows={5}
               className="resize-y"
             />
             <p className="text-xs text-muted-foreground">{t("promptHint")}</p>
           </div>
 
-          <div className="space-y-2">
+          <div className="flex flex-col gap-1.5">
             <p className="text-sm font-medium">{t("scheduleLabel")}</p>
 
             {schedule.freq === "custom" && !scheduleTouched && (
-              <div className="space-y-1.5 rounded-xl bg-muted px-4 py-3">
+              <div className="mb-1 space-y-1 rounded-xl bg-muted px-4 py-3">
                 <p className="font-mono text-xs">{schedule.cron}</p>
                 <p className="text-xs text-muted-foreground">{t("customScheduleHint")}</p>
               </div>
             )}
 
-            <ToggleGroup
-              value={[schedule.freq === "custom" ? "" : schedule.freq]}
-              onValueChange={(v) => v.length && patchSchedule({ freq: v[0] as Freq })}
-              variant="outline"
-              size="sm"
-              className="flex-wrap justify-start"
-            >
-              <ToggleGroupItem value="daily">{t("freq.daily")}</ToggleGroupItem>
-              <ToggleGroupItem value="weekly">{t("freq.weekly")}</ToggleGroupItem>
-              <ToggleGroupItem value="monthly">{t("freq.monthly")}</ToggleGroupItem>
-              <ToggleGroupItem value="once">{t("freq.once")}</ToggleGroupItem>
-              <ToggleGroupItem value="webhook">{t("freq.webhook")}</ToggleGroupItem>
-            </ToggleGroup>
+            {/* The whole schedule reads as one sentence — "weekly, at 09:00, on
+                Monday" — so it is laid out as one row, and each control names
+                itself for assistive tech instead of carrying a visible label. */}
+            <div className="flex flex-wrap gap-2">
+              <Select
+                value={schedule.freq === "custom" ? null : schedule.freq}
+                onValueChange={(v) => v && patchSchedule({ freq: v as Freq })}
+                items={freqItems}
+              >
+                <SelectTrigger className="min-w-36 flex-1" aria-label={t("scheduleLabel")}>
+                  <SelectValue placeholder={t("freqPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(freqItems).map(([k, label]) => (
+                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-            {schedule.freq !== "custom" && schedule.freq !== "webhook" && (
-              <div className="flex flex-wrap items-end gap-3 pt-1">
-                {schedule.freq === "once" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="automation-at" className="text-xs text-muted-foreground">{t("dateLabel")}</label>
-                    <Input
-                      id="automation-at"
-                      type="datetime-local"
-                      value={schedule.at}
-                      onChange={(e) => patchSchedule({ at: e.target.value })}
-                      className="w-56"
-                    />
-                  </div>
-                ) : (
-                  <>
-                    {schedule.freq === "weekly" && (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs text-muted-foreground">{t("weekdayLabel")}</label>
-                        <Select
-                          value={schedule.weekday}
-                          onValueChange={(v) => v && patchSchedule({ weekday: v as string })}
-                          items={weekdayItems}
-                        >
-                          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(weekdayItems).map(([k, label]) => (
-                              <SelectItem key={k} value={k}>{label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    {schedule.freq === "monthly" && (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs text-muted-foreground">{t("dayOfMonthLabel")}</label>
-                        <Select
-                          value={schedule.dayOfMonth}
-                          onValueChange={(v) => v && patchSchedule({ dayOfMonth: v as string })}
-                          items={monthDayItems}
-                        >
-                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {Object.keys(monthDayItems).map((k) => (
-                              <SelectItem key={k} value={k}>{k}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="automation-time" className="text-xs text-muted-foreground">{t("timeLabel")}</label>
-                      <Input
-                        id="automation-time"
-                        type="time"
-                        value={schedule.time}
-                        onChange={(e) => patchSchedule({ time: e.target.value })}
-                        className="w-28"
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
+              {schedule.freq === "once" && (
+                <Input
+                  type="datetime-local"
+                  aria-label={t("dateLabel")}
+                  value={schedule.at}
+                  onChange={(e) => patchSchedule({ at: e.target.value })}
+                  className="w-auto min-w-52 flex-1"
+                />
+              )}
+
+              {(schedule.freq === "daily" || schedule.freq === "weekly" || schedule.freq === "monthly") && (
+                <Input
+                  type="time"
+                  aria-label={t("timeLabel")}
+                  value={schedule.time}
+                  onChange={(e) => patchSchedule({ time: e.target.value })}
+                  className="w-28"
+                />
+              )}
+
+              {schedule.freq === "monthly" && (
+                <Select
+                  value={schedule.dayOfMonth}
+                  onValueChange={(v) => v && patchSchedule({ dayOfMonth: v as string })}
+                  items={monthDayItems}
+                >
+                  <SelectTrigger className="min-w-24 flex-1" aria-label={t("dayOfMonthLabel")}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.keys(monthDayItems).map((k) => (
+                      <SelectItem key={k} value={k}>{k}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* One pill per day, several at once: "Mon–Fri at 09:00" is the
+                commonest weekly schedule and a single-day picker made it five
+                automations. Full day names go to assistive tech via aria-label. */}
+            {schedule.freq === "weekly" && (
+              <ToggleGroup
+                multiple
+                value={schedule.weekdays}
+                onValueChange={(v) => patchSchedule({ weekdays: (v as string[]).slice().sort() })}
+                variant="outline"
+                size="sm"
+                spacing={1.5}
+                aria-label={t("weekdayLabel")}
+                className="flex-wrap pt-1"
+              >
+                {weekdayOrder.map((d) => (
+                  <ToggleGroupItem key={d} value={d} aria-label={t(`weekday.w${d}`)} className="min-w-11 px-2.5">
+                    {t(`weekdayShort.w${d}`)}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             )}
 
             {schedule.freq === "webhook" && (
@@ -318,16 +364,50 @@ export function AutomationEditor({
                 )}
               </div>
             )}
+          </div>
 
-            {/* Which clock the time above is read in. Without this line "09:00"
-                is ambiguous the moment someone travels or the instance is hosted
-                elsewhere — and the trigger keeps its own zone, not the reader's.
-                A webhook has no time to read, but the same zone still decides
-                which calendar day its run limit counts against — so it says so
-                rather than showing a note about times that don't exist. */}
-            <p className="text-xs text-muted-foreground">
-              {schedule.freq === "webhook" ? t("webhook.tzNote", { tz: schedule.timezone }) : t("tzNote", { tz: schedule.timezone })}
-            </p>
+          {/* Which clock the time above is read in. Without this "09:00" is
+              ambiguous the moment someone travels or the instance is hosted
+              elsewhere — and the trigger keeps its own zone, not the reader's.
+              A webhook has no time to read, but the same zone still decides
+              which calendar day its run limit counts against — so it says so.
+              Folded to one line by default; a zone that is not the browser's
+              gets a one-click way back to it, which is the common fix. */}
+          <div className="flex flex-col gap-1.5">
+            {pickingZone ? (
+              <>
+                <label htmlFor="automation-timezone" className="text-sm font-medium">{t("timezoneLabel")}</label>
+                <Select
+                  value={schedule.timezone}
+                  onValueChange={(v) => v && patchSchedule({ timezone: v as string })}
+                  items={zones}
+                >
+                  <SelectTrigger id="automation-timezone" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(zones).map(([k, label]) => (
+                      <SelectItem key={k} value={k}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {schedule.freq === "webhook"
+                  ? t("webhook.tzNote", { tz: zoneLabel(schedule.timezone) })
+                  : t("tzNote", { tz: zoneLabel(schedule.timezone) })}
+                {" · "}
+                <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => setPickingZone(true)}>
+                  {t("tzChange")}
+                </button>
+              </p>
+            )}
+            {schedule.timezone !== browserTz && (
+              <div>
+                <Button variant="outline" size="sm" onClick={() => patchSchedule({ timezone: browserTz })}>
+                  {t("tzUseMine", { tz: browserTz })}
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Directly under the schedule, because it qualifies it: the schedule
@@ -347,6 +427,10 @@ export function AutomationEditor({
             />
             <p className="text-xs text-muted-foreground">{t("runWhen.hint")}</p>
           </div>
+
+          {/* Everything above decides when a run happens; everything below,
+              what becomes of it. The rule marks that turn. */}
+          <hr className="border-border" />
 
           <div className="space-y-2">
             <p className="text-sm font-medium">{t("threadModeLabel")}</p>
@@ -390,7 +474,7 @@ export function AutomationEditor({
               Telegram connected: without a link this switch changes nothing, and a
               control with no effect is worse than no control. */}
           {telegramLinked && (
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex flex-col gap-1">
                 <label htmlFor="automation-telegram" className="text-sm font-medium">{t("deliverTelegramLabel")}</label>
                 <p className="text-xs text-muted-foreground">{t("deliverTelegramHint")}</p>
@@ -419,11 +503,11 @@ export function AutomationEditor({
           </div>
         </div>
 
-        <div className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">
+        <div className="flex shrink-0 justify-end gap-2 border-t px-5 py-3.5">
           <Button variant="ghost" onClick={onClose} disabled={saving}>{t("cancel")}</Button>
           <Button onClick={save} disabled={saving || !canSave}>
             {saving && <Loader2 className="animate-spin" />}
-            {t("save")}
+            {automation ? t("save") : t("create")}
           </Button>
         </div>
       </DialogContent>
