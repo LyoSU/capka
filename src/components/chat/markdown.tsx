@@ -10,14 +10,19 @@ import "streamdown/styles.css";
 import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents, LiveContext } from "./workspace-path";
 import { remarkCitations } from "@/lib/chat/citations";
+import { remarkDollarMathGuard } from "@/lib/chat/dollar-math";
 import { openFenceBody, deferLiveHighlight } from "@/lib/chat/live-code";
 import type { Pluggable } from "unified";
 import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
 // Default remark pipeline + our /workspace path linker. Passing remarkPlugins
 // replaces Streamdown's defaults, so re-include them (gfm, codeMeta) to keep GFM
-// tables etc.; ours runs last so it sees plain text.
-const REMARK_WITH_PATHS = [...Object.values(defaultRemarkPlugins), remarkWorkspacePaths];
+// tables etc.; ours runs last so it sees plain text. The math guard rides in
+// every variant, including the plain one, because it is the other half of the
+// single-dollar math enabled below — a message with neither chat nor citations
+// still quotes prices.
+const REMARK_BASE = [...Object.values(defaultRemarkPlugins), remarkDollarMathGuard];
+const REMARK_WITH_PATHS = [...REMARK_BASE, remarkWorkspacePaths];
 
 // Keep relative /workspace links intact (the chip handles them); defer all other
 // URLs to Streamdown's normal sanitizing transform.
@@ -66,7 +71,11 @@ const ANIMATED = {
 // loader clears its own slot on failure instead, so the next render tries again.
 const LOADERS = {
   code: () => import("@streamdown/code").then((m) => m.createCodePlugin({ themes: ["github-light", "github-dark"] })),
-  math: () => import("@streamdown/math").then((m) => m.math),
+  // NOT the packaged `math` instance: it is createMathPlugin() with
+  // `singleDollarTextMath: false`, so `$x = 1$` rendered as literal LaTeX while
+  // only `$$…$$` typeset. Models write the single-dollar form constantly. The
+  // price ambiguity it opens is closed on the tree by remarkDollarMathGuard.
+  math: () => import("@streamdown/math").then((m) => m.createMathPlugin({ singleDollarTextMath: true })),
   mermaid: () => import("@streamdown/mermaid").then((m) => m.mermaid),
 };
 type PluginName = keyof typeof LOADERS;
@@ -188,9 +197,9 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
   // keyed by plugin NAME + JSON(options), so a bare closure per source set
   // would collide on name "" and hand every message the first one's processor.
   const remarkPlugins = useMemo(() => {
-    const base = chatId ? REMARK_WITH_PATHS : undefined;
+    const base = chatId ? REMARK_WITH_PATHS : REMARK_BASE;
     if (!citeKey) return base;
-    return [...(base ?? Object.values(defaultRemarkPlugins)), [remarkCitations, { sources: sources! }] as Pluggable];
+    return [...base, [remarkCitations, { sources: sources! }] as Pluggable];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sources` is represented by citeKey (content identity, not reference)
   }, [chatId, citeKey]);
 
