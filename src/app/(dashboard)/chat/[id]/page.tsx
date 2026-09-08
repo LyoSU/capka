@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { eq, and } from "drizzle-orm";
 
+import { getTranslations } from "next-intl/server";
+
 import { currentSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats, users } from "@/lib/db/schema";
@@ -9,6 +11,27 @@ import { parseThinkAmount } from "@/lib/models/thinking";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { isShareImportEnabled } from "@/lib/import/flag";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { ChatTitleSync } from "@/components/chat/chat-title-sync";
+
+// The browser tab carries the conversation's own name, so a window with three
+// chats open is readable. Scoped by userId like every other read here — a title
+// is user content, and a guessed id must not reveal someone else's. An unsaved
+// chat (no row yet) and an untitled one both fall back to the same placeholder
+// the sidebar shows, so the tab and the list agree.
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const session = await currentSession();
+  if (!session) return {};
+
+  const { id } = await params;
+  const [chat] = await db
+    .select({ title: chats.title })
+    .from(chats)
+    .where(and(eq(chats.id, id), eq(chats.userId, session.user.id)))
+    .limit(1);
+
+  const t = await getTranslations("chat");
+  return { title: chat?.title || t("untitled") };
+}
 
 export default async function ChatIdPage({
   params,
@@ -53,18 +76,23 @@ export default async function ChatIdPage({
   ]);
 
   return (
-    <ChatPanel
-      key={chatId}
-      chatId={chatId}
-      defaultModel={defaultModel}
-      initialThinkAmount={parseThinkAmount(existingChat?.thinkAmount)}
-      projectId={projectId ?? undefined}
-      isAdmin={userRow?.role === "admin"}
-      projectName={project?.name}
-      readOnly={existingChat?.source === "telegram"}
-      initialHasHistory={!!existingChat?.activeLeafId}
-      userName={session.user.name}
-      shareImportEnabled={isShareImportEnabled()}
-    />
+    <>
+      {/* The title above is a first-paint snapshot; this keeps it live once the
+          generated name (or a rename) arrives. */}
+      <ChatTitleSync chatId={chatId} />
+      <ChatPanel
+        key={chatId}
+        chatId={chatId}
+        defaultModel={defaultModel}
+        initialThinkAmount={parseThinkAmount(existingChat?.thinkAmount)}
+        projectId={projectId ?? undefined}
+        isAdmin={userRow?.role === "admin"}
+        projectName={project?.name}
+        readOnly={existingChat?.source === "telegram"}
+        initialHasHistory={!!existingChat?.activeLeafId}
+        userName={session.user.name}
+        shareImportEnabled={isShareImportEnabled()}
+      />
+    </>
   );
 }

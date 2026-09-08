@@ -2214,6 +2214,7 @@
     }
   },
   "setup": {
+    "title": "Setup",
     "back": "Back",
     "blocked": {
       "title": "Setup is locked on this deployment",

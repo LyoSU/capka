@@ -11,6 +11,27 @@ import { resolveShareAccess } from "@/lib/chat/sharing";
 import { SharedChatView } from "@/components/chat/shared-chat-view";
 import { ShareGate } from "@/components/chat/share-gate";
 
+// Metadata on a public route is also the link preview messengers fetch, so the
+// title runs through the SAME gate as the render below — never a looser one. A
+// private chat, an unknown token and a members-only chat seen by a signed-out
+// visitor all fall back to the bare brand name: no title, nothing to infer.
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+
+  const [chat] = await db
+    .select({ title: chats.title, visibility: chats.visibility })
+    .from(chats)
+    .where(eq(chats.shareToken, token))
+    .limit(1);
+  if (!chat) return {};
+
+  const auth = await getAuth();
+  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
+  if (resolveShareAccess(chat.visibility, !!session) !== "ok") return {};
+
+  return chat.title ? { title: chat.title } : {};
+}
+
 // A published conversation, viewable by its share token. This route lives
 // OUTSIDE the (dashboard) group on purpose — no authed sidebar/chrome, and the
 // visibility gate is enforced here server-side (never trust the client).

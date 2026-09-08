@@ -7,6 +7,7 @@ import { clientMessages } from "@/i18n/messages";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
+import { TITLE_TEMPLATE } from "@/lib/metadata";
 import "./globals.css";
 
 // Onest and Lora are served from `fonts/`, not next/font/google. Fetching them
@@ -49,7 +50,11 @@ const lora = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Capka",
+  // `default` is what an unnamed route shows; `template` wraps whatever a child
+  // segment returns, so a page only has to state its own name ("Memory") and the
+  // brand suffix is appended once, here. A template never applies to the segment
+  // that declares it — hence both fields, or "/" would render "%s · Capka".
+  title: { default: "Capka", template: TITLE_TEMPLATE },
   description: "Self-hosted AI coworker. Give it the work, get the finished files.",
   // iOS ignores the manifest's `display: standalone`; this is what makes the
   // app launch full-screen (no Safari chrome) once added to the home screen.

@@ -11,6 +11,23 @@ import { parseAgentProfile } from "@/lib/agents/profile";
 import { getOrgAgentProfile } from "@/lib/settings";
 import { ProjectHub, type HubTab } from "@/components/projects/project-hub";
 
+// The project's own name in the tab — the hub is a place, and someone with two
+// projects open needs to tell the windows apart. Same ownership filter as the
+// page: no metadata read may be looser than the render it labels.
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const session = await currentSession();
+  if (!session) return {};
+
+  const { id } = await params;
+  const [project] = await db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(and(eq(projects.id, id), eq(projects.userId, session.user.id), projectNotDeleted))
+    .limit(1);
+
+  return project ? { title: project.name } : {};
+}
+
 export default async function ProjectHubPage({
   params,
   searchParams,
