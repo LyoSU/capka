@@ -372,7 +372,27 @@ run("vault: the model-facing projection", () => {
       noteId,
       SPACE_A,
     ]);
-    await seedNoteVersion(noteId, "Deadlines", "the embargo deadline is in March");
+    // THE NOTE'S BODY IS LOAD-BEARING, and "tidying" it back to a tight `embargo deadline`
+    // re-arms a coin flip. The `limit: 1` case at the bottom needs the CLAIM to outrank the
+    // note, and the fixture has to earn that in `fusedCandidates` rather than be handed it:
+    //   - the claim's statement contains the query as a PHRASE and this body does not, so
+    //     only the claim takes the +0.5 exact-phrase boost — a margin three orders of
+    //     magnitude wider than one RRF step, and the reason the order cannot drift;
+    //   - the two query words sit far apart here, so `ts_rank_cd` puts the claim first in
+    //     the lexical lane (0.10 vs 0.0125) instead of tying it;
+    //   - the body is longer, so `similarity` keeps the claim first in the trigram lane too
+    //     (0.63 vs 0.42).
+    // MEASURED, because the tight wording did tie: with both texts one adjacent
+    // `embargo deadline`, `ts_rank_cd` was IDENTICAL (0.1 each, `simple` config, no length
+    // normalization), so the lexical lane fell through to its `node_id` tiebreak while the
+    // trigram lane favoured the claim — one rank-1 and one rank-2 each way, whose RRF sums
+    // are equal to the last digit. The final `score desc, node_id asc` then decided the
+    // order by whether `nanoid()` happened to sort after `mviewtest-kinds-note`: ~40% of
+    // runs put the note first and failed the premise below. A test may not be a coin flip.
+    // The note must still be a CANDIDATE for the merged control to mean anything, and it is:
+    // both query words are present, so it matches the lexical lane, and 0.42 clears the
+    // trigram threshold.
+    await seedNoteVersion(noteId, "Deadlines", "the embargo lifted last spring, and a separate filing deadline falls in March");
     await createClaim(
       { spaceId: SPACE_A, statement: "the embargo deadline moved", origin: {}, sourceClass: testServerClass("owner_authored") },
       ACTOR,
@@ -404,7 +424,9 @@ run("vault: the model-facing projection", () => {
     // The premise of the case below, ASSERTED rather than assumed: on this query the claim
     // ranks ABOVE the note in the merged list, so the single slot is contested. If ranking
     // ever put the note first this assertion fails loudly instead of leaving `limit: 1`
-    // quietly pinning nothing.
+    // quietly pinning nothing. It has already fired once, on a fixture whose two texts
+    // scored equal — see the note body above for the margin that now holds it up, and keep
+    // this line: an assertion that catches its own fixture is the cheap half of the fix.
     expect(both.rows.map((r) => r.kind)).toEqual(["claim", "note"]);
 
     const oneNote = await listMemoryToolRows([SPACE_A], {
