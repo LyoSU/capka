@@ -11,7 +11,7 @@ import { loadCorpus } from "./types";
 /**
  * Does the model reuse an existing topic, or mint a new name every turn?
  *
- * Opt-in, because it spends real money at a real provider — 54 sequential calls, plus the
+ * Opt-in, because it spends real money at a real provider — 55 sequential calls, plus the
  * judge's control:
  *
  *   RUN_VAULT_EVAL=1 \
@@ -61,7 +61,7 @@ run("topic reuse", () => {
 
     // The measured run goes FIRST, unlike the extraction eval. There the judge decides every
     // number, so a failed control is terminal; here it decides only the cross-language section,
-    // and spending 54 calls and then discarding the headline ratio because a secondary
+    // and spending 55 calls and then discarding the headline ratio because a secondary
     // instrument was unwell would throw away the answer that was actually paid for.
     const result = await runTopicReuse({ corpus, generate: generatorFor(MODEL) });
     const s = summarize(result);

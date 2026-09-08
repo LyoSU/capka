@@ -226,14 +226,14 @@ describe("the real corpus", () => {
     // Proof the harness executes at full scale without a provider. The stub answers `none`
     // every time, so the topic list stays empty and nothing here is a claim about a model.
     const corpus = loadCorpus();
-    expect(corpus).toHaveLength(54);
+    expect(corpus).toHaveLength(55);
     const { generate, prompts } = scripted(corpus.map(() => '{"kind":"none"}'));
     const run = await runTopicReuse({ corpus, generate });
-    expect(run.rows).toHaveLength(54);
-    expect(prompts).toHaveLength(54);
+    expect(run.rows).toHaveLength(55);
+    expect(prompts).toHaveLength(55);
     expect(run.topics).toHaveLength(0);
     const s = summarize(run);
-    expect(s.counts.none).toBe(54);
+    expect(s.counts.none).toBe(55);
     expect(s.topicsPerFact).toBe(0);
   });
 
@@ -243,10 +243,10 @@ describe("the real corpus", () => {
     const corpus = loadCorpus();
     const { generate } = scripted(corpus.map((f) => JSON.stringify({ kind: "new", name: `topic for ${f.id}` })));
     const run = await runTopicReuse({ corpus, generate });
-    expect(run.topics).toHaveLength(54);
-    expect(run.curve[53]).toBe(54);
+    expect(run.topics).toHaveLength(55);
+    expect(run.curve[54]).toBe(55);
     const s = summarize(run);
-    expect(s.counts.mint).toBe(54);
+    expect(s.counts.mint).toBe(55);
     expect(s.topicsPerFact).not.toBeNull();
   });
 });

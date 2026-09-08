@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 - Chat UI polish: sidebar rows carry hierarchy in tone rather than one flat size, composer and message-action buttons have a rest state and the app's own press curve, a code block's copy/download sit on a header bar inside the block (and are now localized), text-file tiles show their type instead of a 4px content peek, and the composer draws a line around itself while a turn runs.
 
 ### Fixed
+- Memory no longer stores the assistant's own self-description (name, abilities, promises) as facts about the user: the background fact sweep and `memory_fact_write` both keep a fact's subject to the person or the project.
 - Inline math written as `$…$` now typesets instead of showing raw LaTeX; a price like `$5 and $10` is still read as text.
 - Dictation no longer repeats phrases (Chrome for Android reported each one twice; Safari re-lists what it heard after a pause), and editing the composer while dictating no longer re-inserts what was already heard.
 

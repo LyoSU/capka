@@ -409,6 +409,18 @@ describe("extractFacts — what is actually sent to the aux model", () => {
     expect(calledWith.system).toMatch(/connection string/i);
   });
 
+  // Observed live: asked to "write something nice about yourself", the assistant wrote a
+  // self-description and the sweep filed each paragraph as a durable fact — five rows of
+  // "I am Capka, an AI colleague…" in the person's memory. The class gate cannot catch
+  // it (it measures where the words came from, not whom they are about), so the rule
+  // lives in the prompt, and this pins that it is still there.
+  it("the system prompt says a fact is never about the assistant itself", async () => {
+    const generate = generateReturning("[]");
+    await extractFacts({ ...baseArgs, generate });
+    const [[calledWith]] = generate.mock.calls;
+    expect(calledWith.system).toMatch(/never the assistant itself/i);
+  });
+
   // Pins the wording that makes the real-verifier tests below meaningful: if this
   // instruction is ever deleted, those tests keep passing (they call
   // verifyDirectProvenance directly, not through the prompt) while the guarantee

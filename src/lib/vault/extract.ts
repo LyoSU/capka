@@ -47,6 +47,8 @@ const EXTRACT_INSTRUCTION =
   `Never extract a credential, password, API key, token, connection string, or account/card number as a plain ` +
   `fact — if the turn contains one, either omit it entirely or extract it with "sensitive":true.\n\n` +
   `Only durable, reusable facts — never task mechanics, pleasantries, or transient chatter. One fact per item. ` +
+  `The subject of a fact is the user or their project — never the assistant itself: what the assistant is, ` +
+  `is called, can do, or promises to do is not a fact to save, even when the assistant states it at length. ` +
   `Output ONLY the JSON array, nothing else. If nothing is worth saving, output [].`;
 // The Ukrainian few-shot example two paragraphs up is a SANCTIONED exception to
 // "comments/code in English" (same standing as `src/i18n/config.ts`): it is what
