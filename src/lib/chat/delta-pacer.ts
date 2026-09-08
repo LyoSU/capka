@@ -110,10 +110,21 @@ export function createDeltaPacer<E extends PacedDelta>(apply: (event: E) => void
         apply({ ...head, delta: avail });
         return;
       }
-      // Split at the budget, extended to the end of the word it lands in.
+      // Split on the last word boundary the budget reaches — the most whole
+      // words it affords, never one more. Extending FORWARD to the end of the
+      // word the cut lands in (what this did) overshoots by up to a word, and a
+      // batch at the size a real model produces is barely longer than one
+      // tick's budget: the overshoot then swallows the whole batch and the pacer
+      // turns transparent, replaying the server's cadence instead of its own.
+      // Falling back to the forward extend matters for the case that has no
+      // boundary to go back to — the budget landing inside the first word.
       let cut = budget;
-      const ws = avail.slice(cut, cut + MAX_WORD_EXTEND).search(/\s/);
-      if (ws >= 0) cut += ws + 1;
+      const whole = /[\s\S]*\s/.exec(avail.slice(0, cut));
+      if (whole) cut = whole[0].length;
+      else {
+        const ws = avail.slice(cut, cut + MAX_WORD_EXTEND).search(/\s/);
+        if (ws >= 0) cut += ws + 1;
+      }
       // Never split a surrogate pair (emoji) across two ticks.
       if (cut < avail.length && /[\uD800-\uDBFF]/.test(avail[cut - 1])) cut++;
       const part = avail.slice(0, cut);

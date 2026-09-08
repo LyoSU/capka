@@ -226,4 +226,32 @@ describe("createDeltaPacer", () => {
     vi.advanceTimersByTime(5_000);
     expect(applied).toEqual([]);
   });
+
+  // The property the pacer exists for, and the one every test above misses. They
+  // feed either a big burst (words(60)) or 40-char batches, and at those sizes a
+  // tick's budget really does split the batch. At the size a typical model
+  // actually produces — ~12 chars per 100ms flush — it does not: the budget is
+  // ~7 chars and the word-extend in `release` carries the cut to the end of the
+  // next word, which is the end of the batch. So the pacer became transparent,
+  // applying one server batch per tick, and the cadence on screen was the
+  // cadence of Postgres NOTIFY: two words, pause, two words.
+  //
+  // Note what this means for the test above it: "does not starve a slow model"
+  // passes BECAUSE of that transparency (one apply per batch clears its bar), so
+  // wanting the queue drained cannot be the whole specification. The pacer needs
+  // a cadence of its own, finer than the stream it is smoothing.
+  it("releases on its own cadence, not the server's, on a stream of ordinary speed", () => {
+    const at: number[] = [];
+    const p = createDeltaPacer(() => at.push(Date.now()));
+    // ~120 chars/s, the pace of a typical model, in the runner's 100ms batches.
+    for (let i = 0; i < 40; i++) {
+      p.enqueue(text(words(2)));
+      vi.advanceTimersByTime(100);
+    }
+    // The first few releases run before the incoming rate is known; the cadence
+    // claim is about the steady state, not the first frame.
+    const gaps = at.slice(1).map((t, i) => t - at[i]).slice(3);
+    const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    expect(median).toBeLessThan(100);
+  });
 });
