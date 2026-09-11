@@ -306,7 +306,7 @@ export type ScopeView = {
  * and is worse: the reader is promised a date, and a date that moves every time an image is
  * rebuilt is not a promise.
  */
-const ARCHIVE_RELEASED_ON = "2026-09-02";
+const ARCHIVE_RELEASED_ON = "2026-09-11";
 export const ARCHIVE_DAYS = 30;
 
 export function archiveExpiresAt(): string {
