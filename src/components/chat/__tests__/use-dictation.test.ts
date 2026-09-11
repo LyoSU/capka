@@ -103,6 +103,12 @@ function harness(initial = "", caret = initial.length) {
       selection = { start: at, end: at };
       engine.syncValue(next);
     },
+    /** A keystroke React has rendered but not yet reported to the engine: the
+     *  composer already holds it, `syncValue` is one tick behind. */
+    typeAhead(next: string, at = next.length) {
+      value = next;
+      selection = { start: at, end: at };
+    },
     /** Drag-select a range, as a user does before speaking over it. */
     select(start: number, end: number) {
       selection = { start, end };
@@ -240,18 +246,36 @@ describe("dictation engine", () => {
     expect(h.value()).toBe("first sentence second sentence");
   });
 
-  it("keeps one copy of the phrase Chrome on Android reports twice", () => {
+  // crbug.com/41186589: on Android the newest final carries a concatenation of
+  // every final that preceded it, which desktop Chrome never does. A phrase that
+  // CONTAINS what the run already said therefore replaces it.
+  it("keeps one copy of the run Chrome for Android restates in its newest final", () => {
     const h = harness("");
     h.engine.start();
-    // Android answers each phrase with two events; the second lists the phrase
-    // twice, both copies final.
     h.live().say({ text: "mobile", final: true });
-    h.live().say({ text: "mobile", final: true }, { text: "mobile", final: true });
-    expect(h.value()).toBe("mobile");
-
-    h.live().end();
-    h.live().say({ text: "phone", final: true }, { text: "phone", final: true });
+    h.live().say({ text: "mobile", final: true }, { text: "mobile phone", final: true });
     expect(h.value()).toBe("mobile phone");
+  });
+
+  it("keeps one copy when that restatement spans a restart", () => {
+    const h = harness("");
+    h.engine.start();
+    h.live().say({ text: "mobile", final: true });
+    h.live().end();
+    // The reopened run replays the phrase before the one just spoken.
+    h.live().say({ text: "mobile phone", final: true });
+    expect(h.value()).toBe("mobile phone");
+  });
+
+  // The other half of that rule, and the reason it tests CONTAINS and not EQUALS:
+  // a word said twice is indistinguishable from an engine echo by text alone, and
+  // dictation has to err towards keeping. A duplicate on screen can be deleted; a
+  // word that never arrived is never noticed.
+  it("keeps both halves of a word the speaker said twice", () => {
+    const h = harness("");
+    h.engine.start();
+    h.live().say({ text: "very", final: true }, { text: "very", final: true }, { text: "good", final: true });
+    expect(h.value()).toBe("very very good");
   });
 
   it("keeps one copy of what Safari re-lists after a pause, piecewise or whole", () => {
@@ -265,19 +289,35 @@ describe("dictation engine", () => {
     expect(h.value()).toBe("hello world how are you");
   });
 
+  // A keystroke while listening makes what was heard so far ordinary text. The run
+  // keeps reporting it, so the engine remembers how much of the run is already in
+  // the composer and only writes what comes after. Reopening the run instead — as
+  // this did — meant aborting and restarting recognition on every character.
   it("does not say the run's phrases again after the user edits mid-dictation", () => {
     const h = harness("");
     h.engine.start();
     h.live().say({ text: "hello world", final: true });
     expect(h.value()).toBe("hello world");
 
-    // A keystroke while listening: what was heard so far is ordinary text now,
-    // and the run — which would report "hello world" again — is reopened.
     h.type("hello world!");
-    expect(h.runs()).toBe(2);
+    expect(h.runs()).toBe(1);
     expect(h.engine.listening()).toBe(true);
-    h.live().say({ text: "how are you", final: true });
+    h.live().say({ text: "hello world", final: true }, { text: "how are you", final: true });
     expect(h.value()).toBe("hello world! how are you");
+  });
+
+  // The same edit, one React tick earlier: the composer holds the keystroke and
+  // the engine has not been told. A repaint from the engine's own baseline used to
+  // write the character back out of existence, and nothing could restore it —
+  // `syncValue` arrived to find exactly the text it had just written.
+  it("does not paint over a keystroke it has not been told about yet", () => {
+    const h = harness("");
+    h.engine.start();
+    h.live().say({ text: "hello world", final: true });
+
+    h.typeAhead("hello world!");
+    h.live().say({ text: "hello world how", final: true });
+    expect(h.value()).toBe("hello world! how");
   });
 
   it("undoes the whole dictation back to the text and caret it started from", () => {
@@ -321,13 +361,60 @@ describe("dictation engine", () => {
     expect(h.runs()).toBe(1);
   });
 
-  it("ends a silent session without saying anything", () => {
+  // Chrome reports a few seconds of silence as a `no-speech` ERROR and closes the
+  // run, continuous or not. Treating that as the end of the session is what made
+  // the microphone die on anyone who paused to think.
+  it("rides out the silence Chrome reports as an error, and keeps listening", () => {
     const h = harness("");
     h.engine.start();
+    h.live().say({ text: "a thought", final: true });
     h.live().fail("no-speech");
     h.live().end();
+    expect(h.engine.listening()).toBe(true);
+    expect(h.runs()).toBe(2);
     expect(h.errors).toEqual([]);
+
+    h.live().say({ text: "and the rest of it", final: true });
+    expect(h.value()).toBe("a thought and the rest of it");
+  });
+
+  it("gives up on a session that stays silent, and says why it did", () => {
+    const h = harness("");
+    h.engine.start();
+    for (let i = 0; i < 5; i++) {
+      h.live().fail("no-speech");
+      h.live().end();
+    }
     expect(h.engine.listening()).toBe(false);
+    // Going dark without a word is what a dead button looks like.
+    expect(h.errors).toEqual(["silence"]);
+  });
+
+  // Chrome's engine is remote, and in continuous mode it answers silence with a
+  // `network` error as readily as with `no-speech` — so one of them cannot end a
+  // session that a person is still talking into.
+  it("rides out a single network blip", () => {
+    const h = harness("");
+    h.engine.start();
+    h.live().say({ text: "before the blip", final: true });
+    h.live().fail("network");
+    h.live().end();
+    expect(h.engine.listening()).toBe(true);
+    expect(h.errors).toEqual([]);
+
+    h.live().say({ text: "after it", final: true });
+    expect(h.value()).toBe("before the blip after it");
+  });
+
+  it("stops when the network stays down, and names that as the reason", () => {
+    const h = harness("");
+    h.engine.start();
+    for (let i = 0; i < 5; i++) {
+      h.live().fail("network");
+      h.live().end();
+    }
+    expect(h.engine.listening()).toBe(false);
+    expect(h.errors).toEqual(["network"]);
   });
 
   // Every handler has to come off the abandoned run, not just the three that

@@ -68,11 +68,14 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
  * them with: a browser that never got the permission, no microphone at all, a speech
  * service it cannot reach, a page served over plain HTTP, a language the engine does
  * not have. `pending` is not a failure — the browser is still asking for permission —
- * but after a few seconds of that the person deserves to be told where to look.
+ * but after a few seconds of that the person deserves to be told where to look, and
+ * `silence` is the microphone closing itself after hearing nothing for a long while,
+ * which has to be said out loud or the button just goes dark on its own.
  */
 export type DictationErrorKind =
   | "permission"
   | "pending"
+  | "silence"
   | "no-microphone"
   | "network"
   | "language"
@@ -212,11 +215,26 @@ export function useDictationLang(locale: string): [string, (tag: string) => void
  * Append one recognised phrase to what we already have. Trimming each phrase
  * before joining is what keeps a single space between them however the engine
  * pads its own output — the doubled spaces come from the engine, not from us.
+ *
+ * A phrase that CONTAINS everything so far replaces it rather than following it.
+ * Chrome for Android sends its newest final as a concatenation of every final
+ * before it (crbug.com/41186589), which desktop Chrome never does, and Safari
+ * re-lists a run once the speaker pauses.
+ *
+ * A phrase that merely EQUALS what is already there is where the two failures
+ * meet, because by text alone an engine's echo and a word the speaker said twice
+ * are the same thing. The line is drawn at one word: people repeat single words —
+ * "very very", "no no" — and do not repeat a whole phrase verbatim with nothing
+ * in between, whereas an engine restating a run always restates the phrase. A
+ * heuristic, and deliberately the timid one: a duplicate on screen can be deleted,
+ * a word that never arrived is never noticed.
  */
 export function appendPhrase(acc: string, phrase: string): string {
   const piece = phrase.trim();
   if (!piece) return acc;
-  return acc ? `${acc} ${piece}` : piece;
+  if (!acc) return piece;
+  if (piece === acc) return piece.includes(" ") ? acc : `${acc} ${piece}`;
+  return piece.startsWith(`${acc} `) ? piece : `${acc} ${piece}`;
 }
 
 /**
@@ -277,6 +295,12 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   let carried = "";
   /** What the run in progress has said so far. Recomputed wholesale each event. */
   let spoken = "";
+  /** Everything the run in progress has ever reported, including what a re-aim has
+   *  since turned into ordinary composer text. Its events restate this prefix. */
+  let runText = "";
+  /** The part of `runText` that is already sitting in `before`. Subtracted from
+   *  every later event so a re-aim does not have to reopen the run. */
+  let consumed = "";
 
   /** The composer exactly as it was before this dictation. `null` → nothing to undo. */
   let snapshot: { value: string; start: number; end: number } | null = null;
@@ -290,6 +314,9 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
   let terminal = false;
   /** Runs reopened in a row that heard nothing. Guards against a restart storm. */
   let barren = 0;
+  /** Why the last run ended, for a session that runs out of patience and has to
+   *  say something. Silence is the ordinary case; a dead speech service the other. */
+  let giveUp: DictationErrorKind = "silence";
   let capTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
   let phase: DictationPhase = "idle";
@@ -325,6 +352,30 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     after = value.slice(end);
     carried = "";
     spoken = "";
+    runText = "";
+    consumed = "";
+    // The composer holds exactly what we last left there, which is what it holds
+    // now: without this a keystroke landing before the first phrase would look
+    // like our own writing and be painted over.
+    written = value;
+  };
+
+  /**
+   * Take the composer as it stands as the new starting point: what is there is
+   * ordinary text now, and the next phrase lands at the caret. The run in progress
+   * is left alone — it keeps restating what it has heard, and `consumed` is how
+   * much of that restatement is already in `before`. Reopening the run instead
+   * would abort and restart recognition on every keystroke, which is a good way to
+   * make an engine stop answering.
+   */
+  const retarget = (value: string) => {
+    const { start, end } = host.getSelection();
+    before = value.slice(0, start);
+    after = value.slice(end);
+    carried = "";
+    spoken = "";
+    consumed = runText;
+    written = value;
   };
 
   const clearCap = () => {
@@ -363,6 +414,13 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       heard = true;
       barren = 0;
       setPhase("hearing");
+      // React reports a keystroke one tick late. If the composer already holds one,
+      // take it as the new starting point BEFORE this phrase lands — a repaint from
+      // the engine's own baseline would write the character back out of existence,
+      // and nothing could restore it, because the `syncValue` that follows finds
+      // exactly the text it just wrote and concludes nothing happened.
+      const live = host.getValue();
+      if (live !== written) retarget(live);
       // Recompute the whole run from its results rather than tracking deltas:
       // the engine revises earlier phrases as it hears more, and `results` is
       // always the authoritative list for the run in progress. Whether a
@@ -374,36 +432,37 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       for (let i = 0; i < list.length; i++) {
         const piece = (list[i]?.[0]?.transcript ?? "").trim();
         if (!piece) continue;
-        // Engines say things twice. Chrome on Android reports each finished
-        // phrase as two results with the same text; Safari re-lists what it
-        // heard once the speaker pauses, sometimes as one result carrying the
-        // whole run so far. A result that only repeats what this run already
-        // said is the engine's, not the speaker's — the one thing this eats is
-        // a phrase deliberately said twice with a pause between, which
-        // dictation does not do.
-        if (piece === text || text.endsWith(" " + piece)) continue;
-        text = piece.startsWith(text + " ") ? piece : appendPhrase(text, piece);
+        text = appendPhrase(text, piece);
       }
-      spoken = text;
+      runText = text;
+      spoken = text.startsWith(consumed) ? text.slice(consumed.length).trimStart() : text;
       paint();
     };
 
     r.onerror = (event) => {
       const code = event?.error;
       if (code === "aborted") return; // Our own `stop()` on the way out.
+      // Chrome answers a few seconds of silence with an ERROR and closes the run,
+      // continuous or not — and in continuous mode it reaches for `network` about
+      // as readily as for `no-speech`. Neither can end a session someone is still
+      // talking into; `onend` reopens the run, and the barren counter is what stops
+      // that becoming a storm on a microphone or a speech service that is truly gone.
+      if (code === "no-speech") {
+        giveUp = "silence";
+        return;
+      }
+      if (code === "network") {
+        giveUp = "network";
+        return;
+      }
       terminal = true;
       if (code === "not-allowed" || code === "service-not-allowed") {
         host.failed("permission");
       } else if (code === "audio-capture") {
         host.failed("no-microphone");
-      } else if (code === "network") {
-        // Chrome's engine is a remote service; without a route to it there is no
-        // recognition at all, which is worth saying in those words.
-        host.failed("network");
       } else if (code === "language-not-supported") {
         host.failed("language");
-      } else if (code !== "no-speech") {
-        // Silence is not a failure worth a message — it just ends the session.
+      } else {
         host.failed("failed");
       }
     };
@@ -419,11 +478,17 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
       // A run that heard nothing and ended immediately would otherwise reopen
       // forever; three in a row means the engine is refusing, not pausing.
       barren = heard ? 0 : barren + 1;
-      if (!wanted || terminal || disposed || barren > 3) {
+      const exhausted = barren > 3;
+      if (!wanted || terminal || disposed || exhausted) {
+        // Going dark without a word is indistinguishable from a dead button, and
+        // the person is usually still talking when it happens.
+        if (exhausted && wanted && !terminal && !disposed) host.failed(giveUp);
         finish();
         return;
       }
       recognition = null;
+      runText = "";
+      consumed = "";
       if (!run()) finish();
     };
 
@@ -462,6 +527,7 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     wanted = true;
     terminal = false;
     barren = 0;
+    giveUp = "silence";
     phase = "starting";
     if (!run()) {
       wanted = false;
@@ -505,6 +571,8 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     after = "";
     carried = "";
     spoken = "";
+    runText = "";
+    consumed = "";
     written = restore.value;
     host.emit(restore.value, restore.start, restore.end);
     host.changed();
@@ -516,23 +584,11 @@ export function createDictationEngine(host: DictationHost): DictationEngine {
     // message was sent. Either way the undo no longer means anything.
     written = null;
     snapshot = null;
-    if (wanted) {
-      // Still listening — re-aim at wherever the caret is now, so the next
-      // phrase lands where the user is looking instead of at a stale offset.
-      // The undo stays gone: it promised the text as it was before dictation,
-      // and the user has since written something it would throw away.
-      const { start, end } = host.getSelection();
-      before = value.slice(0, start);
-      after = value.slice(end);
-      carried = "";
-      spoken = "";
-      written = value;
-      // The run in progress keeps reporting every phrase it has heard so far,
-      // and those phrases are now part of `before`. Open a fresh run so the
-      // next event starts from nothing instead of saying them all again.
-      release();
-      if (!run()) finish();
-    }
+    // Still listening — re-aim at wherever the caret is now, so the next phrase
+    // lands where the user is looking instead of at a stale offset. The undo stays
+    // gone: it promised the text as it was before dictation, and the user has since
+    // written something it would throw away.
+    if (wanted) retarget(value);
     host.changed();
   };
 

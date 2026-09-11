@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Dictation no longer stops when the speaker pauses to think: Chrome reports a few seconds of silence as an error, and one of those (or a single `network` blip, which Chrome also emits on silence) no longer ends the session.
+- A dictation session that does close itself — a long silence, or a speech service that stays unreachable — now says which of the two it was instead of the microphone going dark.
+- Dictation no longer erases a character typed while it is listening, and no longer restarts recognition on every keystroke.
+- Dictation keeps a word the speaker said twice ("very very"), while still collapsing the run Chrome for Android restates in its newest final.
+
 ## [0.42.0] - 2026-09-11
 
 ### Changed

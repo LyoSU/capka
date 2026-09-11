@@ -168,6 +168,7 @@ export function ChatInput({
     if (kind === "pending") return void toast(t("dictation.pending"));
     const key: Record<Exclude<DictationErrorKind, "pending">, string> = {
       permission: "dictation.permissionDenied",
+      silence: "dictation.silence",
       "no-microphone": "dictation.noMicrophone",
       network: "dictation.network",
       language: "dictation.language",
