@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-11
+
 ### Changed
 - Browser tabs are named per page instead of all reading "Capka": a chat shows its own title (updating live as soon as one is generated or the chat is renamed), and projects, the project hub, archived chats, every settings page, sign-in, registration and first-run setup show theirs; a shared conversation's tab and link preview carry its title only when the share is actually viewable.
 - Automation editor: the schedule is one row (frequency, time, day) and a weekly schedule can pick several weekdays, the time zone defaults to the browser's with a one-click reset and a picker behind "Change", and when editing the enabled switch sits in the dialog header.
