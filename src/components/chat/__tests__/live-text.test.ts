@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
  * fade sits on top of that pacing and must never stand in for it.
  *
  * The runner flushes every ~100ms; shown as they land, a paragraph grows in slabs
- * of twenty-odd tokens. A fade on each slab is what once read as «блимає»: four
+ * of twenty-odd tokens. A fade on each slab is what once read as a flicker: four
  * slabs a second, each flashing in from transparent, plus a caret flickering
  * between them. `delta-pacer.ts` now releases whole words at a steady cadence
  * upstream of the renderer, and a fade on each PACED word turns the leading edge

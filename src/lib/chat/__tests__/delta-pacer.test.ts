@@ -67,12 +67,12 @@ describe("createDeltaPacer", () => {
     // the seam between two batches.
     const applied: string[] = [];
     const p = createDeltaPacer((e: Ev) => applied.push(e.delta));
-    for (const d of ["Пістаціє", "вий смак ", "росте най", "швидше: ", "продажі ", "за місяць "]) {
+    for (const d of ["Pistachi", "o is the ", "fastest g", "rower: ", "sales per ", "month "]) {
       p.enqueue(text(d));
       vi.advanceTimersByTime(100);
     }
     vi.advanceTimersByTime(1_000);
-    expect(applied.join("")).toBe("Пістацієвий смак росте найшвидше: продажі за місяць ");
+    expect(applied.join("")).toBe("Pistachio is the fastest grower: sales per month ");
     for (const chunk of applied) expect(chunk).toMatch(/\s$/);
   });
 
@@ -82,12 +82,12 @@ describe("createDeltaPacer", () => {
     // word whose tail is still in flight — so it waits for the tail.
     const applied: string[] = [];
     const p = createDeltaPacer((e: Ev) => applied.push(e.delta));
-    p.enqueue(text("продажі за міс"));
+    p.enqueue(text("sales per mon"));
     vi.advanceTimersByTime(1_000);
-    expect(applied.join("")).toBe("продажі за ");
-    p.enqueue(text("яць піднялися "));
+    expect(applied.join("")).toBe("sales per ");
+    p.enqueue(text("th rose "));
     vi.advanceTimersByTime(1_000);
-    expect(applied.join("")).toBe("продажі за місяць піднялися ");
+    expect(applied.join("")).toBe("sales per month rose ");
   });
 
   it("does not hold a long run with no whitespace (CJK, base64): past a word's length it is shown", () => {

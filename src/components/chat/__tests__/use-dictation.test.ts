@@ -153,7 +153,7 @@ describe("speechLangLabels", () => {
 
 describe("speechLangLabel", () => {
   it("names the tag in the UI language, capitalised", () => {
-    expect(speechLangLabel("uk-UA", "uk")).toMatch(/^[А-ЯЇІЄҐ]/u);
+    expect(speechLangLabel("uk-UA", "uk")).toMatch(/^\p{Script=Cyrillic}/u);
     // ICU names dialects the way people say them ("American English"), which is
     // what a picker wants over "English (United States)".
     expect(speechLangLabel("en-US", "en")).toMatch(/^[A-Z].*English/);

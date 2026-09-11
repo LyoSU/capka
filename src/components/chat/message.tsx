@@ -2190,7 +2190,7 @@ type GenStats = {
 /** Render the AI work time as "12.3s" under a minute, "1m 3s" beyond it. */
 function formatDuration(ms: number, t: TimeTranslator, locale: string): string {
   const sec = ms / 1000;
-  // One decimal in the reader's own notation ("18,6 с", not "18.6 с").
+  // One decimal in the reader's own notation: a decimal comma in Ukrainian, a dot in English.
   if (sec < 60) return t("durationSec", { s: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(sec) });
   return t("durationMin", { m: Math.floor(sec / 60), s: Math.round(sec % 60) });
 }
@@ -2394,7 +2394,7 @@ function MessageDetails({
                 {aux.map((a, i) => (
                   // The label keeps its full word; when the value does not fit
                   // beside it, the value drops to its own line, right-aligned,
-                  // instead of the label being cut to «Запам'ятовуван…».
+                  // instead of the label being cut mid-word with an ellipsis.
                   <div key={`${a.purpose}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-0.5 pl-2">
                     <span className="shrink-0">{t(PURPOSE_LABEL[a.purpose])}</span>
                     <span className="ml-auto whitespace-nowrap tabular-nums text-muted-foreground">
