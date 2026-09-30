@@ -95,9 +95,10 @@ export async function compactionReply(
  * every body the prune shed and overflows the window it was sized against. This cut
  * clears EVERY history body: at least what the live cut shed, and more when the turn
  * made fewer than three tool exchanges (the live cut then kept the history's newest),
- * so the request can come out smaller than the prompt measured, never larger. When
- * the prune never armed, the list is left alone and the history goes out byte for
- * byte as the turn sent it.
+ * so the history part comes out no larger than what was measured (the request as a whole
+ * can still exceed the measured prompt: it also carries the rebuilt reply, its reasoning
+ * and the instruction). When the prune never armed, the list is left alone and the
+ * history goes out byte for byte as the turn sent it.
  */
 export function compactionInput(history: ModelMessage[], reply: ModelMessage[], prunedMidTurn: boolean): ModelMessage[] {
   const msgs = [...history, ...reply];

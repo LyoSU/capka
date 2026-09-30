@@ -218,11 +218,13 @@ export async function getMaxContextTokens(): Promise<number> {
  * pulling facts out of a turn do not need the model someone chose for the actual
  * work, and on a shared key they are pure overhead priced at the frontier rate.
  *
- * Compaction deliberately does NOT read this. It is the one pass that reuses the
- * turn's own hot prefix (buildCompactionMessages), so it pays cache-read for a
- * whole conversation; sending that prefix to a different model pays full price for
- * every token of it, and a cheap model can easily cost MORE than the expensive one
- * did. The knob would look like a saving and be a loss.
+ * Compaction deliberately does NOT read this. It is the one pass that sends the
+ * whole conversation (buildCompactionMessages), so it is the input-heavy one; it
+ * aims at the turn's own cached prefix where the provider can hit it (see
+ * COMPACTION_INSTRUCTION for when it cannot), and sending that prefix to a different
+ * model forfeits any hit and pays full price for every token of it, so a cheap model
+ * can easily cost MORE than the expensive one did. The knob would look like a saving
+ * and be a loss.
  */
 export async function getAuxModelRef(): Promise<string | null> {
   const v = (await getSetting("aux_model"))?.trim();
