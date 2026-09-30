@@ -52,10 +52,14 @@ ENV PORT=3000 HOSTNAME="0.0.0.0"
 # which for a background task with no open SSE fires before the drain. Set on the
 # prod image only — `next dev` (the dev stage) keeps Next's instant Ctrl-C.
 ENV NEXT_MANUAL_SIG_HANDLE=1
-# Size the V8 heap to the container: Node's own default (~2 GB) makes the process
-# die with "JavaScript heap out of memory" at half of the compose default
-# PLATFORM_MEM_LIMIT (4 GB). 3 GB of heap leaves ~1 GB for native memory, buffers
-# and code. Operators who change the container limit should override NODE_OPTIONS
-# to match (the builder stage's build-time cap above is unrelated).
-ENV NODE_OPTIONS="--max-old-space-size=3072"
+# Size the V8 heap to the container: Node's own default (~half the cgroup limit)
+# makes the process die with "JavaScript heap out of memory" at 2 GB under the
+# compose default PLATFORM_MEM_LIMIT (4 GB). 75% of the limit — 3 GB at the default
+# — leaves the rest for native memory, buffers and code, and follows
+# PLATFORM_MEM_LIMIT when an operator lowers it for a small box, so the heap can
+# never outgrow its container. The flag needs Node >= 22.21 (a stale cached
+# node:22-alpine would refuse to boot), so check it at build time instead. The
+# builder stage's build-time cap above is unrelated.
+RUN node --max-old-space-size-percentage=75 -e 0 || { echo "node:22-alpine is older than 22.21 — run: docker pull node:22-alpine" >&2; exit 1; }
+ENV NODE_OPTIONS="--max-old-space-size-percentage=75"
 CMD ["node", "server.js"]

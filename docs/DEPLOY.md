@@ -75,7 +75,8 @@ deploys onto a host with a Docker daemon.
      `SANDBOX_PIDS_LIMIT` (1024),
      `MAX_SESSIONS_PER_USER` (2), `SANDBOX_IDLE_TTL_MS` (900000),
      `WORKSPACE_TTL_MS` (2592000000), `GC_GRACE_MS` (604800000),
-     `SANDBOX_ALLOW_NETWORK` (true).
+     `SANDBOX_ALLOW_NETWORK` (true), `PLATFORM_MEM_LIMIT` (4g — on a 2 GB box
+     set it to about `1536m`; the platform's heap is sized at 75% of it).
    - Optional tracing (see [Tracing](#tracing-optional)):
      `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`. Paste the
      header value **unquoted**, exactly as one line — it legitimately contains
