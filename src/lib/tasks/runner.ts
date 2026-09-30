@@ -53,7 +53,7 @@ import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { foldAssembledRows, untrustedOutputOf } from "./turn-taint";
-import { prepareRun } from "./run-context";
+import { prepareRun, replyParentOf } from "./run-context";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
@@ -65,8 +65,16 @@ const errMsg = (e: unknown) => errorText(e);
 export interface TaskPayload {
   requestModel?: string;
   projectId?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  uiMessages: any[];
+  /** The message this turn's reply hangs off — the user message just sent, or the
+   *  one a regenerate re-answers. Set by whoever enqueued the turn from rows it
+   *  wrote or checked; the conversation itself is always rebuilt from the tree.
+   *  Absent on a continuation (`resumeMessageId`) and a late-steer follow-up,
+   *  which answer the chat's leaf. Read it through `replyParentOf`. */
+  replyParentId?: string | null;
+  /** LEGACY: the client's whole transcript, carried by tasks queued before
+   *  `replyParentId` existed. Only its last id is ever read (see `replyParentOf`),
+   *  and never as model context — it was client-supplied. */
+  uiMessages?: { id?: string }[];
   attachedFiles?: FileRef[];
   /** Where to push the result besides the web UI (e.g. Telegram). */
   origin?: TaskOrigin;
@@ -568,7 +576,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The reply hangs off the last message of the branch we're answering (the
     // user message just sent, or the user turn being regenerated). Pointing the
     // chat at this leaf makes the new branch the active one immediately.
-    let replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
+    let replyParentId = replyParentOf(payload);
     let extraAttachedFiles: FileRef[] = [];
     if (resumeMessageId) {
       // Approval continuation: the assistant message already exists (it's the chat
@@ -685,7 +693,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Computed once here because two things downstream need it: the provider's own
     // context-management trigger below, and the tool-clearing threshold just under.
     const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
-    let uiMessages = payload.uiMessages ?? [];
+    // Empty until the tree fills it: history comes from the DB and nowhere else.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let uiMessages: any[] = [];
     // Whether this turn's context was built with tool bodies cleared — persisted
     // on the message below, because the decision for the NEXT turn depends on it
     // (see shouldClearToolResults).
@@ -2235,7 +2245,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               try {
                 const { created } = await enqueueTask({
                   id: followUpTaskId, chatId, userId,
-                  payload: { requestModel: payload.requestModel, projectId: payload.projectId, uiMessages: [], origin: payload.origin },
+                  payload: { requestModel: payload.requestModel, projectId: payload.projectId, origin: payload.origin },
                 });
                 handedOff = created;
                 tlog.info("steers arrived too late to fold in; queued as a follow-up turn", { count: kept.count });
@@ -2418,7 +2428,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // reconstruct it a third time.
     //
     // Its emptiness has consequences beyond this call and they are all fail-safe: an
-    // approval/`ask` continuation carries `uiMessages: []`, so nothing is mined from
+    // approval/`ask` continuation answers no user message, so nothing is mined from
     // that half of the turn rather than something being mined from the wrong text.
     // `userSpaceId` is absent exactly when memory is off, so it carries the same
     // gate the capability check does — but both are stated, because the space is
@@ -2489,7 +2499,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // The chat's OWN opening message, not `userTurnText`. These are different
           // questions — "what did the user type this turn" vs "what did this chat open
           // with" — and only the second one has an answer on a continuation, where
-          // `uiMessages` is empty and `userTurnText` is "" by design (see
+          // the payload names no user message and `userTurnText` is "" by design (see
           // `run-context.ts`). Sourced from the message ROW because a row survives a
           // continuation; re-deriving it from `modelMessages` is what F1 was and must
           // not come back. Rides idx_messages_chat_role_created.
@@ -2619,7 +2629,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           ...(messageInserted ? {} : {
             insert: {
               chatId,
-              parentId: (payload.uiMessages ?? []).at(-1)?.id ?? null,
+              parentId: replyParentOf(payload),
               platform: payload.origin?.platform ?? "web",
             },
           }),

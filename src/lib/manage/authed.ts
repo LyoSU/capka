@@ -168,7 +168,6 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
         userId,
         payload: {
           resumeMessageId: d.messageId,
-          uiMessages: [],
           requestModel: orig?.requestModel,
           projectId: msg.projectId ?? undefined,
           origin: orig?.origin,

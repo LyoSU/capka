@@ -37,7 +37,7 @@ import type { TaskPayload } from "./runner";
 /**
  * The user's own words inside an answered `ask`, and nothing else.
  *
- * An approval/`ask` continuation carries `uiMessages: []` — the user's answer rides
+ * An approval/`ask` continuation answers no user message — the user's answer rides
  * `resumeMessages` and is not a chat message at all — so `userTurnText` read "" and a
  * fact the user stated while approving ("yes, and remember we pay in EUR") landed
  * `derived`. This is the fold the F7 trigger comment asked for: ONE more source for the
@@ -97,6 +97,15 @@ export async function readResumeRow(resumeMessageId: string | null): Promise<{ a
 }
 
 /**
+ * The message a task's reply hangs off. `replyParentId` is written by whoever
+ * enqueued the turn; a task queued before that field existed carries the client's
+ * transcript instead, and its last id is the same answer — read as a fallback only,
+ * so such a task still runs after an upgrade.
+ */
+export const replyParentOf = (payload: TaskPayload): string | null =>
+  payload.replyParentId !== undefined ? payload.replyParentId : (payload.uiMessages?.at(-1)?.id ?? null);
+
+/**
  * Re-resolve everything needed to run a task from its persisted payload — the
  * "run context builder". `sessionKey` is the project (shared folder) or the chat
  * itself (see workspaceSessionKey). Memory is scoped to two vault spaces: the
@@ -111,7 +120,8 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // and the capability profile (which decides whether to touch memory at all), and
   // a space is a WRITE — a `getOrCreateSpace` riding this wave would create one for
   // a project that turns out to be deleted. It happens below, once both are known.
-  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, user, chat, orgProfile, orgInstructions] = await Promise.all([
+  const replyParentId = replyParentOf(payload);
+  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, user, chat, orgProfile, orgInstructions, turnMessage] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
@@ -121,6 +131,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     db.select({ createdAt: chats.createdAt, thinkAmount: chats.thinkAmount }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
     getOrgAgentProfile(),
     getOrgInstructions(),
+    // The user message this turn answers, from the tree — never from the payload.
+    replyParentId
+      ? db.select({ content: messages.content, parentId: messages.parentId }).from(messages)
+          .where(and(eq(messages.id, replyParentId), eq(messages.chatId, chatId), eq(messages.role, "user")))
+          .limit(1).then((r) => r[0])
+      : Promise.resolve(undefined),
   ]);
 
   // The task was enqueued for a project that has since been deleted (a worker retry
@@ -171,11 +187,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // it from `modelMessages`, which is not the transcript: it carries the runner's
   // OWN synthetic `role:"user"` messages (the effect-ledger recovery note), so on
   // any continued turn the security predicate was verifying facts against a list of
-  // tool names and clamped tool arguments. `payload.uiMessages` is the only source
-  // that holds what a person actually typed.
+  // tool names and clamped tool arguments. The stored user row the reply answers is
+  // the only source that holds what a person actually typed — read from the DB, not
+  // from anything a client sent, since it is what a fact must be quoted from.
   //
   // KNOWN AND NOW CLOSED (Fable audit F7). An approval/`ask` continuation arrives with
-  // `uiMessages: []` — the user's ANSWER rides `resumeMessages` and is not a chat message
+  // no reply parent — the user's ANSWER rides `resumeMessages` and is not a chat message
   // at all — so this read "" on that half of the turn and a fact the user stated while
   // approving was `derived`: pending, and invisible until a review queue existed. The
   // answer is durable on the message row, so it is folded in HERE, as one more source for
@@ -188,22 +205,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // `ask`, which `userWordsFromAnswer` already narrows to free-text fields — is the one
   // ingress the turn taint is measured AGAINST. Marking it would make every turn untrusted
   // and the distinction empty.
-  const userTurnText =
-    (() => {
-      const uiMessages = payload.uiMessages ?? [];
-      for (let i = uiMessages.length - 1; i >= 0; i--) {
-        const m = uiMessages[i];
-        if (m?.role !== "user") continue;
-        if (typeof m.content === "string") return m.content;
-        const parts: unknown[] = Array.isArray(m.parts) ? m.parts : [];
-        return parts
-          .filter((p): p is { type: string; text: string } =>
-            typeof (p as { text?: unknown })?.text === "string" && (p as { type?: unknown })?.type === "text")
-          .map((p) => p.text)
-          .join("\n");
-      }
-      return "";
-    })() || answeredAsk;
+  const userTurnText = turnMessage?.content || answeredAsk;
 
   // THE TURN'S THREE PER-TURN OBJECTS, constructed once, here, because the tool factory
   // below is called exactly once per turn and all three have exactly its lifetime: the
@@ -449,7 +451,8 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // `manage` group — the nudge's entire content is an offer to use that tool, and
     // consuming the one-shot flag there would burn it on a chat that can't act.
     let concierge = false;
-    if (caps.manage && user?.role === "admin" && (payload.uiMessages?.length ?? 0) <= 1) {
+    // "First turn" is read off the tree: the message being answered is a root.
+    if (caps.manage && user?.role === "admin" && turnMessage && turnMessage.parentId === null) {
       if ((await getSetting("concierge_pending")) === userId) {
         concierge = true;
         await setSetting("concierge_pending", ""); // consume — never nudge twice

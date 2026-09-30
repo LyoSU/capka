@@ -86,7 +86,7 @@ run("runAgentTask end-to-end (mock model, real queue/realtime/DB)", () => {
       id: "e2e1",
       chatId: C,
       userId: U,
-      payload: { uiMessages: [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }] },
+      payload: { replyParentId: "m1" },
     });
 
     const task = await claimNextTask("w-e2e");

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { askFormSchema, askAnswerSchema } from "@/lib/ask/types";
 import { THINK_AMOUNTS } from "@/lib/models/thinking";
+import { MAX_IMPORT_MESSAGE_CHARS } from "@/lib/import/types";
 
 // Inbound POST /api/chat body
 export const chatRequestSchema = z.object({
@@ -11,24 +12,26 @@ export const chatRequestSchema = z.object({
   // like `model`, and persisted on the chat the same way, so the setting sticks.
   thinkAmount: z.enum(THINK_AMOUNTS).optional(),
   projectId: z.string().optional(),
-  userMessage: z.string().default(""),
+  // Same per-message ceiling an import clips to. Anything longer belongs in an
+  // attached file, where the agent reads it from the workspace instead.
+  userMessage: z.string().max(MAX_IMPORT_MESSAGE_CHARS, "This message is too long — attach it as a file instead.").default(""),
   // The client's optimistic user-message id. Persisting the row under this id
   // keeps the React key stable across the optimistic → loaded transition, so the
   // bubble doesn't remount (and visibly flash) when history reloads.
   userMessageId: z.string().optional(),
-  // Explicit parent for the new user message. The server NEVER infers parent
-  // linkage from the position of the message inside `messages` — a client whose
-  // history hasn't loaded yet (e.g. a persisted send queue draining on mount)
-  // would send a stale/empty array and graft the turn onto the wrong node or a
-  // second root. Semantics:
+  // Explicit parent for the NEW message this request creates. The client sends no
+  // history — parent linkage and the model's context both come from the DB — so
+  // this is the only place it names a node. Semantics:
   //   absent (undefined) → a normal send: the server anchors to the chat's own
   //                        `activeLeafId` (authoritative, from the DB).
-  //   string | null      → an edit/regenerate: the caller computed the sibling
-  //                        parent from loaded history (null = editing the first
-  //                        message, so the new version is a root sibling).
+  //   string | null      → an edit: the sibling parent the caller computed from
+  //                        loaded history (null = editing the first message, so
+  //                        the new version is a root sibling).
+  //   string             → a regenerate (empty `userMessage`): the user message
+  //                        the new reply answers.
+  // Either way the server checks the id belongs to this chat before using it.
   parentId: z.string().nullable().optional(),
-  attachedFiles: z.array(z.object({ name: z.string(), type: z.string() })).optional(),
-  messages: z.array(z.any()).optional(),
+  attachedFiles: z.array(z.object({ name: z.string().max(1024), type: z.string().max(255) })).max(500).optional(),
 });
 
 // Stored in messages.metadata.parts — the DB representation

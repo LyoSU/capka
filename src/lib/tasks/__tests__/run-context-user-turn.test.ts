@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { userWordsFromAnswer } from "../run-context";
+import { replyParentOf, userWordsFromAnswer } from "../run-context";
 
 const form = {
   title: "Which currency?",
@@ -30,5 +30,21 @@ describe("userWordsFromAnswer", () => {
   it("returns empty for a row with no answered ask", () => {
     expect(userWordsFromAnswer({ parts: [{ type: "text", text: "hello" }] })).toBe("");
     expect(userWordsFromAnswer(null)).toBe("");
+  });
+});
+
+describe("replyParentOf", () => {
+  it("reads the id the enqueuer derived", () => {
+    expect(replyParentOf({ replyParentId: "u2" })).toBe("u2");
+    // An explicit null (a new chat with nothing to answer) is an answer, not a gap.
+    expect(replyParentOf({ replyParentId: null, uiMessages: [{ id: "u1" }] })).toBeNull();
+  });
+
+  it("falls back to the last id of a task queued before the field existed", () => {
+    expect(replyParentOf({ uiMessages: [{ id: "u1" }, { id: "u2" }] })).toBe("u2");
+  });
+
+  it("is null for a continuation, which answers the chat's leaf", () => {
+    expect(replyParentOf({ resumeMessageId: "a1" })).toBeNull();
   });
 });

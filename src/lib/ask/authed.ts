@@ -70,7 +70,7 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
       const { id, created } = await enqueueTask({
         id: nanoid(), chatId: msg.chatId, userId,
         payload: {
-          resumeMessageId: d.messageId, uiMessages: [],
+          resumeMessageId: d.messageId,
           requestModel: orig?.requestModel, projectId: msg.projectId ?? undefined, origin: orig?.origin,
         } satisfies TaskPayload,
       }, tx);

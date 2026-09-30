@@ -8,7 +8,6 @@ import { enqueueTask, notifyTaskEnqueued, type QueueTx } from "@/lib/tasks/queue
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
-import { toUIMessages } from "@/lib/chat/presenter";
 import { getTranslator } from "@/lib/i18n/translator";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { log } from "@/lib/log";
@@ -399,15 +398,13 @@ export async function fireAutomation(
         ? await tx.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId))
         : [];
       // Just the message this firing wrote — NOT the thread's history. The runner
-      // reads the payload's last message id and rebuilds the model context from
-      // the live tree itself (loadActivePath in runner.ts), so a history handed
-      // over here is read twice and used once. Sending it also meant loading every
-      // message of a long-lived `single` thread while this transaction holds the
-      // automation's row lock, which is the most expensive thing that was under it.
+      // rebuilds the model context from the live tree above it (loadActivePath in
+      // runner.ts); loading a long-lived `single` thread here would also do it
+      // while this transaction holds the automation's row lock.
       const payload: TaskPayload = {
         requestModel: a.model ?? undefined,
         projectId: a.projectId ?? undefined,
-        uiMessages: toUIMessages([inserted]),
+        replyParentId: inserted.id,
         automationId: a.id,
         notifyMode: a.notifyMode,
         ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),

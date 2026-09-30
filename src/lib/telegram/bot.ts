@@ -9,8 +9,6 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask, requestCancel, cancelQueuedTurn } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { toUIMessages } from "@/lib/chat/presenter";
-import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
 import { getTranslator } from "@/lib/i18n/translator";
@@ -305,12 +303,11 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
   try {
-    // Answer from the active branch (root → the message we just added).
-    const path = await loadActivePath(chat.id, tgUserId);
+    // Answer the message we just added; the runner rebuilds the branch above it.
     const payload: TaskPayload = {
       requestModel: chat.model ?? undefined,
       projectId: chat.projectId ?? undefined,
-      uiMessages: toUIMessages(path.map((p) => p.node)),
+      replyParentId: tgUserId,
       attachedFiles: attachedFiles.length ? attachedFiles : undefined,
       origin: { platform: "telegram", telegramChatId: ctx.chat!.id, locale: ctx.from?.language_code },
     };

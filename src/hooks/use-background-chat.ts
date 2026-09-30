@@ -99,10 +99,11 @@ export function useBackgroundChat({
 
   const [error, setError] = useState<string | null>(null);
   // Has the initial history fetch resolved at least once? Guards the send/drain
-  // path: sending before history loads means `msgRef.current` is still empty, so
-  // the turn would carry no conversation context to the model. (Parent linkage is
-  // already safe — the server anchors to its own leaf — but the prompt would be
-  // context-blind.) A persisted send queue draining on mount is the trigger.
+  // path, for the UI only: the server takes no history from us (parent linkage and
+  // the model's context both come from the DB), but before history loads
+  // `msgRef.current` is still empty, so an optimistic send would draw its bubble on
+  // a blank transcript and read an existing chat as brand new (`isFirstMessage`).
+  // A persisted send queue draining on mount is the trigger.
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
   // ── Load history from DB ───────────────────────────────────
@@ -736,11 +737,6 @@ export function useBackgroundChat({
             userMessage: displayText,
             userMessageId: userMsg.id,
             attachedFiles: files.length > 0 ? files : undefined,
-            messages: currentMessages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              parts: m.parts,
-            })),
           }),
         });
 
@@ -780,10 +776,10 @@ export function useBackgroundChat({
     async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[], model?: string, parentId?: string | null) => {
       // Non-destructive: the server inserts a sibling branch under the explicit
       // `parentId` we compute here, so the previous version stays reachable via
-      // ‹ i/N ›. Passing parentId explicitly (rather than letting the server read
-      // it off the history array) is what makes an edit a sibling instead of an
-      // append: the server anchors a *normal* send to the chat's leaf, so edit
-      // MUST state its own (older) parent — null when editing the first message.
+      // ‹ i/N ›. `history` only draws the optimistic transcript — it is never sent.
+      // Passing parentId is what makes an edit a sibling instead of an append: the
+      // server anchors a *normal* send to the chat's leaf, so edit MUST state its
+      // own (older) parent — null when editing the first message.
       setMessages(history);
       setStatus("running");
       startWaiting();
@@ -801,7 +797,6 @@ export function useBackgroundChat({
             // Edit only changes the text — the original attachments ride along so
             // the server re-persists them and the runner re-feeds them to the model.
             attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
-            messages: history.map((m) => ({ id: m.id, role: m.role, parts: m.parts })),
           }),
         });
         if (!res.ok) {
@@ -834,7 +829,9 @@ export function useBackgroundChat({
     if (lastAssistantIdx === -1) return;
     const history = msgs.slice(0, lastAssistantIdx);
     if (!history.some((m) => m.role === "user")) return;
-    await rerun(history, "", undefined, undefined, model);
+    // The new reply answers the message the old one did — named explicitly, since
+    // the server no longer reads it off a history array.
+    await rerun(history, "", undefined, undefined, model, history[history.length - 1].id);
   }, [rerun]);
 
   // Edit: replace a user message's text and re-run from there.

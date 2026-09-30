@@ -4,7 +4,7 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 /**
  * "The user's turn" is the anchor `verifyDirectProvenance` checks a proposed fact
  * against, and the runner used to compute it TWICE: the memory tools got the last
- * user message of `payload.uiMessages`, while post-turn extraction took
+ * user message of the client's transcript, while post-turn extraction took
  * `modelMessages.findLast(role === "user")`. Those are different texts, and they
  * differ exactly where it hurts — the runner pushes its own effect-ledger recovery
  * note onto `modelMessages` as a `role:"user"` message and never removes it, so on
@@ -120,9 +120,7 @@ run("runAgentTask: post-turn extraction is anchored on the user's own words", ()
       `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
        VALUES ('t14a-task',$1,$2,'running','w-t14a', now() + interval '300 seconds', $3::jsonb)
        RETURNING *`,
-      [C, U, JSON.stringify({
-        uiMessages: [{ id: "t14a-u2", role: "user", parts: [{ type: "text", text: USER_TEXT }] }],
-      })],
+      [C, U, JSON.stringify({ replyParentId: "t14a-u2" })],
     );
     await runAgentTask(rows[0], "w-t14a");
     // Extraction is fire-and-forget; give the tracked aux call a moment to land.

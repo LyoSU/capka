@@ -152,33 +152,40 @@ export const POST = apiHandler(async (req: Request) => {
     ...(thinkAmount && thinkAmount !== existingChat?.thinkAmount ? { thinkAmount } : {}),
   };
 
-  // Save user message + update chat title
   const text = userMessage || "";
+  // Parent linkage is server-authoritative — the client sends no history at all.
+  // A normal send (parentId absent) anchors to the chat's own leaf; an edit passes
+  // the sibling parent it computed from loaded history (null = first-message
+  // edit); a regenerate names the user message its new reply answers.
+  const parentId = text
+    ? (body.parentId !== undefined ? body.parentId : (existingChat?.activeLeafId ?? null))
+    : (body.parentId ?? null);
+  // The parent must be a real message *in this chat* — otherwise a stale or
+  // tampered client would 500 on the FK, or (with a real id from another chat)
+  // silently graft this turn onto a foreign branch. A regenerate that names no
+  // message comes from a client too old to know it must: send it to reload too.
+  if (parentId || (!text && existingChat)) {
+    const [parent] = parentId
+      ? await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
+          .limit(1)
+      : [];
+    if (!parent) {
+      // handedOff stays false → the finally below releases the hold.
+      return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
+    }
+  }
+  // What the runner's reply hangs off: the user message saved just below, or the
+  // one a regenerate re-answers. Derived here, from rows this request checked, so
+  // the task never needs the transcript the client happens to be showing.
+  let replyParentId = parentId;
+
+  // Save user message + update chat title
   if (text) {
     const isNewChat = !existingChat || existingChat.title === "New Chat";
     const newUserId = userMessageId || nanoid();
-    // Parent linkage is server-authoritative — NEVER inferred from the position
-    // of this message inside the client's `messages` array. A client whose
-    // history hasn't loaded (a persisted send queue draining on mount) would
-    // send an empty/stale array and root this turn as a second tree or graft it
-    // mid-thread — surfacing as "my send edited/forked an old message". A normal
-    // send (parentId absent) anchors to the chat's own leaf; an edit passes the
-    // sibling parent it computed from loaded history (null = first-message edit).
-    const parentId = body.parentId !== undefined ? body.parentId : (existingChat?.activeLeafId ?? null);
-    // The parent must be a real message *in this chat* — otherwise a stale or
-    // tampered client would 500 on the FK, or (with a real id from another
-    // chat) silently graft this turn onto a foreign branch.
-    if (parentId) {
-      const [parent] = await db
-        .select({ id: messages.id })
-        .from(messages)
-        .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
-        .limit(1);
-      if (!parent) {
-        // handedOff stays false → the finally below releases the hold.
-        return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
-      }
-    }
     // Order matters: the message row must exist before the chat's
     // active_leaf_id can reference it (FK), so these can't run in parallel.
     await db.insert(messages).values({
@@ -202,6 +209,7 @@ export const POST = apiHandler(async (req: Request) => {
       activeLeafId: newUserId,
       updatedAt: new Date(),
     }).where(eq(chats.id, chatId));
+    replyParentId = newUserId;
   } else if (existingChat) {
     // A regenerate. `updatedAt` is bumped unconditionally, not only when a setting
     // changed: it is what orders the sidebar and what `resolveInitialModel` reads
@@ -215,7 +223,7 @@ export const POST = apiHandler(async (req: Request) => {
   const payload: TaskPayload = {
     requestModel: effectiveModel,
     projectId: effectiveProjectId,
-    uiMessages: body.messages || [],
+    replyParentId,
     attachedFiles: attachedFiles as FileRef[] | undefined,
   };
   // Coalesces if the chat already has a pending turn (another tab/device, a
