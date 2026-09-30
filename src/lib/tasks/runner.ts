@@ -1703,6 +1703,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             });
             await saveSnapshot(true); // keep the snapshot current with each step
             break;
+          case "tool-output-denied": {
+            // The SDK re-checks each approved call before running it, and denies one
+            // whose tool is gone (its connector did not connect) or no longer asks for
+            // approval. It emits no result for it, so the row would keep an approved
+            // call nothing ran: the card spins and later turns send a bare call. Stored
+            // with the result a call that will never run gets (see approveManageForUser).
+            // A declined call already has its decision and is left alone.
+            const call = parts.find((p) => p.type === "tool-call" && p.id === event.toolCallId);
+            if (call?.type !== "tool-call" || call.approval?.approved !== true) break;
+            const output = { status: "error", code: "NOT_RUN", error: event.toolName in rawTools
+              ? "Not run. This tool no longer asks for approval, so the approved call was not run. Call it again if it is still needed."
+              : "Not run. This tool was not available when the approved call was due to run." };
+            await flushBuffers();
+            recordApprovedRun(event.toolCallId, event.toolName, { type: "json", value: output });
+            parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
+            await publishTaskEvent(userId, {
+              type: "task:tool-result", taskId, chatId, messageId: msgId,
+              toolCallId: event.toolCallId, result: output, seq: ++seq,
+            });
+            await saveSnapshot(true);
+            break;
+          }
           case "error":
             streamError = errMsg(event.error);
             break;
