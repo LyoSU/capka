@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - `GET /api/chat` accepts `messageId` and returns only that turn onward; a finished turn now fetches its own rows instead of the whole conversation.
 - Mid-stream reply snapshots are written every 1–2 s depending on reply size, and unchanged `content` is no longer rewritten. Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
 - Changing workspace files, memories or attachments between turns no longer invalidates the prompt cache for the conversation history, and Anthropic chats keep the history cached after a long tool-using turn.
+- The platform's V8 heap is now 75% of `PLATFORM_MEM_LIMIT` (3 GB at the default 4g) instead of a fixed 3 GB, so lowering the limit on a small box needs no `NODE_OPTIONS` override. Building the image locally needs `node:22-alpine` ≥ 22.21 (`docker pull node:22-alpine`).
 - `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
 
 ### Fixed
