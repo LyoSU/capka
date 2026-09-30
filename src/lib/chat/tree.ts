@@ -185,11 +185,6 @@ export function importedMessageRows(a: {
   });
 }
 
-/** All messages of a chat — small, bounded set; the graph math runs in memory. */
-async function loadMessages(chatId: string): Promise<MessageRow[]> {
-  return db.select().from(messages).where(eq(messages.chatId, chatId));
-}
-
 /** Just the columns the graph math needs, for every message of a chat. A full row
  *  carries every tool output the turn produced, and most of a branched chat's rows
  *  are not on the path being rendered. */
@@ -293,20 +288,14 @@ export async function forkChat(opts: {
     .limit(1);
   if (!source) return null;
 
-  const rows = await loadMessages(sourceChatId);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  if (!byId.has(fromMessageId)) return null;
-
-  // Path from the chosen node up to the root, then root → node.
-  const chain: MessageRow[] = [];
-  const seen = new Set<string>();
-  let cur: MessageRow | undefined = byId.get(fromMessageId);
-  while (cur && !seen.has(cur.id)) {
-    seen.add(cur.id);
-    chain.push(cur);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  chain.reverse();
+  // Root → chosen node over the light skeleton; full rows only for that chain.
+  const skeleton = await loadSkeleton(sourceChatId);
+  if (!skeleton.some((r) => r.id === fromMessageId)) return null;
+  const chainIds = activePath(skeleton, fromMessageId).map((p) => p.node.id);
+  const full = new Map(
+    (await db.select().from(messages).where(pathRowsWhere(sourceChatId, chainIds))).map((r) => [r.id, r]),
+  );
+  const chain = chainIds.flatMap((id) => full.get(id) ?? []);
 
   const newChatId = nanoid();
   const idMap = new Map<string, string>();
