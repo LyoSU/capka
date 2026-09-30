@@ -66,7 +66,8 @@ vi.mock("@/lib/sandbox/tools", () => ({
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
 vi.mock("@/lib/sandbox/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sandbox/client")>()),
-  listFiles: async () => ({ entries: [], truncated: false }),
+  // A workspace to list, so the turn context is on these prompts.
+  listFiles: async () => ({ entries: [{ path: "rows.csv", isDirectory: false }], truncated: false }),
 }));
 vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
@@ -248,5 +249,47 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("cancelled");
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+  }, 30_000);
+
+  // The SDK runs an approval only when its response is the LAST message it is handed.
+  // Everything a continuation adds to the history — the turn context folded into the
+  // user's message, the note of what already ran, a steer given before the approval
+  // and one the first half never read — has to land before the reply holding the call.
+  it("runs the approved call with every addition to its history in place", async () => {
+    const chat = `${C}-order`;
+    await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2)`, [chat, U]);
+    const steer = (id: string, text: string) => ({ id, text, at: new Date().toISOString() });
+    await pool.query(
+      `INSERT INTO tasks (id, chat_id, user_id, status, steers) VALUES ($1,$2,$3,'completed',$4::jsonb)`,
+      [`${chat}-t0`, chat, U, JSON.stringify([steer("s1", "use the final row"), steer("s2", "and keep it short")])],
+    );
+    await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ($1,$2,'user','save the row')`, [`${chat}-u1`, chat]);
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ($1,$2,$3,'assistant','',$4::jsonb)`,
+      [`${chat}-a1`, chat, `${chat}-u1`, JSON.stringify({
+        status: "awaiting_approval", taskId: `${chat}-t0`,
+        steers: [{ ...steer("s1", "use the final row"), atStep: 1, afterToolCallId: "c1" }],
+        parts: [
+          { type: "tool-call", id: "c1", name: "save_row", input: { row: "draft" } },
+          { type: "tool-result", id: "c1", name: "save_row", output: "saved" },
+          { type: "tool-call", id: "c2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
+        ],
+      })],
+    );
+    await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-a1`, chat]);
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    // The finding this pins: the approved call ran, once.
+    expect(writes).toEqual([{ row: "final" }]);
+    const [prompt] = prompts;
+    expectWireShape(prompt);
+    const reply = prompt.findIndex((m) => m.role === "assistant" && JSON.stringify(m.content).includes('"toolCallId":"c2"'));
+    expect(prompt[reply + 1]).toMatchObject({ role: "tool" });
+    expect(JSON.stringify(prompt[reply + 1].content)).toContain('"toolCallId":"c2"');
+    // Control: each addition really was on this prompt, ahead of that reply.
+    const before = JSON.stringify(prompt.slice(0, reply));
+    for (const text of ["rows.csv", "use the final row", "draft"]) expect(before).toContain(text);
+    expect(JSON.stringify(prompt)).toContain("and keep it short");
   }, 30_000);
 });
