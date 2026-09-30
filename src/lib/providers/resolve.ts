@@ -6,6 +6,7 @@ import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName, type ApiStyle } from "@/lib/providers";
 import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
+import { UnsafeUrlError } from "@/lib/net/ssrf";
 import { log } from "@/lib/log";
 import type { LanguageModel } from "ai";
 
@@ -237,8 +238,14 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey = decrypt(apiKey, mk);
   }
 
-  // SSRF guard on the real inference path — same policy as listing/testing.
-  await assertSafeProviderConfig(config.provider, config.baseUrl);
+  // SSRF guard on the real inference path — same policy as listing/testing. Its
+  // refusal (a host that stopped resolving, or the strict private-URL policy turned
+  // on after this connection was saved) is a plain Error; re-raised as a
+  // ValidationError it takes the same "this model can't be used" path as the
+  // refusals above instead of surfacing from /api/chat as a 500.
+  await assertSafeProviderConfig(config.provider, config.baseUrl).catch((e: unknown) => {
+    throw e instanceof UnsafeUrlError ? new ValidationError(e.message) : e;
+  });
 
   const model = getModel(config.provider, modelId, {
     apiKey: apiKey || undefined,
