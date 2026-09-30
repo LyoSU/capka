@@ -29,7 +29,7 @@ class Realtime {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private buildSubClient(): Client {
-    const client = new Client({ connectionString: DATABASE_URL, keepAlive: true });
+    const client = new Client({ connectionString: DATABASE_URL, keepAlive: true, keepAliveInitialDelayMillis: 10_000 });
     client.on("notification", (m) => {
       if (!m.channel || !m.payload) return;
       const cbs = this.chans.get(m.channel);
@@ -136,7 +136,7 @@ class Realtime {
     // never .end()ed). Concurrent callers await the same in-flight connect.
     if (this.pubConnecting) return this.pubConnecting;
     this.pubConnecting = (async () => {
-      const client = new Client({ connectionString: DATABASE_URL, keepAlive: true });
+      const client = new Client({ connectionString: DATABASE_URL, keepAlive: true, keepAliveInitialDelayMillis: 10_000 });
       // Drop the handle on error/end so the next publish lazily reconnects.
       client.on("error", (err) => {
         log.error("NOTIFY connection error", { err: String(err) });
