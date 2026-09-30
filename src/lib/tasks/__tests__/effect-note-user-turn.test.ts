@@ -15,7 +15,7 @@ vi.mock("@/lib/tasks/turn-taint", async (importOriginal) => ({
 import { downloadFile, execCommand } from "@/lib/sandbox/client";
 import { buildRecoveryNote } from "../effect-ledger";
 import { injectNativeFiles } from "../run-attachments";
-import { withoutEffectNote } from "../runner";
+import { userMessage } from "../runner";
 
 /**
  * The effect-ledger recovery note is a user-role message the runner adds after a
@@ -39,36 +39,35 @@ beforeEach(() => {
 
 const partTypes = (m: ModelMessage) => (Array.isArray(m.content) ? m.content.map((p) => p.type) : [typeof m.content]);
 
-describe("withoutEffectNote", () => {
-  it("re-attaches the user's files to the user's message, not to the note placed last", async () => {
+describe("userMessage", () => {
+  it("is the user's message, not the note placed last", async () => {
     const user: ModelMessage = { role: "user", content: "summarize this" };
     const msgs: ModelMessage[] = [user, { role: "assistant", content: "Working on it." }, note];
+    expect(userMessage(msgs, note)).toBe(user);
 
-    const injected = await injectNativeFiles(withoutEffectNote(msgs, note), "s", "u", "openai", [{ name: "a.txt", type: "text/plain" }], "row");
-
+    // …and the files go where they are pointed, whatever else in the list is user-role.
+    const injected = await injectNativeFiles(userMessage(msgs, note), "s", "u", "openai", [{ name: "a.txt", type: "text/plain" }], "row");
     expect(injected.map((f) => f.name)).toEqual(["a.txt"]);
     expect(partTypes(user)).toEqual(["file", "text"]);
-    expect(msgs[2]).toBe(note);
     expect(note.content).toBe(noteText);
   });
 
-  // The control: the same call over the whole history is the defect this pins.
-  it("without it, the note is what the files land on", async () => {
-    const lookalike: ModelMessage = { ...note };
+  // The control: the note really is the last user-role message here.
+  it("is not the last user-role message when that is the note", () => {
     const user: ModelMessage = { role: "user", content: "summarize this" };
-    await injectNativeFiles([user, lookalike], "s", "u", "openai", [{ name: "a.txt", type: "text/plain" }], "row");
-    expect(partTypes(user)).toEqual(["string"]);
-    expect(partTypes(lookalike)).toEqual(["file", "text"]);
+    const msgs: ModelMessage[] = [user, note];
+    expect(msgs.findLast((m) => m.role === "user")).toBe(note);
+    expect(userMessage(msgs, note)).toBe(user);
   });
 
-  it("finds the user's message for stripping when the note sits right after it (an approval still to run)", () => {
+  it("finds the user's message when the note sits right after it (an approval still to run)", () => {
     const user: ModelMessage = { role: "user", content: [{ type: "text", text: "see image" }, { type: "image", image: "aGk=" }] };
     const msgs: ModelMessage[] = [user, note, { role: "assistant", content: "…" }];
-    expect(withoutEffectNote(msgs, note).findLast((m) => m.role === "user")).toBe(user);
+    expect(userMessage(msgs, note)).toBe(user);
   });
 
-  it("is the history itself when there is no note", () => {
-    const msgs: ModelMessage[] = [{ role: "user", content: "hi" }];
-    expect(withoutEffectNote(msgs, null)).toBe(msgs);
+  it("is the last user message when there is no note", () => {
+    const user: ModelMessage = { role: "user", content: "hi" };
+    expect(userMessage([{ role: "user", content: "earlier" }, { role: "assistant", content: "ok" }, user], null)).toBe(user);
   });
 });

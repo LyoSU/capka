@@ -1,4 +1,4 @@
-import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
+import type { UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
 import { nanoid } from "nanoid";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { audioNeedsTranscode, NATIVE_IMAGE_FORMATS } from "@/lib/providers/registry";
@@ -277,21 +277,24 @@ async function normalizeImagesForProvider(
 }
 
 /**
- * Read multimodal files from sandbox and inject as FilePart in the last user
- * message. Returns the ORIGINAL FileRefs whose bytes actually reached the model
- * — the caller announces only those as inline-readable and routes the rest to
- * the tool path, so a file that couldn't be delivered (download failed, still
- * over cap after downscale, aggregate budget) is never falsely promised visible.
+ * Read multimodal files from sandbox and inject them as FileParts into `target`, the
+ * user's own message. Handed in rather than looked up by role: the platform adds
+ * user-role messages of its own (the effect-ledger note), and the last user-role
+ * message can be one of those. Returns
+ * the ORIGINAL FileRefs whose bytes actually reached the model — the caller announces
+ * only those as inline-readable and routes the rest to the tool path, so a file that
+ * couldn't be delivered (download failed, still over cap after downscale, aggregate
+ * budget) is never falsely promised visible.
  */
 export async function injectNativeFiles(
-  modelMessages: ModelMessage[],
+  target: UserModelMessage | undefined,
   sessionKey: string,
   userId: string,
   provider: string,
   files: FileRef[],
   /**
    * The message row that owns these attachments — `replyParentId ?? msgId` at both call
-   * sites. It is a parameter because this function takes `ModelMessage[]` and holds no
+   * sites. It is a parameter because this function takes a model message and holds no
    * row id of its own, and the mark has to land on a ROW: on a fresh turn that is the
    * USER message the attachment rides, which is what keeps the mark alive when the
    * assistant reply is regenerated; on a continuation it is `resumeMessageId`, which is
@@ -299,10 +302,7 @@ export async function injectNativeFiles(
    */
   attachmentRowId: string,
 ): Promise<FileRef[]> {
-  if (files.length === 0) return [];
-
-  const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-  if (!lastUser) return [];
+  if (files.length === 0 || !target) return [];
 
   // Prepare in-sandbox copies the transport can actually carry, each step
   // index-aligned with `files` so a substitute maps back to its original.
@@ -345,12 +345,12 @@ export async function injectNativeFiles(
   const totalBytes = downloaded.reduce((sum, { buf }) => sum + buf.length, 0);
 
   type UserPart = TextPart | ImagePart | FilePart;
-  const existing: UserPart[] = typeof lastUser.content === "string"
-    ? [{ type: "text", text: lastUser.content }]
-    : [...lastUser.content];
+  const existing: UserPart[] = typeof target.content === "string"
+    ? [{ type: "text", text: target.content }]
+    : [...target.content];
   // Attachments go BEFORE the user's text: providers (Anthropic says so
   // explicitly) attend to images best when they precede the prompt text.
-  lastUser.content = [...parts, ...existing];
+  target.content = [...parts, ...existing];
 
   // `downloadBounded` indexes into the array it was handed (`pending`), so map
   // each result back through `pending` to the caller's original FileRef — the

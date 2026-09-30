@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, UserModelMessage } from "ai";
 
 vi.mock("@/lib/sandbox/client", () => ({
   downloadFile: vi.fn(),
@@ -22,7 +22,8 @@ const marked = vi.mocked(markMessageUntrusted);
 /** Every case injects into the same row; only the mark cases care which. */
 const inject = (
   msgs: ModelMessage[], sessionKey: string, userId: string, provider: string, files: FileRef[],
-): Promise<FileRef[]> => injectNativeFiles(msgs, sessionKey, userId, provider, files, "attach-row");
+): Promise<FileRef[]> =>
+  injectNativeFiles(msgs.findLast((m): m is UserModelMessage => m.role === "user"), sessionKey, userId, provider, files, "attach-row");
 
 /** A downloadFile result stub — the code only ever reads `arrayBuffer()`. */
 const asResponse = (buf: Buffer) =>

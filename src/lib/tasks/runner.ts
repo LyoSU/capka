@@ -262,13 +262,13 @@ export function snapshotIntervalMs(bytes: number): number {
 }
 
 /**
- * The history as seen by whatever looks up "the user's last message" (native
- * attachment injection and stripping): the effect-ledger recovery note is user-role
- * too and, placed last or right after the user's message, would otherwise be the
- * one found. Same message objects, so an edit to the user's message lands in `msgs`.
+ * The user's own latest message, which native attachments are put on and stripped
+ * from. Not simply the last user-role message: the effect-ledger recovery note is
+ * user-role too and, placed last or right after the user's message, would be the one
+ * found.
  */
-export function withoutEffectNote(msgs: ModelMessage[], note: ModelMessage | null): ModelMessage[] {
-  return note ? msgs.filter((m) => m !== note) : msgs;
+export function userMessage(msgs: ModelMessage[], note: ModelMessage | null): UserModelMessage | undefined {
+  return msgs.findLast((m): m is UserModelMessage => m.role === "user" && m !== note);
 }
 
 /**
@@ -872,7 +872,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // `replyParentId ?? msgId`: on a fresh turn that is the USER message the attachment
       // rides — the row that survives a regenerate — and on a continuation it is
       // `resumeMessageId`, which is `msgId` and therefore this taint's own target.
-      injectedFiles = await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
+      // No effect note exists yet: the first one goes on below (carryEffectsIntoRestart).
+      injectedFiles = await injectNativeFiles(userMessage(modelMessages, null), sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
       injectedNative = injectedFiles.length > 0;
       // The row above carries the mark durably; this carries it into THIS turn's own gate,
       // which the fold above ran too early to see (the attachment is injected after it).
@@ -1816,7 +1817,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // in their place — the model should KNOW the user attached something and say it
     // can't process it, not answer as if nothing was sent.
     const stripNativeFilesWithNote = () => {
-      const lastUser = withoutEffectNote(modelMessages, effectNote).findLast((m): m is UserModelMessage => m.role === "user");
+      const lastUser = userMessage(modelMessages, effectNote);
       if (!lastUser || !Array.isArray(lastUser.content)) return;
       const removed = lastUser.content.filter((p) => p.type === "file" || p.type === "image").length;
       lastUser.content = lastUser.content.filter((p) => p.type !== "file" && p.type !== "image");
@@ -1984,7 +1985,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (injectedNative && nativeFiles.length) {
         // Same row id as the first injection — missing it here would drop the mark on
         // exactly the turn that overflowed. Monotonic, so the repeat is a no-op.
-        await injectNativeFiles(withoutEffectNote(modelMessages, effectNote), sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
+        await injectNativeFiles(userMessage(modelMessages, effectNote), sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
       }
       foldDiscarded();
       result = makeStream();
