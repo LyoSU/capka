@@ -159,4 +159,14 @@ describe("refusal — what the composer shows for a refused send", () => {
     expect(await shown(400, { error: "Some future refusal.", code: "NOT_YET_KNOWN" })).toBe(uk.chat.hook.requestFailed);
     expect(await shown(502)).toBe(uk.chat.hook.requestFailed); // no JSON body at all
   });
+
+  it("a refused regenerate does not claim a message failed to send", async () => {
+    // It sends none: the reply is re-run off the message already there.
+    const rerun = await refusal(new Response(JSON.stringify({ error: "Internal server error" }), { status: 500 }), t, "rerunFailed");
+    expect(rerun.message).toBe(uk.chat.hook.rerunFailed);
+    expect(rerun.message).not.toBe(uk.chat.hook.requestFailed);
+    // A coded refusal still says what it is.
+    expect((await refusal(new Response(JSON.stringify({ code: "RATE_LIMITED" }), { status: 429 }), t, "rerunFailed")).message)
+      .toBe(uk.chat.hook.rateLimited);
+  });
 });

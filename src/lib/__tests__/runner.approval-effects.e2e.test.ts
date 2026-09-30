@@ -25,9 +25,10 @@ import { expectWireShape, type WireMsg } from "./wire-shape";
 type Msg = WireMsg;
 const prompts: Msg[][] = [];
 // What the next provider call does instead of answering: an overflow is thrown (the
-// emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume), or a
-// 503 is thrown before any output (a resume with nothing of its own to continue).
-const failures: ("overflow" | "transient" | "unavailable")[] = [];
+// emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume), a
+// 503 is thrown before any output (a resume with nothing of its own to continue), or
+// the reply ends with nothing in it (the empty-response retry).
+const failures: ("overflow" | "transient" | "unavailable" | "empty")[] = [];
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
@@ -40,12 +41,18 @@ vi.mock("@/lib/providers/resolve", () => ({
           stream: simulateReadableStream({
             chunks: [
               { type: "stream-start", warnings: [] },
-              { type: "text-start", id: "1" },
               ...(fail === "transient"
-                ? [{ type: "text-delta", id: "1", delta: "Saving" }, { type: "error", error: new Error("503 Service Unavailable") }]
+                ? [
+                    { type: "text-start", id: "1" },
+                    { type: "text-delta", id: "1", delta: "Saving" },
+                    { type: "error", error: new Error("503 Service Unavailable") },
+                  ]
                 : [
-                    { type: "text-delta", id: "1", delta: "Saved." },
-                    { type: "text-end", id: "1" },
+                    ...(fail === "empty" ? [] : [
+                      { type: "text-start", id: "1" },
+                      { type: "text-delta", id: "1", delta: "Saved." },
+                      { type: "text-end", id: "1" },
+                    ]),
                     {
                       type: "finish",
                       finishReason: { unified: "stop", raw: "end_turn" },
@@ -77,6 +84,15 @@ vi.mock("@/lib/sandbox/tools", () => ({
   }),
 }));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
+// What the client is told, so a reset can be checked against what it keeps on screen.
+const published: TaskEvent[] = [];
+vi.mock("@/lib/tasks/events", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tasks/events")>();
+  return {
+    ...actual,
+    publishTaskEvent: async (userId: string, event: TaskEvent) => { published.push(event); return actual.publishTaskEvent(userId, event); },
+  };
+});
 // A workspace to list, so the turn context is on these prompts too.
 vi.mock("@/lib/sandbox/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sandbox/client")>()),
@@ -92,12 +108,21 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
+import type { TaskEvent } from "../tasks/events";
+import { toUIMessages } from "../chat/presenter";
+import { resetReply } from "@/hooks/use-background-chat";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "apfx-user";
 const C = "apfx-chat";
 
 /** A suspended half: a read that ran, then a write the user has just approved. */
+const SUSPENDED = [
+  { type: "tool-call", id: "c1", name: "save_row", input: { row: "draft" } },
+  { type: "tool-result", id: "c1", name: "save_row", output: "saved" },
+  { type: "tool-call", id: "c2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
+];
+
 async function seedSuspended(chat: string) {
   await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [chat, U]);
   await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ($1,$2,'user','save the row')`, [`${chat}-u1`, chat]);
@@ -105,11 +130,7 @@ async function seedSuspended(chat: string) {
     `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ($1,$2,$3,'assistant','',$4::jsonb)`,
     [`${chat}-a1`, chat, `${chat}-u1`, JSON.stringify({
       status: "awaiting_approval",
-      parts: [
-        { type: "tool-call", id: "c1", name: "save_row", input: { row: "draft" } },
-        { type: "tool-result", id: "c1", name: "save_row", output: "saved" },
-        { type: "tool-call", id: "c2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
-      ],
+      parts: SUSPENDED,
     })],
   );
   await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-a1`, chat]);
@@ -151,6 +172,7 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     prompts.length = 0;
     writes.length = 0;
     failures.length = 0;
+    published.length = 0;
   });
   afterAll(async () => {
     await clean();
@@ -184,12 +206,13 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     for (const p of prompts) expectWireShape(p);
   }, 30_000);
 
-  // Three restart roads: the overflow trim rebuilds the history from the settled rows,
-  // the transient resume keeps it and appends the reply so far, and a 503 before any
-  // output leaves the resume nothing of its own, so it restarts clean. Either way the
-  // write already ran before the model was first asked, so the retried prompt must
-  // hold its call and its result exactly once — and the write must not run again.
-  it.each(["overflow", "transient", "unavailable"] as const)("a %s restart sends the approved call with its result, once", async (kind) => {
+  // Four restart roads: the overflow trim rebuilds the history from the settled rows,
+  // the transient resume keeps it and appends the reply so far, a 503 before any
+  // output leaves the resume nothing of its own, so it restarts clean, and so does an
+  // empty reply. Either way the write already ran before the model was first asked,
+  // so the retried prompt must hold its call and its result exactly once — and the
+  // write must not run again.
+  it.each(["overflow", "transient", "unavailable", "empty"] as const)("a %s restart sends the approved call with its result, once", async (kind) => {
     const chat = `${C}-${kind}`;
     await seedSuspended(chat);
     failures.push(kind);
@@ -214,5 +237,14 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
       .toEqual(["tool-call:c1", "tool-result:c1", "tool-call:c2", "tool-result:c2"]);
     expect(parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
     expect(parts.at(-1)?.text).toMatch(/Saved\.$/);
+
+    // The live view keeps them too: a reset leaves the two cards the page drew for the
+    // suspended half, and drops only what the thrown-away attempt streamed after them.
+    const resets = published.filter((e): e is Extract<TaskEvent, { type: "task:reset" }> => e.type === "task:reset");
+    if (kind === "unavailable" || kind === "empty") expect(resets.length).toBeGreaterThan(0);
+    const [suspended] = toUIMessages([{ id: `${chat}-a1`, role: "assistant", content: "", createdAt: null, platform: null,
+      metadata: { status: "running", parts: SUSPENDED } }]);
+    const live = [{ ...suspended, parts: [...suspended.parts, { type: "text", text: "Saving" }] }];
+    for (const reset of resets) expect(resetReply(live, reset)[0].parts).toEqual(suspended.parts);
   }, 30_000);
 });

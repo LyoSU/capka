@@ -216,6 +216,28 @@ describe("createStreamRecovery", () => {
     expect(applied).toEqual([]);
   });
 
+  it("forgets the backoff of a reply whose turn ended, so the next gap reloads at once", async () => {
+    // The gap never closed before the turn finished: by then its retries had backed
+    // off to 2s, with one pending. A gap on the next reply must not wait that out.
+    const cursors = new Map<string, number>([["m1", 0]]);
+    let reloads = 0;
+    const recovery = createStreamRecovery<Ev>({
+      reload: async () => { reloads += 1; },  // never catches up
+      apply: () => true,
+      cursors,
+    });
+
+    recovery.hold({ messageId: "m1", seq: 10, text: "x" });
+    await vi.advanceTimersByTimeAsync(1800);     // reloads at 0, 250, 750, 1750
+    expect(reloads).toBe(4);                     // control: backed off, next one at 3750
+    recovery.drop("m1");                         // task:finish
+
+    await vi.advanceTimersByTimeAsync(300);
+    recovery.hold({ messageId: "m2", seq: 5, text: "y" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reloads).toBe(5);
+  });
+
   it("bounds what it holds when the reload is wedged", async () => {
     const cursors = new Map<string, number>([["m1", 0]]);
     const recovery = createStreamRecovery<Ev>({

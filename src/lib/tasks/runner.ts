@@ -546,9 +546,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // continuation that later overflows would report an empty ledger and re-run
       // the first half's writes — the exact failure the ledger exists to prevent.
       // Both sources, unioned by tool-call id with the ledger winning — not one or
-      // the other. An emergency trim clears `parts`, so the ledger is the stronger
-      // record; but during a rolling upgrade the half that ran before the table
-      // existed lives ONLY in `parts`, and an empty ledger is also what a failed
+      // the other. An emergency trim throws away every part this run adds past the
+      // loaded half (only the approved results survive it), so the ledger is the
+      // stronger record; but during a rolling upgrade the half that ran before the
+      // table existed lives ONLY in `parts`, and an empty ledger is also what a failed
       // write leaves behind. Choosing a source would drop the other's entries, and a
       // dropped effect is precisely the one that gets done twice. See mergeEffects.
       turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
@@ -912,16 +913,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The volatile tier as ONE user message right after the latest user message,
     // which mergeUserRuns then folds into that message after the user's words: strict
     // chat templates reject two user messages in a row. Providers cache by prefix,
-    // so anything that changes per run (a file written, a memory saved, this
-    // turn's attachments) placed before the history re-bills
-    // the whole history on the next turn; here it sits past the history-tail
-    // breakpoint, and the next turn and the compaction pass replay that prefix byte
-    // for byte. A user message because a system message past the start of the
-    // conversation is not portable: Anthropic accepts one only under a beta header,
-    // and many chat templates allow a system message only first. After the LAST user
-    // message rather than at the very end, because an approval continuation must
-    // still end on its tool-approval response — the SDK only executes approvals found in the final message; and
-    // before the effect-ledger note (`effectNote`), which is meant to be read last.
+    // so anything that changes per run (a file written, a memory saved, this turn's
+    // attachments) placed before the history re-bills the whole history on the next
+    // turn; here it sits past the history-tail breakpoint, and the next turn and the
+    // compaction pass replay that prefix byte for byte. A user message because a
+    // system message past the start of the conversation is not portable: Anthropic
+    // accepts one only under a beta header, and many chat templates allow a system
+    // message only first. After the LAST user message rather than at the very end,
+    // because an approval continuation must still end on its tool-approval response
+    // (the SDK only executes approvals found in the final message); and before the
+    // effect-ledger note (`effectNote`), which is meant to be read last.
     // Kept out of `modelMessages`, so nothing that looks up the user's last message
     // there (attachment stripping, native injection) can mistake this for it.
     const turnContextMessage: ModelMessage | null = turnContext.length
@@ -1490,7 +1491,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Wiping `parts` is exactly what blinds the next stream to this turn's own
       // writes, so the statement of what already ran goes in at the same moment.
       carryEffectsIntoRestart();
-      await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
+      // The client keeps the kept half too, counted as the presenter draws it: a card
+      // per call (its result lands on that card) and a part per non-empty text.
+      const keep = parts.slice(0, suspendedParts)
+        .filter((p) => p.type === "tool-call" || ((p.type === "text" || p.type === "reasoning") && p.text)).length;
+      await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq, keep });
     };
 
     let retried = false;
@@ -2067,7 +2072,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // empty parts there mean "provider never spoke", not "model chose silence",
     // and another attempt would just stall again.
     if (!ac.signal.aborted && !streamError && !stalledOut) {
-      const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
+      // Only this run's parts: a continuation's loaded half always holds a tool call,
+      // so counting it would never retry an empty continuation reply.
+      const hasContent = parts.slice(suspendedParts).some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
       if (!hasContent) {
         tlog.info("empty response — retrying once");
         await discardPartial();

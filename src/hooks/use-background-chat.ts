@@ -61,8 +61,10 @@ export const REFUSALS: Record<string, string> = {
   FORBIDDEN: "accountCantSend",
 };
 
-/** Turn a refused send or re-run into the error its caller throws, in the user's language. */
-export async function refusal(res: Response, t: ReturnType<typeof useTranslations>): Promise<Error> {
+/** Turn a refused send or re-run into the error its caller throws, in the user's language.
+ *  `fallback` is the line for a refusal with no code this build knows: a regenerate
+ *  sends no message, so it must not say that one could not be sent. */
+export async function refusal(res: Response, t: ReturnType<typeof useTranslations>, fallback: "requestFailed" | "rerunFailed" = "requestFailed"): Promise<Error> {
   const err = (await res.json().catch(() => null)) as { code?: string; admin?: boolean } | null;
   if (err?.code === "MODEL_UNAVAILABLE" && err.admin) return new Error(t("modelUnavailableAdmin"));
   const key = err?.code ? REFUSALS[err.code] : undefined;
@@ -72,7 +74,18 @@ export async function refusal(res: Response, t: ReturnType<typeof useTranslation
   if (res.status === 429) return new Error(t("rateLimited"));
   // Never the body's own `error`: that is English written for a log — a 500's "Internal
   // server error", or the line behind a code this build does not know.
-  return new Error(t("requestFailed"));
+  return new Error(t(fallback));
+}
+
+/** Apply a `task:reset`: the runner threw its partial reply away, so drop it from our
+ *  copy too — all but the first `keep` parts, the suspended half a continuation loaded,
+ *  which the retry keeps and does not stream again. */
+export function resetReply<M extends { id: string; parts: unknown[] }>(msgs: M[], reset: { messageId: string; keep?: number }): M[] {
+  const idx = msgs.findIndex((m) => m.id === reset.messageId);
+  if (idx === -1) return msgs;
+  const next = [...msgs];
+  next[idx] = { ...msgs[idx], parts: msgs[idx].parts.slice(0, reset.keep ?? 0) };
+  return next;
 }
 
 // ── Hook ─────────────────────────────────────────────────────
@@ -349,13 +362,7 @@ export function useBackgroundChat({
           // parts so retry deltas don't append onto the abandoned attempt, and
           // move the cursor to the reset's seq.
           appliedSeqRef.current.set(data.messageId, data.seq);
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === data.messageId);
-            if (idx === -1) return prev;
-            const msgs = [...prev];
-            msgs[idx] = { ...msgs[idx], parts: [] };
-            return msgs;
-          });
+          setMessages((prev) => resetReply(prev, data));
           break;
         }
 
@@ -865,7 +872,7 @@ export function useBackgroundChat({
             attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
           }),
         });
-        if (!res.ok) throw await refusal(res, t);
+        if (!res.ok) throw await refusal(res, t, "rerunFailed");
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
       } catch (e) {

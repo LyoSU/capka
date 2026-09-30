@@ -41,11 +41,13 @@ export type TaskEvent =
   // reload path re-derives an ask card from the persisted `answer` marker (see
   // presenter); this is the live-only fast path.
   | { type: "task:ask"; taskId: string; chatId: string; messageId: string; toolCallId: string; form: import("@/lib/ask/types").AskForm; seq?: number }
-  // A retry inside the runner threw away the partial reply (`parts.length = 0`)
-  // for a capability/empty-response retry. The client must DISCARD the streamed
-  // parts for this message and resync its applied-seq, so retry deltas land on a
-  // clean slate instead of being appended to the abandoned attempt.
-  | { type: "task:reset"; taskId: string; chatId: string; messageId: string; seq: number }
+  // A retry inside the runner threw away the partial reply. The client must DISCARD
+  // the streamed parts for this message past the first `keep` and resync its
+  // applied-seq, so retry deltas land on a clean slate instead of being appended to
+  // the abandoned attempt. `keep` is the suspended half an approval/`ask`
+  // continuation loaded, which the retry does not throw away. Absent from a runner
+  // older than the field, which kept nothing.
+  | { type: "task:reset"; taskId: string; chatId: string; messageId: string; seq: number; keep?: number }
   // A transient, non-persisted heads-up about the run itself (not the reply
   // content). Lets the UI replace a silent pause with a calm sentence instead of
   // leaving the user wondering whether anything is happening:

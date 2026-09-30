@@ -113,6 +113,14 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
      *  onto the finished message, duplicating text the reload already brought back. */
     drop(messageId: string) {
       buffer = buffer.filter((e) => e.messageId !== messageId);
+      // Nothing left to recover, so the backoff this gap earned goes with it: left
+      // standing, the next gap would wait out a stale retry and start from a long
+      // spacing instead of reloading at once.
+      if (buffer.length === 0) {
+        misses = 0;
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = null;
+      }
     },
     dispose() {
       disposed = true;
