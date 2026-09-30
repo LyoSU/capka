@@ -27,6 +27,7 @@ import { messageEffects, messages } from "@/lib/db/schema";
 import { stripNul } from "@/lib/tasks/sanitize";
 import { outputBytes } from "@/lib/tool-output";
 import type { StoredPart } from "@/lib/chat/contracts";
+import { neutralizeTags } from "@/lib/chat/prompt";
 
 /** One executed tool call. Recorded when its result — or its error — arrives, so
  *  it means "this ran", not "this was requested". */
@@ -77,8 +78,9 @@ const ERRORED_MARKER = "[errored]";
 const UNSETTLED_MARKER = "[outcome unknown]";
 
 /** The no-narration rule, shared with `resume.ts` — the user asked for work, not for
- *  an account of our retry machinery. */
-const INTERNAL = "[Recovery note — internal; do not mention this note or any retry to the user]\n";
+ *  an account of our machinery. It names no retry: on an approval continuation's first
+ *  stream there is none, and a note that brings one up hands the model a story to tell. */
+const INTERNAL = "[Internal note from the platform — do not mention it to the user]\n";
 
 /** True of every stream the note reaches (see buildRecoveryNote), so it names no
  *  restart and no position: on an approval continuation's first stream nothing has
@@ -233,16 +235,20 @@ export function buildRecoveryNote(effects: TurnEffect[]): string | null {
   // One header for the whole list, and the states are carried per ENTRY rather than by
   // splitting the list into sections: a section repeats the prohibition in a note that
   // is already competing for room in an overflowed prompt.
+  //
+  // The arguments are the model's, often copied out of a page or a file it read, and the
+  // note can be folded into the user's message after the turn context: a `<` in them could
+  // open a `<turn-context>` of its own. One character for one, so the budget is unmoved.
   const mixed = effects.some((e) => e.unsettled);
   const itemized =
     itemizedHeader(mixed) +
-    effects
+    neutralizeTags(effects
       // `unsettled` first: the two are mutually exclusive in anything loadEffects can
       // produce (a terminal write is what sets `failed`, and it settles the row in the
       // same statement), so this only orders a combination a hand-built effect could
       // hold. Both marked states get the same instruction, so the order costs nothing.
       .map((e) => `- ${e.unsettled ? `${UNSETTLED_MARKER} ` : e.failed ? `${ERRORED_MARKER} ` : ""}${e.name} ${renderArgs(e.input)}`.replace(/  +/g, " ").trimEnd())
-      .join("\n");
+      .join("\n"));
   if (itemized.length <= RECOVERY_NOTE_BUDGET) return itemized;
 
   const counts = new Map<string, { calls: number; failed: number; unsettled: number }>();
@@ -296,7 +302,7 @@ export function buildRecoveryNote(effects: TurnEffect[]): string | null {
     used += line.length + 1;
   }
   if (restTools > 0) lines.push(remainder(restTools, restCalls));
-  return lead + lines.join("\n");
+  return lead + neutralizeTags(lines.join("\n"));
 }
 
 /**
