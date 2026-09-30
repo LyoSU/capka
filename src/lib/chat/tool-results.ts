@@ -18,7 +18,8 @@
  * leave an empty assistant message — its own SDK error). Mutates in place and
  * returns the same array.
  *
- * A declined approval gets the same treatment for the same reason (see below).
+ * A declined approval gets the same treatment for the same reason, and so does
+ * an approved one that nothing will run any more (see below).
  *
  * Only ever apply this to HISTORY being fed to the model — never to a live,
  * streaming turn, where an `input-available` tool call legitimately means
@@ -32,7 +33,7 @@ export const INTERRUPTED_TOOL_RESULT =
   "The previous turn was interrupted before this tool finished, so it has no result.";
 
 export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] }>(messages: T[]): T[] {
-  for (const m of messages) {
+  for (const [i, m] of messages.entries()) {
     if (m.role !== "assistant" || !Array.isArray(m.parts)) continue;
     for (const part of m.parts as Array<Record<string, unknown>>) {
       const type = part.type;
@@ -52,8 +53,19 @@ export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] 
       // call, which providers reject. `output-denied` makes convertToModelMessages
       // emit the denial as a real result on every turn, the resume included (the
       // SDK skips synthesizing one for an approval whose result is already there).
-      if (isToolPart && part.state === "approval-responded" && (part.approval as { approved?: boolean } | undefined)?.approved === false) {
+      const approved = (part.approval as { approved?: boolean } | undefined)?.approved;
+      if (isToolPart && part.state === "approval-responded" && approved === false) {
         part.state = "output-denied";
+      }
+      // An approved call with no result runs only while its response is the LAST
+      // message — the continuation's history ends on it. Anywhere earlier nothing
+      // will run it (its queued continuation was cancelled, say), and the SDK would
+      // strip the response and leave a bare call. Sealed as interrupted, not as
+      // never-ran: from here a call cut off mid-run looks the same, and its effect
+      // may have landed.
+      if (isToolPart && part.state === "approval-responded" && approved === true && i < messages.length - 1) {
+        part.state = "output-error";
+        if (part.errorText == null) part.errorText = INTERRUPTED_TOOL_RESULT;
       }
     }
   }

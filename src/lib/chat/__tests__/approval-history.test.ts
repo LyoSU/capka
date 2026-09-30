@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { convertToModelMessages, jsonSchema, streamText, tool, type ModelMessage } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { toUIMessages } from "../presenter";
-import { sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, sealOrphanToolCalls } from "../tool-results";
 import type { MessageMeta, StoredPart } from "../contracts";
 
 // Anthropic and OpenAI reject a tool call with no result, so an approval that
@@ -94,6 +94,29 @@ describe("approval history reaches the provider with a result for every call", (
     expect(executed).toBe(false);
   });
 
+  // Stop, the deadline or a lost lease can end the continuation while the approved
+  // call is still running: the stream yields neither result nor error, yet its effect
+  // may land. Saying it never ran would have the user approve it a second time.
+  it("an approved call whose turn was stopped or failed reads as interrupted, never as not-run", async () => {
+    for (const status of ["cancelled", "failed"]) {
+      const stopped = row("a1", "assistant", { status, parts: [approved] });
+      const { results, executed } = await providerPrompt([ask, stopped, later]);
+      expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "error-text", value: INTERRUPTED_TOOL_RESULT } })]);
+      expect(JSON.stringify(results)).not.toContain("never ran");
+      expect(executed).toBe(false);
+    }
+  });
+
+  // A continuation cancelled while still queued never writes the row, so it stays
+  // awaiting_approval with the decision recorded — and a later message follows it.
+  it("an approved call left awaiting a continuation that will never run is sealed once a later message follows", async () => {
+    const stranded = row("a1", "assistant", { status: "awaiting_approval", parts: [approved] });
+    const { prompt, results, executed } = await providerPrompt([ask, stranded, later]);
+    expect(prompt.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user"]);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "error-text", value: INTERRUPTED_TOOL_RESULT } })]);
+    expect(executed).toBe(false);
+  });
+
   it("the resume of a just-approved call still runs it, exactly once", async () => {
     const waiting = row("a1", "assistant", { status: "awaiting_approval", parts: [approved] });
     const { results, executed } = await providerPrompt([ask, waiting]);
@@ -101,10 +124,12 @@ describe("approval history reaches the provider with a result for every call", (
     expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "text", value: "ok" } })]);
   });
 
-  it("the card reads not-run on a finished turn and keeps its spinner only while the continuation is pending", () => {
-    const at = (status: string) => toUIMessages([row("a1", "assistant", { status, parts: [approved] })])[0].parts[0];
+  it("the card reads not-run on a completed turn, interrupted on any other finished one, and spins only while the continuation is pending", () => {
+    const at = (status?: string) => toUIMessages([row("a1", "assistant", { status, parts: [approved] })])[0].parts[0];
     expect(at("completed")).toMatchObject({ state: "output-available", output: notRun, approval: { approved: true } });
-    expect(at("failed")).toMatchObject({ state: "output-available", output: { code: "NOT_RUN" } });
+    for (const status of ["failed", "cancelled", undefined]) {
+      expect(at(status)).toMatchObject({ state: "output-error", errorText: INTERRUPTED_TOOL_RESULT, approval: { approved: true } });
+    }
     expect(at("awaiting_approval")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
     expect(at("running")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
   });

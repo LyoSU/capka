@@ -124,17 +124,22 @@ export function toUIMessages(rows: {
             //
             // "Not yet run" holds only while the row still waits for its
             // continuation (awaiting_approval) or is that continuation (running).
-            // Once the turn has finished, an approved call with no result never ran:
-            // the resume re-checked it and dropped it (its connector gone, or it no
-            // longer needs approval) with nothing stored, or the continuation failed
-            // first. It gets the NOT_RUN result approveManageForUser stores for the
-            // same outcome, so the card stops spinning and later turns carry a result.
-            const notRun = a.approved === true && !tr && !err && meta?.status !== "awaiting_approval" && meta?.status !== "running";
+            // On a COMPLETED turn an approved call with no result never ran — had the
+            // continuation run it, it would have stored the result: the resume
+            // re-checked it and dropped it (its connector gone, or it no longer needs
+            // approval). It gets the NOT_RUN result approveManageForUser stores for
+            // the same outcome, so the card stops spinning and later turns carry a
+            // result. Any other finished status (failed, cancelled) may have stopped
+            // the call mid-run with its effect already landed, so it is sealed as
+            // interrupted, like any dangling call: "never ran" would invite a repeat.
+            const unsettled = a.approved === true && !tr && !err && meta?.status !== "awaiting_approval" && meta?.status !== "running";
+            const notRun = unsettled && meta?.status === "completed";
+            const errorText = err ?? (unsettled && !notRun ? INTERRUPTED_TOOL_RESULT : undefined);
             const output = notRun ? { status: "error", code: "NOT_RUN", error: "Not run. This approved call never ran, so it has no result." } : tr?.output;
-            const state = a.approved === undefined ? "approval-requested" : tr || notRun ? "output-available" : err ? "output-error" : "approval-responded";
+            const state = a.approved === undefined ? "approval-requested" : tr || notRun ? "output-available" : errorText ? "output-error" : "approval-responded";
             parts.push({
               type: "dynamic-tool", toolCallId: p.id, toolName: p.name, input: p.input, state,
-              output, ...(state === "output-error" ? { errorText: err } : {}),
+              output, ...(state === "output-error" ? { errorText } : {}),
               approval: { id: a.id, approved: a.approved, reason: a.reason },
             });
             continue;

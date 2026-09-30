@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, sealOrphanToolCalls } from "../tool-results";
 
 type Part = Record<string, unknown>;
 type Msg = { role: string; parts?: Part[] };
@@ -64,6 +64,18 @@ describe("sealOrphanToolCalls", () => {
     sealOrphanToolCalls(msgs);
     expect(msgs[0].parts![0].state).toBe("output-denied");
     expect(msgs[0].parts![1].state).toBe("approval-responded");
+  });
+
+  it("seals an approved call as interrupted once its message is no longer the last", () => {
+    const approvedCall = () => ({ type: "dynamic-tool", toolCallId: "c2", toolName: "manage", state: "approval-responded", approval: { id: "a2", approved: true } });
+    const msgs: Msg[] = [
+      { role: "assistant", parts: [approvedCall()] },
+      { role: "user", parts: [{ type: "text", text: "hello again" }] },
+      { role: "assistant", parts: [approvedCall()] },
+    ];
+    sealOrphanToolCalls(msgs);
+    expect(msgs[0].parts![0]).toMatchObject({ state: "output-error", errorText: INTERRUPTED_TOOL_RESULT, approval: { approved: true } });
+    expect(msgs[2].parts![0].state).toBe("approval-responded");
   });
 
   it("ignores user messages and non-tool parts", () => {
