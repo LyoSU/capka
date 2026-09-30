@@ -24,7 +24,8 @@ export interface ServerHealth {
 
 const PROBE_CONCURRENCY = 4;
 const CACHE_TTL_MS = 60_000;
-// Keyed by `${id}:${updatedAtMs}` so an edit (new updatedAt) busts the entry.
+// Keyed by `${userId}:${id}:${updatedAtMs}` so an edit (new updatedAt) busts the entry and
+// one user's verdict (an OAuth server is healthy only with THEIR token) is never served to another.
 const cache = new Map<string, { at: number; health: ServerHealth }>();
 
 /** A 401/403 means the credential is wrong (fixable by the user); anything else
@@ -120,7 +121,7 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   // Split into cache hits vs rows needing a live probe.
   const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets; authKind: McpAuthKind; transport: "http" | "sse" }[] = [];
   for (const r of remoteRows) {
-    const cacheKey = `${r.id}:${r.updatedAt?.getTime() ?? 0}`;
+    const cacheKey = `${userId}:${r.id}:${r.updatedAt?.getTime() ?? 0}`;
     const hit = cache.get(cacheKey);
     if (hit && now - hit.at < CACHE_TTL_MS) { out[r.id] = hit.health; continue; }
     let secrets: McpSecrets | undefined;
