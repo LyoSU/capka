@@ -50,7 +50,8 @@ vi.mock("@/lib/db", async () => {
             if (fields) {
               return Promise.resolve(store.map((r) => ({ id: r.id, parentId: r.parentId, createdAt: r.createdAt, role: r.role })));
             }
-            const { params } = new PgDialect().sqlToQuery(pred);
+            // The ids arrive as one array parameter (see pathRowsWhere).
+            const params = new PgDialect().sqlToQuery(pred).params.flat();
             fullReads.ids.push(params);
             return Promise.resolve(store.filter((r) => params.includes(r.id)));
           },
