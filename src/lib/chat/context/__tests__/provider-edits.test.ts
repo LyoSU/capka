@@ -238,7 +238,7 @@ describe("markStepTail", () => {
   it("does NOT mutate the messages it was given", () => {
     // The ceiling bug this guards: the SDK hands back the SAME objects each step, so
     // an in-place marker accumulates one breakpoint per step. Anthropic allows four
-    // (stable + session + user tail + this), and a 25-step tool loop would blow past
+    // (stable + previous turn's tail + user tail + this), and a 25-step tool loop would blow past
     // it — the request fails outright rather than degrading.
     const msgs: Msg[] = [{ role: "user" }, { role: "tool" }];
     const before = JSON.stringify(msgs);

@@ -222,8 +222,9 @@ export function contextManagementOptions(
  *
  * The tail is CLONED, never mutated, and that is the whole point: the SDK hands
  * back the same message objects each step, so an in-place marker would accumulate
- * one breakpoint per step and blow Anthropic's ceiling of four (stable + session +
- * user tail + this one is already exactly four). Step 0 is skipped — its tail is
+ * one breakpoint per step and blow Anthropic's ceiling of four (stable system
+ * prompt + the previous turn's tail + this turn's user tail + this one is already
+ * exactly four; the session tier carries none). Step 0 is skipped — its tail is
  * the already-marked user message.
  */
 export function markStepTail<T extends { providerOptions?: Record<string, Record<string, unknown>> }>(
