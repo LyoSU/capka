@@ -5,7 +5,10 @@ import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
 import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { BudgetExceededError } from "@/lib/errors";
+import { AppError, BudgetExceededError, ValidationError } from "@/lib/errors";
+import { take } from "@/lib/rate-limit";
+import { classifyLLMError } from "@/lib/errors/friendly";
+import { publishTaskEvent } from "@/lib/tasks/events";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -21,8 +24,9 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  * normal call→result pair and the SDK finishes the SAME turn with the answer in
  * hand. Same three outcomes as `approveManageForUser`: "gone" (not the caller's,
  * no pending ask, or already answered) is final; "busy" (the chat's one queued
- * slot is taken) is worth retrying. Over budget, it throws BudgetExceededError
- * with nothing recorded — the same gate and refusal as the manage approval path.
+ * slot is taken) is worth retrying. Over budget or over the chat rate limit it
+ * throws (BudgetExceededError / a 429 `RATE_LIMITED` AppError) with nothing
+ * recorded — the same gates and refusals as the manage approval path.
  */
 export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy"> {
   const [msg] = await db
@@ -52,10 +56,18 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
     : null;
   // The resume is a paid turn: reserve its budget hold before anything is written,
   // exactly as approveManageForUser does, and release it unless our task committed.
+  // Same flood bucket and refusal as a send, and the same removed-connection rule:
+  // no model means the answer is recorded and the turn settled here as failed.
+  if (!take(`chat:${userId}`).ok) throw new AppError("Too many messages — please slow down.", 429, "RATE_LIMITED");
   const taskId = nanoid();
-  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(userId, orig?.requestModel);
-  const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
-  if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  const model = await resolveUserModelInfo(userId, orig?.requestModel)
+    .catch((e) => { if (e instanceof ValidationError) return { failure: classifyLLMError(e) }; throw e; });
+  const failure = "failure" in model ? model.failure : null;
+  if (!("failure" in model)) {
+    const { isShared, modelId, provider, configId } = model;
+    const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
+    if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  }
   let handedOff = false;
 
   // Same shape as the manage approval path: the answer and the turn that acts on it
@@ -68,13 +80,17 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
       // still unanswered, so two racing answers (double-submit, or web + Telegram) can't
       // both enqueue a resume — the first writes the value, the second matches 0 rows
       // and bails. Mirrors answerElicitationForUser's isNull(answer) guard.
-      const applied = await tx.update(messages).set({ metadata: { ...meta, parts } })
+      const settled = failure
+        ? { status: "failed", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category }
+        : {};
+      const applied = await tx.update(messages).set({ metadata: { ...meta, parts, ...settled } })
         .where(and(
           eq(messages.id, d.messageId),
           sql`${messages.metadata} @? ${'$.parts[*] ? (exists(@.answer.form) && !exists(@.answer.value))'}::jsonpath`,
         ))
         .returning({ id: messages.id });
       if (applied.length === 0) tx.rollback();
+      if (failure) return;
 
       // A chat holds at most one QUEUED turn, so this insert folds into a pending one
       // when the user typed a follow-up while the question sat unanswered. The
@@ -96,7 +112,11 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
       }
     });
     handedOff = true;
-    await notifyTaskEnqueued(taskId);
+    if (failure) {
+      await publishTaskEvent(userId, {
+        type: "task:finish", taskId, chatId: msg.chatId, messageId: d.messageId, status: "failed", error: failure.userMessage,
+      }).catch(() => {});
+    } else await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
     if (e instanceof TransactionRollbackError) return refusal;

@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import { getTranslator } from "@/lib/i18n/translator";
-import { BudgetExceededError } from "@/lib/errors";
+import { BudgetExceededError, isAppError } from "@/lib/errors";
 import type { AskForm, AskField, AskAnswer } from "@/lib/ask/types";
 
 /**
@@ -97,25 +97,26 @@ async function finish(bot: Bot, chatId: number, c: Collection, action: AskAnswer
   const { answerAskForUser, answerElicitationForUser } = await import("@/lib/ask/authed");
   const outcome = c.kind === "elicitation"
     ? ((await answerElicitationForUser(c.userId, d)) ? "applied" : "gone")
-    : await answerAskForUser(c.userId, d)
-      .catch((e) => { if (e instanceof BudgetExceededError) return "budget" as const; throw e; });
-  if (outcome === "budget") {
-    await bot.api.sendMessage(chatId, getTranslator(c.locale, "telegram")("budgetReached")).catch(() => {});
-    // Nothing was recorded, so the question stays open: re-offer its last field so
-    // the user can answer again once the window rolls over (unless a newer question
-    // took this chat meanwhile).
+    : await answerAskForUser(c.userId, d).catch((e) => {
+      if (e instanceof BudgetExceededError) return "budget" as const;
+      if (isAppError(e) && e.code === "RATE_LIMITED") return "limited" as const;
+      throw e;
+    });
+  if (outcome === "budget" || outcome === "limited" || outcome === "busy") {
+    // "busy" is not "expired": the question is still live, the chat is just finishing
+    // another turn — and a refusal by the spending limit or the flood guard recorded
+    // nothing either. So each says why, then re-offers the last field so the user can
+    // answer again (unless a newer question took this chat meanwhile).
+    const tg = getTranslator(c.locale, "telegram");
+    const msg = outcome === "busy" ? t("busy") : outcome === "budget" ? tg("budgetReached") : tg("tooFast");
+    await bot.api.sendMessage(chatId, msg).catch(() => {});
     if (collections.has(chatId)) return;
     c.cursor = Math.min(c.cursor, c.form.fields.length - 1);
     collections.set(chatId, c);
     await promptField(bot, chatId, c);
     return;
   }
-  // "busy" is not "expired": the question is still live, the chat is just finishing
-  // another turn. Saying "expired" there would tell the user their answer is gone
-  // when the right move is to answer again.
-  const msg = outcome === "busy" ? t("busy")
-    : outcome === "gone" ? t("expired")
-    : action === "skip" ? t("skipped") : t("answered");
+  const msg = outcome === "gone" ? t("expired") : action === "skip" ? t("skipped") : t("answered");
   await bot.api.sendMessage(chatId, msg).catch(() => {});
 }
 

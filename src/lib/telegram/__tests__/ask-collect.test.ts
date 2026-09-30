@@ -14,7 +14,7 @@ vi.mock("@/lib/ask/authed", () => ({
   answerElicitationForUser: (...a: unknown[]) => answerElicitationForUser(...a),
 }));
 
-import { BudgetExceededError } from "@/lib/errors";
+import { AppError, BudgetExceededError } from "@/lib/errors";
 import { startAskCollection, onAskText } from "../ask-collect";
 
 const sent: string[] = [];
@@ -68,5 +68,30 @@ describe("telegram ask-collect — spending limit", () => {
     expect(answerAskForUser).toHaveBeenCalledTimes(2);
     expect(answerAskForUser).toHaveBeenLastCalledWith("u1", { messageId: "m1", action: "submit", values: { q: "Alice" } });
     expect(sent.at(-1)).toBe("answered");
+  });
+});
+
+describe("telegram ask-collect — retryable refusals", () => {
+  it("keeps the question answerable when the chat is busy, instead of asking for an answer it can no longer take", async () => {
+    answerAskForUser.mockResolvedValueOnce("busy").mockResolvedValueOnce("applied");
+    await startAskCollection(bot, CHAT, { userId: "u1", messageId: "m1", form: oneTextField, kind: "ask" });
+    sent.length = 0;
+
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(sent).toEqual(["busy", "Your name?"]);
+
+    // The next reply is still captured by the question, not sent as a new chat turn.
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(answerAskForUser).toHaveBeenCalledTimes(2);
+    expect(sent.at(-1)).toBe("answered");
+  });
+
+  it("says to slow down on the flood guard's refusal and keeps the question answerable", async () => {
+    answerAskForUser.mockRejectedValueOnce(new AppError("Too many messages — please slow down.", 429, "RATE_LIMITED"));
+    await startAskCollection(bot, CHAT, { userId: "u1", messageId: "m1", form: oneTextField, kind: "ask" });
+    sent.length = 0;
+
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(sent).toEqual(["tooFast", "Your name?"]);
   });
 });

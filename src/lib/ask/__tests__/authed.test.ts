@@ -19,6 +19,11 @@ const resolveUserModelInfo = vi.fn();
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: (...a: unknown[]) => resolveUserModelInfo(...a),
 }));
+// The same per-user flood bucket a send spends from; the key is what these assert.
+const take = vi.fn();
+vi.mock("@/lib/rate-limit", () => ({ take: (...a: unknown[]) => take(...a) }));
+const publishTaskEvent = vi.fn();
+vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: (...a: unknown[]) => publishTaskEvent(...a) }));
 
 const rows: Record<string, unknown> = {};
 // Both answerAskForUser and answerElicitationForUser guard the write and read its
@@ -53,7 +58,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { BudgetExceededError } from "@/lib/errors";
+import { BudgetExceededError, ValidationError } from "@/lib/errors";
 import { answerAskForUser, answerElicitationForUser } from "../authed";
 
 describe("answerAskForUser", () => {
@@ -66,6 +71,8 @@ describe("answerAskForUser", () => {
     reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
     releaseHold.mockReset().mockResolvedValue(undefined);
     resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
+    take.mockReset().mockReturnValue({ ok: true, retryAfterSec: 0 });
+    publishTaskEvent.mockReset().mockResolvedValue(undefined);
   });
 
   const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
@@ -107,6 +114,50 @@ describe("answerAskForUser", () => {
     ).rejects.toBeInstanceOf(BudgetExceededError);
     expect(rows.updated).toBeUndefined();
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it("refuses over the chat rate limit with the send's 429, nothing recorded and nothing reserved", async () => {
+    rows.msg = pendingAsk();
+    rows.task = { payload: { requestModel: "m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    take.mockReturnValue({ ok: false, retryAfterSec: 6 });
+    const err = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } }).catch((e) => e);
+    expect(take).toHaveBeenCalledWith("chat:u1");
+    expect(err).toMatchObject({ status: 429, code: "RATE_LIMITED" });
+    expect(rows.updated).toBeUndefined();
+    expect(reserveBudget).not.toHaveBeenCalled();
+    expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it("settles the turn as failed when the chat's connection was removed, instead of leaving an unresolvable card", async () => {
+    rows.msg = pendingAsk();
+    rows.task = { payload: { requestModel: "gone-cfg:m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    resolveUserModelInfo.mockRejectedValue(new ValidationError(
+      "This chat's model is no longer available — its connection was removed. Please choose another model.",
+    ));
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(outcome).toBe("applied");
+    // The decision is recorded AND the turn settled, in the runner's own friendly words.
+    const meta = (rows.updated as { metadata: { status: string; error: string; errorCategory: string; errorDetail: string } }).metadata;
+    expect(meta).toMatchObject({ status: "failed", errorCategory: "model_unavailable" });
+    expect(meta.error).toMatch(/isn't available right now/);
+    expect(meta.errorDetail).toMatch(/connection was removed/);
+    // Nothing can run without a model, so nothing is held, queued or woken.
+    expect(reserveBudget).not.toHaveBeenCalled();
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(publishTaskEvent).toHaveBeenCalledWith("u1", expect.objectContaining({
+      type: "task:finish", chatId: "chat1", messageId: "m1", status: "failed", error: meta.error,
+    }));
+  });
+
+  it("still surfaces an unexpected model-resolution error rather than settling the turn", async () => {
+    rows.msg = pendingAsk();
+    rows.task = { payload: {} };
+    resolveUserModelInfo.mockRejectedValue(new Error("connection reset"));
+    await expect(answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } })).rejects.toThrow("connection reset");
+    expect(rows.updated).toBeUndefined();
   });
 
   it("is single-use: a racing second answer whose guarded update matches 0 rows does NOT enqueue a duplicate resume", async () => {

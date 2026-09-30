@@ -6,7 +6,10 @@ import { users, messages, chats, tasks } from "@/lib/db/schema";
 import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { BudgetExceededError } from "@/lib/errors";
+import { AppError, BudgetExceededError, ValidationError } from "@/lib/errors";
+import { take } from "@/lib/rate-limit";
+import { classifyLLMError } from "@/lib/errors/friendly";
+import { publishTaskEvent } from "@/lib/tasks/events";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -100,7 +103,8 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * (nothing to retry); "busy" — the decision stuck nowhere because the chat's one
  * queued slot is taken, which IS worth tapping again. Callers that show buttons
  * must keep them alive only for "busy". A user over their shared-key budget gets
- * a BudgetExceededError instead, with nothing recorded.
+ * a BudgetExceededError instead, and one over the chat rate limit a 429
+ * `RATE_LIMITED` AppError — both with nothing recorded.
  */
 export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy"> {
   const [msg] = await db
@@ -144,10 +148,22 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   // turn and passes the same shared-key budget gate as a send, resolved the way the
   // runner will resolve it. Reserved before anything is written: a refusal records
   // no decision, so the card stays live for when the window rolls over.
+  // It also spends from the same per-user flood bucket as a send (same key, same
+  // refusal), so a continuation is never a way around the chat route's rate limit.
+  if (!take(`chat:${userId}`).ok) throw new AppError("Too many messages — please slow down.", 429, "RATE_LIMITED");
   const taskId = nanoid();
-  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(userId, orig?.requestModel);
-  const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
-  if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  // A connection an admin removed while the card waited leaves no model to run on.
+  // Refusing would leave a card no tap can ever settle, so the decision is recorded
+  // and the turn settled on the spot with the failure the runner gives a turn it
+  // cannot resolve a model for — no hold and no task, since nothing can be spent.
+  const model = await resolveUserModelInfo(userId, orig?.requestModel)
+    .catch((e) => { if (e instanceof ValidationError) return { failure: classifyLLMError(e) }; throw e; });
+  const failure = "failure" in model ? model.failure : null;
+  if (!("failure" in model)) {
+    const { isShared, modelId, provider, configId } = model;
+    const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
+    if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  }
   // Released on every path that doesn't hand the hold to a created, committed task.
   let handedOff = false;
 
@@ -165,13 +181,17 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
       // Telegram at once) can't both win — the first flips it, the second matches 0
       // rows and bails WITHOUT enqueuing a duplicate resume. (answerElicitationForUser
       // already had this shape via isNull(answer); this brings approve in line.)
-      const applied = await tx.update(messages).set({ metadata: { ...meta, parts } })
+      const settled = failure
+        ? { status: "failed", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category }
+        : {};
+      const applied = await tx.update(messages).set({ metadata: { ...meta, parts, ...settled } })
         .where(and(
           eq(messages.id, d.messageId),
           sql`${messages.metadata} @? ${'$.parts[*] ? (exists(@.approval) && !exists(@.approval.approved))'}::jsonpath`,
         ))
         .returning({ id: messages.id });
       if (applied.length === 0) tx.rollback();
+      if (failure) return;
 
       // A chat holds at most one QUEUED turn, so this insert folds into an existing
       // one when the chat already has a pending turn (a Telegram follow-up typed while
@@ -201,7 +221,13 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
     // only now does the row exist for anyone else, so only now is a worker worth
     // waking (enqueueTask holds the NOTIFY back inside a transaction).
     handedOff = true;
-    await notifyTaskEnqueued(taskId);
+    // With no task to finish the turn, say it is finished ourselves: the open chat
+    // reloads it, and the card gives way to the failure notice.
+    if (failure) {
+      await publishTaskEvent(userId, {
+        type: "task:finish", taskId, chatId: msg.chatId, messageId: d.messageId, status: "failed", error: failure.userMessage,
+      }).catch(() => {});
+    } else await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
     // Our own rollback: nothing was recorded either way, so the card is safe to
