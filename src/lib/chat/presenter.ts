@@ -121,10 +121,20 @@ export function toUIMessages(rows: {
             // given its result in model history by sealOrphanToolCalls). The
             // `approval` marker rides along in every state so the card owns the
             // whole lifecycle.
-            const state = a.approved === undefined ? "approval-requested" : tr ? "output-available" : err ? "output-error" : "approval-responded";
+            //
+            // "Not yet run" holds only while the row still waits for its
+            // continuation (awaiting_approval) or is that continuation (running).
+            // Once the turn has finished, an approved call with no result never ran:
+            // the resume re-checked it and dropped it (its connector gone, or it no
+            // longer needs approval) with nothing stored, or the continuation failed
+            // first. It gets the NOT_RUN result approveManageForUser stores for the
+            // same outcome, so the card stops spinning and later turns carry a result.
+            const notRun = a.approved === true && !tr && !err && meta?.status !== "awaiting_approval" && meta?.status !== "running";
+            const output = notRun ? { status: "error", code: "NOT_RUN", error: "Not run. This approved call never ran, so it has no result." } : tr?.output;
+            const state = a.approved === undefined ? "approval-requested" : tr || notRun ? "output-available" : err ? "output-error" : "approval-responded";
             parts.push({
               type: "dynamic-tool", toolCallId: p.id, toolName: p.name, input: p.input, state,
-              output: tr?.output, ...(state === "output-error" ? { errorText: err } : {}),
+              output, ...(state === "output-error" ? { errorText: err } : {}),
               approval: { id: a.id, approved: a.approved, reason: a.reason },
             });
             continue;

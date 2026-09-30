@@ -33,7 +33,9 @@ async function providerPrompt(rows: Row[]) {
   const r = streamText({
     model,
     messages: history as ModelMessage[],
-    tools: { manage: tool({ inputSchema: jsonSchema({ type: "object" }), execute: async () => { executed = true; return "ok"; } }) },
+    // Gated, as the runner builds it: the SDK re-checks an approved call and denies
+    // one whose tool no longer needs approval instead of running it.
+    tools: { manage: tool({ inputSchema: jsonSchema({ type: "object" }), needsApproval: true, execute: async () => { executed = true; return "ok"; } }) },
   });
   for await (const c of r.fullStream) chunks.push(c.type);
   const prompt = model.doStreamCalls[0].prompt;
@@ -78,6 +80,33 @@ describe("approval history reaches the provider with a result for every call", (
       expect.objectContaining({ toolCallId: "c1", output: { type: "error-text", value: "Connector refused the change" } }),
     ]);
     expect(executed).toBe(false);
+  });
+
+  // The resume re-checks an approved call and drops it — connector gone, or no longer
+  // gated — without storing anything, so the finished row holds an approval and no result.
+  const approved = { ...call, approval: { id: "ap1", approved: true } } as StoredPart;
+  const notRun = { status: "error", code: "NOT_RUN", error: "Not run. This approved call never ran, so it has no result." };
+
+  it("an approved call that never ran on a finished turn carries a not-run result", async () => {
+    const finished = row("a1", "assistant", { status: "completed", parts: [approved, { type: "text", text: "Done." }] });
+    const { results, executed } = await providerPrompt([ask, finished, later]);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "json", value: notRun } })]);
+    expect(executed).toBe(false);
+  });
+
+  it("the resume of a just-approved call still runs it, exactly once", async () => {
+    const waiting = row("a1", "assistant", { status: "awaiting_approval", parts: [approved] });
+    const { results, executed } = await providerPrompt([ask, waiting]);
+    expect(executed).toBe(true);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "text", value: "ok" } })]);
+  });
+
+  it("the card reads not-run on a finished turn and keeps its spinner only while the continuation is pending", () => {
+    const at = (status: string) => toUIMessages([row("a1", "assistant", { status, parts: [approved] })])[0].parts[0];
+    expect(at("completed")).toMatchObject({ state: "output-available", output: notRun, approval: { approved: true } });
+    expect(at("failed")).toMatchObject({ state: "output-available", output: { code: "NOT_RUN" } });
+    expect(at("awaiting_approval")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
+    expect(at("running")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
   });
 
   it("the transcript keeps the declined card as it is — the seal is for model history only", () => {
