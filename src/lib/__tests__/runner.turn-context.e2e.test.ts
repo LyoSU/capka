@@ -61,7 +61,8 @@ vi.mock("@/lib/providers/resolve", () => ({
         };
       },
     }),
-    provider: "mock",
+    // The provider whose cache markers this suite counts: elsewhere a fold is one string.
+    provider: "anthropic",
     modelId: "mock-model",
   }),
 }));
@@ -172,7 +173,7 @@ run("runAgentTask: the volatile tier rides after the history", () => {
     manifest = "## User memory\n- likes coffee";
     listing = [...listing, { path: "c.txt", isDirectory: false }, { path: CLOSER, isDirectory: false }, { path: NESTED, isDirectory: false }];
     truncated = true;
-    await runTurn("tctx-task2", "tctx-u2", { attachedFiles: [{ name: ATTACHED, type: "application/pdf" }] });
+    await runTurn("tctx-task2", "tctx-u2", { attachedFiles: [{ name: ATTACHED, type: "text/plain" }] });
     const second = prompts.at(-1)!;
 
     // Control: the context really did change between the turns, and is not in a

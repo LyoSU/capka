@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import { generateText, type ModelMessage } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider-v2";
 import {
   contextManagementOptions,
   mergeProviderOptions,
@@ -335,24 +338,32 @@ describe("mergeUserRuns", () => {
   ];
 
   /** The request body a real provider package builds for `messages`. */
-  async function wire(provider: "anthropic" | "openai-compatible", messages: ModelMessage[]) {
+  async function wire(provider: "anthropic" | "openai-compatible" | "openai" | "ollama" | "google", messages: ModelMessage[]) {
     let body: Record<string, unknown> | undefined;
     const fetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
       body = JSON.parse(String(init?.body));
       throw new Error("captured");
     };
-    const model = provider === "anthropic"
-      ? createAnthropic({ apiKey: "k", fetch })("claude-sonnet-4-5")
-      : createOpenAICompatible({ name: "vllm", baseURL: "http://vllm.test/v1", fetch })("gemma");
+    const model = {
+      anthropic: () => createAnthropic({ apiKey: "k", fetch })("claude-sonnet-4-5"),
+      "openai-compatible": () => createOpenAICompatible({ name: "vllm", baseURL: "http://vllm.test/v1", fetch })("gemma"),
+      openai: () => createOpenAI({ apiKey: "k", baseURL: "http://vllm.test/v1", fetch }).chat("gemma"),
+      ollama: () => createOllama({ baseURL: "http://ollama.test/api", fetch })("llama3"),
+      google: () => createGoogleGenerativeAI({ apiKey: "k", fetch })("gemini-2.5-flash"),
+    }[provider]();
     await generateText({ model, messages, maxRetries: 0 }).catch(() => {});
-    return body as { system?: unknown; messages: { role: string; content: unknown }[] };
+    return body as {
+      system?: unknown;
+      messages: { role: string; content: unknown; images?: unknown[] }[];
+      contents: { role: string; parts: { text?: string }[] }[];
+    };
   }
   const roles = (msgs: { role: string }[]) => msgs.map((m) => m.role);
   const consecutiveUsers = (msgs: { role: string }[]) =>
     msgs.filter((m, i) => m.role === "user" && msgs[i - 1]?.role === "user").length;
 
   it("folds the turn context into the user's message and keeps the breakpoint on the user's own part", () => {
-    const out = mergeUserRuns(turn1());
+    const out = mergeUserRuns(turn1(), "anthropic");
     expect(roles(out)).toEqual(["system", "user"]);
     const user = out[1] as { content: { text: string; providerOptions?: unknown }[]; providerOptions?: unknown };
     expect(user.providerOptions).toBeUndefined();
@@ -363,39 +374,64 @@ describe("mergeUserRuns", () => {
 
   it("returns the list itself when nothing needs folding, and never mutates it", () => {
     const alternating: ModelMessage[] = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }];
-    expect(mergeUserRuns(alternating)).toBe(alternating);
-    const msgs = turn2();
-    const before = JSON.stringify(msgs);
-    mergeUserRuns(msgs);
-    expect(JSON.stringify(msgs)).toBe(before);
+    expect(mergeUserRuns(alternating, "vllm")).toBe(alternating);
+    for (const provider of ["anthropic", "vllm"]) {
+      const msgs = turn2();
+      const before = JSON.stringify(msgs);
+      mergeUserRuns(msgs, provider);
+      expect(JSON.stringify(msgs)).toBe(before);
+    }
   });
 
   it("folds a run of three (context, then an effect note or a steer) in order", () => {
-    const out = mergeUserRuns([...turn1(), { role: "user", content: "already ran: save_row" }]);
+    const run = [...turn1(), { role: "user", content: "already ran: save_row" } as const];
+    const out = mergeUserRuns(run, "anthropic");
     expect(roles(out)).toEqual(["system", "user"]);
     expect((out[1].content as { text: string }[]).map((p) => p.text)).toEqual(["hello", CONTEXT, "already ran: save_row"]);
+    // Elsewhere the same run is one string, each folded message on a line of its own.
+    expect(mergeUserRuns(run, "vllm")[1].content).toBe(`hello\n\n${CONTEXT}\n\nalready ran: save_row`);
   });
 
   it("puts the marker on the last part the SDK keeps, not on an empty text it drops", () => {
     const out = mergeUserRuns([
       { role: "user", content: [{ type: "file", data: "aGk=", mediaType: "image/png" }, { type: "text", text: "" }], providerOptions: marker },
       { role: "user", content: CONTEXT },
-    ]);
+    ], "anthropic");
     const parts = out[0].content as { type: string; providerOptions?: unknown }[];
     expect(parts[0].providerOptions).toEqual(marker);
     expect(parts[1].providerOptions).toBeUndefined();
   });
 
-  it("sends an OpenAI-compatible backend no two user messages in a row", async () => {
+  it.each(["openai-compatible", "openai"] as const)("sends %s no two user messages in a row, and text as one string", async (provider) => {
     // Control: unfolded, the package sends the run as it is — the 400 on a strict template.
-    expect(consecutiveUsers((await wire("openai-compatible", turn2())).messages)).toBe(1);
-    const body = await wire("openai-compatible", mergeUserRuns(turn2()));
+    expect(consecutiveUsers((await wire(provider, turn2())).messages)).toBe(1);
+    const body = await wire(provider, mergeUserRuns(turn2(), provider));
     expect(roles(body.messages)).toEqual(["system", "user", "assistant", "user"]);
-    expect(body.messages.at(-1)!.content).toEqual([{ type: "text", text: "and now?" }, { type: "text", text: CONTEXT }]);
+    // A string, as a lone text part goes out: some text-only backends 400 on an array.
+    expect(body.messages.at(-1)!.content).toBe(`and now?\n\n${CONTEXT}`);
+  });
+
+  it("keeps the user's words apart from the context on Ollama, which joins parts with nothing", async () => {
+    // An attachment keeps the fold in parts, so the package's own join is what runs.
+    const run: ModelMessage[] = [
+      { role: "user", content: [{ type: "file", data: "aGk=", mediaType: "image/png" }, { type: "text", text: "what is this" }], providerOptions: marker },
+      { role: "user", content: CONTEXT },
+    ];
+    // Control: unfolded, two user messages.
+    expect(consecutiveUsers((await wire("ollama", run)).messages)).toBe(1);
+    const [user] = (await wire("ollama", mergeUserRuns(run, "ollama"))).messages;
+    expect(user.content).toBe(`what is this\n\n${CONTEXT}`);
+    expect(user.images).toHaveLength(1);
+  });
+
+  it("sends Google one user turn with the words and the context apart", async () => {
+    const body = await wire("google", mergeUserRuns(turn2(), "google"));
+    expect(body.contents.map((c) => c.role)).toEqual(["user", "model", "user"]);
+    expect(body.contents.at(-1)!.parts.map((p) => p.text).join("")).toBe(`and now?\n\n${CONTEXT}`);
   });
 
   it("sends Anthropic the same request as before, so the next turn's prefix is still a cache hit", async () => {
-    const [t1, t2] = [await wire("anthropic", mergeUserRuns(turn1())), await wire("anthropic", mergeUserRuns(turn2()))];
+    const [t1, t2] = [await wire("anthropic", mergeUserRuns(turn1(), "anthropic")), await wire("anthropic", mergeUserRuns(turn2(), "anthropic"))];
     // Anthropic folds a run itself, so folding first changes nothing on its wire…
     expect(await wire("anthropic", turn2())).toEqual(t2);
     // …and turn 2 replays turn 1 byte for byte up to and including the marked block

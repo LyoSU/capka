@@ -13,7 +13,7 @@
  * identical regardless of provider.
  */
 
-import type { ModelMessage, UserModelMessage } from "ai";
+import type { ModelMessage, TextPart, UserModelMessage } from "ai";
 import type { MessageMeta } from "@/lib/chat/contracts";
 
 /**
@@ -255,15 +255,35 @@ export function markStepTail<T extends { providerOptions?: Record<string, Record
  * the next turn a cache hit: it replays the user's message without the turn
  * context, and the breakpoint on the user's own part still closes the same bytes.
  *
+ * Elsewhere two package defaults bite instead. Ollama joins a message's text parts
+ * with nothing between them, so the user's words ran straight into the next
+ * message's: each folded message after the first starts on a blank line — except
+ * on Anthropic, whose own fold adds none, so the request stays the one it builds
+ * itself. And an OpenAI-compatible package sends one text part as a string but
+ * several as an array, which some text-only backends reject: an all-text fold goes
+ * out as one string wherever no provider reads a part's marker.
+ *
  * Returns `messages` itself when there is nothing to fold.
  */
-export function mergeUserRuns(messages: ModelMessage[]): ModelMessage[] {
+export function mergeUserRuns(messages: ModelMessage[], provider: string): ModelMessage[] {
   if (!messages.some((m, i) => m.role === "user" && messages[i - 1]?.role === "user")) return messages;
+  // The providers that read a part's `anthropic` cache marker (OpenRouter as a
+  // fallback namespace for Claude) — the only reason to keep a fold in parts.
+  const keepParts = provider === "anthropic" || provider === "openrouter";
   const out: ModelMessage[] = [];
   for (const m of messages) {
     const prev = out.at(-1);
     if (m.role === "user" && prev?.role === "user") {
-      out[out.length - 1] = { role: "user", content: [...ownParts(prev), ...ownParts(m)] };
+      let next = ownParts(m);
+      const first = next.findIndex((p) => p.type === "text" && p.text !== "");
+      if (provider !== "anthropic" && first >= 0) {
+        next = next.map((p, i) => (i === first && p.type === "text" ? { ...p, text: `\n\n${p.text}` } : p));
+      }
+      const parts = [...ownParts(prev), ...next];
+      out[out.length - 1] = {
+        role: "user",
+        content: !keepParts && parts.every((p): p is TextPart => p.type === "text") ? parts.map((p) => p.text).join("") : parts,
+      };
     } else {
       out.push(m);
     }

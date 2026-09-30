@@ -902,7 +902,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       turnContext.push(block);
     }
     // The volatile tier as ONE user message right after the latest user message,
-    // which mergeUserRuns then folds into that message as its last part: strict
+    // which mergeUserRuns then folds into that message after the user's words: strict
     // chat templates reject two user messages in a row. Providers cache by prefix,
     // so anything that changes per run (a file written, a memory saved, this
     // turn's attachments) placed before the history re-bills
@@ -1173,7 +1173,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 msgs = markStepTail(msgs, stepNumber, ephemeral);
                 // A steer or the view-file bridge right after another user message
                 // (the turn context at step 0, a steer before the bridge) is a run.
-                msgs = mergeUserRuns(msgs);
+                msgs = mergeUserRuns(msgs, provider);
                 return {
                   ...stepSettings(stepNumber, 1 - (deadlineAt - Date.now()) / MAX_TASK_MS),
                   // The output-side twin of that wrap-up: a turn whose results have
@@ -1187,7 +1187,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               },
             }
           : {}),
-        messages: mergeUserRuns([...systemMessages, ...withTurnContext(modelMessages), ...resumeMessages]),
+        messages: mergeUserRuns([...systemMessages, ...withTurnContext(modelMessages), ...resumeMessages], provider),
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
         abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),
@@ -2717,7 +2717,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // too). So the request is shed the same way, the edit or the cut, or it replays
           // what the live turn shed and overflows. Without the thinking edit: compaction
           // runs with thinking off.
-          return compactConversation(model, systemMessages, mergeUserRuns(compactionInput(history, reply, pruneArmedEarlier)), sourceTrust,
+          return compactConversation(model, systemMessages, mergeUserRuns(compactionInput(history, reply, pruneArmedEarlier), provider), sourceTrust,
             auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit));
         })()
           .then(async (result) => {

@@ -176,11 +176,11 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     const note = prompt.findIndex((m) => m.role === "user" && JSON.stringify(m.content).includes("draft"));
     expect(note).toBeGreaterThan(-1);
     expect(note).toBeLessThan(prompt.findIndex((m) => m.role === "assistant"));
-    // …folded, with the turn context, into the user's own message.
+    // …folded, with the turn context, into the user's own message: one text here (the
+    // mock is no Anthropic), each folded message starting on a line of its own.
     const folded = (prompt[note].content as { text?: string }[]).map((p) => p.text ?? "");
-    expect(folded[0]).toBe("save the row");
-    expect(folded[1]).toMatch(/^<turn-context>[\s\S]*rows\.csv/);
-    expect(folded.at(-1)).toContain("draft");
+    expect(folded).toHaveLength(1);
+    expect(folded[0]).toMatch(/^save the row\n\n<turn-context>[\s\S]*rows\.csv[\s\S]*<\/turn-context>\n\n[\s\S]*draft/);
     for (const p of prompts) expectWireShape(p);
   }, 30_000);
 

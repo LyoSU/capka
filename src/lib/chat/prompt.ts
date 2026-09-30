@@ -276,9 +276,11 @@ This is the operator's FIRST message right after finishing setup. Warmly welcome
  * it past the rename, and a real `turn-context.md` came out renamed. So no `<` is
  * left in the body at all: without one no tag opens or closes, whatever a name
  * spells. `‹` keeps a path readable, and the platform's own text here has no `<`.
+ * The characters a model reads as `<` go too: the fullwidth and small forms, which
+ * NFKC folds into `<` itself, and the angle brackets that look like one.
  */
 export function wrapTurnContext(blocks: string[]): string {
-  return `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${blocks.join("\n\n").replaceAll("<", "‹")}\n</turn-context>`;
+  return `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${blocks.join("\n\n").replace(/[<\uFF1C\uFE64\u2329\u3008\u27E8]/g, "‹")}\n</turn-context>`;
 }
 
 /**
