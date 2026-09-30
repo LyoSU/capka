@@ -78,6 +78,7 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
+import { cancelQueuedTurn } from "../tasks/queue";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "aplc-user";
@@ -213,5 +214,39 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(rows.map((r) => r.id)).toEqual([`${chat}-a1`, `${chat}-u1`]);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
+  }, 30_000);
+
+  // Stop pressed while the continuation was still queued, and a worker claimed it anyway.
+  it.each([
+    ["approved", true, ["NOT_RUN"]],
+    ["declined", false, []],
+  ])("settles a %s row whose continuation was cancelled before it ran", async (kind, approved, codes) => {
+    const chat = `${C}-cancel-${kind}`;
+    await seedSuspended(chat, { name: "save_row", approved });
+
+    expect(await continueApproval(chat, {}, true)).toBe("cancelled");
+
+    const row = await storedRow(chat);
+    expect(row.status).toBe("cancelled");
+    // A declined call keeps its decision alone, so its card still reads "declined".
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
+    expect(prompts).toEqual([]);
+    expect(writes).toEqual([]);
+  }, 30_000);
+
+  // The same Stop, with the row removed before any worker saw it.
+  it("settles the row when a queued continuation is removed", async () => {
+    const chat = `${C}-dequeue`;
+    await seedSuspended(chat, { name: "save_row", approved: true });
+    await pool.query(
+      `INSERT INTO tasks (id, chat_id, user_id, status, payload) VALUES ($1,$2,$3,'queued',$4::jsonb)`,
+      [`${chat}-task`, chat, U, JSON.stringify({ resumeMessageId: `${chat}-a1` })],
+    );
+
+    expect(await cancelQueuedTurn({ id: `${chat}-task`, userId: U, chatId: chat })).toBe("removed");
+
+    const row = await storedRow(chat);
+    expect(row.status).toBe("cancelled");
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
   }, 30_000);
 });

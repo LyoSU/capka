@@ -436,8 +436,8 @@ export async function cancelQueuedTurn(input: {
   userId: string;
   chatId: string;
 }): Promise<"removed" | "flagged"> {
-  const { rows } = await pool.query<{ id: string }>(
-    `DELETE FROM tasks WHERE id = $1 AND status = 'queued' RETURNING id`,
+  const { rows } = await pool.query<{ id: string; resume: string | null }>(
+    `DELETE FROM tasks WHERE id = $1 AND status = 'queued' RETURNING id, payload->>'resumeMessageId' AS resume`,
     [input.id],
   );
   if (!rows[0]) {
@@ -445,6 +445,8 @@ export async function cancelQueuedTurn(input: {
     return "flagged";
   }
   await releaseHold(input.id);
+  // An approval continuation leaves a row behind that waits on this task.
+  if (rows[0].resume) await settleCancelledContinuation(rows[0].resume);
   // The row is gone, so nothing will ever publish an outcome for it — say so
   // here or every open client keeps showing a turn that no longer exists.
   await publishTaskEvent(input.userId, {
@@ -471,6 +473,26 @@ export function sealUnrunApprovals(parts: StoredPart[], error: string): StoredPa
     }
   }
   return parts;
+}
+
+/**
+ * Settle the row a cancelled continuation was queued to finish. That row still reads
+ * `awaiting_approval` with the user's decision on it, and nothing else will ever move
+ * it; its approved calls never ran. Compare-and-set on the metadata read, so a write
+ * landing in between (a second decision) is never overwritten.
+ */
+export async function settleCancelledContinuation(messageId: string): Promise<void> {
+  const { rows } = await pool.query<{ metadata: MessageMeta }>(
+    `SELECT metadata FROM messages WHERE id = $1 AND metadata->>'status' = 'awaiting_approval'`,
+    [messageId],
+  );
+  const meta = rows[0]?.metadata;
+  if (!meta) return;
+  const parts = sealUnrunApprovals([...(meta.parts ?? [])], "Not run. The turn was stopped before this approved call ran.");
+  await pool.query(
+    `UPDATE messages SET metadata = $2::jsonb WHERE id = $1 AND metadata = $3::jsonb`,
+    [messageId, JSON.stringify({ ...meta, status: "cancelled", parts }), JSON.stringify(meta)],
+  );
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,

@@ -12,7 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation } from "@/lib/tasks/queue";
 import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
@@ -504,6 +504,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // still announces an outcome, and announcing one we don't own would contradict
       // whatever the reconciler already told this user.
       if (await finalizeTask(taskId, "cancelled", null, workerId)) {
+        // A continuation's row, though, still waits on this task with the user's
+        // decision on it — settled here or its card spins on "Applying…" forever.
+        if (resumeMessageId) await settleCancelledContinuation(resumeMessageId);
         await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
       } else {
         tlog.warn("cancellation outcome was already settled elsewhere; standing down");
