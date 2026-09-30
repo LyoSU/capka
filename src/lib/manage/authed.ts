@@ -10,6 +10,7 @@ import { AppError, BudgetExceededError, ValidationError } from "@/lib/errors";
 import { take } from "@/lib/rate-limit";
 import { classifyLLMError } from "@/lib/errors/friendly";
 import { publishTaskEvent } from "@/lib/tasks/events";
+import { makeDeliverySink } from "@/lib/tasks/delivery";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -156,9 +157,19 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   // Refusing would leave a card no tap can ever settle, so the decision is recorded
   // and the turn settled on the spot with the failure the runner gives a turn it
   // cannot resolve a model for — no hold and no task, since nothing can be spent.
+  // Deliberately every ValidationError that resolution throws, not just the removed
+  // connection: no provider or default model, the shared-key price cap, an unsafe
+  // provider URL all refuse until an admin acts, and the runner classifies each the
+  // same way (only the removed connection reads as "model unavailable").
   const model = await resolveUserModelInfo(userId, orig?.requestModel)
     .catch((e) => { if (e instanceof ValidationError) return { failure: classifyLLMError(e) }; throw e; });
   const failure = "failure" in model ? model.failure : null;
+  // An approved call that will now never run still needs a result: without one the
+  // card spins on "Applying…" forever, and every later turn feeds the model a tool
+  // call with no result, which providers reject — the chat would fail on each send.
+  if (failure && d.approved) {
+    parts.push({ type: "tool-result", id: call.id, name: call.name, output: { status: "error", code: "NOT_RUN", error: `Not run. ${failure.userMessage}` } });
+  }
   if (!("failure" in model)) {
     const { isShared, modelId, provider, configId } = model;
     const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
@@ -222,11 +233,19 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
     // waking (enqueueTask holds the NOTIFY back inside a transaction).
     handedOff = true;
     // With no task to finish the turn, say it is finished ourselves: the open chat
-    // reloads it, and the card gives way to the failure notice.
+    // reloads it, and the card gives way to the failure notice. A Telegram turn also
+    // gets the failure message the runner would have delivered there.
     if (failure) {
       await publishTaskEvent(userId, {
         type: "task:finish", taskId, chatId: msg.chatId, messageId: d.messageId, status: "failed", error: failure.userMessage,
       }).catch(() => {});
+      const origin = orig?.origin;
+      if (origin) {
+        await identity(userId).then(({ isAdmin }) => makeDeliverySink(origin).finish({
+          status: "failed", text: "", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category,
+          isAdmin, toolCount: 0, elapsedMs: 0,
+        })).catch((e) => log.warn("approval failure delivery failed", { messageId: d.messageId, err: String(e) }));
+      }
     } else await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {

@@ -25,6 +25,10 @@ const take = vi.fn();
 vi.mock("@/lib/rate-limit", () => ({ take: (...a: unknown[]) => take(...a) }));
 const publishTaskEvent = vi.fn();
 vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: (...a: unknown[]) => publishTaskEvent(...a) }));
+// A turn settled here on Telegram gets the runner's failure message through its sink.
+const makeDeliverySink = vi.fn();
+const sinkFinish = vi.fn();
+vi.mock("@/lib/tasks/delivery", () => ({ makeDeliverySink: (...a: unknown[]) => makeDeliverySink(...a) }));
 
 const rows: Record<string, unknown> = {};
 // The decision + its resume task are written in ONE transaction, so the mock has
@@ -57,7 +61,9 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { convertToModelMessages, type UIMessage } from "ai";
 import { BudgetExceededError, ValidationError } from "@/lib/errors";
+import { toUIMessages } from "@/lib/chat/presenter";
 import { approveManageForUser } from "../authed";
 
 const pendingApproval = () => ({
@@ -79,6 +85,8 @@ describe("approveManageForUser — atomic single-use approval", () => {
     resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
     take.mockReset().mockReturnValue({ ok: true, retryAfterSec: 0 });
     publishTaskEvent.mockReset().mockResolvedValue(undefined);
+    sinkFinish.mockReset().mockResolvedValue(undefined);
+    makeDeliverySink.mockReset().mockReturnValue({ finish: sinkFinish });
   });
 
   const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
@@ -151,6 +159,51 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
     expect(publishTaskEvent).toHaveBeenCalledWith("u1", expect.objectContaining({
       type: "task:finish", chatId: "chat1", messageId: "m1", status: "failed", error: meta.error,
+    }));
+    // A web turn has no other channel to tell.
+    expect(makeDeliverySink).not.toHaveBeenCalled();
+  });
+
+  it("gives an approved call that will never run a result, so the card settles and later turns stay valid", async () => {
+    rows.msg = pendingApproval();
+    rows.task = { payload: { requestModel: "gone-cfg:m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("This chat's model is no longer available — its connection was removed."));
+    await approveManageForUser("u1", { messageId: "m1", approved: true });
+    const settled = { id: "m1", role: "assistant", content: "", metadata: (rows.updated as { metadata: unknown }).metadata, createdAt: null, platform: null };
+    const next = { id: "u2", role: "user", content: "hello again", metadata: null, createdAt: null, platform: null };
+    const [reply] = toUIMessages([settled]);
+    // Not "approval-responded" with approved=true — that state is the card's endless spinner.
+    expect(reply.parts[0]).toMatchObject({ state: "output-available", approval: { approved: true }, output: { status: "error", code: "NOT_RUN" } });
+    // The next send's history carries the call WITH its result (the same shape as an
+    // approved call that ran), not a bare tool call ahead of the user's message.
+    const model = await convertToModelMessages(toUIMessages([settled, next]) as unknown as UIMessage[]);
+    const content = model.flatMap((m) => (Array.isArray(m.content) ? m.content : []) as { type: string; toolCallId?: string }[]);
+    expect(content.filter((c) => c.type === "tool-call" || c.type === "tool-result"))
+      .toEqual([expect.objectContaining({ type: "tool-call", toolCallId: "c1" }), expect.objectContaining({ type: "tool-result", toolCallId: "c1" })]);
+    expect(content.at(-1)).toMatchObject({ type: "text", text: "hello again" });
+  });
+
+  it("records no result for a declined call — the model sees the denial instead", async () => {
+    rows.msg = pendingApproval();
+    rows.task = { payload: { requestModel: "gone-cfg:m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("This chat's model is no longer available — its connection was removed."));
+    await approveManageForUser("u1", { messageId: "m1", approved: false });
+    const parts = (rows.updated as { metadata: { parts: { type: string }[] } }).metadata.parts;
+    expect(parts.map((p) => p.type)).toEqual(["tool-call"]);
+  });
+
+  it("tells a Telegram turn it failed, the way the runner would have", async () => {
+    rows.msg = pendingApproval();
+    const origin = { platform: "telegram", telegramChatId: 42, locale: "uk" };
+    rows.task = { payload: { requestModel: "gone-cfg:m", origin } };
+    rows.updateReturn = [{ id: "m1" }];
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("This chat's model is no longer available — its connection was removed."));
+    await approveManageForUser("u1", { messageId: "m1", approved: true });
+    expect(makeDeliverySink).toHaveBeenCalledWith(origin);
+    expect(sinkFinish).toHaveBeenCalledWith(expect.objectContaining({
+      status: "failed", errorCategory: "model_unavailable", errorDetail: expect.stringMatching(/connection was removed/),
     }));
   });
 

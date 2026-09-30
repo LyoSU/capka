@@ -1,7 +1,7 @@
 import { eq, and, isNull, sql, TransactionRollbackError } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
+import { users, messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
 import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
@@ -9,6 +9,7 @@ import { AppError, BudgetExceededError, ValidationError } from "@/lib/errors";
 import { take } from "@/lib/rate-limit";
 import { classifyLLMError } from "@/lib/errors/friendly";
 import { publishTaskEvent } from "@/lib/tasks/events";
+import { makeDeliverySink } from "@/lib/tasks/delivery";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -56,8 +57,9 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
     : null;
   // The resume is a paid turn: reserve its budget hold before anything is written,
   // exactly as approveManageForUser does, and release it unless our task committed.
-  // Same flood bucket and refusal as a send, and the same removed-connection rule:
-  // no model means the answer is recorded and the turn settled here as failed.
+  // Same flood bucket and refusal as a send, and the same removed-connection rule
+  // (any ValidationError from resolution, as there): no model means the answer is
+  // recorded and the turn settled here as failed.
   if (!take(`chat:${userId}`).ok) throw new AppError("Too many messages — please slow down.", 429, "RATE_LIMITED");
   const taskId = nanoid();
   const model = await resolveUserModelInfo(userId, orig?.requestModel)
@@ -116,6 +118,17 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
       await publishTaskEvent(userId, {
         type: "task:finish", taskId, chatId: msg.chatId, messageId: d.messageId, status: "failed", error: failure.userMessage,
       }).catch(() => {});
+      // A Telegram turn also gets the failure message the runner would have delivered there.
+      const origin = orig?.origin;
+      if (origin) {
+        await (async () => {
+          const [u] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+          await makeDeliverySink(origin).finish({
+            status: "failed", text: "", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category,
+            isAdmin: u?.role === "admin", toolCount: 0, elapsedMs: 0,
+          });
+        })().catch((e) => log.warn("ask failure delivery failed", { messageId: d.messageId, err: String(e) }));
+      }
     } else await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {

@@ -24,6 +24,10 @@ const take = vi.fn();
 vi.mock("@/lib/rate-limit", () => ({ take: (...a: unknown[]) => take(...a) }));
 const publishTaskEvent = vi.fn();
 vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: (...a: unknown[]) => publishTaskEvent(...a) }));
+// A turn settled here on Telegram gets the runner's failure message through its sink.
+const makeDeliverySink = vi.fn();
+const sinkFinish = vi.fn();
+vi.mock("@/lib/tasks/delivery", () => ({ makeDeliverySink: (...a: unknown[]) => makeDeliverySink(...a) }));
 
 const rows: Record<string, unknown> = {};
 // Both answerAskForUser and answerElicitationForUser guard the write and read its
@@ -73,6 +77,8 @@ describe("answerAskForUser", () => {
     resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
     take.mockReset().mockReturnValue({ ok: true, retryAfterSec: 0 });
     publishTaskEvent.mockReset().mockResolvedValue(undefined);
+    sinkFinish.mockReset().mockResolvedValue(undefined);
+    makeDeliverySink.mockReset().mockReturnValue({ finish: sinkFinish });
   });
 
   const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
@@ -149,6 +155,21 @@ describe("answerAskForUser", () => {
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
     expect(publishTaskEvent).toHaveBeenCalledWith("u1", expect.objectContaining({
       type: "task:finish", chatId: "chat1", messageId: "m1", status: "failed", error: meta.error,
+    }));
+    // A web turn has no other channel to tell.
+    expect(makeDeliverySink).not.toHaveBeenCalled();
+  });
+
+  it("tells a Telegram turn it failed, the way the runner would have", async () => {
+    rows.msg = pendingAsk();
+    const origin = { platform: "telegram", telegramChatId: 42, locale: "uk" };
+    rows.task = { payload: { requestModel: "gone-cfg:m", origin } };
+    rows.updateReturn = [{ id: "m1" }];
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("This chat's model is no longer available — its connection was removed."));
+    await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(makeDeliverySink).toHaveBeenCalledWith(origin);
+    expect(sinkFinish).toHaveBeenCalledWith(expect.objectContaining({
+      status: "failed", errorCategory: "model_unavailable", errorDetail: expect.stringMatching(/connection was removed/),
     }));
   });
 

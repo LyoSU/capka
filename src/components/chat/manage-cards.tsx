@@ -477,6 +477,9 @@ export function ApprovalCard({
 
   const oo = output as ManageOutput | null;
   const followUp = oo?.data?.action ?? oo?.action ?? null;
+  // A result can itself report failure — the tool's own error, or an approved call
+  // that never ran because its turn could not start — and must not read "Confirmed".
+  const failed = state === "output-error" || oo?.status === "error";
 
   return (
     <CardShell>
@@ -555,7 +558,7 @@ export function ApprovalCard({
         </div>
       )}
       {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={gated ? ta("declined") : t("declined")} />}
-      {!awaiting && state === "output-available" && (
+      {!awaiting && state === "output-available" && !failed && (
         <>
           {oo?.summary && <div className="mt-2 text-sm text-muted-foreground">{oo.summary}</div>}
           <Outcome kind="done" text={t("confirmed")} />
@@ -566,7 +569,7 @@ export function ApprovalCard({
           )}
         </>
       )}
-      {!awaiting && state === "output-error" && <Outcome kind="error" text={oo?.summary || t("applyError")} />}
+      {!awaiting && failed && <Outcome kind="error" text={oo?.summary || t("applyError")} />}
     </CardShell>
   );
 }
