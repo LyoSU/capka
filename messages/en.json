@@ -723,7 +723,9 @@
       "projectNotFound": "This project couldn't be found. It may have been deleted.",
       "telegramChat": "This chat continues in Telegram. Reply there instead.",
       "staleConversation": "This conversation has changed since the page loaded. Reload the page to continue.",
-      "modelUnavailable": "This model isn't available right now. Choose another one, or contact your admin if none of them work."
+      "modelUnavailable": "This model isn't available right now. Choose another one, or contact your admin if none of them work.",
+      "sessionEnded": "Your session has ended. Reload the page to sign in again.",
+      "accountCantSend": "Your account can't send messages right now. Contact your admin."
     },
     "citations": {
       "openSource": "Source {n}: {title}",

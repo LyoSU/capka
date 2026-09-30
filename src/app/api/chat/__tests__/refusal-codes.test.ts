@@ -44,7 +44,8 @@ vi.mock("@/lib/db", async () => {
 });
 
 import { POST } from "@/app/api/chat/route";
-import { REFUSALS } from "@/hooks/use-background-chat";
+import { REFUSALS, refusal } from "@/hooks/use-background-chat";
+import { createTranslator } from "next-intl";
 
 const send = (body: unknown) =>
   POST(new Request("http://x/api/chat", { method: "POST", body: JSON.stringify(body) }));
@@ -106,10 +107,19 @@ describe("POST /api/chat — refusals carry a code the composer can translate", 
     quiet.mockRestore();
   });
 
+  it("an expired session and an account that may not send", async () => {
+    const { UnauthorizedError, ForbiddenError } = await import("@/lib/errors");
+    requireRole.mockRejectedValue(new UnauthorizedError());
+    expect(await refused(await send({ chatId: "c-new", userMessage: "hi" }))).toEqual({ status: 401, code: "UNAUTHORIZED" });
+    requireRole.mockRejectedValue(new ForbiddenError("Your access has been suspended. Contact your administrator."));
+    expect(await refused(await send({ chatId: "c-new", userMessage: "hi" }))).toEqual({ status: 403, code: "FORBIDDEN" });
+  });
+
   it("every code the route sends reads as a line in both languages", () => {
     const src = readFileSync("src/app/api/chat/route.ts", "utf8");
-    // BUDGET_EXCEEDED is thrown (BudgetExceededError), not written as a literal.
-    const codes = [...new Set([...src.matchAll(/code: "([A-Z_]+)"/g)].map((m) => m[1])), "BUDGET_EXCEEDED"];
+    // Thrown, not written as literals: BUDGET_EXCEEDED (BudgetExceededError), and
+    // requireRole's UNAUTHORIZED / FORBIDDEN.
+    const codes = [...new Set([...src.matchAll(/code: "([A-Z_]+)"/g)].map((m) => m[1])), "BUDGET_EXCEEDED", "UNAUTHORIZED", "FORBIDDEN"];
     expect(codes).toContain("STALE_CONVERSATION"); // the scan itself found the literals
     for (const code of codes) {
       const key = REFUSALS[code];
@@ -117,5 +127,20 @@ describe("POST /api/chat — refusals carry a code the composer can translate", 
       expect((en.chat.hook as Record<string, string>)[key], `en ${key}`).toBeTruthy();
       expect((uk.chat.hook as Record<string, string>)[key], `uk ${key}`).toBeTruthy();
     }
+  });
+});
+
+describe("refusal — what the composer shows for a refused send", () => {
+  const t = createTranslator({ locale: "uk", messages: uk, namespace: "chat.hook" }) as unknown as Parameters<typeof refusal>[1];
+  const shown = async (status: number, body?: unknown) =>
+    (await refusal(new Response(body === undefined ? null : JSON.stringify(body), { status }), t)).message;
+
+  it("a coded refusal reads in the user's language", async () => {
+    expect(await shown(401, { error: "Unauthorized", code: "UNAUTHORIZED" })).toBe(uk.chat.hook.sessionEnded);
+    expect(await shown(403, { error: "Your account is awaiting administrator approval.", code: "FORBIDDEN" })).toBe(uk.chat.hook.accountCantSend);
+  });
+
+  it("the proxy's uncoded 401 still reads as an ended session", async () => {
+    expect(await shown(401, { error: "Unauthorized" })).toBe(uk.chat.hook.sessionEnded);
   });
 });
