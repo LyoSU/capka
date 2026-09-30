@@ -28,7 +28,7 @@ import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
-import { compactConversation } from "@/lib/chat/context/compactor";
+import { compactConversation, compactionReply } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { resolveAuxTarget } from "@/lib/providers/resolve";
 import { auxGenerate } from "@/lib/chat/context/aux";
@@ -2545,17 +2545,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // The summary must cover THIS reply too: the checkpoint hangs below it, and
           // the next turn drops everything up to the checkpoint — so a reply left out
           // of the summary input is a reply the model never sees again. `modelMessages`
-          // ends at the user turn, so rebuild the reply from `parts` through the
-          // resume pipeline (tool pairs sealed, reasoning dropped) minus its trailing
-          // "continue" turn.
-          const reply = (await buildResumeMessages(msgId, parts)).slice(0, -1);
-          // A continuation's history already ends at this very row — its first half.
-          // Replaying the whole reply after it would repeat those tool-call ids, so
-          // rebuild the history without the row. Loses the cache prefix; rare.
+          // ends at the user turn, so rebuild the reply from `parts` (see
+          // compactionReply for why its stale tool bodies are cleared).
+          const reply = await compactionReply(msgId, parts, consumedSteers, reasoningStripped);
+          // A continuation's history already ends at this very row — its first half,
+          // and the steers row expandSteers put before it. Replaying the whole reply
+          // after them would repeat those tool-call ids and steers, so rebuild the
+          // history without both, from the trimmed view if the overflow retry trimmed
+          // (that retry replaced only `modelMessages`).
           let history = modelMessages;
           if (resumeMessageId) {
-            history = await convertToModelMessages(sealOrphanToolCalls(uiMessages.filter((m) => m.id !== msgId)));
+            const settled = emergencyTrimmed ? trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT) : uiMessages;
+            history = await convertToModelMessages(sealOrphanToolCalls(
+              settled.filter((m) => m.id !== msgId && m.id !== `${msgId}:steer`)));
             if (reasoningStripped) history = foldReasoningIntoText(history);
+            markCacheTail(history); // fresh objects — re-mark the cache tail
           }
           return compactConversation(model, systemMessages, [...history, ...reply], sourceTrust, auxUsageRecorder("compaction"));
         })()

@@ -16,7 +16,8 @@ import type { ModelMessage } from "ai";
 const REPLY = "There are forty-two active suppliers.";
 const FIRST_HALF = "Which quarter did you mean?";
 const compacted: ModelMessage[][] = [];
-vi.mock("@/lib/chat/context/compactor", () => ({
+vi.mock("@/lib/chat/context/compactor", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chat/context/compactor")>()),
   compactConversation: async (_m: unknown, _s: unknown, msgs: ModelMessage[]) => {
     compacted.push(msgs);
     return null;

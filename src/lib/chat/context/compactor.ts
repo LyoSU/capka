@@ -1,6 +1,12 @@
-import { generateText, type ModelMessage, type LanguageModel } from "ai";
+import { convertToModelMessages, generateText, type ModelMessage, type LanguageModel } from "ai";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
+import type { ConsumedSteer, StoredPart } from "@/lib/chat/contracts";
+import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
+import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { AUX_TIMEOUT_MS } from "./aux";
+import { buildModelContext } from "./build";
+import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
+import { foldReasoningIntoText } from "./step-control";
 import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
@@ -33,14 +39,47 @@ export const COMPACTION_INSTRUCTION = [
 /**
  * Assemble the request for a compaction turn: the SAME system + history prefix
  * the main turn just used (so the prompt cache hits), followed by the reply that
- * turn wrote (the caller appends it to `modelMessages`), with the compaction
- * instruction appended as the trailing user message.
+ * turn wrote (compactionReply, appended to `modelMessages` by the caller), with
+ * the compaction instruction appended as the trailing user message.
  */
 export function buildCompactionMessages(
   systemMessages: ModelMessage[],
   modelMessages: ModelMessage[],
 ): ModelMessage[] {
   return [...systemMessages, ...modelMessages, { role: "user", content: COMPACTION_INSTRUCTION }];
+}
+
+/**
+ * The reply that tripped compaction, as model messages, shaped the way the NEXT
+ * turn's history would carry it — the checkpoint hangs below this reply, so the
+ * summary is all of it any later turn will see. The steers it folded in come first
+ * (expandSteers), reasoning is kept (folded into text where this turn learned the
+ * backend rejects its echo), and stale tool bodies are cleared to the shared
+ * keep-last policy.
+ *
+ * The clearing is what keeps the request inside the window. The live turn shed its
+ * older tool traffic mid-loop (or Anthropic did, server-side) and compaction fires on
+ * the size of THAT pruned prompt; rebuilt from `parts` in full, a file-reading loop
+ * puts back everything it shed and the summary request overflows. Compaction fires
+ * past the clearing trigger by construction (75% of the window against at most 50%),
+ * so this is also exactly what the next turn would have cleared.
+ *
+ * Not the resume pipeline: that drops reasoning and steers for a re-stream.
+ */
+export async function compactionReply(
+  id: string,
+  parts: StoredPart[],
+  steers: ConsumedSteer[],
+  reasoningStripped: boolean,
+): Promise<ModelMessage[]> {
+  const rows = buildModelContext(
+    [{ id, role: "assistant", content: "", createdAt: null, platform: null, metadata: { parts, ...(steers.length ? { steers } : {}) } }],
+    { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST },
+  );
+  // No `status` on the row, so toUIMessages seals a call left without a result.
+  // Laundered at the SDK boundary exactly as buildResumeMessages does.
+  const msgs = await convertToModelMessages(sealOrphanToolCalls(toUIMessages(expandSteers(rows))) as never);
+  return reasoningStripped ? foldReasoningIntoText(msgs) : msgs;
 }
 
 /**
