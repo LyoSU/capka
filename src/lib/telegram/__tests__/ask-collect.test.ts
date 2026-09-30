@@ -14,6 +14,7 @@ vi.mock("@/lib/ask/authed", () => ({
   answerElicitationForUser: (...a: unknown[]) => answerElicitationForUser(...a),
 }));
 
+import { BudgetExceededError } from "@/lib/errors";
 import { startAskCollection, onAskText } from "../ask-collect";
 
 const sent: string[] = [];
@@ -50,5 +51,22 @@ describe("telegram ask-collect — expiry", () => {
     await onAskText(bot, CHAT, "u1", "Alice");
     expect(sent).toContain("expired");
     expect(sent).not.toContain("answered");
+  });
+});
+
+describe("telegram ask-collect — spending limit", () => {
+  it("says the limit was reached and keeps the question answerable instead of dropping it", async () => {
+    answerAskForUser.mockRejectedValueOnce(new BudgetExceededError("d1")).mockResolvedValueOnce("applied");
+    await startAskCollection(bot, CHAT, { userId: "u1", messageId: "m1", form: oneTextField, kind: "ask" });
+    sent.length = 0;
+
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(sent).toEqual(["budgetReached", "Your name?"]); // refusal, then the field re-offered
+
+    // Once the window rolls over, the next reply is captured and submitted again.
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(answerAskForUser).toHaveBeenCalledTimes(2);
+    expect(answerAskForUser).toHaveBeenLastCalledWith("u1", { messageId: "m1", action: "submit", values: { q: "Alice" } });
+    expect(sent.at(-1)).toBe("answered");
   });
 });

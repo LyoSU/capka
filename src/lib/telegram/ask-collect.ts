@@ -1,5 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import { getTranslator } from "@/lib/i18n/translator";
+import { BudgetExceededError } from "@/lib/errors";
 import type { AskForm, AskField, AskAnswer } from "@/lib/ask/types";
 
 /**
@@ -96,7 +97,19 @@ async function finish(bot: Bot, chatId: number, c: Collection, action: AskAnswer
   const { answerAskForUser, answerElicitationForUser } = await import("@/lib/ask/authed");
   const outcome = c.kind === "elicitation"
     ? ((await answerElicitationForUser(c.userId, d)) ? "applied" : "gone")
-    : await answerAskForUser(c.userId, d);
+    : await answerAskForUser(c.userId, d)
+      .catch((e) => { if (e instanceof BudgetExceededError) return "budget" as const; throw e; });
+  if (outcome === "budget") {
+    await bot.api.sendMessage(chatId, getTranslator(c.locale, "telegram")("budgetReached")).catch(() => {});
+    // Nothing was recorded, so the question stays open: re-offer its last field so
+    // the user can answer again once the window rolls over (unless a newer question
+    // took this chat meanwhile).
+    if (collections.has(chatId)) return;
+    c.cursor = Math.min(c.cursor, c.form.fields.length - 1);
+    collections.set(chatId, c);
+    await promptField(bot, chatId, c);
+    return;
+  }
   // "busy" is not "expired": the question is still live, the chat is just finishing
   // another turn. Saying "expired" there would tell the user their answer is gone
   // when the right move is to answer again.
