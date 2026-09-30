@@ -168,18 +168,24 @@ describe("pathRowsWhere", () => {
 describe("insertMessageChunks", () => {
   it("splits a long chain so no statement binds more than 65535 parameters, keeping order", async () => {
     const columns = Object.keys(getTableColumns(messages)).length;
+    const tables: unknown[] = [];
     const rows = Array.from({ length: 20000 }, (_, i) => ({ id: `m${i}`, chatId: "c", role: "user", content: "x" }));
     const batches: { id: string }[][] = [];
     const tx = {
-      insert: () => ({
+      insert: (table: unknown) => ({
         values: async (v: { id: string }[]) => {
+          tables.push(table);
           batches.push(v);
         },
       }),
     } as unknown as Parameters<typeof insertMessageChunks>[0];
     await insertMessageChunks(tx, rows);
     expect(batches.length).toBeGreaterThan(1);
+    expect(tables.every((t) => t === messages)).toBe(true);
     for (const b of batches) expect(b.length * columns).toBeLessThanOrEqual(65535);
+    // Full chunks are as large as the cap allows: one more row would overflow it.
+    expect((batches[0].length + 1) * columns).toBeGreaterThan(65535);
+    expect(batches.at(-1)!.length).toBe(rows.length - batches[0].length * (batches.length - 1));
     expect(batches.flat().map((r) => r.id)).toEqual(rows.map((r) => r.id));
   });
 });
