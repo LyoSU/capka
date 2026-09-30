@@ -818,7 +818,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the same `anthropic` namespace as a fallback) otherwise cache only the
     // system prefix and re-bill the whole history at full input price on every
     // turn. The marker travels with the message OBJECT, so the compaction pass,
-    // which reuses this array as its prefix, hits the same cache. It sits
+    // which reuses this array as its prefix, carries the same breakpoint. It sits
     // on the latest user message and the turn context goes AFTER it, so the
     // prefix it closes is exactly what the next turn replays.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
@@ -2216,8 +2216,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(quietReason ? { quiet: { reason: quietReason } } : {}),
         // On EVERY outcome, not just the successful ones: a failed turn's message
         // still sits on the path the next turn reads, and this is how that turn
-        // learns clearing is already on (see shouldClearToolResults).
-        ...(toolsCleared ? { toolsCleared: true } : {}),
+        // learns clearing is already on (see shouldClearToolResults). The mid-turn
+        // prune counts: it cut into the history too, and the size it left behind can
+        // sit under the trigger, which would build the next turn with every body back.
+        ...(toolsCleared || pruneArmedEarlier ? { toolsCleared: true } : {}),
         ...(contextDeep ? { contextDeep: true } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
@@ -2670,10 +2672,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     // Compaction. If this turn's INPUT neared the context-window budget, summarize
-    // the conversation on the still-hot prefix and write a checkpoint, so the next
-    // turn's buildModelContext collapses everything up to it into that summary.
-    // Cache-friendly by construction (same system+history, instruction appended as
-    // the final user turn — see buildCompactionMessages). Fire-and-forget like
+    // the conversation and write a checkpoint, so the next turn's buildModelContext
+    // collapses everything up to it into that summary. Same system+history with the
+    // instruction appended as the final user turn (see COMPACTION_INSTRUCTION for
+    // what that does and does not buy from the cache). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
     if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
@@ -2694,13 +2696,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // A continuation's history already ends at this very row — its first half,
           // and the steers row expandSteers put before it. Replaying the whole reply
           // after them would repeat those tool-call ids and steers, so rebuild the
-          // history without both, from the trimmed view if the overflow retry trimmed
-          // (that retry replaced only `modelMessages`).
+          // history without both. After an emergency trim too, from the untrimmed
+          // view: that retry cut `modelMessages` to the recent turns, and the checkpoint
+          // replaces EVERY turn before it, so a summary of the trimmed view would leave
+          // the rest with no summary at all. If the whole no longer fits, compactConversation
+          // fails and no checkpoint is written. (The rebuild re-sends no native files.)
           let history = modelMessages;
-          if (resumeMessageId) {
-            const settled = emergencyTrimmed ? trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT) : uiMessages;
+          if (resumeMessageId || emergencyTrimmed) {
             history = await convertToModelMessages(sealOrphanToolCalls(
-              settled.filter((m) => m.id !== msgId && m.id !== `${msgId}:steer`)));
+              uiMessages.filter((m) => m.id !== msgId && m.id !== `${msgId}:steer`)));
             if (reasoningStripped) history = foldReasoningIntoText(history);
             markCacheTail(history); // fresh objects — re-mark the cache tail
           }

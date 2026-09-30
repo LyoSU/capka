@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
-import type { ModelMessage } from "ai";
+import { tool, type ModelMessage } from "ai";
+import { z } from "zod";
 
 /**
  * Compaction must summarize the reply that triggered it. The checkpoint is written
@@ -12,6 +13,10 @@ import type { ModelMessage } from "ai";
  * list it hands the compactor), and covers the continuation, whose history already
  * ends at the very row being written — appending the reply there would replay its
  * first half twice.
+ *
+ * The same road carries the edges around it: a tool loop whose mid-turn prune armed,
+ * a continuation holding tool calls and a steer, and a turn the overflow retry
+ * trimmed — each changes which history the compactor must be handed.
  */
 const REPLY = "There are forty-two active suppliers.";
 const FIRST_HALF = "Which quarter did you mean?";
@@ -20,6 +25,33 @@ const compacted: ModelMessage[][] = [];
 const compactOpts: unknown[] = [];
 // Read per turn, so one suite can run the same mock model as two providers.
 let provider = "mock";
+// The window the runner plans against, read in beforeAll the way run-context reads it.
+let limit = 0;
+// Every provider call's prompt, and what each next call does. An empty script answers
+// REPLY past the compaction threshold; "overflow" rejects the prompt as too long, with
+// no figure in it, so the runner learns no window from it.
+const prompts: ModelMessage[][] = [];
+const script: (unknown[] | "overflow")[] = [];
+const finish = (unified: string, tokens: number) => ({
+  type: "finish",
+  finishReason: { unified, raw: unified },
+  usage: { inputTokens: { total: tokens, noCache: tokens }, outputTokens: { total: 8 } },
+});
+const answer = (tokens: number) => [
+  { type: "stream-start", warnings: [] },
+  { type: "text-start", id: "1" },
+  { type: "text-delta", id: "1", delta: REPLY },
+  { type: "text-end", id: "1" },
+  finish("stop", tokens),
+];
+const readStep = (id: string, tokens: number) => [
+  { type: "stream-start", warnings: [] },
+  { type: "tool-call", toolCallId: id, toolName: "read_file", input: JSON.stringify({ path: `${id}.csv` }) },
+  finish("tool-calls", tokens),
+];
+// Tool bodies: the ones an earlier turn read, and the ones this turn's reads return.
+const OLD = "o".repeat(4_000);
+const NEW = "n".repeat(4_000);
 vi.mock("@/lib/chat/context/compactor", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chat/context/compactor")>()),
   compactConversation: async (_m: unknown, _s: unknown, msgs: ModelMessage[], _t: unknown, _u: unknown, opts: unknown) => {
@@ -31,23 +63,14 @@ vi.mock("@/lib/chat/context/compactor", async (importOriginal) => ({
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
-      doStream: async () => ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "stream-start", warnings: [] },
-            { type: "text-start", id: "1" },
-            { type: "text-delta", id: "1", delta: REPLY },
-            { type: "text-end", id: "1" },
-            {
-              type: "finish",
-              finishReason: { unified: "stop", raw: "end_turn" },
-              // Past 75% of the default 128k window, so the turn trips compaction.
-              usage: { inputTokens: { total: 120_000, noCache: 120_000 }, outputTokens: { total: 8 } },
-            },
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ] as any,
-        }),
-      }),
+      doStream: async (opts) => {
+        prompts.push(opts.prompt as ModelMessage[]);
+        // Past 75% of the window by default, so the turn trips compaction.
+        const next = script.shift() ?? answer(Math.ceil(limit * 0.9));
+        if (next === "overflow") throw new Error("prompt is too long");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return { stream: simulateReadableStream({ chunks: next as any }) };
+      },
     }),
     provider,
     modelId: "mock-model",
@@ -56,7 +79,13 @@ vi.mock("@/lib/providers/resolve", () => ({
 }));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => null }));
 vi.mock("@/lib/sandbox/tools", () => ({
-  loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
+  loadSandboxTools: async () => ({
+    tools: {
+      read_file: tool({ inputSchema: z.object({ path: z.string() }), execute: async () => NEW }),
+      save_row: tool({ inputSchema: z.object({ row: z.string() }), needsApproval: true, execute: async () => "saved" }),
+    },
+    close: async () => {},
+  }),
 }));
 // Memory stubbed at the same seams the sibling e2e suites stub: this runs against the
 // shared database and the real vault would leave rows behind for a fixture user.
@@ -80,8 +109,42 @@ const U = "cmp-reply-user";
 const C1 = "cmp-reply-chat";
 const C2 = "cmp-reply-cont";
 const C3 = "cmp-reply-anth";
+// The edge suites seed their own chats under this prefix.
+const CX = "cmp-edge";
 
-async function runTask(id: string, chatId: string, payload: object) {
+/** A linear path of rows, each the parent of the next; the last becomes the leaf. */
+async function seedPath(chatId: string, rows: { id: string; role: string; content?: string; metadata?: object }[]) {
+  await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [chatId, U]);
+  let parent: string | null = null;
+  for (const r of rows) {
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+      [r.id, chatId, parent, r.role, r.content ?? "", JSON.stringify(r.metadata ?? null)],
+    );
+    parent = r.id;
+  }
+  await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [parent, chatId]);
+}
+
+/** An earlier turn that read two files, measured small enough that the next build keeps its bodies. */
+const readTurn = (prefix: string) => [
+  { id: `${prefix}-u1`, role: "user", content: "read p0 and p1" },
+  { id: `${prefix}-a1`, role: "assistant", metadata: { status: "completed", contextTokens: 1_000, parts: [
+    { type: "tool-call", id: `${prefix}-p0`, name: "read_file", input: { path: "p0.csv" } },
+    { type: "tool-result", id: `${prefix}-p0`, name: "read_file", output: OLD },
+    { type: "tool-call", id: `${prefix}-p1`, name: "read_file", input: { path: "p1.csv" } },
+    { type: "tool-result", id: `${prefix}-p1`, name: "read_file", output: OLD },
+    { type: "text", text: "Both read." },
+  ] } },
+  { id: `${prefix}-u2`, role: "user", content: "now read the rest" },
+];
+
+/** How many `type` parts in the list carry this tool-call id. */
+const count = (msgs: ModelMessage[], type: string, id: string) =>
+  msgs.flatMap((m) => (Array.isArray(m.content) ? (m.content as { type: string; toolCallId?: string }[]) : []))
+    .filter((p) => p.type === type && p.toolCallId === id).length;
+
+async function runTask(id: string, chatId: string, payload: object, compacts = true) {
   // Written already-running rather than enqueued: the dev stack's own worker polls
   // this same database and would claim a `queued` row out from under this suite.
   const { rows } = await pool.query<ClaimedTask>(
@@ -93,10 +156,12 @@ async function runTask(id: string, chatId: string, payload: object) {
   const before = compacted.length;
   await runAgentTask(rows[0], "w-cmp");
   // Compaction is fire-and-forget; wait for the call to land.
-  for (let i = 0; i < 100 && compacted.length === before; i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; compacts && i < 100 && compacted.length === before; i++) await new Promise((r) => setTimeout(r, 50));
   const t = await pool.query(`SELECT status FROM tasks WHERE id=$1`, [id]);
   expect(t.rows[0].status).toBe("completed");
-  expect(compacted.length).toBe(before + 1);
+  expect(compacted.length).toBe(before + (compacts ? 1 : 0));
+  // Every scripted call was made: a turn that stopped early tested nothing.
+  expect(script).toHaveLength(0);
   return compacted.at(-1)!;
 }
 
@@ -109,6 +174,10 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
       await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [c, U]);
       await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [c]);
     }
+    await pool.query(`DELETE FROM messages WHERE chat_id LIKE $1`, [`${CX}%`]);
+    limit = contextBudget({
+      usedTokens: 0, modelContextLength: await getModelContextLength("mock-model"), adminCap: (await getMaxContextTokens()) || null,
+    }).effectiveLimit;
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('cmp-u1',$1,'user','how many suppliers do we have?')`, [C1]);
     await pool.query(`UPDATE chats SET active_leaf_id='cmp-u1' WHERE id=$1`, [C1]);
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('cmp-u3',$1,'user','how many suppliers do we have?')`, [C3]);
@@ -122,13 +191,13 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     await pool.query(`UPDATE chats SET active_leaf_id='cmp-a2' WHERE id=$1`, [C2]);
   });
   afterAll(async () => {
-    for (const c of [C1, C2, C3]) {
-      await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id=$1)`, [c]);
-      await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [c]);
+    for (const c of [C1, C2, C3, `${CX}%`]) {
+      await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id LIKE $1)`, [c]);
+      await pool.query(`DELETE FROM messages WHERE chat_id LIKE $1`, [c]);
     }
     await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
     await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2,$3)`, [C1, C2, C3]);
+    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2,$3) OR id LIKE $4`, [C1, C2, C3, `${CX}%`]);
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
   });
 
@@ -160,10 +229,99 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     } finally {
       provider = "mock";
     }
-    // The window the runner sized the live edit against, read the way run-context reads it.
-    const limit = contextBudget({
-      usedTokens: 0, modelContextLength: await getModelContextLength("mock-model"), adminCap: (await getMaxContextTokens()) || null,
-    }).effectiveLimit;
+    // The window the runner sized the live edit against.
     expect(compactOpts.at(-1)).toEqual(contextManagementOptions("anthropic", limit));
+  }, 30_000);
+
+  it("after a tool loop whose mid-turn prune armed, hands over the history with its tool bodies cleared", async () => {
+    const chat = `${CX}-loop`;
+    await seedPath(chat, readTurn(chat));
+    // Three reads past the clear trigger arm the prune; the answer then lands past 75%.
+    for (const id of ["c0", "c1", "c2"]) script.push(readStep(id, Math.ceil(limit * 0.6)));
+    const from = prompts.length;
+    const msgs = await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u2` });
+    // Control: the turn was built with the earlier bodies intact, so only the armed
+    // prune can have cleared them.
+    expect(JSON.stringify(prompts[from])).toContain(OLD);
+    const text = JSON.stringify(msgs);
+    expect(text).not.toContain(OLD);
+    // Cleared, not dropped: the earlier turn is still there to be summarized.
+    expect(text).toContain("read p0 and p1");
+    expect(text).toContain("Both read.");
+    expect(count(msgs, "tool-call", `${chat}-p0`)).toBe(1);
+    expect(count(msgs, "tool-result", `${chat}-p0`)).toBe(1);
+    expect(text).toContain(REPLY);
+  }, 30_000);
+
+  it("after an armed prune that ends under the trigger, still builds the next turn with the bodies cleared", async () => {
+    const chat = `${CX}-sticky`;
+    await seedPath(chat, readTurn(chat));
+    for (const id of ["c0", "c1", "c2"]) script.push(readStep(id, Math.ceil(limit * 0.6)));
+    // The pruned last step measures under the trigger, so no compaction either.
+    script.push(answer(Math.ceil(limit * 0.3)));
+    await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u2` }, false);
+    const { rows } = await pool.query(`SELECT id, metadata FROM messages WHERE chat_id=$1 AND parent_id=$2`, [chat, `${chat}-u2`]);
+    // Control: the persisted size alone would not have said "deep".
+    expect(rows[0].metadata.contextTokens).toBeLessThan(limit * 0.5);
+    expect(rows[0].metadata.toolsCleared).toBe(true);
+
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content) VALUES ($1,$2,$3,'user','and summarize them')`,
+      [`${chat}-u3`, chat, rows[0].id],
+    );
+    await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-u3`, chat]);
+    script.push(answer(1_000));
+    const from = prompts.length;
+    await runTask(`${chat}-task2`, chat, { replyParentId: `${chat}-u3` }, false);
+    // The finding: the next turn's first request replayed every body the prune had shed.
+    const first = JSON.stringify(prompts[from]);
+    expect(first).toContain("read p0 and p1");
+    expect(first).not.toContain(OLD);
+  }, 30_000);
+
+  it("on a continuation with tool calls and a steer, hands over each call and the steer once", async () => {
+    const chat = `${CX}-cont`;
+    const steer = "use metric units";
+    await seedPath(chat, [
+      { id: `${chat}-u1`, role: "user", content: "save the rows" },
+      { id: `${chat}-a1`, role: "assistant", metadata: {
+        status: "awaiting_approval",
+        parts: [
+          { type: "tool-call", id: "s1", name: "save_row", input: { row: "draft" } },
+          { type: "tool-result", id: "s1", name: "save_row", output: "saved" },
+          { type: "tool-call", id: "s2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
+        ],
+        steers: [{ id: "st1", text: steer, at: "2026-10-01T00:00:00Z", atStep: 1, afterToolCallId: "s1" }],
+      } },
+    ]);
+    const msgs = await runTask(`${chat}-task`, chat, { resumeMessageId: `${chat}-a1` });
+    for (const id of ["s1", "s2"]) {
+      expect(count(msgs, "tool-call", id)).toBe(1);
+      expect(count(msgs, "tool-result", id)).toBe(1);
+    }
+    const text = JSON.stringify(msgs);
+    expect(text.split(steer).length - 1).toBe(1);
+    expect(text).toContain(REPLY);
+  }, 30_000);
+
+  it("after an emergency trim, summarizes the whole history the checkpoint replaces", async () => {
+    const chat = `${CX}-trim`;
+    const rows = [{ id: `${chat}-u0`, role: "user", content: "Our supplier is Kestrel Ltd." }];
+    for (let i = 0; i < 7; i++) {
+      rows.push({ id: `${chat}-a${i}`, role: "assistant", content: `Noted ${i}.` });
+      rows.push({ id: `${chat}-u${i + 1}`, role: "user", content: `Question ${i + 1}?` });
+    }
+    await seedPath(chat, rows);
+    script.push("overflow");
+    const from = prompts.length;
+    const msgs = await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u7` });
+    // Control: the retry really ran on the trimmed tail, without the oldest turn.
+    expect(prompts.length - from).toBe(2);
+    expect(JSON.stringify(prompts[from])).toContain("Kestrel");
+    expect(JSON.stringify(prompts[from + 1])).not.toContain("Kestrel");
+    // The finding: the checkpoint replaces every turn, so the summary must see every turn.
+    const text = JSON.stringify(msgs);
+    expect(text).toContain("Kestrel");
+    expect(text).toContain(REPLY);
   }, 30_000);
 });

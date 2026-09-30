@@ -7,17 +7,20 @@ import { AUX_TIMEOUT_MS } from "./aux";
 import { buildModelContext } from "./build";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { foldReasoningIntoText, pruneTurnToolTraffic } from "./step-control";
-import { isReasoningEchoRejectedError } from "@/lib/errors/friendly";
+import { isContextOverflowError, isReasoningEchoRejectedError } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
 /**
  * The compaction instruction, delivered as the FINAL user turn rather than as a
- * replacement system prompt. This is the cache-critical detail (per Boris
- * Cherny / "Don't Break the Cache"): editing the system prompt invalidates the
- * whole cached prefix, but appending one user turn keeps the just-warmed
- * system+history prefix a cache hit — so compaction costs ~cache-read + this
- * short instruction + the summary, not a full re-read of the conversation.
+ * replacement system prompt (per Boris Cherny / "Don't Break the Cache"): editing
+ * the system prompt changes the prefix outright, while appending one user turn
+ * leaves the system + history bytes the turn sent. That is the part of a cache hit
+ * this request controls, not a promise of one. It sends no tool definitions and runs
+ * with thinking off. On Anthropic, where tool definitions lead the cached prefix, a
+ * chat with tools therefore misses outright and pays full input price for the
+ * summary, and a turn that ran with thinking misses the cached messages. A provider
+ * that caches the message prefix alone can hit it.
  *
  * Tuned per Anthropic's guidance: maximize recall first (never drop goals,
  * decisions, open bugs, established facts), then precision (drop raw tool
@@ -38,10 +41,9 @@ export const COMPACTION_INSTRUCTION = [
 ].join("\n");
 
 /**
- * Assemble the request for a compaction turn: the SAME system + history prefix
- * the main turn just used (so the prompt cache hits), followed by the reply that
- * turn wrote (see compactionInput), with the compaction instruction appended as
- * the trailing user message.
+ * Assemble the request for a compaction turn: the system prompt and the history the
+ * main turn just used, followed by the reply that turn wrote (see compactionInput),
+ * with the compaction instruction appended as the trailing user message.
  */
 export function buildCompactionMessages(
   systemMessages: ModelMessage[],
@@ -89,11 +91,13 @@ export async function compactionReply(
  * On a provider we prune for, the live turn's mid-loop prune (pruneTurnToolTraffic)
  * cuts across the WHOLE prompt once it arms — the history's tool bodies go with the
  * turn's own — and `shouldCompact` measured that result. `history` was built at turn
- * start, before any of it, so the request is cut the same way (`prunedMidTurn`) or it
- * replays every body the prune shed and overflows the window it was sized against.
- * The cut clears the history's tool bodies as the live one did, so that prefix can
- * still hit the cache; when the prune never armed, the list is left alone and the
- * history goes out byte for byte as the turn sent it.
+ * start, before any of it, so the request is cut too (`prunedMidTurn`) or it replays
+ * every body the prune shed and overflows the window it was sized against. This cut
+ * clears EVERY history body: at least what the live cut shed, and more when the turn
+ * made fewer than three tool exchanges (the live cut then kept the history's newest),
+ * so the request can come out smaller than the prompt measured, never larger. When
+ * the prune never armed, the list is left alone and the history goes out byte for
+ * byte as the turn sent it.
  */
 export function compactionInput(history: ModelMessage[], reply: ModelMessage[], prunedMidTurn: boolean): ModelMessage[] {
   const msgs = [...history, ...reply];
@@ -105,10 +109,10 @@ export function compactionInput(history: ModelMessage[], reply: ModelMessage[], 
 }
 
 /**
- * Run the compaction turn on the hot prefix and return the summary text (or null
+ * Run the compaction turn and return the summary text (or null
  * if the model abstained / it failed — the caller then writes no checkpoint and
  * leaves the conversation as-is). Thin I/O wrapper, mirroring generateChatTitle:
- * the cache-critical assembly is buildCompactionMessages above.
+ * the message assembly is buildCompactionMessages above.
  *
  * `sourceTrust` is carried through rather than computed: a summary is only ever as
  * trustworthy as the prompt it summarized, so a checkpoint written from a tainted
@@ -124,6 +128,14 @@ export function compactionInput(history: ModelMessage[], reply: ModelMessage[], 
  * folded into text. The turn only learns that when IT echoed, and a single-step
  * reply over a history with no reasoning never does — but this request echoes the
  * reply's own reasoning.
+ *
+ * An overflow gets one retry with every tool body cleared and all reasoning dropped.
+ * The request can outgrow the prompt `shouldCompact` measured: the final step's own
+ * output was never in it, and a provider may count the output budget against the
+ * window too. Tool bodies are what the instruction discards anyway, and reasoning is
+ * the model's scratch, not the conversation. It never drops a turn: the checkpoint
+ * replaces everything before it, so a turn left out of the input is gone for every
+ * later one. Still too long, it fails like any other error.
  */
 export async function compactConversation(
   model: LanguageModel,
@@ -137,17 +149,25 @@ export async function compactConversation(
   // can outlive the turn that triggered it (see auxGenerate).
   const run = (msgs: ModelMessage[]) => withoutParentContext(() => generateText({
     model,
-    messages: buildCompactionMessages(systemMessages, msgs),
+    messages: msgs,
     providerOptions: providerOptions as never,
     // Same deadline as the other fire-and-forget aux calls: a hung provider
     // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
     abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
     experimental_telemetry: telemetryFor("capka.aux.compaction"),
   }));
+  const messages = buildCompactionMessages(systemMessages, modelMessages);
   try {
-    const { text, usage } = await run(modelMessages).catch((e) => {
-      if (!isReasoningEchoRejectedError(e)) throw e;
-      return run(foldReasoningIntoText(modelMessages));
+    const { text, usage } = await run(messages).catch((e) => {
+      if (isReasoningEchoRejectedError(e)) return run(foldReasoningIntoText(messages));
+      if (!isContextOverflowError(e)) throw e;
+      const bare = messages.flatMap((m): ModelMessage[] => {
+        if (m.role !== "assistant" || typeof m.content === "string") return [m];
+        const content = m.content.filter((p) => p.type !== "reasoning");
+        return content.length ? [{ ...m, content }] : [];
+      });
+      // Cut at the instruction, the last message: every tool body ahead of it goes.
+      return run(pruneTurnToolTraffic(bare, bare.length - 1));
     });
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);

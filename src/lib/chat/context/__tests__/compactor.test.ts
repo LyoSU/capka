@@ -191,4 +191,43 @@ describe("compactConversation", () => {
     // Folded, not dropped: the reasoning is still in the summary's input.
     expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("The user wants metric.");
   });
+
+  describe("past an overflow", () => {
+    const body = "b".repeat(5_000);
+    const input: ModelMessage[] = [
+      { role: "user", content: "Read the ledger." },
+      { role: "assistant", content: [
+        { type: "reasoning", text: "Long scratch." },
+        { type: "tool-call", toolCallId: "r1", toolName: "read_file", input: { path: "ledger.csv" } },
+      ] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "r1", toolName: "read_file", output: { type: "text", value: body } }] },
+      { role: "assistant", content: [{ type: "reasoning", text: "Long scratch." }, { type: "text", text: "The ledger balances." }] },
+    ];
+    const overflow = () => new Error("This model's maximum context length is 32768 tokens.");
+
+    it("retries once with the tool bodies and reasoning shed, and every turn still in", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async ({ prompt }) => {
+          const text = JSON.stringify(prompt);
+          if (text.includes(body) || text.includes("Long scratch.")) throw overflow();
+          return generated("summary");
+        },
+      });
+      expect(await compactConversation(model, [], input, false)).toEqual({ text: "summary", trust: false });
+      expect(model.doGenerateCalls).toHaveLength(2);
+      const retried = JSON.stringify(model.doGenerateCalls[1].prompt);
+      // Shed, not dropped: both turns and the call/result pair are still there.
+      expect(retried).toContain("Read the ledger.");
+      expect(retried).toContain("The ledger balances.");
+      expect(retried).toContain(CLEARED_TOOL_OUTPUT);
+      expect(retried.split('"toolCallId":"r1"').length - 1).toBe(2);
+      expect(retried).toContain(COMPACTION_INSTRUCTION.split("\n")[0]);
+    });
+
+    it("gives up after that one retry", async () => {
+      const model = new MockLanguageModelV3({ doGenerate: async () => { throw overflow(); } });
+      expect(await compactConversation(model, [], input, false)).toBeNull();
+      expect(model.doGenerateCalls).toHaveLength(2);
+    });
+  });
 });
