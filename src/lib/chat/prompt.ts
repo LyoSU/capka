@@ -12,10 +12,11 @@ import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
  *    Identical across every user and chat, so it carries the first cache
  *    breakpoint and is reused by everyone (highest hit rate).
  * 2. `session` — who the user is + when THIS conversation started. Constant
- *    for the whole conversation, so it carries its own breakpoint and is reused
- *    on every turn of that chat. CACHE-CRITICAL: it must be derived from the
- *    conversation start time, never a live clock — a per-turn value here would
- *    change the prefix and bust the cache for everything after it.
+ *    for the whole conversation. It has no breakpoint of its own: the history
+ *    breakpoints (`markCacheTail`) cover it on every turn of that chat.
+ *    CACHE-CRITICAL: it must be derived from the conversation start time, never
+ *    a live clock — a per-turn value here would change the prefix and bust the
+ *    cache for everything after it.
  * 3. `volatile` — memories, workspace snapshot, just-attached files. Changes
  *    per run, so it is NOT a system message: the runner sends it after the
  *    conversation history, as the turn context following the latest user

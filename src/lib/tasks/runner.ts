@@ -876,11 +876,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // before the effect-ledger note (`effectNote`), which is meant to be read last.
     // Kept out of `modelMessages`, so nothing that looks up the user's last message
     // there (attachment stripping, native injection) can mistake this for it.
-    // The tag itself is stripped from the body: a path (directory names can spell
+    // The tag's name is rewritten in the body: a path (directory names can spell
     // it across a `/`) or a memory fact must not be able to close the wrapper and
-    // go on as text outside it.
+    // go on as text outside it. Renamed, not deleted — deleting a tag nested inside
+    // another (`</turn-</turn-context>context>`) joins the halves into a new one.
     const turnContextMessage: ModelMessage | null = turnContext.length
-      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n").replace(/<\s*\/?\s*turn-context\s*>/gi, "")}\n</turn-context>` }
+      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n").replace(/turn-context/gi, "turn_context")}\n</turn-context>` }
       : null;
     const withTurnContext = (msgs: ModelMessage[]) => {
       if (!turnContextMessage) return msgs;
