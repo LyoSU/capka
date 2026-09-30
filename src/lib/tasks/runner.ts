@@ -859,11 +859,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A native-eligible file that couldn't be delivered (download failed, still
     // over cap after downscale, aggregate budget) is routed to the tool path
     // instead of being falsely promised visible — the root of the false-native
-    // bug. Part of the turn context, so no cache-prefix cost.
+    // bug. Part of the turn context, so no cache-prefix cost. Each path is
+    // JSON-quoted, as the workspace snapshot's are: the name is whatever the client
+    // or a Telegram sender called the file, and a raw newline in it would end the
+    // list and go on as prompt text.
     if (turnFiles.length) {
       const injectedNames = new Set(injectedFiles.map((f) => f.name));
       const lines = turnFiles.map(
-        (f) => `  - /workspace/${f.name}${injectedNames.has(f.name) ? " (attached — you can see/read it directly)" : ""}`,
+        (f) => `  - ${JSON.stringify(`/workspace/${f.name}`)}${injectedNames.has(f.name) ? " (attached — you can see/read it directly)" : ""}`,
       );
       let block = `## User just attached these files:\n${lines.join("\n")}`;
       if (injectedFiles.length) {
