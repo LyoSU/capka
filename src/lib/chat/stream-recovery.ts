@@ -14,13 +14,17 @@ import { planGapDrain } from "./stream-reconcile";
  *     the agent kept working. So: fire on the LEADING edge, and space retries from
  *     the last reload rather than from the last event.
  *
- *  2. CONVERGE. The snapshot a reload returns is up to a second or two stale (the
- *     runner persists every 1-2s, longer for a large reply, while it publishes
- *     ~10/s), so adopting it alone lands the
- *     client straight back in a gap. So: hold the events we can't apply yet and
- *     replay the ones the snapshot doesn't cover.
+ *  2. CONVERGE. The snapshot a reload returns can be up to five seconds stale (the
+ *     runner persists every 1-5s by reply size, snapshotIntervalMs, while it
+ *     publishes ~10/s), so adopting it alone lands the client straight back in a
+ *     gap. So: hold the events we can't apply yet and replay the ones the snapshot
+ *     doesn't cover.
  *
- * Timer- and clock-injectable so both properties are testable without React.
+ *  3. NOT STORM. Every reload re-fetches the whole chat, and a gap on a large reply
+ *     stays open until the runner's next snapshot, seconds away. So retries back off
+ *     while the gap stays open, and start over from the floor once it closes.
+ *
+ * Timer- and clock-injectable so all three are testable without React.
  */
 
 /**
@@ -31,8 +35,10 @@ import { planGapDrain } from "./stream-reconcile";
  */
 export const MAX_GAP_BUFFER = 300;
 
-/** Minimum spacing between reconcile reloads. */
+/** Spacing between reconcile reloads: the floor, and the most it backs off to
+ *  (doubling after each reload that left the gap open). */
 const RECONCILE_MIN_MS = 250;
+const RECONCILE_MAX_MS = 2000;
 
 export function createStreamRecovery<E extends { messageId: string; seq?: number }>({
   reload,
@@ -54,11 +60,11 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
   let buffer: E[] = [];
   let reloading = false;
   let lastReloadAt = -Infinity;
+  let misses = 0; // reloads in a row that left the gap open
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
 
   const drain = () => {
-    if (buffer.length === 0) return;
     const { apply: replay, keep } = planGapDrain(buffer, cursors);
     buffer = keep;
     for (let i = 0; i < replay.length; i++) {
@@ -72,13 +78,16 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
       }
       if (typeof event.seq === "number") cursors.set(event.messageId, event.seq);
     }
-    if (buffer.length > 0) reconcile();
+    if (buffer.length === 0) { misses = 0; return; }
+    misses += 1;
+    reconcile();
   };
 
   /** Pull a fresh snapshot, then replay whatever it doesn't already cover. */
   const reconcile = () => {
     if (disposed || reloading || retryTimer) return;
-    const wait = minIntervalMs - (now() - lastReloadAt);
+    const spacing = Math.min(RECONCILE_MAX_MS, minIntervalMs * 2 ** Math.max(0, misses - 1));
+    const wait = spacing - (now() - lastReloadAt);
     if (wait > 0) {
       retryTimer = setTimeout(() => { retryTimer = null; reconcile(); }, wait);
       return;

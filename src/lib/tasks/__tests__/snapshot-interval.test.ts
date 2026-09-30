@@ -14,12 +14,11 @@ describe("snapshotIntervalMs", () => {
     expect(snapshotIntervalMs(112_000)).toBe(1750);
   });
 
-  // A client resuming mid-stream re-fetches the whole chat every 250ms until a
-  // snapshot covers the deltas it holds, so however large the reply gets, a snapshot
-  // is never older than this.
-  it("never waits more than 2s", () => {
-    expect(snapshotIntervalMs(128_000)).toBe(2000);
-    expect(snapshotIntervalMs(50_000_000)).toBe(2000);
+  // A client resuming mid-stream holds the deltas it receives until a snapshot covers
+  // them, so however large the reply gets, a snapshot is never older than this.
+  it("never waits more than 5s", () => {
+    expect(snapshotIntervalMs(320_000)).toBe(5000);
+    expect(snapshotIntervalMs(50_000_000)).toBe(5000);
   });
 
   // Replays saveSnapshot's gate against a reply that grows steadily (a tool-heavy turn
@@ -39,9 +38,12 @@ describe("snapshotIntervalMs", () => {
       }
       return total;
     };
-    // 8s reaches 128 KB, where the cap takes over.
-    expect(written(snapshotIntervalMs, 8) / 8).toBeLessThan(64_000 * 1.25);
-    // Past the cap the fixed cadence it replaced writes nearly twice as much.
-    expect(written(() => 1000, 60)).toBeGreaterThan(written(snapshotIntervalMs, 60) * 1.8);
+    // 20s reaches 320 KB, where the cap takes over. The fixed 1s cadence this replaced
+    // writes ~168 KB/s over the same stretch, and a 2s cap ~95 KB/s.
+    const limit = 64_000 * 1.25;
+    expect(written(snapshotIntervalMs, 20) / 20).toBeLessThan(limit);
+    expect(written(() => 1000, 20) / 20).toBeGreaterThan(limit);
+    // Past the cap the fixed cadence writes over four times as much.
+    expect(written(() => 1000, 60)).toBeGreaterThan(written(snapshotIntervalMs, 60) * 4);
   });
 });

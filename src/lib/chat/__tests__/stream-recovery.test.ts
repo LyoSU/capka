@@ -6,11 +6,12 @@ type Ev = { messageId: string; seq: number; text: string };
 
 /**
  * A stand-in for the live turn: the runner publishes a delta every 100ms and
- * persists a snapshot at most once a second, exactly as runner.ts does.
+ * persists a snapshot when the test says so — every 1s for an ordinary reply, up
+ * to every 5s for a large one (snapshotIntervalMs in runner.ts).
  */
 function makeTurn() {
   let published = 0;          // highest seq published
-  let snapshotSeq = 0;        // what a reload would return (lags, throttled 1/s)
+  let snapshotSeq = 0;        // what a reload would return (lags, throttled)
   const publishedText = new Map<number, string>();
   return {
     publish(): Ev {
@@ -66,7 +67,7 @@ describe("createStreamRecovery", () => {
     });
 
     turn.publish();          // seq 1 — the lost event
-    turn.persist();          // the runner's next 1/s snapshot covers the hole
+    turn.persist();          // the runner's next snapshot covers the hole
 
     for (let tick = 0; tick < 20; tick++) {
       const event = turn.publish();
@@ -128,6 +129,51 @@ describe("createStreamRecovery", () => {
     // ~1s at a 250ms floor — a handful of reloads, not one per event.
     expect(reloads).toBeLessThanOrEqual(6);
     expect(reloads).toBeGreaterThan(0);
+  });
+
+  it("backs off while a gap stays open for a large reply's 5s snapshot, then starts over", async () => {
+    // Every reload is a full-chat fetch, and on a large reply the snapshot that
+    // closes the gap is up to 5s away. At a fixed 250ms that was ~20 reloads of a
+    // reply that is, by then, hundreds of KB.
+    const turn = makeTurn();
+    const cursors = new Map<string, number>([["m1", 0]]);
+    let rendered = "";
+    let reloads = 0;
+    const recovery = createStreamRecovery<Ev>({
+      reload: async () => { reloads += 1; rendered = turn.textUpTo(turn.snapshotSeq); cursors.set("m1", turn.snapshotSeq); },
+      apply: (e) => { rendered += e.text; return true; },
+      cursors,
+    });
+    const tick = async () => {
+      const event = turn.publish();
+      if (classifyStreamEvent(cursors.get("m1") ?? -1, event.seq) === "apply") {
+        cursors.set("m1", event.seq);
+        rendered += event.text;
+      } else {
+        recovery.hold(event);
+      }
+      await vi.advanceTimersByTimeAsync(100);
+    };
+
+    turn.publish();                                  // seq 1 — the lost event
+    for (let t = 0; t < 50; t++) await tick();       // 5s before the runner persists
+    expect(reloads).toBeLessThanOrEqual(6);
+    expect(reloads).toBeGreaterThan(2);
+
+    turn.persist();                                  // the snapshot that covers the hole
+    for (let t = 0; t < 21; t++) await tick();       // at most one backed-off spacing (2s)
+    expect(rendered).toBe(turn.textUpTo(72));
+    expect(recovery.held).toBe(0);
+
+    // The gap closed, so the next one retries from the 250ms floor again.
+    const before = reloads;
+    turn.publish();                                  // another lost event
+    await tick();                                    // gapped: reloads at once
+    turn.persist();
+    for (let t = 0; t < 3; t++) await tick();        // retried 250ms later, not 2s
+    expect(reloads).toBe(before + 2);
+    expect(rendered).toBe(turn.textUpTo(77));
+    expect(recovery.held).toBe(0);
   });
 
   it("keeps holding events that could not be applied, in publish order", async () => {

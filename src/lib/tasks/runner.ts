@@ -251,14 +251,14 @@ export async function persistUnreadSteers(input: {
  * How long to wait after a mid-stream snapshot of `bytes` before writing the next.
  * Every snapshot rewrites the WHOLE reply (content plus every part, tool results
  * included), so a fixed cadence makes a turn's write volume grow with the square of
- * its length. Scaling the wait with the size holds it near 64 KB/s up to 128 KB,
- * and at half a fixed 1s cadence's volume beyond. Capped at 2s: a client that
- * mounts or reconnects mid-stream re-fetches the whole chat every 250ms until a
- * snapshot covers the deltas it holds (stream-recovery.ts), so each second of
- * staleness costs four full-chat reloads of a reply that is, by then, large.
+ * its length. Scaling the wait with the size holds it near 64 KB/s up to 320 KB.
+ * Capped at 5s because a client that mounts or reconnects mid-stream holds the
+ * deltas it receives until a snapshot covers them (stream-recovery.ts): the cap is
+ * how long its reply can sit frozen, and its reloads back off meanwhile so the wait
+ * does not turn into a storm of full-chat re-fetches.
  */
 export function snapshotIntervalMs(bytes: number): number {
-  return Math.min(2000, Math.max(1000, bytes / 64));
+  return Math.min(5000, Math.max(1000, bytes / 64));
 }
 
 /**
@@ -1388,7 +1388,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     //
     // `content` is still written mid-stream, but only when it changed: a turn whose
     // worker dies keeps it as the partial reply (reconcileZombies merges only
-    // metadata), and search, export and forks read it. Re-sending the same text
+    // metadata), search and export read it, and a fork taken mid-stream copies it
+    // as the forked reply's text for good (tree.ts). Re-sending the same text
     // still counts as a change to Postgres (a fresh value against the stored TOAST
     // pointer), so each forced save of a tool-only step would re-TOAST the whole
     // text and re-run to_tsvector for idx_messages_content_fts. Left out of the
