@@ -115,7 +115,15 @@ export class LocalFsStore {
     const queue = [[relPath, Math.max(1, depth)]];
     scan: for (let q = 0; q < queue.length; q++) {
       const [rel, d] = queue[q];
-      const dirPath = await safeRealPath(base, rel);
+      // The requested root must resolve (a bad path is the caller's error); a queued
+      // subdirectory that escaped, looped or vanished since it was enqueued is skipped.
+      let dirPath;
+      try {
+        dirPath = await safeRealPath(base, rel);
+      } catch (err) {
+        if (q === 0) throw err;
+        continue;
+      }
       const names = (await readdir(dirPath).catch(() => [])).sort();
       for (const name of names) {
         if (entries.length >= limit) { truncated = true; break scan; }
