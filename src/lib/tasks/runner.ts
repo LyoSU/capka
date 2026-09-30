@@ -549,13 +549,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const auxTarget = () =>
       (auxTargetMemo ??= resolveAuxTarget(userId, { model, provider, modelId, configId, isShared }));
 
-    // Prompt caching, three tiers of system messages (see buildSystemPrompt):
+    // Prompt caching, three tiers (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
     //     first ephemeral breakpoint, reused across all users/chats.
     //  2. session — name + conversation-start date, constant for this chat →
     //     its own breakpoint, reused on every turn of the conversation.
-    //  3. volatile — memories/workspace/files, per-run, sent uncached last so
-    //     churn never invalidates the cached prefixes.
+    //  3. volatile — memories/workspace/files, per-run. NOT a system message: it
+    //     rides after the history as the turn context (see turnContextMessage),
+    //     so its churn never invalidates the cached history either.
     // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
     const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
     // Every tier is conditional, INCLUDING stable: a project in raw-prompt mode with
@@ -569,9 +570,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (prompt.session) {
       systemMessages.push({ role: "system", content: prompt.session, providerOptions: ephemeral });
     }
-    if (prompt.volatile) {
-      systemMessages.push({ role: "system", content: prompt.volatile });
-    }
+    const turnContext: string[] = prompt.volatile ? [prompt.volatile] : [];
 
     // The reply hangs off the last message of the branch we're answering (the
     // user message just sent, or the user turn being regenerated). Pointing the
@@ -785,7 +784,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the same `anthropic` namespace as a fallback) otherwise cache only the
     // system prefix and re-bill the whole history at full input price on every
     // turn. The marker travels with the message OBJECT, so the compaction/memory
-    // aux calls that reuse this array (buildAuxRequest) hit the same cache.
+    // aux calls that reuse this array (buildAuxRequest) hit the same cache. It sits
+    // on the latest user message and the turn context goes AFTER it, so the
+    // prefix it closes is exactly what the next turn replays.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
     // Breakpoint budget (Anthropic max 4): stable + session + this + the moving
     // step tail in prepareStep = 4 — don't add a fifth.
@@ -827,7 +828,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A native-eligible file that couldn't be delivered (download failed, still
     // over cap after downscale, aggregate budget) is routed to the tool path
     // instead of being falsely promised visible — the root of the false-native
-    // bug. Uncached volatile tier (own system message), so no cache-prefix cost.
+    // bug. Part of the turn context, so no cache-prefix cost.
     if (turnFiles.length) {
       const injectedNames = new Set(injectedFiles.map((f) => f.name));
       const lines = turnFiles.map(
@@ -848,8 +849,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           ? `\nOpen the files without that note using tools as needed (e.g. view_file for images and PDFs).`
           : `\nYou have NO file tools in this chat, so you cannot open the files without that note at all. Say so plainly — this project is set up without file access — instead of guessing at their contents.`;
       }
-      systemMessages.push({ role: "system", content: block });
+      turnContext.push(block);
     }
+    // The volatile tier as ONE user message right after the latest user message.
+    // Providers cache by prefix, so anything that changes per run (a file written,
+    // a memory saved, this turn's attachments) placed before the history re-bills
+    // the whole history on the next turn; here it sits past the history-tail
+    // breakpoint, and the next turn and the compaction pass replay that prefix byte
+    // for byte. A user message because Anthropic rejects a system message once the
+    // conversation has started. After the LAST user message rather than at the very
+    // end, because an approval continuation must still end on its tool-approval
+    // response — the SDK only executes approvals found in the final message; and
+    // before the effect-ledger note (`effectNote`), which is meant to be read last.
+    // Kept out of `modelMessages`, so nothing that looks up the user's last message
+    // there (attachment stripping, native injection) can mistake this for it.
+    const turnContextMessage: ModelMessage | null = turnContext.length
+      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n")}\n</turn-context>` }
+      : null;
+    const withTurnContext = (msgs: ModelMessage[]) => {
+      if (!turnContextMessage) return msgs;
+      const at = msgs.findLastIndex((m) => m.role === "user" && m !== effectNote) + 1;
+      return [...msgs.slice(0, at), turnContextMessage, ...msgs.slice(at)];
+    };
     // Modalities of the files we actually DELIVERED — if the provider then rejects
     // them at runtime (the catalog over-claimed for a custom backend), the soft
     // retry below strips them and folds these into the notice so the user is still
@@ -1111,7 +1132,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               },
             }
           : {}),
-        messages: [...systemMessages, ...modelMessages, ...resumeMessages],
+        messages: [...systemMessages, ...withTurnContext(modelMessages), ...resumeMessages],
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
         abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),

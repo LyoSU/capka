@@ -30,6 +30,7 @@ import { getModelCannotReason, getModelContextLength, getModelEfforts } from "@/
 import { availableAmounts, clampAmount, parseThinkAmount } from "@/lib/models/thinking";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
+import { isInternalPath } from "@/lib/chat/artifacts";
 import { listSecretNames, loadSecretEnv } from "@/lib/chat/secrets";
 import { publishTaskEvent } from "./events";
 import type { TaskPayload } from "./runner";
@@ -434,11 +435,19 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
         const { listFiles } = await import("@/lib/sandbox/client");
         // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
         const { entries } = await listFiles(sessionKey, ".", userId, 3);
-        if (entries?.length) {
-          workspaceSnapshot = entries
-            .slice(0, 50)
-            .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
-            .join("\n");
+        // Sorted, because readdir order is whatever the filesystem hands back and the
+        // cut below would otherwise keep an arbitrary 50. Capka's own `.capka/` is
+        // left out, as the file browser and the artifact tiers leave it out. And each
+        // path is JSON-quoted: a file name is the sandbox's to choose, and a raw one
+        // carrying a newline and a backtick fence would close the block it is listed
+        // in and continue as prompt text.
+        const paths = (entries ?? [])
+          .filter((e) => !isInternalPath(e.path))
+          .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
+          .sort();
+        if (paths.length) {
+          workspaceSnapshot = paths.slice(0, 50).map((p) => JSON.stringify(p)).join("\n")
+            + (paths.length > 50 ? `\n… and ${paths.length - 50} more` : "");
         }
       } catch { /* no workspace yet */ }
     }

@@ -6,8 +6,7 @@ import { formatAvailableSkills } from "@/lib/skills/fmt";
 import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
 
 /**
- * The system prompt split into THREE cache tiers, rendered as consecutive
- * system messages (see runner.ts):
+ * The system prompt split into THREE cache tiers (see runner.ts):
  *
  * 1. `stable`  — base persona + sandbox + project instructions + skills.
  *    Identical across every user and chat, so it carries the first cache
@@ -18,8 +17,9 @@ import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
  *    conversation start time, never a live clock — a per-turn value here would
  *    change the prefix and bust the cache for everything after it.
  * 3. `volatile` — memories, workspace snapshot, just-attached files. Changes
- *    per run, sent uncached after the breakpoints so churn never invalidates
- *    the cached prefixes.
+ *    per run, so it is NOT a system message: the runner sends it after the
+ *    conversation history, as the turn context following the latest user
+ *    message, so churn invalidates neither the tiers above nor the history.
  */
 export interface BuiltPrompt {
   stable: string;
@@ -230,7 +230,7 @@ export function buildSystemPrompt(opts: {
       // One block, not two: the manifest already splits itself into user/project
       // sections and knows which of them exist this turn.
       caps.memory && memoryManifest ? memoryManifest : undefined,
-      // Workspace snapshot changes every run — must stay out of the cached prefix.
+      // Workspace snapshot changes whenever a file does, hence this tier.
       caps.sandbox && opts.workspaceSnapshot
         ? `## Current workspace files:\n\`\`\`\n${opts.workspaceSnapshot}\n\`\`\``
         : undefined,
