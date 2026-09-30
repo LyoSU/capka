@@ -471,10 +471,10 @@ describe("injectSteers", () => {
 
 describe("a steered turn that also has to prune", () => {
   // The two mechanisms meet in `prepareStep` and count in different units. The
-  // prune boundary is an index into the UN-injected list, while the pruner counts
-  // TRAILING messages of the list it is actually handed — so every steer sitting in
-  // the pruned prefix pushes the protected window one message earlier and buys back
-  // an exchange of tool traffic the turn had decided to shed. The runner corrects
+  // prune boundary is an index into the UN-injected list, while the pruner takes an
+  // absolute index into the list it is actually handed — so every steer sitting in
+  // the pruned prefix pushes the cut one message earlier and buys back an exchange
+  // of tool traffic the turn had decided to shed. The runner corrects
   // for exactly that (`pruneBoundary + before`); this pins that the correction is
   // right, and that removing it is observable.
   const ids = intactCalls;

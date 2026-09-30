@@ -908,10 +908,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // turn's attachments) placed before the history re-bills
     // the whole history on the next turn; here it sits past the history-tail
     // breakpoint, and the next turn and the compaction pass replay that prefix byte
-    // for byte. A user message because Anthropic rejects a system message once the
-    // conversation has started. After the LAST user message rather than at the very
-    // end, because an approval continuation must still end on its tool-approval
-    // response — the SDK only executes approvals found in the final message; and
+    // for byte. A user message because a system message past the start of the
+    // conversation is not portable: Anthropic accepts one only under a beta header,
+    // and many chat templates allow a system message only first. After the LAST user
+    // message rather than at the very end, because an approval continuation must
+    // still end on its tool-approval response — the SDK only executes approvals found in the final message; and
     // before the effect-ledger note (`effectNote`), which is meant to be read last.
     // Kept out of `modelMessages`, so nothing that looks up the user's last message
     // there (attachment stripping, native injection) can mistake this for it.
@@ -1152,12 +1153,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                     // and the turn is not recorded as having armed.
                     pruneArmedEarlier = true;
                   }
-                  // The boundary is an index into `base`; the pruner counts TRAILING
-                  // messages of the list it is handed. Injections at or past the cut
-                  // ride in that tail and need no adjustment (which is why the
-                  // view-file bridge never did), but a steer anchored to an earlier
-                  // step sits in the pruned prefix and would otherwise buy back one
-                  // message of tool traffic each.
+                  // The boundary is an index into `base`, but the pruner takes an
+                  // absolute index into the list it is handed, which is `msgs`.
+                  // Injections past the cut sit after it and need no adjustment
+                  // (which is why the view-file bridge never did), but each steer
+                  // anchored at or before it shifts the cut one message earlier in
+                  // `msgs` and would otherwise buy back one message of tool traffic.
                   const before = steerAnchors.filter((a) => (a.index ?? 0) <= pruneBoundary).length;
                   msgs = pruneTurnToolTraffic(msgs, pruneBoundary + before);
                 }

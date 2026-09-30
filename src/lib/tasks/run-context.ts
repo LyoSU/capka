@@ -38,11 +38,12 @@ import type { TaskPayload } from "./runner";
 /**
  * The user's own words inside an answered `ask`, and nothing else.
  *
- * An approval/`ask` continuation answers no user message — the user's answer rides
- * `resumeMessages` and is not a chat message at all — so `userTurnText` read "" and a
- * fact the user stated while approving ("yes, and remember we pay in EUR") landed
- * `derived`. This is the fold the F7 trigger comment asked for: ONE more source for the
- * ONE value, here, rather than a second consumer deriving its own.
+ * An approval/`ask` continuation answers no user message — the user's answer is
+ * recorded in the suspended assistant row's `metadata.parts` and is not a chat message
+ * at all — so `userTurnText` read "" and a fact the user stated while approving ("yes,
+ * and remember we pay in EUR") landed `derived`. This is the fold the F7 trigger
+ * comment asked for: ONE more source for the ONE value, here, rather than a second
+ * consumer deriving its own.
  *
  * Only free-text fields count, and that exclusion is the whole security content of this
  * function. The FORM is model-authored: a `choice` field's option labels are the model's
@@ -214,12 +215,13 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // from anything a client sent, since it is what a fact must be quoted from.
   //
   // KNOWN AND NOW CLOSED (Fable audit F7). An approval/`ask` continuation arrives with
-  // no reply parent — the user's ANSWER rides `resumeMessages` and is not a chat message
-  // at all — so this read "" on that half of the turn and a fact the user stated while
-  // approving was `derived`: pending, and invisible until a review queue existed. The
-  // answer is durable on the message row, so it is folded in HERE, as one more source for
-  // this SINGLE value. Anything else that ever makes the answer part of the transcript
-  // folds in here too; a second consumer with its own derivation is precisely what F1 was.
+  // no reply parent — the user's ANSWER is recorded on the suspended assistant row
+  // (`payload.resumeMessageId`) and is not a chat message at all — so this read "" on
+  // that half of the turn and a fact the user stated while approving was `derived`:
+  // pending, and invisible until a review queue existed. The answer is durable on that
+  // row, so it is folded in HERE, as one more source for this SINGLE value. Anything
+  // else that ever makes the answer part of the transcript folds in here too; a second
+  // consumer with its own derivation is precisely what F1 was.
   const { answeredAsk, untrustedIngressSeeded } = await readResumeRow(payload.resumeMessageId ?? null);
 
   // NO TAINT MARK HERE, and the absence is the decision rather than an omission: this is
