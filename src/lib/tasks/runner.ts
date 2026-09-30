@@ -552,8 +552,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Prompt caching, three tiers (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
     //     first ephemeral breakpoint, reused across all users/chats.
-    //  2. session — name + conversation-start date, constant for this chat →
-    //     its own breakpoint, reused on every turn of the conversation.
+    //  2. session — name + conversation-start date, constant for this chat. No
+    //     breakpoint of its own: it is a few dozen tokens, and every turn's history
+    //     breakpoints (see markCacheTail) already close a prefix that contains it.
+    //     The slot goes to the previous turn's tail instead.
     //  3. volatile — memories/workspace/files, per-run. NOT a system message: it
     //     rides after the history as the turn context (see turnContextMessage),
     //     so its churn never invalidates the cached history either.
@@ -568,7 +570,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       systemMessages.push({ role: "system", content: prompt.stable, providerOptions: ephemeral });
     }
     if (prompt.session) {
-      systemMessages.push({ role: "system", content: prompt.session, providerOptions: ephemeral });
+      systemMessages.push({ role: "system", content: prompt.session });
     }
     const turnContext: string[] = prompt.volatile ? [prompt.volatile] : [];
 
@@ -788,11 +790,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // on the latest user message and the turn context goes AFTER it, so the
     // prefix it closes is exactly what the next turn replays.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
-    // Breakpoint budget (Anthropic max 4): stable + session + this + the moving
-    // step tail in prepareStep = 4 — don't add a fifth.
+    // Breakpoint budget (Anthropic max 4): stable + the previous turn's tail + this
+    // + the moving step tail in prepareStep = 4 — don't add a fifth.
     const markCacheTail = (msgs: ModelMessage[]) => {
       const last = msgs.at(-1);
       if (last) last.providerOptions = { ...last.providerOptions, ...ephemeral };
+      // The previous turn's tail too: the user message just before the last reply,
+      // which that turn marked in this same position. It is the newest entry this
+      // turn can read back — the previous turn's step-tail entries carry its turn
+      // context and its in-loop message shape, and the history replays neither.
+      // Anthropic only looks ~20 blocks back from a breakpoint for an older entry,
+      // and a long tool loop in between is more than that, so without this mark
+      // the whole history is written again after every long agent turn. (After a
+      // steered reply this lands on the steer row, one block past the entry.)
+      const reply = msgs.findLastIndex((m) => m.role === "assistant");
+      const prev = reply > 0 ? msgs[reply - 1] : undefined;
+      if (prev?.role === "user") prev.providerOptions = { ...prev.providerOptions, ...ephemeral };
     };
     markCacheTail(modelMessages);
 
@@ -863,8 +876,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // before the effect-ledger note (`effectNote`), which is meant to be read last.
     // Kept out of `modelMessages`, so nothing that looks up the user's last message
     // there (attachment stripping, native injection) can mistake this for it.
+    // The tag itself is stripped from the body: a path (directory names can spell
+    // it across a `/`) or a memory fact must not be able to close the wrapper and
+    // go on as text outside it.
     const turnContextMessage: ModelMessage | null = turnContext.length
-      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n")}\n</turn-context>` }
+      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n").replace(/<\s*\/?\s*turn-context\s*>/gi, "")}\n</turn-context>` }
       : null;
     const withTurnContext = (msgs: ModelMessage[]) => {
       if (!turnContextMessage) return msgs;
@@ -1817,12 +1833,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
-      // Again, because the line above REPLACED the list discardPartial had just put
-      // the note on. The trim keeps SETTLED turns, so by construction it drops
-      // everything this turn did — and this note is the only thing between an
+      // Fresh objects — re-mark the cache tail, and BEFORE the note below goes on, as
+      // at the initial build: the tail is the history's, and the turn context sits
+      // between it and the note.
+      markCacheTail(modelMessages);
+      // Again, because the conversion above REPLACED the list discardPartial had
+      // just put the note on. The trim keeps SETTLED turns, so by construction it
+      // drops everything this turn did — and this note is the only thing between an
       // overflow and a duplicate create.
       carryEffectsIntoRestart();
-      markCacheTail(modelMessages); // fresh objects — re-mark the cache tail
       // Re-attach the turn's native files (the trim+reconvert produced fresh
       // model messages, dropping the bytes injected into the original set).
       if (injectedNative && nativeFiles.length) {

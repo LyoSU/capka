@@ -434,20 +434,22 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       try {
         const { listFiles } = await import("@/lib/sandbox/client");
         // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
-        const { entries } = await listFiles(sessionKey, ".", userId, 3);
+        const { entries, truncated } = await listFiles(sessionKey, ".", userId, 3);
         // Sorted, because readdir order is whatever the filesystem hands back and the
-        // cut below would otherwise keep an arbitrary 50. Capka's own `.capka/` is
-        // left out, as the file browser and the artifact tiers leave it out. And each
-        // path is JSON-quoted: a file name is the sandbox's to choose, and a raw one
-        // carrying a newline and a backtick fence would close the block it is listed
-        // in and continue as prompt text.
+        // cut below would otherwise keep an arbitrary 50 — though only over what the
+        // listing returned, which stops at its own entry limit in walk order, so a
+        // cut-short listing says "more" without pretending to know how many. Capka's
+        // own `.capka/` is left out, as the file browser and the artifact tiers leave
+        // it out. And each path is JSON-quoted: a file name is the sandbox's to
+        // choose, and a raw one carrying a newline and a backtick fence would close
+        // the block it is listed in and continue as prompt text.
         const paths = (entries ?? [])
           .filter((e) => !isInternalPath(e.path))
           .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
           .sort();
         if (paths.length) {
           workspaceSnapshot = paths.slice(0, 50).map((p) => JSON.stringify(p)).join("\n")
-            + (paths.length > 50 ? `\n… and ${paths.length - 50} more` : "");
+            + (truncated ? "\n… and more" : paths.length > 50 ? `\n… and ${paths.length - 50} more` : "");
         }
       } catch { /* no workspace yet */ }
     }
