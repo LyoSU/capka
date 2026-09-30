@@ -29,7 +29,10 @@ export function telegramRedirectUri(origin: string): string {
 
 // Best-effort carry of the Telegram @username from the id_token (which better-
 // auth's account row doesn't persist) into the telegram_links upsert that runs
-// in the account.create.after hook, within the same sign-in request.
+// in the account.create.after hook, within the same sign-in request. The entry is
+// only consumed when an account row is created, so a returning login leaves it
+// behind: the map is capped (oldest evicted) rather than relied on to drain.
+const PENDING_USERNAMES_MAX = 500;
 const pendingUsernames = new Map<number, string | null>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -164,7 +167,9 @@ export async function getAuth() {
                   getUserInfo: async (tokens: any) => {
                     const claims = decodeTelegramClaims(tokens?.idToken);
                     if (!claims) return null;
+                    pendingUsernames.delete(claims.telegramUserId); // re-insert as newest
                     pendingUsernames.set(claims.telegramUserId, claims.username);
+                    if (pendingUsernames.size > PENDING_USERNAMES_MAX) pendingUsernames.delete(pendingUsernames.keys().next().value!);
                     return {
                       id: String(claims.telegramUserId),
                       name: telegramDisplayName(claims),
@@ -372,7 +377,8 @@ export async function requireSession(): Promise<{
   }
   if (!session) throw new UnauthorizedError();
   const rawRole = (session.user as Record<string, unknown>).role;
-  const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
+  // Fail-closed like status: an unknown stored role gets the least privilege, not write access.
+  const role: Role = rawRole === "admin" || rawRole === "user" ? rawRole : "viewer";
   // Fail-CLOSED: only an explicit "active" grants access. Anything else (pending,
   // suspended, rejected, or some future/manually-set value) is non-active and gated
   // out — the old `!== "pending" ? "active"` defaulted unknown statuses to active.
