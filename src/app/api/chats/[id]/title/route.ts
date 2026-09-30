@@ -4,7 +4,7 @@ import { requireWriter, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
-import { loadActivePath } from "@/lib/chat/tree";
+import { loadActivePath, messageText } from "@/lib/chat/tree";
 import { generateChatTitle } from "@/lib/chat/title";
 import { resolveAuxTarget, resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
@@ -57,7 +57,9 @@ export const POST = apiHandler(async (_req, { params }) => {
   const userText = path.find((e) => e.node.role === "user")?.node.content ?? "";
   // Last, not first: the point of regenerating is to catch up with where the
   // conversation went, and the opening reply is what the automatic pass already saw.
-  const assistantText = [...path].reverse().find((e) => e.node.role === "assistant")?.node.content;
+  // Through messageText, because that reply may still be streaming.
+  const lastReply = [...path].reverse().find((e) => e.node.role === "assistant")?.node;
+  const assistantText = lastReply && messageText(lastReply);
 
   // Nothing has been answered yet, so there is no conversation to name — the
   // placeholder /api/chat set from the opening message is still the best guess.

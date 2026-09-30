@@ -113,6 +113,35 @@ run("durable queue", () => {
       expect(rows[0].c).toBe("interrupted_partial");
     });
 
+    // Mid-stream snapshots leave `content` to the finishing write a dead worker never
+    // reaches, so failing the row is what gives it the text search and export read.
+    it("gives the stranded reply the text its parts hold", async () => {
+      await strand("qt-zomb-text", [
+        { type: "text", text: " First. " },
+        { type: "reasoning", text: "thinking" },
+        { type: "text", text: "\n" },
+        { type: "text", text: "Second." },
+      ]);
+      const { rows } = await pool.query(`SELECT content, metadata->>'status' AS s FROM messages WHERE id = $1`, ["msg-qt-zomb-text"]);
+      expect(rows[0]).toEqual({ content: "First.\n\nSecond.", s: "failed" });
+    });
+
+    it("rebuilds the text of a row whose task already failed, over what the column held", async () => {
+      await pool.query(
+        `INSERT INTO tasks (id, chat_id, user_id, status, worker_id) VALUES ('qt-zomb-term',$1,$2,'failed','w-zomb')`,
+        [C, U],
+      );
+      await pool.query(
+        `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','first half',$3)`,
+        ["msg-qt-zomb-term", C, JSON.stringify({ taskId: "qt-zomb-term", status: "running", parts: [
+          { type: "text", text: "first half" }, { type: "text", text: "second half" },
+        ] })],
+      );
+      await reconcileZombies();
+      const { rows } = await pool.query(`SELECT content FROM messages WHERE id = $1`, ["msg-qt-zomb-term"]);
+      expect(rows[0].content).toBe("first half\n\nsecond half");
+    });
+
     it("does call a tool that ran and then threw 'partial work'", async () => {
       await strand("qt-zomb-ran", [
         { type: "tool-error", id: "c1", name: "x", error: "disk full" },

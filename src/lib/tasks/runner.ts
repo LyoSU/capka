@@ -9,7 +9,7 @@ import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/lib/chat/steps";
-import { loadActivePath } from "@/lib/chat/tree";
+import { loadActivePath, replyText } from "@/lib/chat/tree";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation } from "@/lib/tasks/queue";
@@ -249,9 +249,9 @@ export async function persistUnreadSteers(input: {
 
 /**
  * How long to wait after a mid-stream snapshot of `bytes` before writing the next.
- * Every snapshot rewrites the WHOLE reply (content plus every part, tool results
- * included), so a fixed cadence makes a turn's write volume grow with the square of
- * its length. Scaling the wait with the size holds it near 64 KB/s up to 320 KB.
+ * Every snapshot rewrites the WHOLE reply (every part, tool results included), so
+ * a fixed cadence makes a turn's write volume grow with the square of its length.
+ * Scaling the wait with the size holds it near 64 KB/s up to 320 KB.
  * Capped at 5s because a client that mounts or reconnects mid-stream holds the
  * deltas it receives until a snapshot covers them (stream-recovery.ts): the cap is
  * how long its reply can sit frozen, and its reloads back off meanwhile so the wait
@@ -389,14 +389,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // first delta is seq 1. Bumped synchronously at each publish so NOTIFY order
   // (per-channel FIFO) matches seq order.
   let seq = 0;
-  // Join distinct segments with a blank line, not "". The model emits text (and
-  // reasoning) in runs broken up by tool/reasoning steps, so each `text` part is
-  // its own paragraph — the web renders them apart, but a channel that flattens
-  // parts to one string (Telegram) would otherwise glue "…the limit.Admin rights…" into
-  // a run-on wall. A blank line restores the paragraph the web already shows.
-  const getFullText = () =>
-    parts.filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text.trim()).filter(Boolean).join("\n\n");
+  // Segments joined with a blank line (see replyText); reasoning the same way.
+  const getFullText = () => replyText(parts);
   const getReasoning = () =>
     parts.filter((p): p is { type: "reasoning"; text: string } => p.type === "reasoning")
       .map((p) => p.text.trim()).filter(Boolean).join("\n\n");
@@ -1398,23 +1392,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // snapshot (snapshotIntervalMs), and only ever called off a flush, so a quiet
     // tool run adds no writes.
     //
-    // `content` is still written mid-stream, but only when it changed: a turn whose
-    // worker dies keeps it as the partial reply (reconcileZombies merges only
-    // metadata), search and export read it, and a fork taken mid-stream copies it
-    // as the forked reply's text for good (tree.ts). Re-sending the same text
-    // still counts as a change to Postgres (a fresh value against the stored TOAST
-    // pointer), so each forced save of a tool-only step would re-TOAST the whole
-    // text and re-run to_tsvector for idx_messages_content_fts. Left out of the
-    // SET, no indexed column changes and the update can be HOT.
+    // `content` is NOT written here, only by the finishing write: it sits under
+    // idx_messages_content_fts, so every mid-stream write of it re-TOASTed the whole
+    // text, re-ran to_tsvector and ruled out a HOT update. Left out of the SET, no
+    // indexed column changes. The readers that need a reply still streaming derive it
+    // from `parts` instead (messageText in tree.ts: a fork, the title route), and
+    // reconcileZombies rebuilds it when it fails a stranded row.
     let lastSaveAt = 0;
     let saveEveryMs = 1000;
-    let savedContent: string | undefined;
     const saveSnapshot = async (force = false) => {
       if (!force && Date.now() - lastSaveAt < saveEveryMs) return;
       lastSaveAt = Date.now();
-      // Capture parts + content synchronously (a JSON round-trip, so a token
-      // appended during the DB await can't mutate what we persist — and its
-      // length is the snapshot size the next interval is scaled by).
+      // Capture parts synchronously (a JSON round-trip, so a token appended
+      // during the DB await can't mutate what we persist — and its length is the
+      // snapshot size the next interval is scaled by).
       //
       // Consistency trap: `parts` is updated EAGERLY (appendText, per token)
       // while `seq` is bumped LAZILY (at publish/flush). During a flush's publish
@@ -1429,11 +1420,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const partsJson = JSON.stringify(parts);
       const snapParts = JSON.parse(partsJson) as typeof parts;
       const snapSeq = seq + (reasonBuf ? 1 : 0) + (textBuf ? 1 : 0);
-      const snapContent = getFullText();
-      saveEveryMs = snapshotIntervalMs(partsJson.length + snapContent.length);
-      const contentChanged = snapContent !== savedContent;
+      saveEveryMs = snapshotIntervalMs(partsJson.length);
       await db.update(messages).set({
-        ...(contentChanged ? { content: snapContent } : {}),
         // Steers ride INSIDE this object, never beside it: the update replaces the
         // row's whole metadata, so a separately-written steer would survive exactly
         // until the next token arrived. Copied, like `parts`, so a steer folded in
@@ -1441,7 +1429,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq,
           ...(consumedSteers.length ? { steers: [...consumedSteers] } : {}) },
       }).where(eq(messages.id, msgId));
-      if (contentChanged) savedContent = snapContent;
     };
 
     // Discard the partial reply before a retry re-streams from scratch

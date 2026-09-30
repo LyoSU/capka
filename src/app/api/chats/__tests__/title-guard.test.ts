@@ -33,7 +33,10 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   return { ...actual, requireWriter };
 });
 vi.mock("@/lib/db/ownership", () => ({ requireOwned }));
-vi.mock("@/lib/chat/tree", () => ({ loadActivePath }));
+vi.mock("@/lib/chat/tree", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chat/tree")>()),
+  loadActivePath,
+}));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle }));
 vi.mock("@/lib/providers/resolve", () => ({ resolveAuxTarget, resolveUserModelInfo }));
 vi.mock("@/lib/billing/limits", () => ({ reserveBudget, releaseHold }));

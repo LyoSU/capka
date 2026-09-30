@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { getTableColumns } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { messages } from "@/lib/db/schema";
-import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, insertMessageChunks, pathRowsWhere, siblingId, turnSuffix, type TreeNode } from "../tree";
+import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, insertMessageChunks, messageText, pathRowsWhere, siblingId, turnSuffix, type TreeNode } from "../tree";
 
 // Pure graph tests — no DB, so they run in the normal suite. `createdAt`
 // increments per node to give a deterministic sibling order.
@@ -81,7 +81,7 @@ describe("conversation tree", () => {
  * `NOT NULL DEFAULT false`, so a dropped carry produces a chat that reads perfectly and
  * folds clean. These pin the builders themselves, which is the only seam a unit test has.
  */
-const sourceRow = (over: Partial<{ untrustedIngress: boolean; metadata: unknown }> = {}) =>
+const sourceRow = (over: Partial<{ untrustedIngress: boolean; content: string; metadata: unknown }> = {}) =>
   ({
     id: "src-1",
     chatId: "chat-a",
@@ -110,6 +110,21 @@ describe("copied and imported rows carry the taint mark", () => {
     expect(copy.metadata).toEqual({ status: "completed" });
   });
 
+  // A reply forked mid-stream is copied as `completed`, so the text it keeps for good
+  // has to come from its parts: mid-stream snapshots no longer write `content`.
+  it("a fork taken mid-stream copies the text streamed so far, not the stale column", () => {
+    const copy = forkedMessageRow(sourceRow({
+      content: "",
+      metadata: { status: "running", taskId: "t1", parts: [
+        { type: "text", text: " First paragraph. " },
+        { type: "reasoning", text: "thinking" },
+        { type: "text", text: "   " },
+        { type: "text", text: "Second." },
+      ] },
+    }), ids);
+    expect(copy.content).toBe("First paragraph.\n\nSecond.");
+  });
+
   it("import rows are born tainted: the text came off another service's share link", () => {
     const rows = importedMessageRows({
       chatId: "chat-c",
@@ -125,6 +140,24 @@ describe("copied and imported rows carry the taint mark", () => {
     expect(rows[0].parentId).toBeNull();
     expect(rows[1].parentId).toBe(rows[0].id);
     expect(rows[1].createdAt.getTime()).toBeGreaterThan(rows[0].createdAt.getTime());
+  });
+});
+
+describe("messageText", () => {
+  it("reads a finished row's column, whatever its parts say", () => {
+    expect(messageText({ content: "final", metadata: { status: "completed", parts: [{ type: "text", text: "draft" }] } }))
+      .toBe("final");
+  });
+
+  it("reads a running row's parts, over what an earlier half left in the column", () => {
+    // An approval continuation resumes a row whose column holds the first half only.
+    expect(messageText({ content: "first half", metadata: { status: "running", parts: [
+      { type: "text", text: "first half" }, { type: "text", text: "second half" },
+    ] } })).toBe("first half\n\nsecond half");
+  });
+
+  it("keeps the column for a row without metadata", () => {
+    expect(messageText({ content: "user words", metadata: null })).toBe("user words");
   });
 });
 

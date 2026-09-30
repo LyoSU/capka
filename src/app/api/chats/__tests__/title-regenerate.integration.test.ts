@@ -160,6 +160,24 @@ run("POST /api/chats/[id]/title", () => {
     expect(await titleOf("tr-foreign")).toBe("Not yours");
   });
 
+  // Mid-stream snapshots keep a streaming reply's text in its parts and leave the
+  // column to the finishing write, so a rename asked for mid-reply reads the parts.
+  it("titles from a reply still streaming, not its empty column", async () => {
+    const { pool } = await import("@/lib/db");
+    await chat("tr-live", "Placeholder");
+    const u = await say("tr-m11", "tr-live", "user", "Compare the two vendors", null);
+    await say("tr-m12", "tr-live", "assistant", "", u);
+    await pool.query(`UPDATE messages SET metadata = $2 WHERE id = $1`, ["tr-m12", JSON.stringify({
+      taskId: "t-live", status: "running", parts: [{ type: "text", text: "Vendor A is cheaper." }],
+    })]);
+    generateChatTitle.mockResolvedValue("Vendor comparison");
+
+    expect((await post("tr-live")).status).toBe(200);
+    expect(generateChatTitle).toHaveBeenCalledWith(
+      TARGET.model, TARGET.provider, "Compare the two vendors", "Vendor A is cheaper.", expect.any(Function),
+    );
+  });
+
   it("titles from the ACTIVE branch, not an abandoned one", async () => {
     // Two replies share a parent; the leaf pins the second. A title derived from
     // the abandoned sibling would name the chat after text nobody can see.

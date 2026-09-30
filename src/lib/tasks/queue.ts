@@ -615,6 +615,19 @@ const INTERRUPTED_METADATA_SQL = `CASE WHEN ${PRODUCED_WORK_SQL}
           END`;
 
 /**
+ * The SQL twin of `replyText` (chat/tree.ts): a stranded reply's text, rebuilt from
+ * its parts. Mid-stream snapshots leave `content` to the finishing write, which a
+ * dead worker never reaches, so failing the row is also what gives it the text that
+ * search, export and a later fork read. A row without parts keeps its content.
+ */
+const REPLY_TEXT_SQL = `CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
+            THEN COALESCE((
+              SELECT string_agg(btrim(p->>'text', E' \\t\\n\\r\\f'), E'\\n\\n' ORDER BY i)
+                FROM jsonb_array_elements(m.metadata->'parts') WITH ORDINALITY AS e(p, i)
+               WHERE p->>'type' = 'text' AND btrim(p->>'text', E' \\t\\n\\r\\f') <> ''), '')
+            ELSE m.content END`;
+
+/**
  * Fail any running task whose lease has expired (its worker died), reconcile its
  * abandoned assistant message, AND settle its outstanding budget hold — all in
  * one statement. tasks.status, messages.metadata.status, and the pending usage
@@ -647,7 +660,8 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
          RETURNING id, user_id, chat_id
      ), reconciled_messages AS (
         UPDATE messages m
-           SET metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
+           SET content = ${REPLY_TEXT_SQL},
+               metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
           FROM dead
          WHERE m.metadata->>'taskId' = dead.id
            AND m.metadata->>'status' = 'running'
@@ -664,7 +678,8 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
         -- terminal sweep. 'completed' is excluded so a genuinely finished answer is
         -- never rewritten to "interrupted".
         UPDATE messages m
-           SET metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
+           SET content = ${REPLY_TEXT_SQL},
+               metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
           FROM tasks t
          WHERE m.metadata->>'taskId' = t.id
            AND m.metadata->>'status' = 'running'

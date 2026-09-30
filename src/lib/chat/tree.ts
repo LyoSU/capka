@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { db } from "@/lib/db";
 import { inIds } from "@/lib/db/in-ids";
 import { chats, messages } from "@/lib/db/schema";
+import type { MessageMeta, StoredPart } from "./contracts";
 import { isShared } from "./sharing";
 
 /**
@@ -111,6 +112,28 @@ export function activePath<T extends TreeNode>(rows: T[], activeLeafId: string |
 type MessageRow = typeof messages.$inferSelect;
 export type PathRow = PathEntry<MessageRow>;
 
+/**
+ * A reply's text as its parts spell it. Distinct segments are joined with a blank
+ * line, not "": the model emits text in runs broken up by tool/reasoning steps, so
+ * each `text` part is its own paragraph — the web renders them apart, but a channel
+ * that flattens parts to one string (Telegram) would otherwise glue "…the limit.Admin
+ * rights…" into a run-on wall.
+ */
+export function replyText(parts: readonly StoredPart[]): string {
+  return parts.filter((p): p is Extract<StoredPart, { type: "text" }> => p.type === "text")
+    .map((p) => p.text.trim()).filter(Boolean).join("\n\n");
+}
+
+/**
+ * A row's text, including a reply still streaming. Mid-stream snapshots keep only
+ * `metadata.parts` current and leave `content` to the finishing write (runner.ts
+ * saveSnapshot), so a `running` row's column holds whatever preceded this run.
+ */
+export function messageText(row: { content: string; metadata: unknown }): string {
+  const meta = row.metadata as MessageMeta | null;
+  return meta?.status === "running" && meta.parts ? replyText(meta.parts) : row.content;
+}
+
 /** Strip live-task fields when copying a message into a fork. */
 function sanitizeForkedMeta(metadata: unknown): unknown {
   if (!metadata || typeof metadata !== "object") return metadata;
@@ -141,7 +164,7 @@ export function forkedMessageRow(node: MessageRow, ids: { id: string; chatId: st
     chatId: ids.chatId,
     parentId: ids.parentId,
     role: node.role,
-    content: node.content,
+    content: messageText(node),
     platform: node.platform,
     untrustedIngress: node.untrustedIngress,
     // A copy is never the live task — strip the source taskId and never

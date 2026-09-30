@@ -5,8 +5,8 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 // and which columns it sets is the whole cost of streaming a long reply. Pinned here
 // against the real runner rather than the interval function alone: one 200 KB text
 // delta, then a second of reasoning. The large snapshot has to push the next unforced
-// save past the old 1s cadence, and the step's forced save — the text unchanged since
-// the first save — has to leave `content` (under the full-text index) out of the SET.
+// save past the old 1s cadence, and no mid-stream save may set `content` (under the
+// full-text index) at all — only the finishing write does.
 const BIG = "a".repeat(200_000);
 const THOUGHTS = Array.from({ length: 10 }, (_, i) => `thought ${i}. `);
 
@@ -78,7 +78,7 @@ run("runAgentTask: mid-stream snapshot writes", () => {
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
   });
 
-  it("stretches the cadence for a large snapshot and leaves unchanged text out of the SET", async () => {
+  it("stretches the cadence for a large snapshot and never writes content mid-stream", async () => {
     const sets: Record<string, unknown>[] = [];
     const update = db.update.bind(db);
     vi.spyOn(db, "update").mockImplementation(((table: typeof messages) => {
@@ -104,8 +104,10 @@ run("runAgentTask: mid-stream snapshot writes", () => {
     // The first flush after the big delta, then the step's forced save — no unforced
     // save a second later while the reasoning streamed (the old 1s cadence).
     expect(running).toHaveLength(2);
-    expect(running[0].content).toBe(BIG);
-    expect("content" in running[1]).toBe(false);
+    expect(running.filter((s) => "content" in s)).toEqual([]);
+    // The text rides in parts instead, from the first save on.
+    const first = (running[0].metadata as { parts: { type: string; text?: string }[] }).parts;
+    expect(first.find((p) => p.type === "text")?.text).toBe(BIG);
     const parts = (running[1].metadata as { parts: { type: string; text?: string }[] }).parts;
     expect(parts.find((p) => p.type === "reasoning")?.text).toBe(THOUGHTS.join(""));
 
