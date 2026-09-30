@@ -21,7 +21,7 @@ export const POST = apiHandler(async (req: Request) => {
   // A pending (awaiting-approval) account must never reach the model — this is the request
   // that spends the shared key. That gate is requireSession's now: it refuses every
   // non-active status, so the check that used to stand here could no longer be reached.
-  const { userId } = await requireRole("admin", "user");
+  const { userId, role } = await requireRole("admin", "user");
 
   // Cheap per-user flood guard (single-instance, in-memory). The client maps the
   // 429 to a friendly, localized message.
@@ -116,12 +116,14 @@ export const POST = apiHandler(async (req: Request) => {
   // shared-key price cap) are English ValidationErrors worded for whoever set the
   // connection up; to the composer they all mean "this model can't take the
   // message", so they travel as one code the client can put in the user's language.
+  // `admin` lets the client point the one person who can fix it at Settings instead
+  // of at "your admin"; the code stays the same for a page loaded before it existed.
   const resolved = await resolveUserModelInfo(userId, effectiveModel).catch((e: unknown) => {
     if (isAppError(e) && e.code === "VALIDATION_ERROR") return null;
     throw e;
   });
   if (!resolved) {
-    return Response.json({ error: "This model isn't available right now.", code: "MODEL_UNAVAILABLE" }, { status: 400 });
+    return Response.json({ error: "This model isn't available right now.", code: "MODEL_UNAVAILABLE", admin: role === "admin" }, { status: 400 });
   }
   const { isShared, modelId: resolvedModelId, provider: resolvedProvider, configId: resolvedConfigId } = resolved;
 

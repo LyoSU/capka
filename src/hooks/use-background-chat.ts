@@ -63,7 +63,8 @@ export const REFUSALS: Record<string, string> = {
 
 /** Turn a refused send or re-run into the error its caller throws, in the user's language. */
 export async function refusal(res: Response, t: ReturnType<typeof useTranslations>): Promise<Error> {
-  const err = (await res.json().catch(() => null)) as { code?: string } | null;
+  const err = (await res.json().catch(() => null)) as { code?: string; admin?: boolean } | null;
+  if (err?.code === "MODEL_UNAVAILABLE" && err.admin) return new Error(t("modelUnavailableAdmin"));
   const key = err?.code ? REFUSALS[err.code] : undefined;
   if (key) return new Error(t(key));
   // The proxy turns away a request with no session cookie before the route runs, uncoded.

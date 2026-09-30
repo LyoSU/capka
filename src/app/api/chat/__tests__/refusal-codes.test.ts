@@ -100,6 +100,10 @@ describe("POST /api/chat — refusals carry a code the composer can translate", 
     const { ValidationError } = await import("@/lib/errors");
     resolveUserModelInfo.mockRejectedValue(new ValidationError("No default model set. Configure one in Settings → Connections."));
     expect(await refused(await send({ chatId: "c-new", userMessage: "hi" }))).toEqual({ status: 400, code: "MODEL_UNAVAILABLE" });
+    // The same code for everyone; only an admin, who can fix it, is told so.
+    expect(((await (await send({ chatId: "c-new", userMessage: "hi" })).json()) as { admin?: boolean }).admin).toBe(false);
+    requireRole.mockResolvedValue({ userId, status: "active", role: "admin" });
+    expect(await (await send({ chatId: "c-new", userMessage: "hi" })).json()).toMatchObject({ code: "MODEL_UNAVAILABLE", admin: true });
     // Anything else it throws is not a refusal the user can act on — it stays a server error.
     resolveUserModelInfo.mockRejectedValue(new Error("connection reset"));
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -138,6 +142,12 @@ describe("refusal — what the composer shows for a refused send", () => {
   it("a coded refusal reads in the user's language", async () => {
     expect(await shown(401, { error: "Unauthorized", code: "UNAUTHORIZED" })).toBe(uk.chat.hook.sessionEnded);
     expect(await shown(403, { error: "Your account is awaiting administrator approval.", code: "FORBIDDEN" })).toBe(uk.chat.hook.accountCantSend);
+  });
+
+  it("a model that can't be used: the regular user asks their admin, the admin is sent to Settings", async () => {
+    expect(await shown(400, { code: "MODEL_UNAVAILABLE", admin: false })).toBe(uk.chat.hook.modelUnavailable);
+    expect(await shown(400, { code: "MODEL_UNAVAILABLE" })).toBe(uk.chat.hook.modelUnavailable); // a server from before the flag
+    expect(await shown(400, { code: "MODEL_UNAVAILABLE", admin: true })).toBe(uk.chat.hook.modelUnavailableAdmin);
   });
 
   it("the proxy's uncoded 401 still reads as an ended session", async () => {
