@@ -8,6 +8,18 @@ vi.mock("@/lib/tasks/queue", () => ({
   notifyTaskEnqueued: (...a: unknown[]) => notifyTaskEnqueued(...a),
 }));
 
+// The resume is a paid turn and reserves a budget hold under its own task id first.
+const reserveBudget = vi.fn();
+const releaseHold = vi.fn();
+vi.mock("@/lib/billing/limits", () => ({
+  reserveBudget: (...a: unknown[]) => reserveBudget(...a),
+  releaseHold: (...a: unknown[]) => releaseHold(...a),
+}));
+const resolveUserModelInfo = vi.fn();
+vi.mock("@/lib/providers/resolve", () => ({
+  resolveUserModelInfo: (...a: unknown[]) => resolveUserModelInfo(...a),
+}));
+
 const rows: Record<string, unknown> = {};
 // Both answerAskForUser and answerElicitationForUser guard the write and read its
 // rowCount via `.set().where().returning()` — `updateReturn` is the rows the guarded
@@ -41,6 +53,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { BudgetExceededError } from "@/lib/errors";
 import { answerAskForUser, answerElicitationForUser } from "../authed";
 
 describe("answerAskForUser", () => {
@@ -50,7 +63,12 @@ describe("answerAskForUser", () => {
     rows.updated = undefined;
     rows.updateReturn = undefined;
     rows.rolledBack = false;
+    reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
+    releaseHold.mockReset().mockResolvedValue(undefined);
+    resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
   });
+
+  const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 
   const pendingAsk = () => ({
     chatId: "chat1", ownerId: "u1", projectId: null,
@@ -69,10 +87,26 @@ describe("answerAskForUser", () => {
     expect(enqueueTask.mock.calls[0][0].payload.resumeMessageId).toBe("m1");
     // Enqueued inside the transaction, so the wake-up NOTIFY only fires after commit.
     expect(enqueueTask.mock.calls[0][1]).toBe(tx);
-    expect(notifyTaskEnqueued).toHaveBeenCalledWith("task-new");
+    expect(notifyTaskEnqueued).toHaveBeenCalledWith(heldTaskId());
     // The tool-result was appended so the resume sees a complete call→result pair.
     const parts = (rows.updated as { metadata: { parts: { type: string }[] } }).metadata.parts;
     expect(parts.some((p) => p.type === "tool-result")).toBe(true);
+    // Reserved on the original turn's model under the resume's own id, which owns it now.
+    expect(resolveUserModelInfo).toHaveBeenCalledWith("u1", "m");
+    expect(enqueueTask.mock.calls[0][0].id).toBe(heldTaskId());
+    expect(releaseHold).not.toHaveBeenCalled();
+  });
+
+  it("refuses over budget with no answer recorded and nothing queued", async () => {
+    rows.msg = pendingAsk();
+    rows.task = { payload: { requestModel: "m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    reserveBudget.mockResolvedValue({ allowed: false, window: "h5", reason: "budget" });
+    await expect(
+      answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    expect(rows.updated).toBeUndefined();
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it("is single-use: a racing second answer whose guarded update matches 0 rows does NOT enqueue a duplicate resume", async () => {
@@ -82,6 +116,7 @@ describe("answerAskForUser", () => {
     const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "late" } });
     expect(outcome).toBe("gone");
     expect(enqueueTask).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("rolls the answer back when the continuation folds into a pending turn", async () => {
@@ -98,6 +133,7 @@ describe("answerAskForUser", () => {
     expect(outcome).toBe("busy");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("rolls the answer back when queuing the continuation THROWS", async () => {
@@ -113,6 +149,7 @@ describe("answerAskForUser", () => {
     ).rejects.toThrow("could not settle");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("refuses as gone when the message isn't the caller's", async () => {

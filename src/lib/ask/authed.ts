@@ -3,6 +3,9 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
 import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
+import { BudgetExceededError } from "@/lib/errors";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -18,7 +21,8 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  * normal call→result pair and the SDK finishes the SAME turn with the answer in
  * hand. Same three outcomes as `approveManageForUser`: "gone" (not the caller's,
  * no pending ask, or already answered) is final; "busy" (the chat's one queued
- * slot is taken) is worth retrying.
+ * slot is taken) is worth retrying. Over budget, it throws BudgetExceededError
+ * with nothing recorded — the same gate and refusal as the manage approval path.
  */
 export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy"> {
   const [msg] = await db
@@ -42,12 +46,24 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
   call.answer = { form: call.answer.form, value };
   // Append the tool-result so the resume sees a complete call→result pair.
   parts.push({ type: "tool-result", id: call.id, name: call.name, output: value });
+
+  const orig = meta.taskId
+    ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
+    : null;
+  // The resume is a paid turn: reserve its budget hold before anything is written,
+  // exactly as approveManageForUser does, and release it unless our task committed.
+  const taskId = nanoid();
+  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(userId, orig?.requestModel);
+  const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
+  if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  let handedOff = false;
+
   // Same shape as the manage approval path: the answer and the turn that acts on it
   // go in ONE transaction, so a throw or a restart between them can't leave an
   // answered question whose turn never resumes (a state no retry can rescue, since
   // the CAS below matches only while the ask is still unanswered).
   try {
-    const taskId = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       // Single-use, atomic transition: the guard matches only while SOME ask part is
       // still unanswered, so two racing answers (double-submit, or web + Telegram) can't
       // both enqueue a resume — the first writes the value, the second matches 0 rows
@@ -60,15 +76,12 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
         .returning({ id: messages.id });
       if (applied.length === 0) tx.rollback();
 
-      const orig = meta.taskId
-        ? ((await tx.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
-        : null;
       // A chat holds at most one QUEUED turn, so this insert folds into a pending one
       // when the user typed a follow-up while the question sat unanswered. The
       // incumbent carries no `resumeMessageId`, so the suspended `ask` would never
       // resume while the card reported success.
-      const { id, created } = await enqueueTask({
-        id: nanoid(), chatId: msg.chatId, userId,
+      const { created } = await enqueueTask({
+        id: taskId, chatId: msg.chatId, userId,
         payload: {
           resumeMessageId: d.messageId,
           requestModel: orig?.requestModel, projectId: msg.projectId ?? undefined, origin: orig?.origin,
@@ -81,13 +94,15 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
         });
         tx.rollback();
       }
-      return id;
     });
+    handedOff = true;
     await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
     if (e instanceof TransactionRollbackError) return refusal;
     throw e;
+  } finally {
+    if (!handedOff) await releaseHold(taskId);
   }
 }
 

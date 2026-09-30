@@ -9,6 +9,7 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask, requestCancel, cancelQueuedTurn } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
+import { BudgetExceededError } from "@/lib/errors";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
 import { getTranslator } from "@/lib/i18n/translator";
@@ -258,6 +259,11 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     return;
   }
 
+  // The hold is released on every path that doesn't hand it to a created task —
+  // including a throw while saving the message or moving the leaf, which would
+  // otherwise leak a pending hold with no task row for the zombie sweep to find.
+  let handedOff = false;
+  try {
   // Pull each Telegram file into the user's sandbox so the assistant can read,
   // run or analyze it — passed through as attachedFiles, exactly like the web.
   const attachedFiles: FileRef[] = [];
@@ -302,7 +308,6 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   }).where(eq(chats.id, chat.id));
   await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
-  try {
     // Answer the message we just added; the runner rebuilds the branch above it.
     const payload: TaskPayload = {
       requestModel: chat.model ?? undefined,
@@ -312,9 +317,9 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
       origin: { platform: "telegram", telegramChatId: ctx.chat!.id, locale: ctx.from?.language_code },
     };
     const { id: turnId, created } = await enqueueTask({ id: tgTaskId, chatId: chat.id, userId: link.userId, payload });
-    // Folded into an existing turn — our reserved turn won't run, so release its
-    // hold; the turn that answers carries its own hold.
-    if (!created) await releaseHold(tgTaskId);
+    // A created turn owns the hold now. A folded one won't run — the finally
+    // releases ours; the turn that answers carries its own.
+    handedOff = created;
     await ctx.replyWithChatAction("typing").catch(() => {});
 
     // Say so when this message is NOT being answered now. A chat's turns are
@@ -344,9 +349,11 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
         .catch((e) => log.warn("telegram queued notice failed", { err: String(e) }));
     }
   } catch (error: unknown) {
-    // The turn never got enqueued — release its budget hold so it doesn't leak.
-    await releaseHold(tgTaskId);
-    await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
+    // Past the enqueue the turn is live and answering; only the queued notice failed.
+    if (handedOff) log.warn("telegram queued notice failed", { err: String(error) });
+    else await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
+  } finally {
+    if (!handedOff) await releaseHold(tgTaskId);
   }
 }
 
@@ -506,7 +513,10 @@ async function buildBot(): Promise<Bot | null> {
       const link = await findLink(ctx.from!.id);
       if (!link) { await ctx.answerCallbackQuery(); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
-      const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved });
+      const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved })
+        .catch((e) => { if (e instanceof BudgetExceededError) return "budget" as const; throw e; });
+      // Over budget: nothing was recorded, so the buttons stay for when the window rolls over.
+      if (outcome === "budget") { await ctx.answerCallbackQuery({ text: t("budgetReached") }); return; }
       const msg = outcome === "busy" ? t("confirmBusy")
         : outcome === "gone" ? t("confirmExpired")
         : approved ? t("confirmApplied") : t("confirmCancelled");

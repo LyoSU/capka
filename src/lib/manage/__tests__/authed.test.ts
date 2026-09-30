@@ -8,6 +8,19 @@ vi.mock("@/lib/tasks/queue", () => ({
   notifyTaskEnqueued: (...a: unknown[]) => notifyTaskEnqueued(...a),
 }));
 
+// The continuation is a paid turn, so it reserves a budget hold under its own task id
+// before anything is written. The reservation's answer is what these tests steer.
+const reserveBudget = vi.fn();
+const releaseHold = vi.fn();
+vi.mock("@/lib/billing/limits", () => ({
+  reserveBudget: (...a: unknown[]) => reserveBudget(...a),
+  releaseHold: (...a: unknown[]) => releaseHold(...a),
+}));
+const resolveUserModelInfo = vi.fn();
+vi.mock("@/lib/providers/resolve", () => ({
+  resolveUserModelInfo: (...a: unknown[]) => resolveUserModelInfo(...a),
+}));
+
 const rows: Record<string, unknown> = {};
 // The decision + its resume task are written in ONE transaction, so the mock has
 // to model a transaction: `tx` carries the writes, `tx.rollback()` throws the way
@@ -23,7 +36,10 @@ const tx = {
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => ({ innerJoin: () => ({ where: () => ({ limit: () => [rows.msg] }) }) }),
+      from: () => ({
+        innerJoin: () => ({ where: () => ({ limit: () => [rows.msg] }) }),
+        where: () => ({ limit: () => [rows.task] }),
+      }),
     }),
     transaction: async (cb: (t: typeof tx) => Promise<unknown>) => {
       try {
@@ -36,6 +52,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { BudgetExceededError } from "@/lib/errors";
 import { approveManageForUser } from "../authed";
 
 const pendingApproval = () => ({
@@ -52,7 +69,12 @@ describe("approveManageForUser — atomic single-use approval", () => {
     rows.updated = undefined;
     rows.updateReturn = undefined;
     rows.rolledBack = false;
+    reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
+    releaseHold.mockReset().mockResolvedValue(undefined);
+    resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
   });
+
+  const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 
   it("records the decision and enqueues a resume when the guarded update matches", async () => {
     rows.msg = pendingApproval();
@@ -66,9 +88,27 @@ describe("approveManageForUser — atomic single-use approval", () => {
     // caller's job AFTER the commit — otherwise a woken worker looks for a row no
     // other connection can see yet and goes back to its 5s poll.
     expect(enqueueTask.mock.calls[0][1]).toBe(tx);
-    expect(notifyTaskEnqueued).toHaveBeenCalledWith("task-new");
+    expect(notifyTaskEnqueued).toHaveBeenCalledWith(heldTaskId());
     const parts = (rows.updated as { metadata: { parts: { approval?: { approved?: boolean } }[] } }).metadata.parts;
     expect(parts[0].approval?.approved).toBe(true);
+    // The hold is reserved on the ORIGINAL turn's model, under the continuation's own
+    // task id — and that task now owns it, so nothing releases it here.
+    expect(resolveUserModelInfo).toHaveBeenCalledWith("u1", "m");
+    expect(reserveBudget.mock.calls[0][0]).toMatchObject({ userId: "u1", onSharedKey: true, modelId: "m", configId: "cfg" });
+    expect(enqueueTask.mock.calls[0][0].id).toBe(heldTaskId());
+    expect(releaseHold).not.toHaveBeenCalled();
+  });
+
+  it("refuses over budget with nothing recorded and nothing queued", async () => {
+    rows.msg = pendingApproval();
+    rows.task = { payload: { requestModel: "m" } };
+    rows.updateReturn = [{ id: "m1" }];
+    reserveBudget.mockResolvedValue({ allowed: false, window: "d7", reason: "budget" });
+    const err = await approveManageForUser("u1", { messageId: "m1", approved: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(BudgetExceededError);
+    expect((err as BudgetExceededError).window).toBe("d7");
+    expect(rows.updated).toBeUndefined();
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it("is single-use: a racing second decision (guarded update matches 0 rows) does NOT enqueue a duplicate resume", async () => {
@@ -80,6 +120,7 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(outcome).toBe("gone");
     expect(enqueueTask).not.toHaveBeenCalled();
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("rolls the decision back when the continuation folds into a pending turn", async () => {
@@ -96,6 +137,8 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(outcome).toBe("busy");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    // The incumbent carries its own hold; ours would inflate the budget forever.
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("rolls the decision back when queuing the continuation THROWS", async () => {
@@ -110,6 +153,7 @@ describe("approveManageForUser — atomic single-use approval", () => {
     await expect(approveManageForUser("u1", { messageId: "m1", approved: true })).rejects.toThrow("could not settle");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
   it("refuses as gone when the message isn't the caller's (no write, no resume)", async () => {
@@ -117,5 +161,6 @@ describe("approveManageForUser — atomic single-use approval", () => {
     const outcome = await approveManageForUser("u1", { messageId: "m1", approved: true });
     expect(outcome).toBe("gone");
     expect(enqueueTask).not.toHaveBeenCalled();
+    expect(reserveBudget).not.toHaveBeenCalled();
   });
 });

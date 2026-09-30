@@ -413,6 +413,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const discarded = { input: 0, output: 0, cached: 0, cacheWrite: 0, cost: 0 };
   const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
   let discardedOrServed = false;
+  // Set once the success path has settled the hold. reconcileUsage is not idempotent
+  // — a second call finds no pending row and inserts the spend again — so a throw
+  // after that point (commitTurnOutcome, say) must not settle it a second time.
+  let spendSettled = false;
 
   // Admin role gates the raw technical detail an error shows in-chat. Looked up
   // lazily and memoized — only failures need it, so a successful task pays nothing.
@@ -2214,6 +2218,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         },
         costUsd: folded,
       });
+      spendSettled = true;
     }
 
     // Claim the right to say how this turn ended, and write the message with it, in
@@ -2816,7 +2821,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const spentOutput = liveUsage.output + discarded.output;
     const spentCached = liveUsage.cached + discarded.cached;
     const spentCacheWrite = liveUsage.cacheWrite + discarded.cacheWrite;
-    if (runModelId && (spentInput || spentOutput || spentCached || spentCacheWrite)) {
+    if (!spendSettled && runModelId && (spentInput || spentOutput || spentCached || spentCacheWrite)) {
       // Prefer the provider's authoritative real charge whenever one was reported
       // (this attempt's orLive, plus any discarded attempts'); else let
       // reconcileUsage recompute from the catalog over the combined tokens.

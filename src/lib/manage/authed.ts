@@ -4,6 +4,9 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { users, messages, chats, tasks } from "@/lib/db/schema";
 import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
+import { BudgetExceededError } from "@/lib/errors";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -96,7 +99,8 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * not the caller's message, no pending call, or a racing tap already decided it
  * (nothing to retry); "busy" — the decision stuck nowhere because the chat's one
  * queued slot is taken, which IS worth tapping again. Callers that show buttons
- * must keep them alive only for "busy".
+ * must keep them alive only for "busy". A user over their shared-key budget gets
+ * a BudgetExceededError instead, with nothing recorded.
  */
 export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy"> {
   const [msg] = await db
@@ -130,6 +134,23 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   let refusal: "gone" | "busy" = "gone";
 
   call.approval = { id: call.approval.id, approved: d.approved, ...(d.reason ? { reason: d.reason } : {}) };
+
+  // Carry the original turn's model/project/origin so the continuation runs with
+  // the same identity and delivers to the same channel (Telegram).
+  const orig = meta.taskId
+    ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
+    : null;
+  // The continuation runs the model again — approved or denied — so it is a paid
+  // turn and passes the same shared-key budget gate as a send, resolved the way the
+  // runner will resolve it. Reserved before anything is written: a refusal records
+  // no decision, so the card stays live for when the window rolls over.
+  const taskId = nanoid();
+  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(userId, orig?.requestModel);
+  const reservation = await reserveBudget({ userId, taskId, onSharedKey: isShared, modelId, provider, configId });
+  if (!reservation.allowed) throw new BudgetExceededError(reservation.window ?? "m1");
+  // Released on every path that doesn't hand the hold to a created, committed task.
+  let handedOff = false;
+
   // The decision and the turn that acts on it are ONE transaction. Recording the
   // decision first and queuing after left a window — a throw from either statement,
   // a dropped connection, a restart landing between them — where the approval was
@@ -138,7 +159,7 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   // matches only while the call is still undecided. Inside a transaction, "the
   // continuation can't be queued" is simply a rollback.
   try {
-    const taskId = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       // Single-use, atomic transition: the guard only matches while SOME approval part
       // is still undecided, so two racing approve/reject clicks (double-tap, or web +
       // Telegram at once) can't both win — the first flips it, the second matches 0
@@ -152,18 +173,13 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
         .returning({ id: messages.id });
       if (applied.length === 0) tx.rollback();
 
-      // Carry the original turn's model/project/origin so the continuation runs with
-      // the same identity and delivers to the same channel (Telegram).
-      const orig = meta.taskId
-        ? ((await tx.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
-        : null;
       // A chat holds at most one QUEUED turn, so this insert folds into an existing
       // one when the chat already has a pending turn (a Telegram follow-up typed while
       // the approval sat unanswered). Folding is right for user messages — they all
       // ride one reply — but fatal here: the incumbent carries no `resumeMessageId`, so
       // the approved call would never run while the card reported success.
-      const { id, created } = await enqueueTask({
-        id: nanoid(),
+      const { created } = await enqueueTask({
+        id: taskId,
         chatId: msg.chatId,
         userId,
         payload: {
@@ -180,10 +196,11 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
         });
         tx.rollback();
       }
-      return id;
     });
-    // Committed — only now does the row exist for anyone else, so only now is a
-    // worker worth waking (enqueueTask holds the NOTIFY back inside a transaction).
+    // Committed with our own task created: it now owns the hold and settles it. And
+    // only now does the row exist for anyone else, so only now is a worker worth
+    // waking (enqueueTask holds the NOTIFY back inside a transaction).
+    handedOff = true;
     await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
@@ -191,5 +208,7 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
     // leave live — `refusal` says whether tapping it again could ever help.
     if (e instanceof TransactionRollbackError) return refusal;
     throw e;
+  } finally {
+    if (!handedOff) await releaseHold(taskId);
   }
 }
