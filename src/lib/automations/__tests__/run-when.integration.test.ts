@@ -25,7 +25,6 @@ const { auxGenerate } = vi.hoisted(() => ({ auxGenerate: vi.fn() }));
 vi.mock("@/lib/chat/context/aux", () => ({
   auxGenerate,
   AUX_TIMEOUT_MS: 180_000,
-  buildAuxRequest: vi.fn(),
 }));
 
 // `isShared: true` deliberately: an own-key user is never gated and never held,

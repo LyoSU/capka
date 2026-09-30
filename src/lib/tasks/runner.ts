@@ -803,8 +803,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // EXPLICIT caching (anthropic direct; Claude via OpenRouter, whose SDK reads
     // the same `anthropic` namespace as a fallback) otherwise cache only the
     // system prefix and re-bill the whole history at full input price on every
-    // turn. The marker travels with the message OBJECT, so the compaction/memory
-    // aux calls that reuse this array (buildAuxRequest) hit the same cache. It sits
+    // turn. The marker travels with the message OBJECT, so the compaction pass,
+    // which reuses this array as its prefix, hits the same cache. It sits
     // on the latest user message and the turn context goes AFTER it, so the
     // prefix it closes is exactly what the next turn replays.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
