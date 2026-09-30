@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { toUIMessages } from "@/lib/chat/presenter";
 import type { StoredPart } from "@/lib/chat/contracts";
 import { isApprovalPart } from "../message";
-import { readDecisionReply } from "../manage-cards";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
+import en from "../../../../messages/en.json";
+import { readDecisionReply, ApprovalCard } from "../manage-cards";
 
 /**
  * An approval whose turn can no longer run (its model connection was removed) is
@@ -66,5 +70,43 @@ describe("readDecisionReply", () => {
     for (const [status, body] of [[200, { ok: false, outcome: "gone" }], [200, { ok: false, outcome: "later-outcome" }], [500, { ok: true }]] as const) {
       expect(readDecisionReply(status, body)).toEqual({ landed: false, retry: true, note: null });
     }
+  });
+});
+
+/**
+ * An approved `manage` call cut off by Stop or a failed turn is sealed as interrupted.
+ * Its card used to read "Couldn't apply that — please try again", inviting a repeat of
+ * a change that may already have landed.
+ */
+describe("ApprovalCard — an approved change that ended with no result", () => {
+  const render = (part: Record<string, unknown>) =>
+    renderToStaticMarkup(createElement(NextIntlClientProvider, {
+      locale: "en", messages: en,
+      children: createElement(ApprovalCard, {
+        messageId: "m1", toolCallId: "c1", toolName: "manage", input: part.input,
+        state: part.state as string, approval: part.approval as { id: string; approved?: boolean }, output: part.output,
+      }),
+    }));
+  const reply = (status: string, result?: StoredPart) => {
+    const parts = [
+      { type: "tool-call", id: "c1", name: "manage", input: { action: "set", key: "locale" }, approval: { id: "a1", approved: true } },
+      ...(result ? [result] : []),
+    ] as StoredPart[];
+    const [m] = toUIMessages([{ id: "m1", role: "assistant", content: "", metadata: { parts, status }, createdAt: null, platform: null }]);
+    return m.parts[0] as Record<string, unknown>;
+  };
+
+  it("says to check before retrying, not to try again", () => {
+    for (const status of ["cancelled", "failed"]) {
+      const html = render(reply(status));
+      expect(html, status).toContain(en.chat.manage.interrupted);
+      expect(html, status).not.toContain(en.chat.manage.applyError);
+    }
+  });
+
+  it("a change that returned its own error still shows that error", () => {
+    const html = render(reply("completed", { type: "tool-result", id: "c1", name: "manage", output: { status: "error", summary: "That value isn't allowed." } } as StoredPart));
+    expect(html).toContain("That value isn&#x27;t allowed.");
+    expect(html).not.toContain(en.chat.manage.interrupted);
   });
 });

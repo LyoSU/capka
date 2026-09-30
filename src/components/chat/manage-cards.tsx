@@ -585,7 +585,10 @@ export function ApprovalCard({
           )}
         </>
       )}
-      {!awaiting && failed && <Outcome kind="error" text={oo?.code === "NOT_RUN" ? ta("notRun") : oo?.summary || t("applyError")} />}
+      {/* An output-error is a call that ended with no result at all: cut off by Stop or a
+          failed turn (sealed as interrupted), or the rare throw. The change may already
+          have landed, so it must not read as a plain "try again". */}
+      {!awaiting && failed && <Outcome kind="error" text={state === "output-error" ? t("interrupted") : oo?.code === "NOT_RUN" ? ta("notRun") : oo?.summary || t("applyError")} />}
     </CardShell>
   );
 }

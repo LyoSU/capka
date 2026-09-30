@@ -773,6 +773,7 @@
       "reverted": "Reverted",
       "expired": "This confirmation expired — just ask again",
       "applyError": "Couldn't apply that — please try again",
+      "interrupted": "Interrupted before it finished. Check whether the change was made before trying again.",
       "cancelled": "Cancelled",
       "recheck": "Re-check",
       "viewInstructions": "View full instructions",
