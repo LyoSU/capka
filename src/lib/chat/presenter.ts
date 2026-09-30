@@ -112,21 +112,20 @@ export function toUIMessages(rows: {
           // to the AI SDK 6 approval states so convertToModelMessages rebuilds the
           // exact tool-approval-request/response the resume needs (and the card
           // renders Approve/Reject), NOT the orphan→output-error fallback below.
-          // awaiting → approval-requested; decided-but-not-yet-executed OR denied →
-          // approval-responded (convert synthesizes an execution-denied result for a
-          // denied call); approved AND executed → falls through to output-available
-          // once its tool-result lands.
           if (p.approval) {
             const a = p.approval;
             // awaiting → approval-requested; approved-and-executed → output-available
-            // (its tool-result landed); approved-not-yet-run OR denied →
-            // approval-responded (convertToModelMessages synthesizes an
-            // execution-denied result for a denied call). The `approval` marker
-            // rides along in every state so the card owns the whole lifecycle.
-            const state = a.approved === undefined ? "approval-requested" : tr ? "output-available" : "approval-responded";
+            // (its tool-result landed) or output-error (it threw — the card reads
+            // failed, and later turns carry the error as the call's result);
+            // approved-not-yet-run OR denied → approval-responded (a denied call is
+            // given its result in model history by sealOrphanToolCalls). The
+            // `approval` marker rides along in every state so the card owns the
+            // whole lifecycle.
+            const state = a.approved === undefined ? "approval-requested" : tr ? "output-available" : err ? "output-error" : "approval-responded";
             parts.push({
               type: "dynamic-tool", toolCallId: p.id, toolName: p.name, input: p.input, state,
-              output: tr?.output, approval: { id: a.id, approved: a.approved, reason: a.reason },
+              output: tr?.output, ...(state === "output-error" ? { errorText: err } : {}),
+              approval: { id: a.id, approved: a.approved, reason: a.reason },
             });
             continue;
           }

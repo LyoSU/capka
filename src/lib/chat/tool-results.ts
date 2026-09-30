@@ -18,6 +18,8 @@
  * leave an empty assistant message — its own SDK error). Mutates in place and
  * returns the same array.
  *
+ * A declined approval gets the same treatment for the same reason (see below).
+ *
  * Only ever apply this to HISTORY being fed to the model — never to a live,
  * streaming turn, where an `input-available` tool call legitimately means
  * "running right now" and the UI must keep showing its spinner.
@@ -42,6 +44,16 @@ export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] 
       if (isToolPart && ORPHAN_STATES.has(part.state as string)) {
         part.state = "output-error";
         if (part.errorText == null) part.errorText = INTERRUPTED_TOOL_RESULT;
+      }
+      // A declined approval is stored as its decision alone — nothing ever writes
+      // it a result, and the web card needs it that way to read "declined". The
+      // SDK synthesizes the denial only while that response is the LAST message
+      // (the resume); on every later turn it strips the response and leaves a bare
+      // call, which providers reject. `output-denied` makes convertToModelMessages
+      // emit the denial as a real result on every turn, the resume included (the
+      // SDK skips synthesizing one for an approval whose result is already there).
+      if (isToolPart && part.state === "approval-responded" && (part.approval as { approved?: boolean } | undefined)?.approved === false) {
+        part.state = "output-denied";
       }
     }
   }

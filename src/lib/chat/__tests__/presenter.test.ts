@@ -127,6 +127,18 @@ describe("toUIMessages", () => {
     expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-available", output: { status: "ok" }, approval: { id: "ap1", approved: true } });
   });
 
+  it("maps an approved call that threw to output-error with its error, not a pending approval", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      parts: [
+        { type: "tool-call", id: "t1", name: "manage", input: { action: "add" }, approval: { id: "ap1", approved: true } },
+        { type: "tool-error", id: "t1", name: "manage", error: "boom" },
+      ],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-error", errorText: "boom", approval: { id: "ap1", approved: true } });
+  });
+
   it("maps an ask tool-call awaiting an answer to input-available with askForm (not an orphan)", () => {
     const meta: MessageMeta = {
       status: "awaiting_answer",

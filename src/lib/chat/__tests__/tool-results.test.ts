@@ -51,6 +51,21 @@ describe("sealOrphanToolCalls", () => {
     expect(msgs[0].parts![0].errorText).toBe("real failure");
   });
 
+  it("seals a declined approval as denied, and leaves an approved one for the resume to run", () => {
+    const msgs: Msg[] = [
+      {
+        role: "assistant",
+        parts: [
+          { type: "dynamic-tool", toolCallId: "c1", toolName: "manage", state: "approval-responded", approval: { id: "a1", approved: false } },
+          { type: "dynamic-tool", toolCallId: "c2", toolName: "manage", state: "approval-responded", approval: { id: "a2", approved: true } },
+        ],
+      },
+    ];
+    sealOrphanToolCalls(msgs);
+    expect(msgs[0].parts![0].state).toBe("output-denied");
+    expect(msgs[0].parts![1].state).toBe("approval-responded");
+  });
+
   it("ignores user messages and non-tool parts", () => {
     const msgs: Msg[] = [{ role: "user", parts: [{ type: "text", text: "hi" }] }];
     const before = JSON.stringify(msgs);
