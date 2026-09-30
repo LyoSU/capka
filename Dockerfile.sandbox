@@ -272,7 +272,7 @@ RUN set -eux; \
       chmod 755 "/usr/local/bin/$name"; \
     done; \
     rm -rf /root/.cache
-# mermaid-cli's puppeteer drives the same single Chromium instead of its own copy.
+# An agent-installed puppeteer drives this same single Chromium instead of its own copy.
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
 
 # ---------------------------------------------------------------------------

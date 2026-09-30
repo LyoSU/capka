@@ -13,7 +13,8 @@
 #   docker-compose.backup.yml  scheduled pg_dump sidecar
 #
 # SECURITY: postgres & sandbox-controller are never published — only `platform`
-# is, and only on 127.0.0.1 (a host reverse-proxy fronts it). Secrets have NO
+# is, on ${PLATFORM_BIND:-0.0.0.0} — set PLATFORM_BIND=127.0.0.1 when a host
+# reverse-proxy fronts it. Secrets have NO
 # defaults: supply POSTGRES_PASSWORD, CONTROLLER_SECRET, CAPKA_MASTER_KEY via
 # .env (`up.sh` generates them). Services reach each other by compose DNS name.
 services:

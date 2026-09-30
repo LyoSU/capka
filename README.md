@@ -33,7 +33,7 @@ durable tasks, isolated workspaces, MCP, and a UI that does not fight you.
 The workflow is intentionally simple:
 
 1. You upload files, or the agent downloads or creates them during the chat
-2. Each chat gets its own Linux sandbox and its own file storage
+2. Each chat (or each project, for chats inside one) gets its own Linux sandbox and file storage
 3. The agent works inside that workspace and returns files you can use.
 
 Nothing depends on your browser staying open. Every turn is a queued job on the
@@ -106,8 +106,9 @@ Admins get one place to manage the instance:
 | Safety | allow, ask, deny policies, audit log, sandbox internet access |
 | Ops | usage, billing status, updates, Telegram bot setup |
 
-Each chat still gets its own sandbox and file storage, so team members can work
-on separate tasks without sharing one messy workspace.
+Each chat, or each project for chats inside one, gets its own sandbox and file
+storage, so team members can work on separate tasks without sharing one messy
+workspace.
 
 ## How It Runs
 
@@ -115,12 +116,13 @@ on separate tasks without sharing one messy workspace.
 |---|---|
 | `platform` | Next.js app, APIs, agent loop, and worker |
 | `postgres` | Database and task queue |
-| `sandbox-controller` | Creates and removes per-chat containers |
+| `sandbox-controller` | Creates and removes per-chat and per-project containers |
 | `socket-proxy` | Gives the controller restricted Docker API access |
 | `sandbox` | Execution image used by agent sessions |
 
-Sandboxes include Python, Node, Java, FFmpeg, ImageMagick, LibreOffice, LaTeX,
-Playwright, OCR tooling, and other common utilities.
+Sandboxes include Python, Node, FFmpeg, ImageMagick, LibreOffice, pandoc (PDF via
+typst or weasyprint), Playwright with Chromium, OCR tooling, and other common
+utilities. There is no Java or LaTeX.
 
 ## Run Locally
 
@@ -205,8 +207,10 @@ approval mode in **Settings -> Authentication**.
 
 ## Security Short Version
 
-Sandboxes are unprivileged containers with dropped Linux capabilities and no host
-filesystem access. The controller reaches Docker through `socket-proxy`, not the
+Sandboxes are unprivileged containers with dropped Linux capabilities. They see
+only their own workspace directory; host folders are mounted only if an admin
+turns on folder access (off by default, optionally limited to the roots in
+`SANDBOX_MOUNT_ALLOW`). The controller reaches Docker through `socket-proxy`, not the
 raw Docker socket.
 
 Sandbox internet access is controlled in **Settings -> Security -> Internet

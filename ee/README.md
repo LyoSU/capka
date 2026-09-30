@@ -8,7 +8,7 @@ covered by the repository's AGPL-3.0 license — see `ee/LICENSE`.
 - SSO / OIDC and SCIM provisioning
 - Advanced RBAC (custom roles/policies beyond the core admin/user + allow/ask/deny)
 - Helm chart / Kubernetes packaging
-- Observability integrations (metrics/traces exporters)
+- Observability integrations beyond the core's OTLP trace export (e.g. metrics exporters)
 - Audit-log export & retention
 
 ## The boundary rule

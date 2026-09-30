@@ -13,7 +13,7 @@ Local development is separate: `npm run docker:dev`; see
 
 | File | Role |
 |---|---|
-| `docker-compose.yml` | **The stack you deploy.** Pull-only (prebuilt GHCR images), internal-only Postgres/controller, platform on loopback. |
+| `docker-compose.yml` | **The stack you deploy.** Pull-only (prebuilt GHCR images), internal-only Postgres/controller, platform published on `${PLATFORM_BIND:-0.0.0.0}` (set `PLATFORM_BIND=127.0.0.1` for loopback only). |
 | `docker-compose.dev.yml` | Local dev overlay (hot reload, dev secrets). |
 | `docker-compose.build.yml` | Build-from-source overlay (`CAPKA_BUILD=1`). |
 | `docker-compose.tls.yml` | Automatic HTTPS via Caddy (`up.sh` layers it when `DOMAIN` is set). |
@@ -72,7 +72,7 @@ deploys onto a host with a Docker daemon.
      `runsc` — the controller then refuses to boot until gVisor is present
      (fail-closed).
    - Optional tuning (defaults in parentheses): `SANDBOX_MEMORY_MB` (1024),
-     `SANDBOX_PIDS_LIMIT` (256),
+     `SANDBOX_PIDS_LIMIT` (1024),
      `MAX_SESSIONS_PER_USER` (2), `SANDBOX_IDLE_TTL_MS` (900000),
      `WORKSPACE_TTL_MS` (2592000000), `GC_GRACE_MS` (604800000),
      `SANDBOX_ALLOW_NETWORK` (true).

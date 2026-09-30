@@ -10,8 +10,9 @@ Capka is a self-hosted, open-source alternative to Claude's Cowork: an AI agent
 that gets its own isolated Linux sandbox per chat, instead of a stateless chat
 box wrapping an API. Users drop in files, and the agent writes/runs code,
 converts documents, scrapes the web, and uses MCP connectors inside a
-disposable Docker container. Licensed AGPL-3.0, open-core (`ee/` holds the
-separate commercial edition: SSO/OIDC, SCIM, advanced RBAC, Helm — do not
+disposable Docker container. Licensed AGPL-3.0, open-core (`ee/` is reserved for
+the separate commercial edition: SSO/OIDC, SCIM, advanced RBAC, Helm; it is
+currently empty — do not
 conflate it with the AGPL core in `src/`).
 
 ### Who it's for (drives UI/UX decisions — see `PRODUCT.md` for the full brief)
@@ -60,8 +61,7 @@ at boot (`instrumentation.ts` → `runMigrations()`) — there is no manual
 `migrate` step in dev or prod. Drizzle's Postgres migrator orders migrations by
 the timestamp embedded in `drizzle/meta/_journal.json`, not by filename — if a
 new migration's timestamp isn't strictly greater than the existing ones, it is
-silently skipped until wall-clock time catches up. A few older journal entries
-carry synthetic future timestamps; check the journal after generating if a
+silently skipped until wall-clock time catches up. Check the journal after generating if a
 migration doesn't seem to apply.
 
 Editing the worker, the task runner, `instrumentation.ts`, or the Telegram bot
@@ -80,7 +80,7 @@ Five pieces, designed to run together on one box (`docker-compose.yml`):
 | `postgres` | System of record **and** the realtime task queue via `LISTEN`/`NOTIFY` — no separate broker. |
 | `sandbox-controller` | Plain Node.js (not the Next.js/TS build; `sandbox-controller/`) HTTP service that creates/kills per-session containers. Built hexagonally: `backends/` abstracts the compute backend (`docker-backend.js` today) behind `ComputeBackend`, `stores/` abstracts the host filesystem behind `WorkspaceStore`. It never touches the raw Docker socket. |
 | `socket-proxy` | A firewall in front of the Docker API — exposes only container/exec endpoints; the host socket is mounted read-only here alone, on an isolated network. |
-| `sandbox` | The execution image (`Dockerfile.sandbox`), built once and reused per session (Python, Node, Java, FFmpeg, LibreOffice, Playwright, OCR, …). |
+| `sandbox` | The execution image (`Dockerfile.sandbox`), built once and reused per session (Python, Node, FFmpeg, LibreOffice, Playwright, OCR, …). |
 
 ### Task lifecycle (`src/lib/tasks/`)
 
