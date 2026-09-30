@@ -6,12 +6,35 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- `POST /api/chat` no longer takes the client's `messages` array (context is built from the stored conversation) and refuses a `userMessage` over 100,000 characters (`MESSAGE_TOO_LONG`). Browser tabs left open across the upgrade need a reload before Regenerate works.
+- `GET /api/chat` accepts `messageId` and returns only that turn onward; a finished turn now fetches its own rows instead of the whole conversation.
+- Mid-stream reply snapshots are written every 1–2 s depending on reply size, and unchanged `content` is no longer rewritten. Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
+- Changing workspace files, memories or attachments between turns no longer invalidates the prompt cache for the conversation history, and Anthropic chats keep the history cached after a long tool-using turn.
+- `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
+
 ### Fixed
 - Dictation no longer stops when the speaker pauses to think: Chrome reports a few seconds of silence as an error, and one of those (or a single `network` blip, which Chrome also emits on silence) no longer ends the session.
 - A dictation session that does close itself — a long silence, or a speech service that stays unreachable — now says which of the two it was instead of the microphone going dark.
 - Dictation no longer erases a character typed while it is listening, and no longer restarts recognition on every keystroke.
 - Dictation keeps a word the speaker said twice ("very very"), while still collapsing the run Chrome for Android restates in its newest final.
 - `sandbox-controller` now deletes a removed workspace's whole session directory, so the orphan sweep no longer logs a `gc` line for the same emptied directories every minute.
+- Compaction keeps the reply that triggered it in the summary and no longer overflows the window after a long tool-calling turn, on small-window models, or in Anthropic chats full of file reads; it also recovers on backends that reject echoed `reasoning_content`.
+- On providers without server-side tool clearing, a long tool loop keeps seeing its earlier tool calls (as placeholders) once the mid-turn context brake engages, so it no longer repeats writes it already made.
+- Gemini, Bedrock and Ollama chats deep enough for old tool calls to be cleared no longer send the cleared arguments as a string.
+- Approving a tool call after the agent already used another tool in that turn now runs the approved call.
+- Approving a tool call or answering an agent question now checks the user's spending limit like a normal send; in Telegram an over-limit answer gets the limit notice and the question stays open.
+- Telegram sends no longer leak a pending budget hold when saving the message fails, and a turn whose finalize fails no longer bills its spend twice.
+- Chats whose active path exceeds about 65,000 messages open again instead of failing on Postgres' bind-parameter limit.
+- `POST /api/chat` refuses an empty send to a new chat (400); clearing the text of a files-only edit no longer turns it into a regenerate, and a reply in an imported chat that answers another reply says it cannot be regenerated.
+- Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s, so a silently dropped database connection is detected within minutes instead of about 2 hours.
+- A deleted workspace file no longer stays clickable for the rest of the session (its existence check expires after 30 s); the in-memory list of pending Telegram usernames is now bounded.
+
+### Security
+- MCP connector health checks are cached per user, so one user's OAuth "ok" or "unauthorized" is no longer shown to others.
+- A stored user role other than `admin`, `user` or `viewer` now gets read-only `viewer` access instead of `user`.
+- `POST /api/chat` refuses a `userMessageId` that belongs to another chat's message (409), and client-supplied conversation text can no longer stand in for what the user typed.
+- Attached file names, workspace paths and memory facts can no longer close the turn-context wrapper or add their own lines to the agent's instructions.
 
 ## [0.42.0] - 2026-09-11
 
@@ -55,7 +78,6 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 - Chat secrets: a value must be at least 6 characters (was 4); shorter existing values are no longer injected or redacted. A project's chats may hold at most 512 secrets together (`TOO_MANY_IN_PROJECT`).
-
 - Message search (`GET /api/search`) is served by a GIN index on `messages.content`; the migration builds it on first boot after upgrade.
 - Chat menu: actions are grouped (share, rename, regenerate title | pin, archive | move to project, export | delete) in the sidebar row, the header "⋯" and the touch sheet alike.
 - One control/row/surface scale across the app, written down in `globals.css`: controls 36px (inputs, selects and buttons alike), list rows 40px with 15px text and 20px icons, floating surfaces (menus, popovers, select lists, dialogs) 16px radius with rules inset to the padding.
