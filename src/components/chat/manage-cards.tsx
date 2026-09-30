@@ -407,6 +407,7 @@ export function ApprovalCard({
 }) {
   const t = useTranslations("chat.manage");
   const ta = useTranslations("chat.approval");
+  const tHook = useTranslations("chat.hook");
   // A gated ordinary tool (connector/skill under a governance "ask") has no staged
   // change to preview — the card asks about the CALL: what would run, with what
   // arguments. `manage` keeps its rich before→after preview below.
@@ -414,6 +415,8 @@ export function ApprovalCard({
   const awaiting = state === "approval-requested";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Why the last decision was refused, when the reason is the user's to know.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   // Fetch the preview only while awaiting — a resolved card shows the applied
   // result's own summary instead, so we never re-probe a connector after the fact.
@@ -440,6 +443,7 @@ export function ApprovalCard({
   const decide = async (approved: boolean) => {
     if (submitting) return;
     setSubmitting(true);
+    setRefusal(null);
     haptic("tap"); // press acknowledgement — success only once the server accepts, below
     try {
       const r = await fetch("/api/manage/approve", {
@@ -456,7 +460,11 @@ export function ApprovalCard({
       // the test: without reading the body the button would sit disabled forever on
       // a decision the server never recorded. Re-enable so the user can retry; when
       // the call really was already decided, `awaiting` flips and the card resolves.
-      const { ok } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean };
+      //
+      // A 429 is the spending limit or the flood guard: nothing was recorded, and the
+      // card says which, in the composer's own words, instead of just coming back.
+      const { ok, code } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean; code?: string };
+      if (r.status === 429) setRefusal(tHook(code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited"));
       if (!r.ok || !ok) {
         haptic("error");
         setSubmitting(false);
@@ -530,6 +538,7 @@ export function ApprovalCard({
           </div>
         </>
       )}
+      {awaiting && refusal && <div role="alert" className="mt-1.5 text-xs text-destructive">{refusal}</div>}
 
       {/* Resolved states — the agent's follow-up text carries the details, so the
           card settles into a quiet confirmation. Approved-but-still-running shows a

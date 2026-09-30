@@ -26,9 +26,12 @@ export function AskCard({
   messageId: string; toolCallId?: string; form: AskForm; value?: AskAnswer; state: string; kind?: "ask" | "elicitation";
 }) {
   const t = useTranslations("chat.ask");
+  const tHook = useTranslations("chat.hook");
   const [values, setValues] = useState<Record<string, string | string[]>>({});
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  // Why the last answer was refused, when the reason is the user's to know.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const awaiting = state === "input-available" && !value;
 
   // Turn a stored answer value into its human label (choice → option label,
@@ -65,6 +68,7 @@ export function AskCard({
   const send = async (action: "submit" | "skip") => {
     if (submitting) return;
     setSubmitting(true);
+    setRefusal(null);
     haptic(action === "submit" ? "success" : "tap");
     try {
       const r = await fetch("/api/ask/answer", {
@@ -77,7 +81,11 @@ export function AskCard({
       // A refusal comes back as 200 + {ok:false} (already answered, or the
       // continuation could not be queued), so read the body: otherwise the buttons
       // stay disabled on an answer the server never kept.
-      const { ok } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean };
+      //
+      // A 429 is the spending limit or the flood guard: nothing was kept, and the
+      // card says which, in the composer's own words, instead of just coming back.
+      const { ok, code } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean; code?: string };
+      if (r.status === 429) setRefusal(tHook(code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited"));
       if (!ok) setSubmitting(false);
     } catch {
       setSubmitting(false); // let the user retry the click
@@ -159,6 +167,7 @@ export function AskCard({
               <span className="text-xs text-muted-foreground">{t("needsAnswer")}</span>
             )}
           </div>
+          {refusal && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
         </>
       ) : (
         // Settled: each question reads as a quiet label and its answer as a
