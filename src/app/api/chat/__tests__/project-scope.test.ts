@@ -48,9 +48,10 @@ vi.mock("@/lib/db", async () => {
     db: {
       select,
       insert: (table: never) => ({
-        values: (values: unknown) => {
+        values: (values: { id: string }) => {
           writes.inserted.push({ table: getTableName(table), values });
-          return Object.assign(Promise.resolve(), { onConflictDoNothing: () => Promise.resolve() });
+          const returning = () => Promise.resolve([{ id: values.id }]);
+          return Object.assign(Promise.resolve(), { onConflictDoNothing: () => ({ returning }) });
         },
       }),
       update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),

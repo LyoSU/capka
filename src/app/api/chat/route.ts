@@ -33,7 +33,16 @@ export const POST = apiHandler(async (req: Request) => {
     );
   }
 
-  const body = chatRequestSchema.parse(await req.json());
+  const parsed = chatRequestSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    // The one malformed body a person can produce by typing — coded so the client
+    // shows it in the user's language rather than this English line.
+    if (parsed.error.issues.some((i) => i.code === "too_big" && i.path[0] === "userMessage")) {
+      return Response.json({ error: "This message is too long.", code: "MESSAGE_TOO_LONG" }, { status: 400 });
+    }
+    throw parsed.error;
+  }
+  const body = parsed.data;
   const { chatId: requestChatId, model: requestModel, thinkAmount, projectId, userMessage, userMessageId, attachedFiles } = body;
   const chatId = requestChatId || nanoid();
 
@@ -106,6 +115,44 @@ export const POST = apiHandler(async (req: Request) => {
   const { isShared, modelId: resolvedModelId, provider: resolvedProvider, configId: resolvedConfigId } =
     await resolveUserModelInfo(userId, effectiveModel);
 
+  const text = userMessage;
+  // An empty send is a regenerate, and a chat with no row yet has nothing to
+  // re-answer — running it would bill a reply to the system prompt alone.
+  if (!text && !existingChat) {
+    return Response.json({ error: "Nothing to send." }, { status: 400 });
+  }
+  // Parent linkage is server-authoritative — the client sends no history at all.
+  // A normal send (parentId absent) anchors to the chat's own leaf; an edit passes
+  // the sibling parent it computed from loaded history (null = first-message
+  // edit); a regenerate names the user message its new reply answers.
+  const parentId = text
+    ? (body.parentId !== undefined ? body.parentId : (existingChat?.activeLeafId ?? null))
+    : (body.parentId ?? null);
+  // The parent must be a real message *in this chat* — otherwise a stale or
+  // tampered client would 500 on the FK, or (with a real id from another chat)
+  // silently graft this turn onto a foreign branch. A regenerate that names no
+  // message comes from a client too old to know it must: send it to reload too.
+  // Checked before the budget hold, so a refusal has nothing to give back.
+  if (parentId || !text) {
+    const [parent] = parentId
+      ? await db
+          .select({ id: messages.id, role: messages.role })
+          .from(messages)
+          .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
+          .limit(1)
+      : [];
+    if (!parent) {
+      return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
+    }
+    // A regenerate re-answers a USER message. An imported chat can have a reply
+    // whose predecessor is another reply (its user turn was dropped on import);
+    // hanging a new reply there would send the model a transcript ending on its
+    // own words, so that reply can't be regenerated — and a reload won't change it.
+    if (!text && parent.role !== "user") {
+      return Response.json({ error: "This reply can't be regenerated.", code: "CANNOT_REGENERATE" }, { status: 422 });
+    }
+  }
+
   // Budget gate: reserve an estimated hold for this turn up front, atomically.
   // The turn's own cost is counted before it runs (no single-turn free pass) and
   // concurrent turns across chats reserve against each other (no TOCTOU). Own-key
@@ -152,33 +199,6 @@ export const POST = apiHandler(async (req: Request) => {
     ...(thinkAmount && thinkAmount !== existingChat?.thinkAmount ? { thinkAmount } : {}),
   };
 
-  const text = userMessage || "";
-  // Parent linkage is server-authoritative — the client sends no history at all.
-  // A normal send (parentId absent) anchors to the chat's own leaf; an edit passes
-  // the sibling parent it computed from loaded history (null = first-message
-  // edit); a regenerate names the user message its new reply answers.
-  const parentId = text
-    ? (body.parentId !== undefined ? body.parentId : (existingChat?.activeLeafId ?? null))
-    : (body.parentId ?? null);
-  // The parent must be a real message *in this chat* — otherwise a stale or
-  // tampered client would 500 on the FK, or (with a real id from another chat)
-  // silently graft this turn onto a foreign branch. A regenerate that names no
-  // message comes from a client too old to know it must: send it to reload too.
-  // And a regenerate re-answers a USER message — an empty send naming any other
-  // parent is not one, and running it would hang a billed reply off the last reply.
-  if (parentId || (!text && existingChat)) {
-    const [parent] = parentId
-      ? await db
-          .select({ id: messages.id, role: messages.role })
-          .from(messages)
-          .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
-          .limit(1)
-      : [];
-    if (!parent || (!text && parent.role !== "user")) {
-      // handedOff stays false → the finally below releases the hold.
-      return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
-    }
-  }
   // What the runner's reply hangs off: the user message saved just below, or the
   // one a regenerate re-answers. Derived here, from rows this request checked, so
   // the task never needs the transcript the client happens to be showing.
@@ -190,7 +210,7 @@ export const POST = apiHandler(async (req: Request) => {
     const newUserId = userMessageId || nanoid();
     // Order matters: the message row must exist before the chat's
     // active_leaf_id can reference it (FK), so these can't run in parallel.
-    await db.insert(messages).values({
+    const [inserted] = await db.insert(messages).values({
       // Reuse the client's optimistic id so the rendered bubble keeps a stable
       // React key when history reloads — otherwise it remounts and flashes.
       id: newUserId,
@@ -202,7 +222,18 @@ export const POST = apiHandler(async (req: Request) => {
       // Persist what was attached so the history bubble can show it (reference
       // metadata only — the bytes stay in the sandbox workspace).
       metadata: attachedFiles?.length ? { attachedFiles } : null,
-    }).onConflictDoNothing();
+    }).onConflictDoNothing().returning({ id: messages.id });
+    // A conflict is this same send retried (another tab, a resend) — or an id that
+    // is already some other row, which must not become this chat's leaf and reply
+    // parent. handedOff stays false → the finally below releases the hold.
+    if (!inserted) {
+      const [own] = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.id, newUserId), eq(messages.chatId, chatId), eq(messages.role, "user")))
+        .limit(1);
+      if (!own) return Response.json({ error: "Message id already in use." }, { status: 409 });
+    }
     await db.update(chats).set({
       ...(isNewChat ? { title: text.slice(0, 100) } : {}),
       ...turnSettings,

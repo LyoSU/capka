@@ -55,7 +55,11 @@ vi.mock("@/lib/db", async () => {
     db: {
       select,
       insert: () => ({
-        values: () => Object.assign(Promise.resolve(), { onConflictDoNothing: () => Promise.resolve() }),
+        // A fresh id every time — a conflicting one needs the real table
+        // (route-guards.integration.test.ts).
+        values: (values: { id: string }) => Object.assign(Promise.resolve(), {
+          onConflictDoNothing: () => ({ returning: () => Promise.resolve([{ id: values.id }]) }),
+        }),
       }),
       update: (table: never) => ({
         set: (values: Record<string, unknown>) => {
@@ -131,15 +135,18 @@ describe("POST /api/chat — a regenerate persists the turn's settings", () => {
     expect(chatUpdate()).toMatchObject({ thinkAmount: "deep" });
   });
 
-  it("does not touch a chat row that does not exist yet", async () => {
+  it("refuses an empty send to a chat that does not exist yet", async () => {
     const userId = "u-regen-nochat";
     requireRole.mockResolvedValue({ userId, status: "active", role: "user" });
     rows.chats = [];
 
-    await send({ chatId: "c-new", userMessage: "", model: "cfg1:m" });
+    const res = await send({ chatId: "c-new", userMessage: "", model: "cfg1:m" });
 
-    // Nothing to re-run and no row to update: the insert above already carried the
-    // model, so an UPDATE here would just be a write against a fresh row.
+    // Nothing to re-run: queued, it would bill a reply to the system prompt alone.
+    // Refused before the budget hold and before a 'New Chat' row is written.
+    expect(res.status).toBe(400);
+    expect(reserveBudget).not.toHaveBeenCalled();
+    expect(enqueueTask).not.toHaveBeenCalled();
     expect(chatUpdate()).toBeUndefined();
   });
 });
@@ -191,28 +198,31 @@ describe("POST /api/chat — the task names its reply parent, not the transcript
     // …and an id from someone else's chat.
     expect((await send({ chatId: "c1", userMessage: "", parentId: "elsewhere" })).status).toBe(409);
     expect(enqueueTask).not.toHaveBeenCalled();
-    expect(releaseHold).toHaveBeenCalledTimes(2);
+    // Refused before the budget hold, so there is nothing to give back.
+    expect(reserveBudget).not.toHaveBeenCalled();
     // What makes "someone else's chat" miss is the lookup's own scope.
     expect(lookups.messages).toHaveLength(1);
     expect(lookups.messages[0].sql).toMatch(/"id" = \$1 and .*"chat_id" = \$2/);
     expect(lookups.messages[0].params).toEqual(["elsewhere", "c1"]);
   });
 
-  it("refuses an empty send whose parent is not a user message", async () => {
+  it("refuses to regenerate a reply that answers another reply, with its own code", async () => {
     // A files-only edit with its text cleared used to post exactly this: an empty
     // userMessage naming the message before the edited one — usually the previous
     // REPLY. Taken as a regenerate, the edit vanished and a paid reply was hung
-    // off that reply.
+    // off that reply. An imported chat can hold such a pair for real (its user
+    // turn dropped on import) — and no reload fixes it, so it isn't a 409 "reload".
     owner("u-regen-assistant");
     rows.chats = [{ id: "c1", userId: "u-regen-assistant", title: "Hi", activeLeafId: "a1" }];
     rows.messages = [{ id: "a1", role: "assistant" }];
 
     const res = await send({ chatId: "c1", userMessage: "", parentId: "a1" });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(422);
+    expect((await res.json()).code).toBe("CANNOT_REGENERATE");
     expect(enqueueTask).not.toHaveBeenCalled();
     expect(chatUpdate()).toBeUndefined();
-    expect(releaseHold).toHaveBeenCalledTimes(1);
+    expect(reserveBudget).not.toHaveBeenCalled();
   });
 
   it("still lets a typed send hang off the previous reply", async () => {
@@ -231,6 +241,12 @@ describe("POST /api/chat — the task names its reply parent, not the transcript
     const res = await send({ chatId: "c-new", userMessage: "x".repeat(100_001) });
 
     expect(res.status).toBe(400);
+    // Coded, so the client can say it in the user's language.
+    expect((await res.json()).code).toBe("MESSAGE_TOO_LONG");
     expect(enqueueTask).not.toHaveBeenCalled();
+    // Any other malformed body still gets the plain 400.
+    const bad = await send({ chatId: "c-new", userMessage: "hi", thinkAmount: "loud" });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).not.toHaveProperty("code");
   });
 });

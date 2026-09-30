@@ -782,6 +782,7 @@ export function useBackgroundChat({
           // Budget exhaustion shares the 429 status with rate limiting — tell
           // them apart by code so the user gets the right message.
           if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
+          if (err?.code === "MESSAGE_TOO_LONG") throw new Error(t("messageTooLong"));
           if (res.status === 429) throw new Error(t("rateLimited"));
           throw new Error(err?.error || t("requestFailed"));
         }
@@ -841,6 +842,8 @@ export function useBackgroundChat({
           // Budget exhaustion shares the 429 status with rate limiting — tell
           // them apart by code so the user gets the right message.
           if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
+          if (err?.code === "MESSAGE_TOO_LONG") throw new Error(t("messageTooLong"));
+          if (err?.code === "CANNOT_REGENERATE") throw new Error(t("cannotRegenerate"));
           if (res.status === 429) throw new Error(t("rateLimited"));
           throw new Error(err?.error || t("requestFailed"));
         }

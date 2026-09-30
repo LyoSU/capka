@@ -711,6 +711,8 @@
       "requestFailed": "Request failed",
       "rateLimited": "Too many messages, please wait a moment",
       "budgetReached": "Spending limit reached. Please contact your admin.",
+      "messageTooLong": "This message is too long. Attach it as a file instead.",
+      "cannotRegenerate": "This reply can't be regenerated. Send a new message instead.",
       "offline": "No connection. Check your internet and try again."
     },
     "citations": {
