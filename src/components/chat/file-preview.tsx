@@ -60,14 +60,23 @@ function downloadUrl(f: PreviewFile) {
 // It fetches only the headers (the body is cancelled immediately), then maps the
 // response through the same classifier everywhere (see fileStatusFromHttp).
 //
-// Only *positive* results are remembered (presentFiles): a known-present file is
-// never re-probed, so the chip and tile for it share one request, and re-renders
-// (one per streamed token) never re-hit the controller. A "gone" verdict is
+// Only *positive* results are remembered (presentFiles), and only for PRESENT_TTL_MS: a
+// known-present file is not re-probed, so the chip and tile for it share one request, and
+// re-renders (one per streamed token) never re-hit the controller — but a file deleted
+// later stops looking clickable once the entry lapses. A "gone" verdict is
 // deliberately NOT cached — the same path can be re-created in a later turn, and
 // a stale negative would wrongly grey out a real file — so it is re-checked on
 // each mount. Cheap: only "gone" changes rendering; "ok" and "checking" look the
 // same (present and clickable).
-const presentFiles = new Set<string>();
+const PRESENT_TTL_MS = 30_000;
+const presentFiles = new Map<string, number>();
+const isPresent = (key: string) => {
+  const at = presentFiles.get(key);
+  if (at === undefined) return false;
+  if (Date.now() - at < PRESENT_TTL_MS) return true;
+  presentFiles.delete(key);
+  return false;
+};
 // `\0` as the escape, not a literal NUL character. The separator itself is a good
 // choice — no id or path can contain it, so two files can never collide on a
 // composed key — but it was previously typed into the template as a raw byte, which
@@ -82,11 +91,11 @@ const fileStatusKey = (f: PreviewFile) => `${f.projectId ?? f.chatId}\0${f.path}
  *  until the first probe settles. */
 export function useFileStatus(file: PreviewFile, enabled = true): "checking" | FileStatus {
   const key = fileStatusKey(file);
-  const [status, setStatus] = useState<"checking" | FileStatus>(() => (presentFiles.has(key) ? "ok" : "checking"));
+  const [status, setStatus] = useState<"checking" | FileStatus>(() => (isPresent(key) ? "ok" : "checking"));
   // The key (chat+path) drives the effect — not `file`, which is a fresh object
   // every render — so the probe fires once per file, not once per render.
   useEffect(() => {
-    if (!enabled || presentFiles.has(key)) return;
+    if (!enabled || isPresent(key)) return;
     let alive = true;
     (async () => {
       let result: FileStatus;
@@ -97,7 +106,7 @@ export function useFileStatus(file: PreviewFile, enabled = true): "checking" | F
       } catch {
         result = "temporary"; // network blip — retryable, not a hard miss
       }
-      if (result === "ok") presentFiles.add(key);
+      if (result === "ok") presentFiles.set(key, Date.now());
       if (alive) setStatus(result);
     })();
     return () => {
@@ -123,7 +132,7 @@ export async function probeFile(file: PreviewFile): Promise<FileStatus> {
     const res = await fetch(inlineUrl(file));
     await res.body?.cancel().catch(() => {});
     const verdict = fileStatusFromHttp(res.status);
-    if (verdict === "ok") presentFiles.add(fileStatusKey(file));
+    if (verdict === "ok") presentFiles.set(fileStatusKey(file), Date.now());
     return verdict;
   } catch {
     return "temporary";
