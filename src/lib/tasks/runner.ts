@@ -251,12 +251,14 @@ export async function persistUnreadSteers(input: {
  * How long to wait after a mid-stream snapshot of `bytes` before writing the next.
  * Every snapshot rewrites the WHOLE reply (content plus every part, tool results
  * included), so a fixed cadence makes a turn's write volume grow with the square of
- * its length. Scaling the wait with the size holds it near 64 KB/s once a snapshot
- * outgrows 64 KB. Capped at 5s: a client resuming mid-stream holds the live deltas
- * it cannot apply until a snapshot covers them (stream-recovery.ts).
+ * its length. Scaling the wait with the size holds it near 64 KB/s up to 128 KB,
+ * and at half a fixed 1s cadence's volume beyond. Capped at 2s: a client that
+ * mounts or reconnects mid-stream re-fetches the whole chat every 250ms until a
+ * snapshot covers the deltas it holds (stream-recovery.ts), so each second of
+ * staleness costs four full-chat reloads of a reply that is, by then, large.
  */
 export function snapshotIntervalMs(bytes: number): number {
-  return Math.min(5000, Math.max(1000, bytes / 64));
+  return Math.min(2000, Math.max(1000, bytes / 64));
 }
 
 /**
