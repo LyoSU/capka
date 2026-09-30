@@ -119,7 +119,7 @@ export const replyParentOf = (payload: TaskPayload): string | null =>
  * short says so without pretending to know how many it never saw.
  */
 export function workspaceSnapshotText(entries: { path: string; isDirectory: boolean }[], truncated: boolean): string | undefined {
-  const paths = [...new Set(entries.filter((e) => !isInternalPath(e.path)).map((e) => (e.isDirectory ? `${e.path}/` : e.path)))];
+  const paths = entries.filter((e) => !isInternalPath(e.path)).map((e) => (e.isDirectory ? `${e.path}/` : e.path));
   if (!paths.length) return undefined;
   const depth = (p: string) => p.split("/").filter(Boolean).length;
   const kept = paths.sort().sort((a, b) => depth(a) - depth(b)).slice(0, 50).sort();
@@ -457,11 +457,11 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       try {
         const { listFiles } = await import("@/lib/sandbox/client");
         // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no
-        // container). That walk is depth-first and stops at the controller's entry
-        // limit, so one big folder met early can spend it all before the rest of the
-        // top level is reached — which is why the top level is listed on its own too.
-        const [top, tree] = await Promise.all([listFiles(sessionKey, ".", userId), listFiles(sessionKey, ".", userId, 3)]);
-        workspaceSnapshot = workspaceSnapshotText([...(top.entries ?? []), ...(tree.entries ?? [])], !!(top.truncated || tree.truncated));
+        // container). The controller walks breadth-first with names sorted, so when its
+        // entry limit cuts the walk it is the deepest entries that go: the whole top
+        // level is in this one listing unless the top level alone is over the limit.
+        const tree = await listFiles(sessionKey, ".", userId, 3);
+        workspaceSnapshot = workspaceSnapshotText(tree.entries ?? [], !!tree.truncated);
       } catch { /* no workspace yet */ }
     }
 
