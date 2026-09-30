@@ -76,7 +76,9 @@ export function clearStaleToolResults<T extends { parts?: StoredPart[] }>(
       }
       if (p.type === "tool-call" && staleCallIds.has(p.id)) {
         touched = true;
-        return { ...p, input: CLEARED_TOOL_INPUT };
+        // An object, as the mid-turn prune clears it: the Bedrock and Gemini
+        // providers send a call's input through as-is, and both APIs take an object.
+        return { ...p, input: { note: CLEARED_TOOL_INPUT } };
       }
       return p;
     });

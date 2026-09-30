@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { convertToModelMessages, type UIMessage } from "ai";
 import { clearStaleToolResults, CLEARED_TOOL_OUTPUT, CLEARED_TOOL_INPUT } from "@/lib/chat/context/tool-clearing";
+import { buildModelContext, type ContextRow } from "@/lib/chat/context/build";
+import { toUIMessages } from "@/lib/chat/presenter";
 import type { StoredPart } from "@/lib/chat/contracts";
 
 /** A minimal message shape carrying ordered parts — mirrors what the runner
@@ -35,7 +38,7 @@ describe("clearStaleToolResults", () => {
     // The stale call's ARGUMENTS go with its result — on a write-heavy turn they
     // are the heavier half — but its name and id survive so the timeline reads.
     const call = out[0].parts![0] as Extract<StoredPart, { type: "tool-call" }>;
-    expect(call.input).toBe(CLEARED_TOOL_INPUT);
+    expect(call.input).toEqual({ note: CLEARED_TOOL_INPUT });
     expect(call.name).toBe("read_file");
     expect(call.id).toBe("1");
     // A surviving exchange keeps its arguments verbatim.
@@ -53,11 +56,26 @@ describe("clearStaleToolResults", () => {
 
     const out = clearStaleToolResults(msgs, 1);
 
-    expect((out[0].parts![0] as Extract<StoredPart, { type: "tool-call" }>).input).toBe(CLEARED_TOOL_INPUT);
+    expect((out[0].parts![0] as Extract<StoredPart, { type: "tool-call" }>).input).toEqual({ note: CLEARED_TOOL_INPUT });
     expect((out[1].parts![0] as Extract<StoredPart, { type: "tool-result" }>).output).toBe(CLEARED_TOOL_OUTPUT);
     // The kept exchange is untouched on both halves.
     expect(out[2].parts![0]).toEqual(toolCall("2"));
     expect((out[2].parts![1] as Extract<StoredPart, { type: "tool-result" }>).output).toBe("keep");
+  });
+
+  it("hands the model a cleared call whose arguments are still an object", async () => {
+    // The Bedrock and Gemini providers put a call's input on the wire as-is, and both
+    // APIs take an object there (a Claude tool_use dict, a protobuf Struct), so the
+    // bare placeholder string was malformed. The runner's road: rows, presenter, SDK.
+    const rows: ContextRow[] = [
+      { id: "u", role: "user", content: "go", metadata: null, createdAt: null, platform: "web" },
+      { id: "a", role: "assistant", content: "", createdAt: null, platform: "web",
+        metadata: { parts: [toolCall("1"), toolResult("1", "old"), toolCall("2"), toolResult("2", "new")] } },
+    ];
+    const model = await convertToModelMessages(toUIMessages(buildModelContext(rows, { clearToolsKeepLast: 1 })) as UIMessage[]);
+    const calls = model.flatMap((m) => (m.role === "assistant" && typeof m.content !== "string" ? m.content : []))
+      .filter((p) => p.type === "tool-call");
+    expect(calls.map((c) => c.input)).toEqual([{ note: CLEARED_TOOL_INPUT }, { path: "/f/2" }]);
   });
 
   it("leaves a call with no result yet alone — nothing about it is stale", () => {
