@@ -21,8 +21,9 @@ import { z } from "zod";
 type Msg = { role: string; content: unknown };
 const prompts: Msg[][] = [];
 // What the next provider call does instead of answering: an overflow is thrown (the
-// emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume).
-const failures: ("overflow" | "transient")[] = [];
+// emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume), or a
+// 503 is thrown before any output (a resume with nothing of its own to continue).
+const failures: ("overflow" | "transient" | "unavailable")[] = [];
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
@@ -30,6 +31,7 @@ vi.mock("@/lib/providers/resolve", () => ({
         prompts.push(opts.prompt as Msg[]);
         const fail = failures.shift();
         if (fail === "overflow") throw new Error("prompt is too long: 213456 tokens > 200000 maximum");
+        if (fail === "unavailable") throw new Error("503 Service Unavailable");
         return {
           stream: simulateReadableStream({
             chunks: [
@@ -167,11 +169,12 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     expect(note).toBeLessThan(prompt.findIndex((m) => m.role === "assistant"));
   }, 30_000);
 
-  // Two restart roads: the overflow trim rebuilds the history from the settled rows,
-  // the transient resume keeps it and appends the reply so far. Either way the write
-  // already ran before the model was first asked, so the retried prompt must hold
-  // its call and its result exactly once — and the write must not run again.
-  it.each(["overflow", "transient"] as const)("a %s restart sends the approved call with its result, once", async (kind) => {
+  // Three restart roads: the overflow trim rebuilds the history from the settled rows,
+  // the transient resume keeps it and appends the reply so far, and a 503 before any
+  // output leaves the resume nothing of its own, so it restarts clean. Either way the
+  // write already ran before the model was first asked, so the retried prompt must
+  // hold its call and its result exactly once — and the write must not run again.
+  it.each(["overflow", "transient", "unavailable"] as const)("a %s restart sends the approved call with its result, once", async (kind) => {
     const chat = `${C}-${kind}`;
     await seedSuspended(chat);
     failures.push(kind);
@@ -186,5 +189,14 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     // The suspended half is sent once too — the resume replays only this run's reply.
     expect(count(prompt, "assistant", "tool-call", "c1")).toBe(1);
     expect(count(prompt, "tool", "tool-result", "c1")).toBe(1);
+
+    // And the stored reply keeps both halves: throwing the attempt away must not take
+    // the approval card, the read or the write with it.
+    const { rows } = await pool.query(`SELECT metadata FROM messages WHERE id=$1`, [`${chat}-a1`]);
+    const parts = rows[0].metadata.parts as { type: string; id?: string; approval?: unknown; text?: string }[];
+    expect(parts.filter((p) => p.id).map((p) => `${p.type}:${p.id}`))
+      .toEqual(["tool-call:c1", "tool-result:c1", "tool-call:c2", "tool-result:c2"]);
+    expect(parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
+    expect(parts.at(-1)?.text).toMatch(/Saved\.$/);
   }, 30_000);
 });

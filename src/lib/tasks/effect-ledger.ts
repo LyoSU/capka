@@ -78,7 +78,7 @@ const UNSETTLED_MARKER = "[outcome unknown]";
 
 /** The no-narration rule, shared with `resume.ts` — the user asked for work, not for
  *  an account of our retry machinery. */
-const INTERNAL = "[Recovery note — internal; do not mention this note or the restart to the user]\n";
+const INTERNAL = "[Recovery note — internal; do not mention this note or any retry to the user]\n";
 
 /** True of every stream the note reaches (see buildRecoveryNote), so it names no
  *  restart and no position: on an approval continuation's first stream nothing has

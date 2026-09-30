@@ -1440,8 +1440,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // never saw land. Executed tool calls are not presentation: they happened,
       // and they stay happened after the attempt is thrown away. Clearing them is
       // what made a restarted turn repeat its writes.
-      parts.length = 0;
-      suspendedParts = 0;
+      // Nor the suspended half a continuation loaded, nor the results of the calls it
+      // approved: the history still replays that half and the retry sends those results
+      // (see settleApprovedRuns), so the SDK will not produce them again. Emptying them
+      // here left the stored reply without the approval card, the calls or the write.
+      const approvedResults = parts.slice(suspendedParts).filter((p) => "id" in p && approvedRuns.has(p.id));
+      parts.length = suspendedParts;
+      parts.push(...approvedResults);
       textBuf = "";
       reasonBuf = "";
       resumeMessages = [];
@@ -2041,8 +2046,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         model: modelId, provider, steps: stepCount,
       });
     }
-    // `parts` is not the whole story: discardPartial empties it when an attempt is
-    // thrown away and keeps the executed-call ledger, so a failure right after a
+    // `parts` is not the whole story: discardPartial drops an attempt's parts when it
+    // is thrown away and keeps the executed-call ledger, so a failure right after a
     // restart has writes standing with nothing in parts to show for them.
     //
     // Nor is the in-memory mirror: it only learns of a call when its RESULT arrives, and

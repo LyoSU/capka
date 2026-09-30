@@ -32,7 +32,7 @@ describe("buildRecoveryNote", () => {
     expect(note).toMatch(/effects are live/);
     expect(note).toMatch(/do NOT repeat/);
     // …and it must not narrate the machinery to the user, same rule as resume.ts.
-    expect(note).toMatch(/do not mention this note or the restart/);
+    expect(note).toMatch(/do not mention this note or any retry/);
   });
 
   // A write-ahead row is a WEAKER claim than the rest of the list: the call was
