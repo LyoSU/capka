@@ -208,7 +208,8 @@ approval mode in **Settings -> Authentication**.
 ## Security Short Version
 
 Sandboxes are unprivileged containers with dropped Linux capabilities. They see
-only their own workspace directory; host folders are mounted only if an admin
+only their own workspace directory plus the owning user's own `/shared` store;
+host folders are mounted only if an admin
 turns on folder access (off by default, optionally limited to the roots in
 `SANDBOX_MOUNT_ALLOW`). The controller reaches Docker through `socket-proxy`, not the
 raw Docker socket.
