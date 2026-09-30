@@ -262,6 +262,16 @@ export function snapshotIntervalMs(bytes: number): number {
 }
 
 /**
+ * The history as seen by whatever looks up "the user's last message" (native
+ * attachment injection and stripping): the effect-ledger recovery note is user-role
+ * too and, placed last or right after the user's message, would otherwise be the
+ * one found. Same message objects, so an edit to the user's message lands in `msgs`.
+ */
+export function withoutEffectNote(msgs: ModelMessage[], note: ModelMessage | null): ModelMessage[] {
+  return note ? msgs.filter((m) => m !== note) : msgs;
+}
+
+/**
  * Run an agent task to completion. Invoked by the worker for a claimed task
  * row — independent of any HTTP request, so it keeps running with the user's
  * tab closed. Streams via Postgres realtime, renews its lease via heartbeat,
@@ -1765,7 +1775,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // in their place — the model should KNOW the user attached something and say it
     // can't process it, not answer as if nothing was sent.
     const stripNativeFilesWithNote = () => {
-      const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+      const lastUser = withoutEffectNote(modelMessages, effectNote).findLast((m): m is UserModelMessage => m.role === "user");
       if (!lastUser || !Array.isArray(lastUser.content)) return;
       const removed = lastUser.content.filter((p) => p.type === "file" || p.type === "image").length;
       lastUser.content = lastUser.content.filter((p) => p.type !== "file" && p.type !== "image");
@@ -1933,7 +1943,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (injectedNative && nativeFiles.length) {
         // Same row id as the first injection — missing it here would drop the mark on
         // exactly the turn that overflowed. Monotonic, so the repeat is a no-op.
-        await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
+        await injectNativeFiles(withoutEffectNote(modelMessages, effectNote), sessionKey, userId, provider, nativeFiles, replyParentId ?? msgId);
       }
       foldDiscarded();
       result = makeStream();
