@@ -12,8 +12,7 @@ box wrapping an API. Users drop in files, and the agent writes/runs code,
 converts documents, scrapes the web, and uses MCP connectors inside a
 disposable Docker container. Licensed AGPL-3.0, open-core (`ee/` is reserved for
 the separate commercial edition: SSO/OIDC, SCIM, advanced RBAC, Helm; it is
-currently empty — do not
-conflate it with the AGPL core in `src/`).
+currently empty — do not conflate it with the AGPL core in `src/`).
 
 ### Who it's for (drives UI/UX decisions — see `PRODUCT.md` for the full brief)
 
