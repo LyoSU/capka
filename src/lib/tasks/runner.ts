@@ -2589,10 +2589,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // The chat's OWN opening message, not `userTurnText`. These are different
           // questions — "what did the user type this turn" vs "what did this chat open
           // with" — and only the second one has an answer on a continuation, where
-          // the payload names no user message and `userTurnText` is "" by design (see
-          // `run-context.ts`). Sourced from the message ROW because a row survives a
-          // continuation; re-deriving it from `modelMessages` is what F1 was and must
-          // not come back. Rides idx_messages_chat_role_created.
+          // the payload names no user message and `userTurnText` holds at most the
+          // words typed into an answered `ask` (see `run-context.ts`). Sourced from
+          // the message ROW because a row survives a continuation; re-deriving it
+          // from `modelMessages` is what F1 was and must not come back. Rides
+          // idx_messages_chat_role_created.
           const [opening] = await db
             .select({ content: messages.content })
             .from(messages)

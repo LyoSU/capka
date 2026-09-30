@@ -8,8 +8,9 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
  * the same assistant row (`payload.resumeMessageId`). Two separate things then made
  * the title impossible: `isFirstTurn` was read off `modelMessages`, which on that
  * continuation contains the very row being written (`replyParentId` points at it), so
- * it said "not the first turn"; and the title text was `userTurnText`, which is ""
- * on a continuation because it answers no user message, by design. The first half is
+ * it said "not the first turn"; and the title text was `userTurnText`, which on a
+ * continuation holds at most the words typed into the answer, never the chat's
+ * opening message, because it answers no user message. The first half is
  * skipped by `!awaitingAnswer` and every later turn by `isFirstTurn`, so such a chat
  * kept the `/api/chat` placeholder — a 100-character slice of the opening message —
  * for good.
@@ -116,7 +117,8 @@ run("runAgentTask: a chat that opens with an ask still gets auto-titled", () => 
     // Written already-running rather than enqueued and claimed: the dev stack's own
     // worker polls this same database and would claim a `queued` row out from under
     // this suite. No reply parent is what an ask continuation really carries — the
-    // user's answer rides `resumeMessages` and is not a chat message at all.
+    // user's answer is recorded on the suspended row itself, and the runner reads the
+    // history, that row included, from the database rather than from the payload.
     const { rows } = await pool.query<ClaimedTask>(
       `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
        VALUES ('t15t-task',$1,$2,'running','w-t15t', now() + interval '300 seconds', $3::jsonb)
