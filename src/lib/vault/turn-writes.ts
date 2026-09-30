@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { inIds } from "@/lib/db/in-ids";
 import { db } from "@/lib/db";
 import { auditEvents, spaces, vaultClaims, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
 
@@ -118,7 +119,7 @@ export async function readTurnWrites(messageIds: string[], userId: string): Prom
         // node's tombstone says the fact is gone. A supersede leaves the node alone —
         // history is not deleted — so neither clause implies the other.
         isNull(vaultClaims.supersededAt),
-        inArray(sql`${vaultClaims.origin} ->> 'messageId'`, messageIds),
+        inIds(sql`${vaultClaims.origin} ->> 'messageId'`, messageIds),
       ),
     );
 
@@ -167,7 +168,7 @@ export async function readTurnWrites(messageIds: string[], userId: string): Prom
       and(
         eq(auditEvents.action, "note.revise"),
         owned,
-        inArray(sql`${vaultNoteVersions.provenance} ->> 'messageId'`, messageIds),
+        inIds(sql`${vaultNoteVersions.provenance} ->> 'messageId'`, messageIds),
       ),
     );
 

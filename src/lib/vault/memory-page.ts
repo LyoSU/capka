@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { inIds } from "@/lib/db/in-ids";
 import { db } from "@/lib/db";
 import {
   chats, claimEvidence, memoryCandidates, messages, noteClaims, projects, spaces, vaultClaims,
@@ -621,7 +622,7 @@ async function topicsOf(
     ? await db
         .select({ noteId: noteClaims.noteId, claimId: noteClaims.claimId })
         .from(noteClaims)
-        .where(inArray(noteClaims.noteId, noteIds))
+        .where(inIds(noteClaims.noteId, noteIds))
     : [];
   const filedUnder = new Map<string, HeadRow[]>(noteIds.map((id) => [id, []]));
   const anyTopic = new Set<string>();
