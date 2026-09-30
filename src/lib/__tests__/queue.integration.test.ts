@@ -166,9 +166,9 @@ run("durable queue", () => {
 
   it("heartbeats then finalizes", async () => {
     const ok = await heartbeat("qt1", "w1");
-    expect(ok).toBe(true);
+    expect(ok).toEqual({ cancelRequested: false });
     const wrongWorker = await heartbeat("qt1", "someone-else");
-    expect(wrongWorker).toBe(false);
+    expect(wrongWorker).toBeNull();
     await finalizeTask("qt1", "completed");
     const { rows } = await pool.query(`SELECT status FROM tasks WHERE id='qt1'`);
     expect(rows[0].status).toBe("completed");
@@ -182,10 +182,13 @@ run("durable queue", () => {
     await enqueueTask({ id: "qt-lease", chatId: C, userId: U, payload: {} });
     const claimed = await claimNextTask("frozen-worker");
     expect(claimed?.id).toBe("qt-lease");
-    expect(await heartbeat("qt-lease", "frozen-worker")).toBe(true);
+    expect(await heartbeat("qt-lease", "frozen-worker")).toEqual({ cancelRequested: false });
+    // The same renewal carries the cancel flag — the monitor's only cancel poll.
+    await requestCancel("qt-lease");
+    expect(await heartbeat("qt-lease", "frozen-worker")).toEqual({ cancelRequested: true });
 
     await pool.query(`UPDATE tasks SET lease_expires_at = now() - interval '1 second' WHERE id = 'qt-lease'`);
-    expect(await heartbeat("qt-lease", "frozen-worker")).toBe(false);
+    expect(await heartbeat("qt-lease", "frozen-worker")).toBeNull();
     // …and the refusal must not have quietly extended it anyway.
     const { rows } = await pool.query(`SELECT lease_expires_at < now() AS expired FROM tasks WHERE id='qt-lease'`);
     expect(rows[0].expired).toBe(true);

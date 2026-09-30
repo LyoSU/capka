@@ -239,8 +239,10 @@ export async function absorbQueuedTasks(chatId: string, exceptId: string): Promi
 }
 
 /**
- * Renew a running task's lease. Returns false if the task is no longer ours —
- * which the runner's monitor treats as "lost lease" and aborts on.
+ * Renew a running task's lease. Returns null if the task is no longer ours —
+ * which the runner's monitor treats as "lost lease" and aborts on — and otherwise
+ * the row's `cancel_requested`, read in the same statement so the monitor's 5s tick
+ * is one round trip per running task rather than two.
  *
  * `lease_expires_at > now()` is part of the guard, not decoration: an EXPIRED
  * lease may never be renewed. `claimNextTask` excludes a workspace only while
@@ -254,16 +256,17 @@ export async function absorbQueuedTasks(chatId: string, exceptId: string): Promi
  * Losing the lease costs a full minute of missed renewals (LEASE_SECONDS) while
  * the monitor retries every 5s, so this is not tripped by one hiccup.
  */
-export async function heartbeat(id: string, workerId: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
+export async function heartbeat(id: string, workerId: string): Promise<{ cancelRequested: boolean } | null> {
+  const { rows } = await pool.query<{ cancel_requested: boolean }>(
     `UPDATE tasks
         SET heartbeat_at = now(),
             lease_expires_at = now() + ($2 || ' seconds')::interval
       WHERE id = $1 AND status = 'running' AND worker_id = $3
-        AND lease_expires_at > now()`,
+        AND lease_expires_at > now()
+      RETURNING cancel_requested`,
     [id, String(LEASE_SECONDS), workerId],
   );
-  return (rowCount ?? 0) > 0;
+  return rows[0] ? { cancelRequested: rows[0].cancel_requested } : null;
 }
 
 /**

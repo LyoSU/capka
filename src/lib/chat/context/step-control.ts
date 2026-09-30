@@ -1,6 +1,7 @@
-import { pruneMessages, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 import { steerFrame } from "@/lib/chat/contracts";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
+import { CLEARED_TOOL_INPUT, CLEARED_TOOL_OUTPUT } from "./tool-clearing";
 import { outputBytes } from "@/lib/tool-output";
 import { posInt } from "@/lib/config/env";
 
@@ -119,7 +120,7 @@ export function stepSettings(
 }
 
 /**
- * Shed the tool traffic accumulated before `boundary` (an absolute index into this
+ * Clear the tool traffic accumulated before `boundary` (an absolute index into this
  * step's message list), keeping everything from there on intact.
  *
  * This is the hole the rest of the context machinery left open. Compaction is
@@ -142,15 +143,51 @@ export function stepSettings(
  * prefix byte-identical from step to step, so the cache goes on hitting and the
  * relief lasts the rest of the turn.
  *
- * Message-scoped rather than tool-scoped: the SDK's pruner counts messages, and a
- * tool loop appends roughly one assistant + one tool message per exchange. Using
- * its own pruner is what guarantees calls and results are dropped as PAIRS — an
- * orphaned tool result is a hard 400 on Anthropic and OpenAI alike.
+ * CLEARED, not dropped — the same placeholders the turn-build policy and Anthropic's
+ * `clear_tool_uses` leave behind. The call keeps its name and id and the result its
+ * slot, so the model still sees that each write HAPPENED; the SDK's `pruneMessages`
+ * removed both, and a write loop that can no longer see its earlier writes does them
+ * again. Nothing is removed, so no result can be orphaned from its call (a hard 400
+ * on Anthropic and OpenAI alike). As in `clearStaleToolResults`, a call is cleared
+ * exactly when its result is: one whose result sits past the cut stays whole, and an
+ * error result keeps both halves (small and high-signal). Provider-executed results
+ * ride in the assistant message and are left to the provider that replays them.
+ *
+ * The cleared arguments are an OBJECT, not the bare string the build path stores:
+ * Anthropic-shaped `tool_use.input` and Gemini's `functionCall.args` must be one.
  */
 export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number): ModelMessage[] {
-  const keepLast = messages.length - boundary;
-  if (boundary <= 0 || keepLast <= 0) return messages;
-  return pruneMessages({ messages, toolCalls: `before-last-${keepLast}-messages` });
+  if (boundary <= 0 || boundary >= messages.length) return messages;
+  const live = new Set<string>();
+  for (const m of messages.slice(boundary)) {
+    if (m.role === "tool") for (const p of m.content) if (p.type === "tool-result") live.add(p.toolCallId);
+  }
+  const stale = new Set<string>();
+  for (const m of messages.slice(0, boundary)) {
+    if (m.role !== "tool") continue;
+    for (const p of m.content) {
+      if (p.type === "tool-result" && !live.has(p.toolCallId)
+        && (p.output.type === "text" || p.output.type === "json" || p.output.type === "content")) {
+        stale.add(p.toolCallId);
+      }
+    }
+  }
+  if (stale.size === 0) return messages;
+  return messages.map((m, i) => {
+    if (i >= boundary) return m;
+    if (m.role === "assistant" && typeof m.content !== "string") {
+      if (!m.content.some((p) => p.type === "tool-call" && stale.has(p.toolCallId))) return m;
+      return { ...m, content: m.content.map((p) =>
+        p.type === "tool-call" && stale.has(p.toolCallId) ? { ...p, input: { note: CLEARED_TOOL_INPUT } } : p) };
+    }
+    if (m.role === "tool") {
+      if (!m.content.some((p) => p.type === "tool-result" && stale.has(p.toolCallId))) return m;
+      return { ...m, content: m.content.map((p) =>
+        p.type === "tool-result" && stale.has(p.toolCallId)
+          ? { ...p, output: { type: "text" as const, value: CLEARED_TOOL_OUTPUT } } : p) };
+    }
+    return m;
+  });
 }
 
 /**
@@ -259,7 +296,7 @@ export function injectSteers(
  * How many messages one tool exchange occupies — the conversion the cut was missing.
  *
  * `TOOL_CLEAR_KEEP_LAST` counts tool USES, which is the unit Anthropic's server-side
- * edit takes. The SDK's pruner counts trailing MESSAGES, and a tool loop appends one
+ * edit takes. The cut counts MESSAGES, and a tool loop appends one
  * assistant message carrying the call(s) plus one tool message carrying the
  * result(s). Passing the use-count straight through therefore kept three MESSAGES —
  * about one and a half exchanges — where the shared policy says three exchanges, so

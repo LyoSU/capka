@@ -470,9 +470,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const monitor = setInterval(() => {
     void (async () => {
       try {
-        const alive = await heartbeat(taskId, workerId);
-        if (!alive) { leaseLost = true; ac.abort(); return; } // lost lease (reconciled) → stop
-        if (await isCancelRequested(taskId)) ac.abort();
+        const lease = await heartbeat(taskId, workerId);
+        if (!lease) { leaseLost = true; ac.abort(); return; } // lost lease (reconciled) → stop
+        if (lease.cancelRequested) ac.abort();
       } catch { /* transient DB hiccup; next tick retries */ }
     })();
   }, 5000);

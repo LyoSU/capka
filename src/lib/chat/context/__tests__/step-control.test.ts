@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens, injectSteers,
   FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION, BYTES_PER_TOKEN } from "@/lib/chat/context/step-control";
+import { CLEARED_TOOL_INPUT, CLEARED_TOOL_OUTPUT } from "@/lib/chat/context/tool-clearing";
 import type { ModelMessage } from "ai";
 import { readFileSync } from "node:fs";
 
@@ -57,14 +58,20 @@ const loop = (n: number): ModelMessage[] => [
   { role: "user", content: "add these rows" },
   ...Array.from({ length: n }, (_, i) => exchange(`t${i}`)).flat(),
 ];
-const callCount = (ms: ModelMessage[]) => (JSON.stringify(ms).match(/"tool-call"/g) ?? []).length;
+const parts = (ms: ModelMessage[]) =>
+  ms.flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : []));
+/** Ids of the calls whose arguments survived — the traffic the cut did NOT clear. */
+const intactCalls = (ms: ModelMessage[]) =>
+  parts(ms)
+    .filter((c) => c.type === "tool-call" && JSON.stringify(c.input) !== JSON.stringify({ note: CLEARED_TOOL_INPUT }))
+    .map((c) => c.toolCallId as string);
 
 describe("pruneTurnToolTraffic", () => {
-  it("sheds everything before the boundary and keeps the rest", () => {
+  it("clears everything before the boundary and keeps the rest", () => {
     const msgs = loop(8);
     const out = pruneTurnToolTraffic(msgs, msgs.length - 3);
 
-    expect(callCount(out)).toBeLessThan(callCount(msgs));
+    expect(intactCalls(out).length).toBeLessThan(intactCalls(msgs).length);
     // The newest exchange survives — the model still sees what it just did.
     expect(JSON.stringify(out)).toContain("t7");
     // The user's instruction is never tool traffic and must not be collateral.
@@ -95,17 +102,52 @@ describe("pruneTurnToolTraffic", () => {
   it("never leaves a tool result whose call is gone", () => {
     // An orphaned tool_result is a hard 400 on Anthropic and OpenAI alike, so a
     // pruner that saved tokens by breaking pairs would trade a slow turn for a dead
-    // one. Pairing is the SDK's job here; this pins that we rely on it.
+    // one.
     const msgs = loop(10);
     const out = pruneTurnToolTraffic(msgs, msgs.length - 3);
 
     const ids = (kind: "tool-call" | "tool-result") =>
-      out
-        .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : []))
-        .filter((c) => c.type === kind)
-        .map((c) => c.toolCallId as string);
+      parts(out).filter((c) => c.type === kind).map((c) => c.toolCallId as string);
     const calls = new Set(ids("tool-call"));
     for (const id of ids("tool-result")) expect(calls.has(id)).toBe(true);
+  });
+
+  it("keeps a record of every call it clears, so a write loop cannot redo its writes", () => {
+    // The SDK's pruneMessages REMOVED the calls, and an agent that can no longer see
+    // that it wrote rows t0..t5 writes them again. Clearing keeps each call's name,
+    // id and position and swaps only the bodies for the shared placeholders.
+    const msgs = loop(8);
+    const out = pruneTurnToolTraffic(msgs, msgs.length - 3);
+
+    expect(out).toHaveLength(msgs.length);
+    expect(parts(out).filter((c) => c.type === "tool-call").map((c) => c.toolCallId))
+      .toEqual(parts(msgs).filter((c) => c.type === "tool-call").map((c) => c.toolCallId));
+    expect(out[1]).toEqual({ role: "assistant", content: [
+      { type: "tool-call", toolCallId: "t0", toolName: "upsert", input: { note: CLEARED_TOOL_INPUT } }] });
+    expect(out[2]).toEqual({ role: "tool", content: [
+      { type: "tool-result", toolCallId: "t0", toolName: "upsert", output: { type: "text", value: CLEARED_TOOL_OUTPUT } }] });
+    // Past the cut, nothing is touched.
+    expect(out.slice(-3)).toEqual(msgs.slice(-3));
+  });
+
+  it("keeps both halves of an exchange the cut falls inside", () => {
+    // Boundary between t6's call and its result: the result is protected, so the call
+    // that produced it stays whole too.
+    const msgs = loop(8);
+    const out = pruneTurnToolTraffic(msgs, msgs.length - 3);
+    expect(intactCalls(out)).toEqual(["t6", "t7"]);
+    expect(out[msgs.length - 4]).toEqual(msgs[msgs.length - 4]);
+  });
+
+  it("leaves an errored exchange whole — small, and the one the model must not repeat", () => {
+    const msgs: ModelMessage[] = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "e", toolName: "upsert", input: { row: 1 } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "e", toolName: "upsert", output: { type: "error-text", value: "duplicate key" } }] },
+      ...exchange("t1"),
+    ];
+    const out = pruneTurnToolTraffic(msgs, 3);
+    expect(out).toEqual(msgs);
   });
 });
 
@@ -206,15 +248,15 @@ describe("armPruneBoundary", () => {
     // test passed while the thing they named was broken. `toBe(0)` on the returned index
     // could not fail: the index is floored by `boundary`. Pruning the short list alone
     // could not fail either — and THAT is the finding worth keeping. A 3-message rebuilt
-    // list holds all its tool traffic in the last PAIR, and the SDK's pruner drops calls
-    // and results as pairs, so no boundary can over-shed it. The short case is safe
-    // structurally, not because the arithmetic guards it.
+    // list holds all its tool traffic in the last PAIR, and the cut keeps both halves of
+    // a pair whose result it protects, so no boundary can over-shed it. The short case
+    // is safe structurally, not because the arithmetic guards it.
     //
-    // So the pair is the guard: same boundary, a list long enough to have a droppable
+    // So the pair is the guard: same boundary, a list long enough to have a clearable
     // pair, and that one must lose it. If the pruner ever stops shedding, this fails.
     const cycle = (n: string): ModelMessage[] => [
       { role: "assistant", content: [{ type: "tool-call", toolCallId: n, toolName: "x", input: {} }] },
-      { role: "tool", content: [{ type: "tool-result", toolCallId: n, toolName: "x", output: "ok" }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: n, toolName: "x", output: { type: "text", value: "ok" } }] },
     ] as ModelMessage[];
     const arm = (messageCount: number) => armPruneBoundary({
       triggerAt: at, boundary: 0, lastStepContextTokens: 0, estimatedTokens: at * 4,
@@ -435,11 +477,7 @@ describe("a steered turn that also has to prune", () => {
   // an exchange of tool traffic the turn had decided to shed. The runner corrects
   // for exactly that (`pruneBoundary + before`); this pins that the correction is
   // right, and that removing it is observable.
-  const ids = (ms: ModelMessage[]) =>
-    ms
-      .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : []))
-      .filter((c) => c.type === "tool-call")
-      .map((c) => c.toolCallId as string);
+  const ids = intactCalls;
   const at = (ms: ModelMessage[], needle: string) =>
     ms.findIndex((m) => typeof m.content === "string" && m.content.includes(needle));
 
@@ -480,8 +518,7 @@ describe("a steered turn that also has to prune", () => {
     expect(at(out, "and cite it")).toBe(out.length - 1);
     // The early one is ahead of every tool call that survived — i.e. it is in the
     // part of the prompt that was shed, exactly where it landed.
-    const firstSurviving = out.findIndex((m) =>
-      Array.isArray(m.content) && (m.content as Array<Record<string, unknown>>).some((c) => c.type === "tool-call"));
+    const firstSurviving = out.findIndex((m) => intactCalls([m]).length > 0);
     expect(at(out, "keep it short")).toBeLessThan(firstSurviving);
   });
 });
