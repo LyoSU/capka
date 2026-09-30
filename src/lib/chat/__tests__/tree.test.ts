@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, siblingId, turnSuffix, type TreeNode } from "../tree";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, pathRowsWhere, siblingId, turnSuffix, type TreeNode } from "../tree";
 
 // Pure graph tests — no DB, so they run in the normal suite. `createdAt`
 // increments per node to give a deterministic sibling order.
@@ -150,5 +151,14 @@ describe("turnSuffix — one finished turn onward", () => {
   it("is empty for a message off the active branch", () => {
     const rows = [r("u1", null, "user"), r("a1", "u1", "assistant"), r("a1b", "u1", "assistant")];
     expect(turnSuffix(activePath(rows, "a1b"), "a1")).toEqual([]);
+  });
+});
+
+describe("pathRowsWhere", () => {
+  it("binds the path ids as one parameter however long the path is", () => {
+    const ids = Array.from({ length: 70000 }, (_, i) => `m${i}`);
+    const q = new PgDialect().sqlToQuery(pathRowsWhere("c1", ids)!);
+    expect(q.params).toEqual(["c1", ids]);
+    expect(q.sql).toContain("= ANY($2::text[])");
   });
 });

@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
@@ -214,6 +214,11 @@ export function turnSuffix<T extends TreeNode & { role: string }>(path: PathEntr
   return path.slice(start);
 }
 
+/** The ids bound as ONE array parameter: `inArray` spends a bind parameter per id, and
+ *  Postgres caps a statement at 65535 — a path that long could never be opened. */
+export const pathRowsWhere = (chatId: string, ids: string[]) =>
+  and(eq(messages.chatId, chatId), sql`${messages.id} = ANY(${sql.param(ids)}::text[])`);
+
 /** The visible conversation for a chat, root → active leaf, with sibling info.
  *  With `turnOf`, only that turn onward (see `turnSuffix`). Full rows are read for
  *  the returned entries alone. */
@@ -222,7 +227,7 @@ export async function loadActivePath(chatId: string, activeLeafId: string | null
   if (turnOf !== undefined) path = turnSuffix(path, turnOf);
   if (path.length === 0) return [];
   const full = new Map(
-    (await db.select().from(messages).where(and(eq(messages.chatId, chatId), inArray(messages.id, path.map((p) => p.node.id)))))
+    (await db.select().from(messages).where(pathRowsWhere(chatId, path.map((p) => p.node.id))))
       .map((r) => [r.id, r]),
   );
   return path.flatMap((p) => {
