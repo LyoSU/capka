@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolveConflictName, leaseRenewMs, uploadBatch, LEASE_GONE } from "../bridge";
-import { conflictName } from "../plan";
+import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, LEASE_GONE } from "../bridge";
+import { conflictName, planSync } from "../plan";
 import { chatTarget } from "@/lib/workspace-target";
 
 /**
@@ -75,6 +75,32 @@ describe("leaseRenewMs", () => {
   it("falls back to a minute when the server sent no usable expiry", () => {
     expect(leaseRenewMs(undefined, now)).toBe(60_000);
     expect(leaseRenewMs("not a date", now)).toBe(60_000);
+  });
+});
+
+// The controller flags a listing `truncated` when it could not see the whole tree —
+// the entry cap, the depth cap, or a directory it failed to read (EACCES, EIO…). The
+// planner reads a synced path the server no longer lists as a server-side delete, so
+// a partial listing must never reach it.
+describe("serverTree — an incomplete listing never becomes a plan", () => {
+  const listing = (truncated: boolean) => vi.fn(async () => Response.json({
+    entries: [{ path: "docs/a.txt", isDirectory: false, size: 1, modifiedAt: "2026-09-07T12:00:00.000Z", hash: "ha" }],
+    truncated,
+  }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refuses a truncated listing that the planner would turn into local deletes", async () => {
+    const entry = { mtime: 0, size: 1, hash: "ha" };
+    // What the refusal prevents: b.txt sits in an unreadable directory, so the listing omits it.
+    expect(planSync({ "a.txt": entry, "b.txt": entry }, { "a.txt": entry }, { "a.txt": entry, "b.txt": entry }).deleteLocal).toEqual(["b.txt"]);
+    vi.stubGlobal("fetch", listing(true));
+    await expect(serverTree(chatTarget("c1"), "docs")).rejects.toThrow(/could not be listed in full/);
+  });
+
+  it("reads a complete listing into the manifest", async () => {
+    vi.stubGlobal("fetch", listing(false));
+    const tree = await serverTree(chatTarget("c1"), "docs");
+    expect(Object.keys(tree.files)).toEqual(["a.txt"]);
   });
 });
 

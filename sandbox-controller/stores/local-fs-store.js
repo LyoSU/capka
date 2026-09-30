@@ -90,9 +90,11 @@ export class LocalFsStore {
    *  Returns `{ entries, truncated }`. `truncated` is true when the listing is
    *  INCOMPLETE — either the entry limit was hit, OR a multi-level walk bottomed
    *  out on a directory that still had children (the depth cap, which also guards
-   *  against symlink-cycle recursion). Folder sync MUST refuse a truncated tree:
-   *  treating the unseen files as absent would drive a destructive local delete.
-   *  With `withHash`, each file entry also carries a content SHA-256 (`hash`). */
+   *  against symlink-cycle recursion), OR a directory or entry could not be read for
+   *  a reason that does not prove it is gone (EACCES, EIO, EMFILE…). Folder sync MUST
+   *  refuse a truncated tree: treating the unseen files as absent would drive a
+   *  destructive local delete. With `withHash`, each file entry also carries a
+   *  content SHA-256 (`hash`). */
   async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000, opts = {}) {
     return this.#listAt(this.#wsPath(userId, sessionId), relPath, depth, limit, opts);
   }
@@ -109,6 +111,12 @@ export class LocalFsStore {
     const deep = depth > 1; // multi-level walk → a dir left un-descended means incomplete
     const entries = [];
     let truncated = false;
+    // A path that vanished, stopped being a directory, loops, or escaped the workspace
+    // (safeRealPath's refusals carry no code) is honestly absent from the listing. Any
+    // other failure hides what is there, so the listing must say it is incomplete.
+    const unseen = (err) => {
+      if (err?.code && !["ENOENT", "ENOTDIR", "ELOOP"].includes(err.code)) truncated = true;
+    };
     // Breadth-first, names sorted per directory: when `limit` cuts the walk the kept
     // subset is the shallowest entries in a stable order, not whatever one deep folder
     // spent the budget on first. A directory still precedes its own children.
@@ -122,9 +130,10 @@ export class LocalFsStore {
         dirPath = await safeRealPath(base, rel);
       } catch (err) {
         if (q === 0) throw err;
+        unseen(err);
         continue;
       }
-      const names = (await readdir(dirPath).catch(() => [])).sort();
+      const names = (await readdir(dirPath).catch((err) => { unseen(err); return []; })).sort();
       for (const name of names) {
         if (entries.length >= limit) { truncated = true; break scan; }
         try {
@@ -143,11 +152,11 @@ export class LocalFsStore {
             if (d > 1) queue.push([childRel, d - 1]);
             else if (deep) {
               // Hit the depth floor with more below → the tree is incomplete.
-              const kids = await readdir(full).catch(() => []);
+              const kids = await readdir(full).catch((err) => { unseen(err); return []; });
               if (kids.length) truncated = true;
             }
           }
-        } catch { /* skip inaccessible */ }
+        } catch (err) { unseen(err); }
       }
     }
     return { entries, truncated };

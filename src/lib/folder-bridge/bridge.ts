@@ -85,7 +85,7 @@ const lastLocal = new Map<string, HashedManifest>();
 // flags `truncated` if even this isn't enough, which aborts the sync (see below).
 const SYNC_LIST_LIMIT = 15000;
 
-async function serverTree(target: WorkspaceTarget, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
+export async function serverTree(target: WorkspaceTarget, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
   // hash=1 makes each file carry a content SHA-256 so plan.ts compares by content,
   // not by size — a same-length edit on the server must still count as a change.
   const res = await fetch(`/api/sandbox/files?${targetQuery(target)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}&hash=1`);
@@ -97,10 +97,10 @@ async function serverTree(target: WorkspaceTarget, name: string): Promise<{ file
     entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null; hash?: string }[];
     truncated?: boolean;
   };
-  // A truncated tree is an INCOMPLETE server view (entry cap OR a subtree past the
-  // depth limit); treating the unseen files as deletions would wipe them locally.
-  // Refuse rather than sync a partial picture.
-  if (truncated) throw new Error("This folder's workspace copy is too large to sync safely.");
+  // A truncated tree is an INCOMPLETE server view (entry cap, a subtree past the
+  // depth limit, or a directory the controller could not read); treating the unseen
+  // files as deletions would wipe them locally. Refuse rather than sync a partial picture.
+  if (truncated) throw new Error("This folder's workspace copy could not be listed in full, so it was not synced.");
   const files: Manifest = {};
   const dirs: string[] = [];
   const excluded: string[] = [];
