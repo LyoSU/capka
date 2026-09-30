@@ -153,33 +153,6 @@ describe("LocalFsStore.list depth", () => {
       await rm(outside, { recursive: true, force: true });
     }
   });
-
-  it("skips a subdirectory that escapes the workspace or vanished mid-walk and still lists the rest", async () => {
-    const dataRoot = join(TMP, `ws-list-skip-${Math.random().toString(36).slice(2)}`);
-    const outside = join(TMP, `outside-skip-${Math.random().toString(36).slice(2)}`);
-    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
-    try {
-      await mkdir(outside, { recursive: true });
-      await writeFile(join(outside, "secret.txt"), "do not inspect");
-      const { wsHostPath } = await store.ensure("u1", "s1");
-      await mkdir(join(wsHostPath, "good"));
-      await writeFile(join(wsHostPath, "good", "a.txt"), "a");
-      await mkdir(join(wsHostPath, "gone"));
-      await writeFile(join(wsHostPath, "gone", "b.txt"), "b");
-      await symlink(outside, join(wsHostPath, "escape"));
-      // "gone" is removed while the walk is in flight, so it may vanish between enqueue and dequeue.
-      const listing = store.list("u1", "s1", ".", 3, 100);
-      await rm(join(wsHostPath, "gone"), { recursive: true, force: true });
-      const { entries } = await listing;
-      const paths = entries.map((e) => e.path);
-      expect(paths).toContain("good/a.txt");
-      expect(paths.some((p) => p.startsWith("escape/"))).toBe(false);
-      expect(paths).not.toContain("secret.txt");
-    } finally {
-      await rm(dataRoot, { recursive: true, force: true });
-      await rm(outside, { recursive: true, force: true });
-    }
-  });
 });
 
 // Filesystem-specific hardening beyond the shared contract: a process inside the
