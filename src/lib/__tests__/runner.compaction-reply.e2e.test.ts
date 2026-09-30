@@ -16,10 +16,15 @@ import type { ModelMessage } from "ai";
 const REPLY = "There are forty-two active suppliers.";
 const FIRST_HALF = "Which quarter did you mean?";
 const compacted: ModelMessage[][] = [];
+// The providerOptions each call was handed, in step with `compacted`.
+const compactOpts: unknown[] = [];
+// Read per turn, so one suite can run the same mock model as two providers.
+let provider = "mock";
 vi.mock("@/lib/chat/context/compactor", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chat/context/compactor")>()),
-  compactConversation: async (_m: unknown, _s: unknown, msgs: ModelMessage[]) => {
+  compactConversation: async (_m: unknown, _s: unknown, msgs: ModelMessage[], _t: unknown, _u: unknown, opts: unknown) => {
     compacted.push(msgs);
+    compactOpts.push(opts);
     return null;
   },
 }));
@@ -44,7 +49,7 @@ vi.mock("@/lib/providers/resolve", () => ({
         }),
       }),
     }),
-    provider: "mock",
+    provider,
     modelId: "mock-model",
   }),
   resolveAuxTarget: async (_userId: string, turn: unknown) => turn,
@@ -65,11 +70,16 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
+import { contextBudget } from "../chat/context/budget";
+import { contextManagementOptions } from "../chat/context/provider-edits";
+import { getModelContextLength } from "../models/catalog";
+import { getMaxContextTokens } from "../settings";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "cmp-reply-user";
 const C1 = "cmp-reply-chat";
 const C2 = "cmp-reply-cont";
+const C3 = "cmp-reply-anth";
 
 async function runTask(id: string, chatId: string, payload: object) {
   // Written already-running rather than enqueued: the dev stack's own worker polls
@@ -95,12 +105,14 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'E','cmp-reply@test.local') ON CONFLICT DO NOTHING`, [U]);
     await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
     await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
-    for (const c of [C1, C2]) {
+    for (const c of [C1, C2, C3]) {
       await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [c, U]);
       await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [c]);
     }
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('cmp-u1',$1,'user','how many suppliers do we have?')`, [C1]);
     await pool.query(`UPDATE chats SET active_leaf_id='cmp-u1' WHERE id=$1`, [C1]);
+    await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('cmp-u3',$1,'user','how many suppliers do we have?')`, [C3]);
+    await pool.query(`UPDATE chats SET active_leaf_id='cmp-u3' WHERE id=$1`, [C3]);
     // A continuation: the assistant half that suspended on an `ask` is the leaf.
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('cmp-u2',$1,'user','report on suppliers')`, [C2]);
     await pool.query(
@@ -110,13 +122,13 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     await pool.query(`UPDATE chats SET active_leaf_id='cmp-a2' WHERE id=$1`, [C2]);
   });
   afterAll(async () => {
-    for (const c of [C1, C2]) {
+    for (const c of [C1, C2, C3]) {
       await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id=$1)`, [c]);
       await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [c]);
     }
     await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
     await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2)`, [C1, C2]);
+    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2,$3)`, [C1, C2, C3]);
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
   });
 
@@ -129,6 +141,8 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     const last = conversation.at(-1)!;
     expect(last.role).toBe("assistant");
     expect(JSON.stringify(last.content)).toContain(REPLY);
+    // A provider we clear for ourselves gets no server-side edit.
+    expect(compactOpts.at(-1)).toBeUndefined();
   }, 30_000);
 
   it("on a continuation, includes the whole reply once — not its first half twice", async () => {
@@ -137,5 +151,19 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     expect(text).toContain(REPLY);
     expect(text.split(FIRST_HALF).length - 1).toBe(1);
     expect(msgs.at(-1)!.role).toBe("assistant");
+  }, 30_000);
+
+  it("hands an Anthropic compaction the live turn's server-side edit, sized to the same window", async () => {
+    provider = "anthropic";
+    try {
+      await runTask("cmp-task-3", C3, { replyParentId: "cmp-u3" });
+    } finally {
+      provider = "mock";
+    }
+    // The window the runner sized the live edit against, read the way run-context reads it.
+    const limit = contextBudget({
+      usedTokens: 0, modelContextLength: await getModelContextLength("mock-model"), adminCap: (await getMaxContextTokens()) || null,
+    }).effectiveLimit;
+    expect(compactOpts.at(-1)).toEqual(contextManagementOptions("anthropic", limit));
   }, 30_000);
 });

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
-import { buildCompactionMessages, compactConversation, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
-import { contextManagementOptions } from "@/lib/chat/context/provider-edits";
+import { buildCompactionMessages, compactConversation, compactionInput, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
 import { buildResumeMessages } from "@/lib/tasks/resume";
-import { estimatePromptTokens } from "@/lib/chat/context/step-control";
+import { armPruneBoundary, estimatePromptTokens, pruneTurnToolTraffic } from "@/lib/chat/context/step-control";
+import { contextManagementOptions, toolClearTrigger } from "@/lib/chat/context/provider-edits";
 import { DEFAULT_CONTEXT_LENGTH, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { CLEARED_TOOL_OUTPUT } from "@/lib/chat/context/tool-clearing";
 import type { StoredPart } from "@/lib/chat/contracts";
@@ -99,6 +99,60 @@ describe("compactionReply", () => {
     const folded = (await compactionReply("m", parts, [], true)).at(-1)!;
     expect(JSON.stringify(folded.content)).not.toContain('"type":"reasoning"');
     expect(JSON.stringify(folded.content)).toContain("The user wants metric.");
+  });
+});
+
+describe("compactionInput", () => {
+  const reads = (prefix: string, n: number, body: string): StoredPart[] => [
+    ...Array.from({ length: n }, (_, i): StoredPart[] => [
+      { type: "tool-call", id: `${prefix}${i}`, name: "read_file", input: { path: `${prefix}${i}.csv` } },
+      { type: "tool-result", id: `${prefix}${i}`, name: "read_file", output: body },
+    ]).flat(),
+    { type: "text", text: "Done." },
+  ];
+
+  it("sheds the history the mid-turn prune shed, so the request fits the window it was measured against", async () => {
+    // A 32k local model. The previous turn read two files and ended just under the
+    // clear trigger, so this turn's history was built with every body intact; this
+    // turn then read four more, the prune armed and cut into that history too.
+    const window = 32_768;
+    const old = "o".repeat(20_000);
+    const fresh = "n".repeat(22_000);
+    const system: ModelMessage[] = [{ role: "system", content: "s".repeat(9_000) }];
+    const history: ModelMessage[] = [
+      { role: "user", content: "read p0 and p1" },
+      ...(await buildResumeMessages("p", reads("p", 2, old))).slice(0, -1),
+      { role: "user", content: "now read c0..c3" },
+    ];
+    // Control: the history really was under the trigger, so nothing cleared it at
+    // turn start, and the live prompt the budget measured is the PRUNED one.
+    expect(estimatePromptTokens([...system, ...history])).toBeLessThan(toolClearTrigger(window));
+    const turn: ModelMessage[] = Array.from({ length: 4 }, (_, i): ModelMessage[] => [
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: `c${i}`, toolName: "read_file", input: { path: `c${i}.csv` } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: `c${i}`, toolName: "read_file", output: { type: "text", value: fresh } }] },
+    ]).flat();
+    const live = [...system, ...history, ...turn];
+    const cut = armPruneBoundary({
+      triggerAt: toolClearTrigger(window), boundary: 0, lastStepContextTokens: estimatePromptTokens(live),
+      messageCount: live.length, stepNumber: 4,
+    });
+    expect(estimatePromptTokens(pruneTurnToolTraffic(live, cut))).toBeGreaterThanOrEqual(window * COMPACT_THRESHOLD);
+
+    const reply = await compactionReply("m", reads("c", 4, fresh), [], false);
+    // The finding: history + reply replays the bodies the prune shed, past the window.
+    expect(estimatePromptTokens([...system, ...compactionInput(history, reply, false)])).toBeGreaterThan(window);
+    const input = compactionInput(history, reply, true);
+    expect(estimatePromptTokens([...system, ...input])).toBeLessThan(window);
+    const text = JSON.stringify(input);
+    expect(text).not.toContain(old);
+    expect(text.split(fresh).length - 1).toBe(3);
+    expect(text).toContain("Done.");
+  });
+
+  it("leaves the list alone when the prune never armed", async () => {
+    const history: ModelMessage[] = [{ role: "user", content: "q" }];
+    const reply = await compactionReply("m", reads("c", 4, "body"), [], false);
+    expect(compactionInput(history, reply, false)).toEqual([...history, ...reply]);
   });
 });
 

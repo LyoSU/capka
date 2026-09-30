@@ -6,7 +6,7 @@ import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { AUX_TIMEOUT_MS } from "./aux";
 import { buildModelContext } from "./build";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
-import { foldReasoningIntoText } from "./step-control";
+import { foldReasoningIntoText, pruneTurnToolTraffic } from "./step-control";
 import { isReasoningEchoRejectedError } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
@@ -40,8 +40,8 @@ export const COMPACTION_INSTRUCTION = [
 /**
  * Assemble the request for a compaction turn: the SAME system + history prefix
  * the main turn just used (so the prompt cache hits), followed by the reply that
- * turn wrote (compactionReply, appended to `modelMessages` by the caller), with
- * the compaction instruction appended as the trailing user message.
+ * turn wrote (see compactionInput), with the compaction instruction appended as
+ * the trailing user message.
  */
 export function buildCompactionMessages(
   systemMessages: ModelMessage[],
@@ -81,6 +81,27 @@ export async function compactionReply(
   // Laundered at the SDK boundary exactly as buildResumeMessages does.
   const msgs = await convertToModelMessages(sealOrphanToolCalls(toUIMessages(expandSteers(rows))) as never);
   return reasoningStripped ? foldReasoningIntoText(msgs) : msgs;
+}
+
+/**
+ * What the compaction request summarizes: the history, then the reply.
+ *
+ * On a provider we prune for, the live turn's mid-loop prune (pruneTurnToolTraffic)
+ * cuts across the WHOLE prompt once it arms — the history's tool bodies go with the
+ * turn's own — and `shouldCompact` measured that result. `history` was built at turn
+ * start, before any of it, so the request is cut the same way (`prunedMidTurn`) or it
+ * replays every body the prune shed and overflows the window it was sized against.
+ * The cut clears the history's tool bodies as the live one did, so that prefix can
+ * still hit the cache; when the prune never armed, the list is left alone and the
+ * history goes out byte for byte as the turn sent it.
+ */
+export function compactionInput(history: ModelMessage[], reply: ModelMessage[], prunedMidTurn: boolean): ModelMessage[] {
+  const msgs = [...history, ...reply];
+  // Cut at the reply, not at the live cut's "last N messages": the rebuilt reply is one
+  // assistant row, not a message per step, so counting messages from the end reaches
+  // back into the history and keeps the newest bodies the live cut shed. The reply
+  // already kept its own newest bodies (compactionReply); the history's are all older.
+  return prunedMidTurn ? pruneTurnToolTraffic(msgs, history.length) : msgs;
 }
 
 /**

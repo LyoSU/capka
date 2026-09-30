@@ -28,7 +28,7 @@ import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
-import { compactConversation, compactionReply } from "@/lib/chat/context/compactor";
+import { compactConversation, compactionInput, compactionReply } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
 import { resolveAuxTarget } from "@/lib/providers/resolve";
 import { auxGenerate } from "@/lib/chat/context/aux";
@@ -2637,12 +2637,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             if (reasoningStripped) history = foldReasoningIntoText(history);
             markCacheTail(history); // fresh objects — re-mark the cache tail
           }
-          // The history keeps every tool body on a provider that clears server-side, and
-          // `shouldCompact` measured the size AFTER that clearing — so the request needs
-          // the same edit or it replays what the live turn shed and overflows. Without
-          // the thinking edit: compaction runs with thinking off.
-          return compactConversation(model, systemMessages, [...history, ...reply], sourceTrust, auxUsageRecorder("compaction"),
-            contextManagementOptions(provider, effectiveLimit));
+          // `shouldCompact` measured the prompt AFTER the turn shed tool bodies, and the
+          // history still carries them — on a provider that clears server-side, and on
+          // one we prune for once the mid-turn prune armed (it cuts into the history
+          // too). So the request is shed the same way, the edit or the cut, or it replays
+          // what the live turn shed and overflows. Without the thinking edit: compaction
+          // runs with thinking off.
+          return compactConversation(model, systemMessages, compactionInput(history, reply, pruneArmedEarlier), sourceTrust,
+            auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit));
         })()
           .then(async (result) => {
             if (!result) return;
