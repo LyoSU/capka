@@ -1336,7 +1336,7 @@ export async function findCurrentHead(
   allowedSpaceIds: string[] | undefined,
   ex: Ex = db,
 ): Promise<ClaimHead | null> {
-  // `inArray` with an empty list yields `false` — "no spaces" reads as "nothing is
+  // `inIds` with an empty list yields `false` — "no spaces" reads as "nothing is
   // visible", never as "everything".
   const scope = allowedSpaceIds ? inIds(vaultClaims.spaceId, allowedSpaceIds) : undefined;
   const select = (where: ReturnType<typeof eq>) =>
