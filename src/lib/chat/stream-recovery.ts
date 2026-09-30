@@ -14,8 +14,9 @@ import { planGapDrain } from "./stream-reconcile";
  *     the agent kept working. So: fire on the LEADING edge, and space retries from
  *     the last reload rather than from the last event.
  *
- *  2. CONVERGE. The snapshot a reload returns is up to a second stale (the runner
- *     persists ~1/s while it publishes ~10/s), so adopting it alone lands the
+ *  2. CONVERGE. The snapshot a reload returns is up to a second or two stale (the
+ *     runner persists every 1-2s, longer for a large reply, while it publishes
+ *     ~10/s), so adopting it alone lands the
  *     client straight back in a gap. So: hold the events we can't apply yet and
  *     replay the ones the snapshot doesn't cover.
  *
