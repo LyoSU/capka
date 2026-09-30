@@ -259,7 +259,14 @@ export const GET = apiHandler(async (req: Request) => {
 
   // The visible conversation is the active branch (root → active leaf), with
   // each node carrying its "‹ i/N ›" sibling position for the version switcher.
-  const path = await loadActivePath(chatId, (chat.activeLeafId as string | null) ?? null);
+  // `messageId` asks for one finished turn onward instead of the whole branch — what
+  // a client already holding the rest needs after `task:finish`. An empty answer
+  // means that message is not on the active branch, and the client reloads in full.
+  const path = await loadActivePath(
+    chatId,
+    (chat.activeLeafId as string | null) ?? null,
+    searchParams.get("messageId") ?? undefined,
+  );
   const rows = path.map((p) => ({ ...p.node, siblingIndex: p.siblingIndex, siblingCount: p.siblingCount }));
 
   // What each turn saved to memory, for the "saved to memory" notice. One extra read for

@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
@@ -190,9 +190,45 @@ async function loadMessages(chatId: string): Promise<MessageRow[]> {
   return db.select().from(messages).where(eq(messages.chatId, chatId));
 }
 
-/** The visible conversation for a chat, root → active leaf, with sibling info. */
-export async function loadActivePath(chatId: string, activeLeafId: string | null): Promise<PathRow[]> {
-  return activePath(await loadMessages(chatId), activeLeafId);
+/** Just the columns the graph math needs, for every message of a chat. A full row
+ *  carries every tool output the turn produced, and most of a branched chat's rows
+ *  are not on the path being rendered. */
+async function loadSkeleton(chatId: string) {
+  return db
+    .select({ id: messages.id, parentId: messages.parentId, createdAt: messages.createdAt, role: messages.role })
+    .from(messages)
+    .where(eq(messages.chatId, chatId));
+}
+
+/**
+ * The path from the start of `messageId`'s turn (the run of user messages it
+ * answers) down to the active leaf, or [] when `messageId` is not on the path.
+ * What a client that already holds the conversation up to that turn needs to catch
+ * up after it finished — including a follow-up queued behind it.
+ */
+export function turnSuffix<T extends TreeNode & { role: string }>(path: PathEntry<T>[], messageId: string): PathEntry<T>[] {
+  const i = path.findIndex((p) => p.node.id === messageId);
+  if (i === -1) return [];
+  let start = i;
+  while (start > 0 && path[start - 1].node.role === "user") start--;
+  return path.slice(start);
+}
+
+/** The visible conversation for a chat, root → active leaf, with sibling info.
+ *  With `turnOf`, only that turn onward (see `turnSuffix`). Full rows are read for
+ *  the returned entries alone. */
+export async function loadActivePath(chatId: string, activeLeafId: string | null, turnOf?: string): Promise<PathRow[]> {
+  let path = activePath(await loadSkeleton(chatId), activeLeafId);
+  if (turnOf !== undefined) path = turnSuffix(path, turnOf);
+  if (path.length === 0) return [];
+  const full = new Map(
+    (await db.select().from(messages).where(and(eq(messages.chatId, chatId), inArray(messages.id, path.map((p) => p.node.id)))))
+      .map((r) => [r.id, r]),
+  );
+  return path.flatMap((p) => {
+    const node = full.get(p.node.id);
+    return node ? [{ ...p, node }] : [];
+  });
 }
 
 /**
@@ -224,7 +260,7 @@ export async function switchSibling(
   messageId: string,
   direction: "prev" | "next",
 ): Promise<string | null> {
-  const rows = await loadMessages(chatId);
+  const rows = await loadSkeleton(chatId);
   const target = siblingId(rows, messageId, direction);
   if (!target) return null;
   const leafId = descendToLeaf(rows, target);
@@ -321,7 +357,7 @@ export async function cloneSharedChat(opts: {
     .limit(1);
   if (!source || !isShared(source.visibility)) return null;
 
-  const path = activePath(await loadMessages(source.id), source.activeLeafId ?? null);
+  const path = await loadActivePath(source.id, source.activeLeafId ?? null);
   const newChatId = nanoid();
   const t = await getTranslations("chat");
   const title = `${source.title ?? "Chat"} ${t("copySuffix")}`;

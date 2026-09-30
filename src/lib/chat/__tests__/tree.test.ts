@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, siblingId, type TreeNode } from "../tree";
+import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, siblingId, turnSuffix, type TreeNode } from "../tree";
 
 // Pure graph tests — no DB, so they run in the normal suite. `createdAt`
 // increments per node to give a deterministic sibling order.
@@ -122,5 +122,33 @@ describe("copied and imported rows carry the taint mark", () => {
     expect(rows[0].parentId).toBeNull();
     expect(rows[1].parentId).toBe(rows[0].id);
     expect(rows[1].createdAt.getTime()).toBeGreaterThan(rows[0].createdAt.getTime());
+  });
+});
+
+describe("turnSuffix — one finished turn onward", () => {
+  const r = (id: string, parentId: string | null, role: string) => ({ ...n(id, parentId), role });
+
+  it("starts at the run of user messages the reply answers and runs to the leaf", () => {
+    // u2 and u3 folded into one turn answered by a2; u4 was queued behind it.
+    const rows = [
+      r("u1", null, "user"), r("a1", "u1", "assistant"),
+      r("u2", "a1", "user"), r("u3", "u2", "user"), r("a2", "u3", "assistant"),
+      r("u4", "a2", "user"),
+    ];
+    const path = activePath(rows, "u4");
+    expect(turnSuffix(path, "a2").map((p) => p.node.id)).toEqual(["u2", "u3", "a2", "u4"]);
+    // The first turn has nothing before it to leave out.
+    expect(turnSuffix(path, "a1").map((p) => p.node.id)).toEqual(["u1", "a1", "u2", "u3", "a2", "u4"]);
+  });
+
+  it("keeps the sibling position a regenerate gave the reply", () => {
+    const rows = [r("u1", null, "user"), r("a1", "u1", "assistant"), r("a1b", "u1", "assistant")];
+    const tail = turnSuffix(activePath(rows, "a1b"), "a1b");
+    expect(tail.map((p) => [p.node.id, p.siblingIndex, p.siblingCount])).toEqual([["u1", 0, 1], ["a1b", 1, 2]]);
+  });
+
+  it("is empty for a message off the active branch", () => {
+    const rows = [r("u1", null, "user"), r("a1", "u1", "assistant"), r("a1b", "u1", "assistant")];
+    expect(turnSuffix(activePath(rows, "a1b"), "a1")).toEqual([]);
   });
 });

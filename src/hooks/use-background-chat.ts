@@ -172,6 +172,41 @@ export function useBackgroundChat({
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // ── Catch up on one finished turn ──────────────────────────
+  // A finished turn only changes its own rows (plus whatever got queued behind it),
+  // so re-reading the whole branch — every earlier reply with every tool output —
+  // after each one is wasted. Read that turn onward and splice it in where our copy
+  // has it. Whatever the splice can't vouch for falls back to the full reload, which
+  // owns those cases: a turn this tab never saw begin (Telegram, another tab, a
+  // dropped task:start), a branch switched elsewhere, a follow-up already streaming
+  // (its seq cursor is seeded only by loadHistory).
+  const refreshTurn = useCallback((messageId: string | undefined) => {
+    if (!messageId) return loadHistory();
+    return fetch(`/api/chat?chatId=${chatId}&messageId=${encodeURIComponent(messageId)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<Message[]>) : null))
+      .then((tail) => {
+        if (
+          !tail?.length
+          || !msgRef.current.some((m) => m.id === tail[0].id)
+          || tail.some((m) => (m.metadata as { taskStatus?: string } | undefined)?.taskStatus === "running")
+        ) return loadHistory();
+        pendingRef.current = pendingStillUnknown(tail, pendingRef.current);
+        const ids = new Set(tail.map((m) => m.id));
+        setMessages((prev) => {
+          const at = prev.findIndex((m) => m.id === tail[0].id);
+          if (at === -1) return prev;
+          // Past the turn, keep only what the server can't know yet, in place: a
+          // send still mid-POST, and a reply whose task:start beat this response.
+          const live = prev.slice(at).filter((m) =>
+            !ids.has(m.id) && (appliedSeqRef.current.has(m.id) || pendingRef.current.some((p) => p.id === m.id)),
+          );
+          return mergePendingMessages([...prev.slice(0, at), ...tail, ...live], pendingRef.current);
+        });
+        setError(null);
+      })
+      .catch(() => loadHistory());
+  }, [chatId, loadHistory]);
+
   // ── Check for running task on mount (reconnection) ─────────
   /** Re-read the chat's live turn and whatever is queued behind it. Returns the
    *  turn so the caller can adopt it; `queuedTurn` is state because it changes on
@@ -463,8 +498,8 @@ export function useBackgroundChat({
           setStatus("idle");
           setTaskId(null);
           setTaskInfo({ startedAt: 0, currentTool: null, retrying: null, phase: null, lastEventAt: 0 });
-          // Stop tracking this reply's seq — the turn is done; loadHistory
-          // below reloads the final, authoritative content. Drop anything still
+          // Stop tracking this reply's seq — the turn is done; the reload
+          // below brings back the final, authoritative content. Drop anything still
           // held for this reply too: with its cursor gone, a later drain would
           // read "nothing applied yet" and replay those deltas onto the finished
           // message, duplicating text the reload already brought back in full.
@@ -476,10 +511,10 @@ export function useBackgroundChat({
           // has already persisted it on the message row (taskStatus:"failed"
           // + error), so the reload below brings it back as the message's own
           // durable ErrorNotice. Setting `error` would only flash the banner
-          // for the one render before loadHistory() clears it again — an
+          // for the one render before the reload clears it again — an
           // unreadable red blink above the composer. The banner is reserved
           // for load errors (loadHistory's own catch).
-          loadHistory();
+          refreshTurn(data.messageId);
           // A follow-up may have been queued behind this turn and be next in line
           // (or, if the user dismissed it, be gone) — either way this is stale now.
           void syncTask();
@@ -540,7 +575,7 @@ export function useBackgroundChat({
           // task:finish, so the reload that finish triggered ran too early to see it —
           // this is the second read, and the notice appears in the turn it belongs to
           // instead of on the next visit.
-          loadHistory();
+          refreshTurn(data.messageId);
           break;
         }
       }
@@ -630,7 +665,7 @@ export function useBackgroundChat({
       pacer.dispose();
       unsubscribe();
     };
-  }, [chatId, loadHistory, syncTask]);
+  }, [chatId, loadHistory, refreshTurn, syncTask]);
 
   // ── Polling fallback — only really needed when SSE is down ──
   useEffect(() => {
@@ -655,7 +690,9 @@ export function useBackgroundChat({
           if (!task || task.status !== "running") {
             setStatus("idle");
             setTaskId(null);
-            loadHistory();
+            // The reply we were showing, or — if its task:start never reached us —
+            // the one before it, whose turn onward still covers the missed one.
+            refreshTurn(msgRef.current.findLast((m) => m.role === "assistant")?.id);
             clearInterval(poll);
           }
         })
@@ -663,7 +700,7 @@ export function useBackgroundChat({
     }, 3000);
 
     return () => clearInterval(poll);
-  }, [status, chatId, loadHistory]);
+  }, [status, chatId, refreshTurn]);
 
   // ── Ensure chat row exists in DB (needed before file upload) ──
   const ensureChatRef = useRef(false);
