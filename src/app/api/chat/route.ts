@@ -28,7 +28,7 @@ export const POST = apiHandler(async (req: Request) => {
   const rl = take(`chat:${userId}`);
   if (!rl.ok) {
     return Response.json(
-      { error: "Too many messages — please slow down." },
+      { error: "Too many messages — please slow down.", code: "RATE_LIMITED" },
       { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } },
     );
   }
@@ -119,7 +119,7 @@ export const POST = apiHandler(async (req: Request) => {
   // An empty send is a regenerate, and a chat with no row yet has nothing to
   // re-answer — running it would bill a reply to the system prompt alone.
   if (!text && !existingChat) {
-    return Response.json({ error: "Nothing to send." }, { status: 400 });
+    return Response.json({ error: "Nothing to send.", code: "NOTHING_TO_SEND" }, { status: 400 });
   }
   // Parent linkage is server-authoritative — the client sends no history at all.
   // A normal send (parentId absent) anchors to the chat's own leaf; an edit passes
@@ -151,6 +151,14 @@ export const POST = apiHandler(async (req: Request) => {
     if (!text && parent.role !== "user") {
       return Response.json({ error: "This reply can't be regenerated.", code: "CANNOT_REGENERATE" }, { status: 422 });
     }
+  }
+  // A brand-new chat's first message can't reuse an id another row already holds.
+  // The check after the message insert below refuses that too and stays the
+  // race-free authority, but it runs after the chat row is written, so on its own it
+  // would leave an empty "New Chat" behind.
+  if (!existingChat && text && userMessageId) {
+    const [taken] = await db.select({ id: messages.id }).from(messages).where(eq(messages.id, userMessageId)).limit(1);
+    if (taken) return Response.json({ error: "Message id already in use.", code: "MESSAGE_ID_IN_USE" }, { status: 409 });
   }
 
   // Budget gate: reserve an estimated hold for this turn up front, atomically.
@@ -232,7 +240,7 @@ export const POST = apiHandler(async (req: Request) => {
         .from(messages)
         .where(and(eq(messages.id, newUserId), eq(messages.chatId, chatId), eq(messages.role, "user")))
         .limit(1);
-      if (!own) return Response.json({ error: "Message id already in use." }, { status: 409 });
+      if (!own) return Response.json({ error: "Message id already in use.", code: "MESSAGE_ID_IN_USE" }, { status: 409 });
     }
     await db.update(chats).set({
       ...(isNewChat ? { title: text.slice(0, 100) } : {}),

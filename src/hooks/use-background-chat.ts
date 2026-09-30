@@ -39,6 +39,26 @@ export type QueuedTurn = { id: string; createdAt: string | null; platform: strin
  *  when there is one), plus its pending follow-up. */
 type TaskProbe = { id: string; status: string; error: string | null; queued: QueuedTurn | null };
 
+/** The chat.hook line a coded /api/chat refusal reads as. Budget and flood share
+ *  the 429 status, so the code is what tells them apart. */
+const REFUSALS: Record<string, string> = {
+  BUDGET_EXCEEDED: "budgetReached",
+  RATE_LIMITED: "rateLimited",
+  MESSAGE_TOO_LONG: "messageTooLong",
+  CANNOT_REGENERATE: "cannotRegenerate",
+  NOTHING_TO_SEND: "nothingToSend",
+  MESSAGE_ID_IN_USE: "messageIdInUse",
+};
+
+/** Turn a refused send or re-run into the error its caller throws, in the user's language. */
+async function refusal(res: Response, t: ReturnType<typeof useTranslations>): Promise<Error> {
+  const err = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+  const key = err?.code ? REFUSALS[err.code] : undefined;
+  if (key) return new Error(t(key));
+  if (res.status === 429) return new Error(t("rateLimited"));
+  return new Error(err?.error || t("requestFailed"));
+}
+
 // ── Hook ─────────────────────────────────────────────────────
 
 export function useBackgroundChat({
@@ -777,15 +797,7 @@ export function useBackgroundChat({
           }),
         });
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          // Budget exhaustion shares the 429 status with rate limiting — tell
-          // them apart by code so the user gets the right message.
-          if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
-          if (err?.code === "MESSAGE_TOO_LONG") throw new Error(t("messageTooLong"));
-          if (res.status === 429) throw new Error(t("rateLimited"));
-          throw new Error(err?.error || t("requestFailed"));
-        }
+        if (!res.ok) throw await refusal(res, t);
 
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
@@ -837,16 +849,7 @@ export function useBackgroundChat({
             attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
           }),
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          // Budget exhaustion shares the 429 status with rate limiting — tell
-          // them apart by code so the user gets the right message.
-          if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
-          if (err?.code === "MESSAGE_TOO_LONG") throw new Error(t("messageTooLong"));
-          if (err?.code === "CANNOT_REGENERATE") throw new Error(t("cannotRegenerate"));
-          if (res.status === 429) throw new Error(t("rateLimited"));
-          throw new Error(err?.error || t("requestFailed"));
-        }
+        if (!res.ok) throw await refusal(res, t);
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
       } catch (e) {

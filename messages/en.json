@@ -713,6 +713,8 @@
       "budgetReached": "Spending limit reached. Please contact your admin.",
       "messageTooLong": "This message is too long. Attach it as a file instead.",
       "cannotRegenerate": "This reply can't be regenerated. Send a new message instead.",
+      "nothingToSend": "There's nothing to send yet. Type a message first.",
+      "messageIdInUse": "This message couldn't be sent. Reload the page and try again.",
       "offline": "No connection. Check your internet and try again."
     },
     "citations": {

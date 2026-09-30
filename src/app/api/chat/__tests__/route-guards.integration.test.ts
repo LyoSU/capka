@@ -82,6 +82,7 @@ run("POST /api/chat guards against the real tables", () => {
     const res = await send({ chatId: "rg-mine", userMessage: "mine now?", userMessageId: "rg-foreign" });
 
     expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("MESSAGE_ID_IN_USE");
     expect(await leafOf("rg-mine")).toBe("rg-a2");
     expect(await q(`SELECT chat_id, content FROM messages WHERE id = 'rg-foreign'`, [])).toEqual([
       { chat_id: "rg-other", content: "their words" },
@@ -114,6 +115,7 @@ run("POST /api/chat guards against the real tables", () => {
     const res = await send({ chatId: "rg-new", userMessage: "" });
 
     expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("NOTHING_TO_SEND");
     expect(await q(`SELECT id FROM chats WHERE id = 'rg-new'`, [])).toEqual([]);
     expect(reserveBudget).not.toHaveBeenCalled();
     expect(enqueueTask).not.toHaveBeenCalled();
@@ -125,6 +127,23 @@ run("POST /api/chat guards against the real tables", () => {
     expect(res.status).toBe(409);
     expect(await q(`SELECT id FROM chats WHERE id = 'rg-new'`, [])).toEqual([]);
     expect(reserveBudget).not.toHaveBeenCalled();
+  });
+
+  it("refuses another chat's message id as a new chat's first message without writing the chat", async () => {
+    const res = await send({ chatId: "rg-new", userMessage: "hi", userMessageId: "rg-foreign" });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("MESSAGE_ID_IN_USE");
+    expect(await q(`SELECT id FROM chats WHERE id = 'rg-new'`, [])).toEqual([]);
+    expect(await q(`SELECT chat_id FROM messages WHERE id = 'rg-foreign'`, [])).toEqual([{ chat_id: "rg-other" }]);
+    expect(reserveBudget).not.toHaveBeenCalled();
+  });
+
+  it("still starts a new chat with a fresh message id", async () => {
+    const res = await send({ chatId: "rg-new", userMessage: "hi", userMessageId: "rg-new-u1" });
+
+    expect(res.status).toBe(200);
+    expect(await leafOf("rg-new")).toBe("rg-new-u1");
   });
 
   it("says a reply that answers another reply can't be regenerated", async () => {
