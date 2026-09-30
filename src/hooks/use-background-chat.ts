@@ -63,13 +63,15 @@ export const REFUSALS: Record<string, string> = {
 
 /** Turn a refused send or re-run into the error its caller throws, in the user's language. */
 export async function refusal(res: Response, t: ReturnType<typeof useTranslations>): Promise<Error> {
-  const err = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+  const err = (await res.json().catch(() => null)) as { code?: string } | null;
   const key = err?.code ? REFUSALS[err.code] : undefined;
   if (key) return new Error(t(key));
   // The proxy turns away a request with no session cookie before the route runs, uncoded.
   if (res.status === 401) return new Error(t("sessionEnded"));
   if (res.status === 429) return new Error(t("rateLimited"));
-  return new Error(err?.error || t("requestFailed"));
+  // Never the body's own `error`: that is English written for a log — a 500's "Internal
+  // server error", or the line behind a code this build does not know.
+  return new Error(t("requestFailed"));
 }
 
 // ── Hook ─────────────────────────────────────────────────────

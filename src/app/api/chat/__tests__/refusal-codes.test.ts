@@ -143,4 +143,10 @@ describe("refusal — what the composer shows for a refused send", () => {
   it("the proxy's uncoded 401 still reads as an ended session", async () => {
     expect(await shown(401, { error: "Unauthorized" })).toBe(uk.chat.hook.sessionEnded);
   });
+
+  it("a server error or a code this build does not know never shows the body's English", async () => {
+    expect(await shown(500, { error: "Internal server error" })).toBe(uk.chat.hook.requestFailed);
+    expect(await shown(400, { error: "Some future refusal.", code: "NOT_YET_KNOWN" })).toBe(uk.chat.hook.requestFailed);
+    expect(await shown(502)).toBe(uk.chat.hook.requestFailed); // no JSON body at all
+  });
 });
