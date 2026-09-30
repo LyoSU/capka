@@ -19,8 +19,9 @@ import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
  *    cache for everything after it.
  * 3. `volatile` — memories, workspace snapshot, just-attached files. Changes
  *    per run, so it is NOT a system message: the runner sends it after the
- *    conversation history, as the turn context following the latest user
- *    message, so churn invalidates neither the tiers above nor the history.
+ *    conversation history, as the turn context following the user's own words
+ *    in the latest user message (see wrapTurnContext), so churn invalidates
+ *    neither the tiers above nor the history.
  */
 export interface BuiltPrompt {
   stable: string;
@@ -261,6 +262,23 @@ This is the operator's FIRST message right after finishing setup. Warmly welcome
         : undefined,
     ]),
   };
+}
+
+/**
+ * The volatile tier plus this turn's attachment list, wrapped as the platform's own
+ * block. The runner sends it as a second part of the latest user message.
+ *
+ * Nearly every value in it is someone else's text: file and folder names are the
+ * sandbox's or a sender's to choose, a memory fact was written by a person or an
+ * agent, a secret's name by the user. A path can spell the closing tag (directory
+ * names split it across a `/`) and go on as text outside the block. Renaming the tag
+ * inside the body was a blocklist — a Unicode hyphen or a zero-width joiner spelled
+ * it past the rename, and a real `turn-context.md` came out renamed. So no `<` is
+ * left in the body at all: without one no tag opens or closes, whatever a name
+ * spells. `‹` keeps a path readable, and the platform's own text here has no `<`.
+ */
+export function wrapTurnContext(blocks: string[]): string {
+  return `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${blocks.join("\n\n").replaceAll("<", "‹")}\n</turn-context>`;
 }
 
 /**

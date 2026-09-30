@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { generateText, type ModelMessage } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   contextManagementOptions,
   mergeProviderOptions,
@@ -8,6 +11,7 @@ import {
   thinkingIsDeep,
   thinkingClearTrigger,
   markStepTail,
+  mergeUserRuns,
   toolClearTrigger,
   TOOL_CLEAR_TRIGGER_FRACTION,
   TOOL_CLEAR_TRIGGER_MAX,
@@ -308,5 +312,100 @@ describe("contextIsDeep", () => {
       turn({ contextTokens: 2_000 }),
     ];
     expect(contextIsDeep(path, LIMIT)).toBe(false);
+  });
+});
+
+describe("mergeUserRuns", () => {
+  const marker = { anthropic: { cacheControl: { type: "ephemeral" } } };
+  const CONTEXT = "<turn-context>\nworkspace: a.txt\n</turn-context>";
+  // Turn 1 as the runner sends it: the user's message carries the history breakpoint
+  // and the turn context follows. Turn 2 replays that message WITHOUT the context,
+  // marked as the previous turn's tail.
+  const turn1 = (): ModelMessage[] => [
+    { role: "system", content: "persona", providerOptions: marker },
+    { role: "user", content: [{ type: "text", text: "hello" }], providerOptions: marker },
+    { role: "user", content: CONTEXT },
+  ];
+  const turn2 = (): ModelMessage[] => [
+    { role: "system", content: "persona", providerOptions: marker },
+    { role: "user", content: [{ type: "text", text: "hello" }], providerOptions: marker },
+    { role: "assistant", content: "Noted." },
+    { role: "user", content: [{ type: "text", text: "and now?" }], providerOptions: marker },
+    { role: "user", content: CONTEXT },
+  ];
+
+  /** The request body a real provider package builds for `messages`. */
+  async function wire(provider: "anthropic" | "openai-compatible", messages: ModelMessage[]) {
+    let body: Record<string, unknown> | undefined;
+    const fetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      throw new Error("captured");
+    };
+    const model = provider === "anthropic"
+      ? createAnthropic({ apiKey: "k", fetch })("claude-sonnet-4-5")
+      : createOpenAICompatible({ name: "vllm", baseURL: "http://vllm.test/v1", fetch })("gemma");
+    await generateText({ model, messages, maxRetries: 0 }).catch(() => {});
+    return body as { system?: unknown; messages: { role: string; content: unknown }[] };
+  }
+  const roles = (msgs: { role: string }[]) => msgs.map((m) => m.role);
+  const consecutiveUsers = (msgs: { role: string }[]) =>
+    msgs.filter((m, i) => m.role === "user" && msgs[i - 1]?.role === "user").length;
+
+  it("folds the turn context into the user's message and keeps the breakpoint on the user's own part", () => {
+    const out = mergeUserRuns(turn1());
+    expect(roles(out)).toEqual(["system", "user"]);
+    const user = out[1] as { content: { text: string; providerOptions?: unknown }[]; providerOptions?: unknown };
+    expect(user.providerOptions).toBeUndefined();
+    expect(user.content.map((p) => p.text)).toEqual(["hello", CONTEXT]);
+    expect(user.content[0].providerOptions).toEqual(marker);
+    expect(user.content[1].providerOptions).toBeUndefined();
+  });
+
+  it("returns the list itself when nothing needs folding, and never mutates it", () => {
+    const alternating: ModelMessage[] = [{ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }];
+    expect(mergeUserRuns(alternating)).toBe(alternating);
+    const msgs = turn2();
+    const before = JSON.stringify(msgs);
+    mergeUserRuns(msgs);
+    expect(JSON.stringify(msgs)).toBe(before);
+  });
+
+  it("folds a run of three (context, then an effect note or a steer) in order", () => {
+    const out = mergeUserRuns([...turn1(), { role: "user", content: "already ran: save_row" }]);
+    expect(roles(out)).toEqual(["system", "user"]);
+    expect((out[1].content as { text: string }[]).map((p) => p.text)).toEqual(["hello", CONTEXT, "already ran: save_row"]);
+  });
+
+  it("puts the marker on the last part the SDK keeps, not on an empty text it drops", () => {
+    const out = mergeUserRuns([
+      { role: "user", content: [{ type: "file", data: "aGk=", mediaType: "image/png" }, { type: "text", text: "" }], providerOptions: marker },
+      { role: "user", content: CONTEXT },
+    ]);
+    const parts = out[0].content as { type: string; providerOptions?: unknown }[];
+    expect(parts[0].providerOptions).toEqual(marker);
+    expect(parts[1].providerOptions).toBeUndefined();
+  });
+
+  it("sends an OpenAI-compatible backend no two user messages in a row", async () => {
+    // Control: unfolded, the package sends the run as it is — the 400 on a strict template.
+    expect(consecutiveUsers((await wire("openai-compatible", turn2())).messages)).toBe(1);
+    const body = await wire("openai-compatible", mergeUserRuns(turn2()));
+    expect(roles(body.messages)).toEqual(["system", "user", "assistant", "user"]);
+    expect(body.messages.at(-1)!.content).toEqual([{ type: "text", text: "and now?" }, { type: "text", text: CONTEXT }]);
+  });
+
+  it("sends Anthropic the same request as before, so the next turn's prefix is still a cache hit", async () => {
+    const [t1, t2] = [await wire("anthropic", mergeUserRuns(turn1())), await wire("anthropic", mergeUserRuns(turn2()))];
+    // Anthropic folds a run itself, so folding first changes nothing on its wire…
+    expect(await wire("anthropic", turn2())).toEqual(t2);
+    // …and turn 2 replays turn 1 byte for byte up to and including the marked block
+    // on the user's own words; only the turn context after it is gone.
+    const first = (t1.messages[0].content as unknown[]);
+    expect(t2.system).toEqual(t1.system);
+    expect(t2.messages[0].content).toEqual(first.slice(0, 1));
+    expect(first[0]).toMatchObject({ text: "hello", cache_control: { type: "ephemeral" } });
+    expect(first[1]).toEqual({ type: "text", text: CONTEXT });
+    // Stable + previous tail + this tail: three, leaving the step tail the fourth.
+    expect(JSON.stringify(t2).match(/cache_control/g)).toHaveLength(3);
   });
 });

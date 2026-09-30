@@ -18,14 +18,14 @@ import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
 import { extractWorkspacePaths, selectTouchedFiles, type ToolWindow } from "@/lib/chat/artifacts";
-import { classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
+import { classifyFiles, findBlindModalities, wrapTurnContext } from "@/lib/chat/prompt";
 import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, thinkingIsDeep, markStepTail,
-  clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
+  mergeUserRuns, clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
 import { compactConversation, compactionInput, compactionReply } from "@/lib/chat/context/compactor";
@@ -588,8 +588,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     //     breakpoints (see markCacheTail) already close a prefix that contains it.
     //     The slot goes to the previous turn's tail instead.
     //  3. volatile — memories/workspace/files, per-run. NOT a system message: it
-    //     rides after the history as the turn context (see turnContextMessage),
-    //     so its churn never invalidates the cached history either.
+    //     rides after the user's own words as the turn context (see
+    //     turnContextMessage), so its churn never invalidates the cached history.
     // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
     const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
     // Every tier is conditional, INCLUDING stable: a project in raw-prompt mode with
@@ -819,8 +819,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // system prefix and re-bill the whole history at full input price on every
     // turn. The marker travels with the message OBJECT, so the compaction pass,
     // which reuses this array as its prefix, carries the same breakpoint. It sits
-    // on the latest user message and the turn context goes AFTER it, so the
-    // prefix it closes is exactly what the next turn replays.
+    // on the latest user message and the turn context goes AFTER it — folded into
+    // that message as a later part, with the marker kept on the user's own part
+    // (see mergeUserRuns) — so the prefix it closes is exactly what the next turn
+    // replays.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
     // Breakpoint budget (Anthropic max 4): stable + the previous turn's tail + this
     // + the moving step tail in prepareStep = 4 — don't add a fifth.
@@ -899,9 +901,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
       turnContext.push(block);
     }
-    // The volatile tier as ONE user message right after the latest user message.
-    // Providers cache by prefix, so anything that changes per run (a file written,
-    // a memory saved, this turn's attachments) placed before the history re-bills
+    // The volatile tier as ONE user message right after the latest user message,
+    // which mergeUserRuns then folds into that message as its last part: strict
+    // chat templates reject two user messages in a row. Providers cache by prefix,
+    // so anything that changes per run (a file written, a memory saved, this
+    // turn's attachments) placed before the history re-bills
     // the whole history on the next turn; here it sits past the history-tail
     // breakpoint, and the next turn and the compaction pass replay that prefix byte
     // for byte. A user message because Anthropic rejects a system message once the
@@ -911,12 +915,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // before the effect-ledger note (`effectNote`), which is meant to be read last.
     // Kept out of `modelMessages`, so nothing that looks up the user's last message
     // there (attachment stripping, native injection) can mistake this for it.
-    // The tag's name is rewritten in the body: a path (directory names can spell
-    // it across a `/`) or a memory fact must not be able to close the wrapper and
-    // go on as text outside it. Renamed, not deleted — deleting a tag nested inside
-    // another (`</turn-</turn-context>context>`) joins the halves into a new one.
     const turnContextMessage: ModelMessage | null = turnContext.length
-      ? { role: "user", content: `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${turnContext.join("\n\n").replace(/turn-context/gi, "turn_context")}\n</turn-context>` }
+      ? { role: "user", content: wrapTurnContext(turnContext) }
       : null;
     const withTurnContext = (msgs: ModelMessage[]) => {
       if (!turnContextMessage) return msgs;
@@ -1171,6 +1171,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // does expose explicit `prompt_cache_breakpoint` and
                 // `prompt_cache_options.ttl`, 1024-token minimum, if that stops holding.)
                 msgs = markStepTail(msgs, stepNumber, ephemeral);
+                // A steer or the view-file bridge right after another user message
+                // (the turn context at step 0, a steer before the bridge) is a run.
+                msgs = mergeUserRuns(msgs);
                 return {
                   ...stepSettings(stepNumber, 1 - (deadlineAt - Date.now()) / MAX_TASK_MS),
                   // The output-side twin of that wrap-up: a turn whose results have
@@ -1184,7 +1187,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               },
             }
           : {}),
-        messages: [...systemMessages, ...withTurnContext(modelMessages), ...resumeMessages],
+        messages: mergeUserRuns([...systemMessages, ...withTurnContext(modelMessages), ...resumeMessages]),
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
         abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),
@@ -2714,7 +2717,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // too). So the request is shed the same way, the edit or the cut, or it replays
           // what the live turn shed and overflows. Without the thinking edit: compaction
           // runs with thinking off.
-          return compactConversation(model, systemMessages, compactionInput(history, reply, pruneArmedEarlier), sourceTrust,
+          return compactConversation(model, systemMessages, mergeUserRuns(compactionInput(history, reply, pruneArmedEarlier)), sourceTrust,
             auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit));
         })()
           .then(async (result) => {

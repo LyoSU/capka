@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { tool } from "ai";
 import { z } from "zod";
+import { expectWireShape, type WireMsg } from "./wire-shape";
 
 /**
  * An approval continuation whose first half already ran a tool used to lose the
@@ -17,8 +18,11 @@ import { z } from "zod";
  * other way: the SDK runs an approval before the first model call, the restart threw
  * that attempt away, and the history still ended on the bare approval. So the
  * provider got the call with no result, after the write had landed.
+ *
+ * Every prompt on these roads also carries the turn context and the note in the
+ * user's own message, never as user messages of their own after it.
  */
-type Msg = { role: string; content: unknown };
+type Msg = WireMsg;
 const prompts: Msg[][] = [];
 // What the next provider call does instead of answering: an overflow is thrown (the
 // emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume), or a
@@ -73,6 +77,11 @@ vi.mock("@/lib/sandbox/tools", () => ({
   }),
 }));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
+// A workspace to list, so the turn context is on these prompts too.
+vi.mock("@/lib/sandbox/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sandbox/client")>()),
+  listFiles: async () => ({ entries: [{ path: "rows.csv", isDirectory: false }], truncated: false }),
+}));
 vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
   getOrCreateSpace: async () => "e2e-space",
@@ -167,6 +176,12 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     const note = prompt.findIndex((m) => m.role === "user" && JSON.stringify(m.content).includes("draft"));
     expect(note).toBeGreaterThan(-1);
     expect(note).toBeLessThan(prompt.findIndex((m) => m.role === "assistant"));
+    // …folded, with the turn context, into the user's own message.
+    const folded = (prompt[note].content as { text?: string }[]).map((p) => p.text ?? "");
+    expect(folded[0]).toBe("save the row");
+    expect(folded[1]).toMatch(/^<turn-context>[\s\S]*rows\.csv/);
+    expect(folded.at(-1)).toContain("draft");
+    for (const p of prompts) expectWireShape(p);
   }, 30_000);
 
   // Three restart roads: the overflow trim rebuilds the history from the settled rows,
@@ -183,6 +198,7 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     expect(writes).toEqual([{ row: "final" }]);
     // Control: the first attempt really failed and was retried.
     expect(prompts).toHaveLength(2);
+    for (const p of prompts) expectWireShape(p);
     const prompt = prompts[1];
     expect(count(prompt, "assistant", "tool-call", "c2")).toBe(1);
     expect(count(prompt, "tool", "tool-result", "c2")).toBe(1);

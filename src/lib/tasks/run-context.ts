@@ -107,6 +107,27 @@ export const replyParentOf = (payload: TaskPayload): string | null =>
   payload.replyParentId !== undefined ? payload.replyParentId : (payload.uiMessages?.at(-1)?.id ?? null);
 
 /**
+ * The workspace listing the turn context carries: at most 50 paths, the shallowest
+ * first. A few top-level names say more about a workspace than one folder's deep
+ * contents, and the pick has to be the same every turn — this tier rides every
+ * request. Ties go alphabetically, and the kept paths are shown in path order so a
+ * folder sits above its contents. Capka's own `.capka/` is left out, as the file
+ * browser and the artifact tiers leave it out. Each path is JSON-quoted: a file name
+ * is the sandbox's to choose, and a raw one carrying a newline and a backtick fence
+ * would close the block it is listed in and continue as prompt text. A listing cut
+ * short says so without pretending to know how many it never saw.
+ */
+export function workspaceSnapshotText(entries: { path: string; isDirectory: boolean }[], truncated: boolean): string | undefined {
+  const paths = [...new Set(entries.filter((e) => !isInternalPath(e.path)).map((e) => (e.isDirectory ? `${e.path}/` : e.path)))];
+  if (!paths.length) return undefined;
+  const depth = (p: string) => p.split("/").filter(Boolean).length;
+  const kept = paths.sort().sort((a, b) => depth(a) - depth(b)).slice(0, 50).sort();
+  const rest = paths.length - kept.length;
+  return kept.map((p) => JSON.stringify(p)).join("\n")
+    + (truncated ? "\n… and more (this listing is incomplete)" : rest ? `\n… and ${rest} more` : "");
+}
+
+/**
  * Re-resolve everything needed to run a task from its persisted payload — the
  * "run context builder". `sessionKey` is the project (shared folder) or the chat
  * itself (see workspaceSessionKey). Memory is scoped to two vault spaces: the
@@ -433,24 +454,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     if (caps.sandbox) {
       try {
         const { listFiles } = await import("@/lib/sandbox/client");
-        // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
-        const { entries, truncated } = await listFiles(sessionKey, ".", userId, 3);
-        // Sorted, because readdir order is whatever the filesystem hands back and the
-        // cut below would otherwise keep an arbitrary 50 — though only over what the
-        // listing returned, which stops at its own entry limit in walk order, so a
-        // cut-short listing says "more" without pretending to know how many. Capka's
-        // own `.capka/` is left out, as the file browser and the artifact tiers leave
-        // it out. And each path is JSON-quoted: a file name is the sandbox's to
-        // choose, and a raw one carrying a newline and a backtick fence would close
-        // the block it is listed in and continue as prompt text.
-        const paths = (entries ?? [])
-          .filter((e) => !isInternalPath(e.path))
-          .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
-          .sort();
-        if (paths.length) {
-          workspaceSnapshot = paths.slice(0, 50).map((p) => JSON.stringify(p)).join("\n")
-            + (truncated ? "\n… and more" : paths.length > 50 ? `\n… and ${paths.length - 50} more` : "");
-        }
+        // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no
+        // container). That walk is depth-first and stops at the controller's entry
+        // limit, so one big folder met early can spend it all before the rest of the
+        // top level is reached — which is why the top level is listed on its own too.
+        const [top, tree] = await Promise.all([listFiles(sessionKey, ".", userId), listFiles(sessionKey, ".", userId, 3)]);
+        workspaceSnapshot = workspaceSnapshotText([...(top.entries ?? []), ...(tree.entries ?? [])], !!(top.truncated || tree.truncated));
       } catch { /* no workspace yet */ }
     }
 

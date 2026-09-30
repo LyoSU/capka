@@ -13,6 +13,7 @@
  * identical regardless of provider.
  */
 
+import type { ModelMessage, UserModelMessage } from "ai";
 import type { MessageMeta } from "@/lib/chat/contracts";
 
 /**
@@ -237,6 +238,44 @@ export function markStepTail<T extends { providerOptions?: Record<string, Record
   // The cast is the price of staying generic over the SDK's message union: the
   // spread produces the same shape, TypeScript just can't say so for an open T.
   return [...messages.slice(0, -1), { ...tail, providerOptions: { ...tail.providerOptions, ...marker } } as T];
+}
+
+/**
+ * One user message per run of consecutive ones: the user's words and the turn
+ * context after them, an effect note, a steer, follow-ups batched into one turn.
+ *
+ * Strict chat templates (vLLM/Jinja for Gemma or Mistral — self-hosted backends an
+ * OpenAI-compatible provider reaches) reject two user messages in a row with a 400,
+ * and @ai-sdk/openai-compatible sends each message as it is. Anthropic's provider
+ * already folds such a run into one user turn, so there this is the same request,
+ * provided each breakpoint stays on the block it closed: a message-level marker
+ * lands on that message's LAST part, and once folded the last part is someone
+ * else's. So the marker moves onto the part it meant — the last one the SDK keeps,
+ * which drops an empty text part before any provider sees it. That is what keeps
+ * the next turn a cache hit: it replays the user's message without the turn
+ * context, and the breakpoint on the user's own part still closes the same bytes.
+ *
+ * Returns `messages` itself when there is nothing to fold.
+ */
+export function mergeUserRuns(messages: ModelMessage[]): ModelMessage[] {
+  if (!messages.some((m, i) => m.role === "user" && messages[i - 1]?.role === "user")) return messages;
+  const out: ModelMessage[] = [];
+  for (const m of messages) {
+    const prev = out.at(-1);
+    if (m.role === "user" && prev?.role === "user") {
+      out[out.length - 1] = { role: "user", content: [...ownParts(prev), ...ownParts(m)] };
+    } else {
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+function ownParts(m: UserModelMessage): Exclude<UserModelMessage["content"], string> {
+  const parts = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
+  const at = parts.findLastIndex((p) => p.type !== "text" || p.text !== "");
+  if (!m.providerOptions || at < 0) return parts;
+  return parts.map((p, i) => (i === at ? { ...p, providerOptions: { ...m.providerOptions, ...p.providerOptions } } : p));
 }
 
 /** A provider-options object: a map of provider name → that provider's options. */
