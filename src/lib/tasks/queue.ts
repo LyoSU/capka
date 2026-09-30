@@ -587,7 +587,8 @@ const INTERRUPTED_METADATA_SQL = `CASE WHEN ${PRODUCED_WORK_SQL}
  * pending hold whose owning task is ALREADY terminal (completed/failed/cancelled
  * — e.g. a crash between finalizeTask and reconcileUsage left a completed task
  * holding a pending estimate forever, or releaseHold's DB delete failed and was
- * swallowed). This makes a leaked hold recoverable on the next sweep instead of
+ * swallowed), and any hour-old hold whose task row never existed or is gone.
+ * This makes a leaked hold recoverable on the next sweep instead of
  * permanent-until-30-days. Returns the reaped task rows so the caller notifies
  * connected clients.
  */
@@ -643,6 +644,21 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
            AND u.task_id = t.id
            AND (t.status IN ('completed', 'failed', 'cancelled')
                 OR u.task_id IN (SELECT id FROM dead))
+     ), orphan_holds AS (
+        -- The holds swept_holds cannot reach: no task row at all. Every admission
+        -- path reserves BEFORE inserting its task (and the title route never inserts
+        -- one), so a crash or dropped connection between the reserve and the insert
+        -- or the release, or between cancelQueuedTurn's delete and its release,
+        -- leaves a hold nothing joins to. The age bound is what makes this safe
+        -- against an admission still in flight, whose task row is not committed
+        -- yet: the longest one is a Telegram album's file ingest or a title call
+        -- (two AUX_TIMEOUT_MS attempts), both far inside an hour. Sweeping one
+        -- early would cost no spend anyway -- reconcileUsage records the real cost
+        -- fresh when its hold is gone.
+        DELETE FROM usage u
+         WHERE u.pending = true
+           AND u.created_at < now() - interval '1 hour'
+           AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = u.task_id)
      )
      SELECT d.id, d.user_id, d.chat_id, COALESCE(rm.partial, false) AS partial
        FROM dead d LEFT JOIN reconciled_messages rm ON rm.task_id = d.id`,

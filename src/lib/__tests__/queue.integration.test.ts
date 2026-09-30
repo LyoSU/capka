@@ -410,6 +410,39 @@ run("durable queue", () => {
     await pool.query(`DELETE FROM chats WHERE id = 'qz2-chat'`);
   });
 
+  // A crash between reserveBudget and the task insert (or the release) leaves a
+  // hold with no task row, which the join above never reaches.
+  it("releases an hour-old hold with no task row, and nothing an admission in flight still owns", async () => {
+    await pool.query(`INSERT INTO chats (id, user_id) VALUES ('qo-chat',$1) ON CONFLICT (id) DO NOTHING`, [U]);
+    expect((await enqueueTask({ id: "qo-live", chatId: "qo-chat", userId: U, payload: {} })).created).toBe(true);
+    const hold = (id: string, taskId: string, age: string, pending = true) =>
+      pool.query(
+        `INSERT INTO usage (id, task_id, user_id, provider, model, cost_usd, on_shared_key, pending, created_at)
+         VALUES ($1,$2,$3,'shared','m','0.01',true,$4, now() - $5::interval)`,
+        [id, taskId, U, pending, age],
+      );
+    await hold("uo-orphan", "qo-never-inserted", "2 hours");
+    // Reserved moments ago: its task insert may be in an uncommitted transaction.
+    await hold("uo-fresh", "qo-inserting-now", "1 minute");
+    // Old, but its task is still queued — that turn will settle it.
+    await hold("uo-live", "qo-live", "2 hours");
+    // Settled spend is history, never a hold, whatever its task.
+    await hold("uo-settled", "qo-gone", "2 hours", false);
+
+    await reconcileZombies();
+    // A second sweep finds nothing more to take.
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM usage WHERE id LIKE 'uo-%' ORDER BY id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(["uo-fresh", "uo-live", "uo-settled"]);
+
+    await pool.query(`DELETE FROM usage WHERE id LIKE 'uo-%'`);
+    await pool.query(`DELETE FROM tasks WHERE id = 'qo-live'`);
+    await pool.query(`DELETE FROM chats WHERE id = 'qo-chat'`);
+  });
+
   it("reconciles a stuck 'running' message whose task already reached a terminal status", async () => {
     // Failure-path repair: finalizeTask flipped the task to 'failed' but the message
     // UPDATE was lost (swallowed .catch), leaving the message stuck at 'running'. The
