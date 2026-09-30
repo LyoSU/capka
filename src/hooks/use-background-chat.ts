@@ -852,10 +852,14 @@ export function useBackgroundChat({
     // Nothing to say and nothing to show: an empty turn would burn a reply on a
     // blank prompt.
     if (!text && !attachedFiles?.length) return;
+    // A files-only edit still sends words, as sendMessage does: an empty
+    // userMessage is how a regenerate says "save no user row", so the edit would
+    // be dropped and the reply re-run off whatever preceded it.
+    const sent = text || t("processFiles");
     const edited: Message = {
       id: nanoid(),
       role: "user",
-      parts: [{ type: "text", text }],
+      parts: [{ type: "text", text: sent }],
       metadata: attachedFiles?.length ? { attachedFiles } : undefined,
     };
     // The edited message is a sibling of the original, so its parent is whatever
@@ -863,8 +867,8 @@ export function useBackgroundChat({
     // first message). Passed explicitly so the server branches instead of
     // appending to the current leaf.
     const parentId = history[history.length - 1]?.id ?? null;
-    await rerun([...history, edited], text, edited.id, attachedFiles, model, parentId);
-  }, [rerun]);
+    await rerun([...history, edited], sent, edited.id, attachedFiles, model, parentId);
+  }, [rerun, t]);
 
   // ── Switch branch (‹ i/N › version arrows) ─────────────────
   // Point the chat at another sibling's branch, then resync from the server,

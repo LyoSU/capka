@@ -31,14 +31,22 @@ const rows = vi.hoisted(() => ({
 // Unlike the project-scope suite this one asserts on UPDATEs, so the fake db
 // records what each `.set()` was handed, tagged by table.
 const writes = vi.hoisted(() => ({ updated: [] as { table: string; values: Record<string, unknown> }[] }));
+// The fake ignores filters when answering, so the parent lookup's predicate is
+// recorded, rendered to SQL, to assert what it was scoped by.
+const lookups = vi.hoisted(() => ({ messages: [] as { sql: string; params: unknown[] }[] }));
 
 vi.mock("@/lib/db", async () => {
   const { getTableName } = await import("drizzle-orm");
+  const { PgDialect } = await import("drizzle-orm/pg-core");
   const select = () => ({
     from: (table: never) => {
       const name = getTableName(table);
       const chain: Record<string, unknown> = {};
-      for (const m of ["leftJoin", "innerJoin", "where", "orderBy"]) chain[m] = () => chain;
+      for (const m of ["leftJoin", "innerJoin", "orderBy"]) chain[m] = () => chain;
+      chain.where = (pred: never) => {
+        if (name === "messages") lookups.messages.push(new PgDialect().sqlToQuery(pred));
+        return chain;
+      };
       chain.limit = () => Promise.resolve(rows[name as keyof typeof rows] ?? []);
       return chain;
     },
@@ -71,6 +79,7 @@ beforeEach(() => {
   rows.projects = [];
   rows.messages = [];
   writes.updated = [];
+  lookups.messages = [];
   requireRole.mockReset().mockResolvedValue({ userId: `u-${Math.random()}`, status: "active", role: "user" });
   resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: false, modelId: "m1", provider: "openai" });
   reserveBudget.mockReset().mockResolvedValue({ allowed: true });
@@ -83,7 +92,7 @@ describe("POST /api/chat — a regenerate persists the turn's settings", () => {
     const userId = "u-regen";
     requireRole.mockResolvedValue({ userId, status: "active", role: "user" });
     rows.chats = [{ id: "c1", userId, title: "Hi", model: "cfg1:old-model", activeLeafId: "m9" }];
-    rows.messages = [{ id: "m8" }];
+    rows.messages = [{ id: "m8", role: "user" }];
 
     const res = await send({ chatId: "c1", userMessage: "", model: "cfg1:new-model", parentId: "m8" });
 
@@ -99,7 +108,7 @@ describe("POST /api/chat — a regenerate persists the turn's settings", () => {
     const userId = "u-regen-same";
     requireRole.mockResolvedValue({ userId, status: "active", role: "user" });
     rows.chats = [{ id: "c1", userId, title: "Hi", model: "cfg1:m", activeLeafId: "m9" }];
-    rows.messages = [{ id: "m8" }];
+    rows.messages = [{ id: "m8", role: "user" }];
 
     await send({ chatId: "c1", userMessage: "", model: "cfg1:m", parentId: "m8" });
 
@@ -113,7 +122,7 @@ describe("POST /api/chat — a regenerate persists the turn's settings", () => {
     const userId = "u-regen-think";
     requireRole.mockResolvedValue({ userId, status: "active", role: "user" });
     rows.chats = [{ id: "c1", userId, title: "Hi", model: "cfg1:m", thinkAmount: "brief", activeLeafId: "m9" }];
-    rows.messages = [{ id: "m8" }];
+    rows.messages = [{ id: "m8", role: "user" }];
 
     await send({ chatId: "c1", userMessage: "", model: "cfg1:m", thinkAmount: "deep", parentId: "m8" });
 
@@ -165,7 +174,7 @@ describe("POST /api/chat — the task names its reply parent, not the transcript
   it("a regenerate hangs the reply off the message it names", async () => {
     owner("u-regen-parent");
     rows.chats = [{ id: "c1", userId: "u-regen-parent", title: "Hi", activeLeafId: "m9" }];
-    rows.messages = [{ id: "m8" }];
+    rows.messages = [{ id: "m8", role: "user" }];
 
     await send({ chatId: "c1", userMessage: "", parentId: "m8" });
 
@@ -183,6 +192,38 @@ describe("POST /api/chat — the task names its reply parent, not the transcript
     expect((await send({ chatId: "c1", userMessage: "", parentId: "elsewhere" })).status).toBe(409);
     expect(enqueueTask).not.toHaveBeenCalled();
     expect(releaseHold).toHaveBeenCalledTimes(2);
+    // What makes "someone else's chat" miss is the lookup's own scope.
+    expect(lookups.messages).toHaveLength(1);
+    expect(lookups.messages[0].sql).toMatch(/"id" = \$1 and .*"chat_id" = \$2/);
+    expect(lookups.messages[0].params).toEqual(["elsewhere", "c1"]);
+  });
+
+  it("refuses an empty send whose parent is not a user message", async () => {
+    // A files-only edit with its text cleared used to post exactly this: an empty
+    // userMessage naming the message before the edited one — usually the previous
+    // REPLY. Taken as a regenerate, the edit vanished and a paid reply was hung
+    // off that reply.
+    owner("u-regen-assistant");
+    rows.chats = [{ id: "c1", userId: "u-regen-assistant", title: "Hi", activeLeafId: "a1" }];
+    rows.messages = [{ id: "a1", role: "assistant" }];
+
+    const res = await send({ chatId: "c1", userMessage: "", parentId: "a1" });
+
+    expect(res.status).toBe(409);
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(chatUpdate()).toBeUndefined();
+    expect(releaseHold).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lets a typed send hang off the previous reply", async () => {
+    owner("u-send-after-reply");
+    rows.chats = [{ id: "c1", userId: "u-send-after-reply", title: "Hi", activeLeafId: "a1" }];
+    rows.messages = [{ id: "a1", role: "assistant" }];
+
+    const res = await send({ chatId: "c1", userMessage: "thanks", userMessageId: "u2" });
+
+    expect(res.status).toBe(200);
+    expect(enqueueTask.mock.calls[0][0].payload.replyParentId).toBe("u2");
   });
 
   it("refuses a message too long to send as text", async () => {

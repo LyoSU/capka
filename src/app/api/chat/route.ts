@@ -164,15 +164,17 @@ export const POST = apiHandler(async (req: Request) => {
   // tampered client would 500 on the FK, or (with a real id from another chat)
   // silently graft this turn onto a foreign branch. A regenerate that names no
   // message comes from a client too old to know it must: send it to reload too.
+  // And a regenerate re-answers a USER message — an empty send naming any other
+  // parent is not one, and running it would hang a billed reply off the last reply.
   if (parentId || (!text && existingChat)) {
     const [parent] = parentId
       ? await db
-          .select({ id: messages.id })
+          .select({ id: messages.id, role: messages.role })
           .from(messages)
           .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
           .limit(1)
       : [];
-    if (!parent) {
+    if (!parent || (!text && parent.role !== "user")) {
       // handedOff stays false → the finally below releases the hold.
       return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
     }

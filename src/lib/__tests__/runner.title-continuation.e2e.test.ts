@@ -9,7 +9,7 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
  * the title impossible: `isFirstTurn` was read off `modelMessages`, which on that
  * continuation contains the very row being written (`replyParentId` points at it), so
  * it said "not the first turn"; and the title text was `userTurnText`, which is ""
- * on a continuation because `uiMessages` is empty there by design. The first half is
+ * on a continuation because it answers no user message, by design. The first half is
  * skipped by `!awaitingAnswer` and every later turn by `isFirstTurn`, so such a chat
  * kept the `/api/chat` placeholder — a 100-character slice of the opening message —
  * for good.
@@ -115,13 +115,13 @@ run("runAgentTask: a chat that opens with an ask still gets auto-titled", () => 
   it("titles it from the chat's opening message, not from the continuation's empty turn text", async () => {
     // Written already-running rather than enqueued and claimed: the dev stack's own
     // worker polls this same database and would claim a `queued` row out from under
-    // this suite. `uiMessages: []` is what an ask continuation really carries — the
+    // this suite. No reply parent is what an ask continuation really carries — the
     // user's answer rides `resumeMessages` and is not a chat message at all.
     const { rows } = await pool.query<ClaimedTask>(
       `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
        VALUES ('t15t-task',$1,$2,'running','w-t15t', now() + interval '300 seconds', $3::jsonb)
        RETURNING *`,
-      [C, U, JSON.stringify({ uiMessages: [], resumeMessageId: "t15t-a1" })],
+      [C, U, JSON.stringify({ resumeMessageId: "t15t-a1" })],
     );
     await runAgentTask(rows[0], "w-t15t");
     // Titling is fire-and-forget, so wait on the LAST thing it does — the write —
