@@ -28,6 +28,9 @@ type Part = { type: string; text?: string; providerOptions?: Record<string, unkn
 const prompts: Msg[][] = [];
 // What the next provider call does instead of answering with text.
 const script: ("tool" | "overflow")[] = [];
+// Anthropic keeps a folded user message in parts (its cache markers ride them); every
+// other provider gets one string, joined with a blank line.
+let provider = "anthropic";
 const finish = (unified: string, raw: string) => ({
   type: "finish",
   finishReason: { unified, raw },
@@ -61,8 +64,7 @@ vi.mock("@/lib/providers/resolve", () => ({
         };
       },
     }),
-    // The provider whose cache markers this suite counts: elsewhere a fold is one string.
-    provider: "anthropic",
+    provider,
     modelId: "mock-model",
   }),
 }));
@@ -308,5 +310,52 @@ run("runAgentTask: the volatile tier rides after the history", () => {
     expect(folded[1].text).toBe("what does it show?");
     expect(folded[2].text).toMatch(/^<turn-context>/);
     expect(note).toBe(3);
+  }, 30_000);
+
+  // The same two roads on an OpenAI-compatible backend, where the fold is one string:
+  // the templates that reject two user messages in a row are behind this provider.
+  it("a steered tool loop on an OpenAI-compatible backend sends one user message per step", async () => {
+    await userSays("tctx-u6", "check again");
+    const from = prompts.length;
+    script.push("tool");
+    onTool = async () => { expect(await appendSteer("tctx-task6", U, steer("s4"))).toBe("ok"); };
+    provider = "litellm";
+    try {
+      await runTurn("tctx-task6", "tctx-u6", {}, [steer("s3")]);
+    } finally {
+      provider = "anthropic";
+      onTool = async () => {};
+    }
+    const sent = prompts.slice(from);
+
+    expect(sent).toHaveLength(2);
+    for (const p of sent) expectWireShape(p);
+    const [step0, step1] = sent;
+    // Control: the step-0 steer really was folded — one text, in reading order.
+    expect(parts(step0.at(-1)!)).toHaveLength(1);
+    const folded = parts(step0.at(-1)!)[0].text!;
+    expect(folded).toMatch(/^check again\n\n<turn-context>\n[\s\S]*\n<\/turn-context>\n\nThe user added while you were working: steer s3$/);
+    expect(step1.at(-2)!.role).toBe("tool");
+    expect(text(step1.at(-1)!)).toContain("steer s4");
+  }, 30_000);
+
+  it("an emergency trim on an OpenAI-compatible backend folds the context and the effect note into the user's message", async () => {
+    await userSays("tctx-u7", "last one");
+    const from = prompts.length;
+    script.push("tool", "overflow");
+    provider = "litellm";
+    try {
+      await runTurn("tctx-task7", "tctx-u7");
+    } finally {
+      provider = "anthropic";
+    }
+    const sent = prompts.slice(from);
+
+    // Control: the tool ran, step 1 overflowed, and the restart was sent.
+    expect(sent).toHaveLength(3);
+    for (const p of sent) expectWireShape(p);
+    const last = parts(sent[2].at(-1)!);
+    expect(last).toHaveLength(1);
+    expect(last[0].text).toMatch(/^last one\n\n<turn-context>\n[\s\S]*\n<\/turn-context>\n\n\[Internal note from the platform[\s\S]*note_it/);
   }, 30_000);
 });
