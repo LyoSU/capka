@@ -513,7 +513,7 @@ async function hydrateFacts(spaceId: string, userId: string, heads: HeadRow[]): 
     .from(claimEvidence)
     .leftJoin(messages, eq(messages.id, claimEvidence.messageId))
     .leftJoin(chats, and(eq(chats.id, messages.chatId), eq(chats.userId, userId)))
-    .where(inArray(claimEvidence.claimId, factIds));
+    .where(inIds(claimEvidence.claimId, factIds));
 
   const predecessorIds = heads.map((f) => f.supersedes).filter((v): v is string => !!v);
   const predecessors = predecessorIds.length
@@ -530,7 +530,7 @@ async function hydrateFacts(spaceId: string, userId: string, heads: HeadRow[]): 
           recordedAt: vaultClaims.recordedAt,
         })
         .from(vaultClaims)
-        .where(and(inArray(vaultClaims.id, predecessorIds), eq(vaultClaims.spaceId, spaceId)))
+        .where(and(inIds(vaultClaims.id, predecessorIds), eq(vaultClaims.spaceId, spaceId)))
     : [];
 
   for (const f of heads) {
@@ -877,7 +877,7 @@ export async function readMemoryPage(
       and(
         eq(spaces.ownerUserId, userId),
         isNull(spaces.retiredAt),
-        inArray(spaces.refId, [userId, ...projectRows.map((p) => p.id)]),
+        inIds(spaces.refId, [userId, ...projectRows.map((p) => p.id)]),
       ),
     );
 
