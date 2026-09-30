@@ -947,10 +947,11 @@ run("vault: memory page projection", () => {
     );
     // Filed, so the cap under test is the topic's and not the `unfiled` list's. The
     // `contains` edge is deliberately NOT written here: `assertContainsParity` fires on
-    // `contains` WRITES, and this test performs none.
+    // `contains` WRITES, and this test performs none. Filed OLDEST first, so a projection
+    // that kept the membership read's own order would cap away the newest rows.
     await q(
       `INSERT INTO note_claims (note_id, claim_id)
-       SELECT $1, $2 || i FROM generate_series(1, $3) AS i`,
+       SELECT $1, $2 || i FROM generate_series($3, 1, -1) AS i`,
       [noteId, `${P}bulk-`, over],
     );
 
@@ -963,5 +964,6 @@ run("vault: memory page projection", () => {
     // NEWEST FIRST inside the cap, which is what makes the dropped rows the old ones: the
     // fixture stamps `recorded_at` as `now() - i seconds`, so row 1 is the newest.
     expect(topic.facts[0].statement.text).toBe("Bulk fact 1");
+    expect(topic.facts[FACT_LIMIT - 1].statement.text).toBe(`Bulk fact ${FACT_LIMIT}`);
   });
 });

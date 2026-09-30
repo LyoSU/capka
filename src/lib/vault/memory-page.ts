@@ -624,14 +624,18 @@ async function topicsOf(
         .from(noteClaims)
         .where(inIds(noteClaims.noteId, noteIds))
     : [];
+  // Filled by walking `heads`, not the membership rows: that read has no order, and the
+  // cap below keeps a list's FIRST `FACT_LIMIT`, which must be its newest. A claim with
+  // no head (superseded or forgotten — `note_claims` keeps the row on purpose) is skipped.
+  const notesOf = new Map<string, string[]>();
+  for (const m of membership) notesOf.set(m.claimId, [...(notesOf.get(m.claimId) ?? []), m.noteId]);
   const filedUnder = new Map<string, HeadRow[]>(noteIds.map((id) => [id, []]));
   const anyTopic = new Set<string>();
-  const byId = new Map(heads.map((h) => [h.id, h]));
-  for (const m of membership) {
-    const head = byId.get(m.claimId);
-    if (!head) continue; // superseded or forgotten: `note_claims` keeps the row on purpose
-    filedUnder.get(m.noteId)?.push(head);
-    anyTopic.add(head.id);
+  for (const head of heads) {
+    for (const noteId of notesOf.get(head.id) ?? []) {
+      filedUnder.get(noteId)?.push(head);
+      anyTopic.add(head.id);
+    }
   }
 
   // The cap, per list, BEFORE anything is hydrated — see `FACT_LIMIT`.
