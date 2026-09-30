@@ -32,7 +32,8 @@ export const COMPACTION_INSTRUCTION = [
 
 /**
  * Assemble the request for a compaction turn: the SAME system + history prefix
- * the main turn just used (so the prompt cache hits), with the compaction
+ * the main turn just used (so the prompt cache hits), followed by the reply that
+ * turn wrote (the caller appends it to `modelMessages`), with the compaction
  * instruction appended as the trailing user message.
  */
 export function buildCompactionMessages(

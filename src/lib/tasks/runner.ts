@@ -2534,13 +2534,31 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
     if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
+      // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
+      // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above
+      // and is not in scope here. It is already the fold over exactly those rows plus
+      // this turn's own marks, and it over-approximates in the safe direction: the
+      // summary covers this turn too.
+      const sourceTrust = taint.seen();
       void trackAux(
-        // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
-        // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above
-        // and is not in scope here. It is already the fold over exactly those rows plus
-        // this turn's own marks, and it over-approximates in the safe direction: the
-        // summary covers this turn too.
-        compactConversation(model, systemMessages, modelMessages, taint.seen(), auxUsageRecorder("compaction"))
+        (async () => {
+          // The summary must cover THIS reply too: the checkpoint hangs below it, and
+          // the next turn drops everything up to the checkpoint — so a reply left out
+          // of the summary input is a reply the model never sees again. `modelMessages`
+          // ends at the user turn, so rebuild the reply from `parts` through the
+          // resume pipeline (tool pairs sealed, reasoning dropped) minus its trailing
+          // "continue" turn.
+          const reply = (await buildResumeMessages(msgId, parts)).slice(0, -1);
+          // A continuation's history already ends at this very row — its first half.
+          // Replaying the whole reply after it would repeat those tool-call ids, so
+          // rebuild the history without the row. Loses the cache prefix; rare.
+          let history = modelMessages;
+          if (resumeMessageId) {
+            history = await convertToModelMessages(sealOrphanToolCalls(uiMessages.filter((m) => m.id !== msgId)));
+            if (reasoningStripped) history = foldReasoningIntoText(history);
+          }
+          return compactConversation(model, systemMessages, [...history, ...reply], sourceTrust, auxUsageRecorder("compaction"));
+        })()
           .then(async (result) => {
             if (!result) return;
             const summary = result.text;
