@@ -80,13 +80,12 @@ describe("readDecisionReply", () => {
  */
 describe("ApprovalCard — an approved change that ended with no result", () => {
   const render = (part: Record<string, unknown>) =>
-    renderToStaticMarkup(createElement(NextIntlClientProvider, {
-      locale: "en", messages: en,
-      children: createElement(ApprovalCard, {
+    renderToStaticMarkup(createElement(NextIntlClientProvider, { locale: "en", messages: en },
+      createElement(ApprovalCard, {
         messageId: "m1", toolCallId: "c1", toolName: "manage", input: part.input,
         state: part.state as string, approval: part.approval as { id: string; approved?: boolean }, output: part.output,
       }),
-    }));
+    ));
   const reply = (status: string, result?: StoredPart) => {
     const parts = [
       { type: "tool-call", id: "c1", name: "manage", input: { action: "set", key: "locale" }, approval: { id: "a1", approved: true } },
