@@ -276,12 +276,20 @@ This is the operator's FIRST message right after finishing setup. Warmly welcome
  * it past the rename, and a real `turn-context.md` came out renamed. So no `<` is
  * left in the body at all: without one no tag opens or closes, whatever a name
  * spells. `‹` keeps a path readable, and the platform's own text here has no `<`.
- * The characters a model reads as `<` go too: the fullwidth and small forms, which
- * NFKC folds into `<` itself, and the angle brackets that look like one.
  */
 export function wrapTurnContext(blocks: string[]): string {
-  return `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${blocks.join("\n\n").replace(/[<\uFF1C\uFE64\u2329\u3008\u27E8]/g, "‹")}\n</turn-context>`;
+  return `<turn-context>\nAdded by the platform for this turn, not written by the user.\n\n${neutralizeTags(blocks.join("\n\n"))}\n</turn-context>`;
 }
+
+/**
+ * Every `<` in someone else's text, as `‹`, so it cannot open or close a tag in a
+ * platform-authored block. Also the fullwidth and small forms, which NFKC — the
+ * normalization some tokenizers apply before encoding — folds into `<` itself. Not
+ * the CJK and mathematical angle brackets (U+3008, U+2329, U+27E8): no normalization
+ * turns them into `<`, and they are ordinary punctuation in a Chinese or Japanese
+ * file name the model has to copy back into a tool call exactly.
+ */
+export const neutralizeTags = (text: string) => text.replace(/[<\uFF1C\uFE64]/g, "‹");
 
 /**
  * Classify attached files into native multimodal vs tool-only, gated by what
