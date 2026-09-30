@@ -568,8 +568,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // check: it's true the instant a send starts, so a fast second submit
     // queues as the next turn rather than racing out as a concurrent send.
     // `!historyLoaded`: a chat opened moments ago may not have its history yet,
-    // so sending now would carry no conversation context to the model. Queue it
-    // (persisted) and let the drain effect fire once history resolves.
+    // so sending now would post into a conversation this client hasn't shown yet
+    // (the server builds the model's history from the DB, so the model is not
+    // affected). Queue it (persisted) and let the drain effect fire once history
+    // resolves.
     //
     // Unless the user asked to STEER (Alt+Enter): then the message goes into the
     // running turn instead of behind it. `clearDraft()` above already emptied the
@@ -913,8 +915,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
         // Only offered against a turn that is genuinely streaming. Two holds
         // must NOT be interruptible: `awaitingInput` is a turn suspended on the
         // user's own approval or answer — cancelling it throws away the question
-        // — and `!historyLoaded` means this client has no conversation to send
-        // yet, so "now" would reach the model with an empty context.
+        // — and `!historyLoaded` means this client has not loaded the conversation
+        // yet, so "now" would post into a chat the user has not seen.
         onSendNow={isLoading && !awaitingInput && historyLoaded && !readOnly ? () => { void stop(); } : undefined}
       />
     </div>
