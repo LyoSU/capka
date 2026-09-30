@@ -184,14 +184,16 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(content.at(-1)).toMatchObject({ type: "text", text: "hello again" });
   });
 
-  it("records no result for a declined call — the model sees the denial instead", async () => {
+  it("records only the decision for a declined call, so its card keeps reading declined", async () => {
     rows.msg = pendingApproval();
     rows.task = { payload: { requestModel: "gone-cfg:m" } };
     rows.updateReturn = [{ id: "m1" }];
     resolveUserModelInfo.mockRejectedValue(new ValidationError("This chat's model is no longer available — its connection was removed."));
     await approveManageForUser("u1", { messageId: "m1", approved: false });
-    const parts = (rows.updated as { metadata: { parts: { type: string }[] } }).metadata.parts;
-    expect(parts.map((p) => p.type)).toEqual(["tool-call"]);
+    const metadata = (rows.updated as { metadata: { parts: { type: string }[] } }).metadata;
+    expect(metadata.parts.map((p) => p.type)).toEqual(["tool-call"]);
+    const [reply] = toUIMessages([{ id: "m1", role: "assistant", content: "", metadata, createdAt: null, platform: null }]);
+    expect(reply.parts[0]).toMatchObject({ state: "approval-responded", approval: { approved: false } });
   });
 
   it("tells a Telegram turn it failed, the way the runner would have", async () => {

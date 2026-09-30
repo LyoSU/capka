@@ -167,6 +167,8 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   // An approved call that will now never run still needs a result: without one the
   // card spins on "Applying…" forever, and every later turn feeds the model a tool
   // call with no result, which providers reject — the chat would fail on each send.
+  // A declined call gets only its decision, as any declined call does: a result
+  // here would take a gated call out of its "declined" card into the activity rail.
   if (failure && d.approved) {
     parts.push({ type: "tool-result", id: call.id, name: call.name, output: { status: "error", code: "NOT_RUN", error: `Not run. ${failure.userMessage}` } });
   }
