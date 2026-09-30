@@ -36,7 +36,7 @@ export function classifyStreamEvent(
  * Decide which held-back events a freshly-loaded snapshot lets us replay.
  *
  * Reconciling by snapshot ALONE cannot catch up with a live stream: the runner
- * persists at most every 1-2s (snapshotIntervalMs) while it publishes ~10 deltas a second, so the
+ * persists about every 1-2s (snapshotIntervalMs; step boundaries force a save sooner) while it publishes ~10 deltas a second, so the
  * snapshot the reload returns is already behind by the time it arrives and the
  * very next delta gaps again. Buffering the gapped events and replaying the ones
  * the snapshot doesn't cover is what closes that distance.

@@ -24,8 +24,8 @@ const MIN_CPS = 40;            // floor so a stalled estimate never freezes the 
 const CATCH_UP_MS = 400;       // the backlog is brought to HOLD_MS within about this long
 // Text kept in hand, measured as how long the model takes to produce it. The
 // runner's flushes are not evenly spaced — `doFlush` awaits `saveSnapshot`
-// inside the serialized flush chain, so about once a second one interval
-// carries a Postgres UPDATE on top of the 100ms timer — and this reserve is
+// inside the serialized flush chain, so every 1-2 s (longer for a large reply)
+// one interval carries a Postgres UPDATE on top of the 100ms timer — and this reserve is
 // what covers such a gap instead of passing it to the screen. It costs the
 // reader nothing: the first word still leaves on the first tick (the reserve is
 // built by running slightly under the model's rate, not by holding text back),

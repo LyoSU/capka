@@ -943,7 +943,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       )}
       // Same two holds as the local queue's "send now": a turn suspended on the
       // user's own approval must not be cancelled out from under the question,
-      // and a client with no history loaded has no conversation to send.
+      // and a client whose history has not loaded yet is still mid-open.
       onSendNow={isLoading && !awaitingInput && historyLoaded && !readOnly ? () => { void stop(); } : undefined}
       onDrop={readOnly ? undefined : () => {
         void fetch(`/api/tasks/${serverQueued.id}/cancel`, { method: "POST" })
