@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { automations, tasks, telegramLinks } from "@/lib/db/schema";
@@ -6,6 +6,7 @@ import { automationCollection } from "@/lib/manage/controls/automations";
 import { localDayOf, type AutomationTrigger } from "@/lib/automations/schedule";
 import { getPublicUrl } from "@/lib/url";
 import { audit } from "@/lib/governance/audit";
+import { inIds } from "@/lib/db/in-ids";
 
 export const GET = apiHandler(async (req: Request) => {
   // Automations spend the shared key unattended, so a pending/rejected account may
@@ -23,7 +24,7 @@ export const GET = apiHandler(async (req: Request) => {
   // over the referenced task ids, not one round-trip per automation.
   const lastTaskIds = rows.map((a) => a.lastTaskId).filter((id): id is string => !!id);
   const taskChats = lastTaskIds.length
-    ? await db.select({ id: tasks.id, chatId: tasks.chatId }).from(tasks).where(inArray(tasks.id, lastTaskIds))
+    ? await db.select({ id: tasks.id, chatId: tasks.chatId }).from(tasks).where(inIds(tasks.id, lastTaskIds))
     : [];
   const chatByTask = new Map(taskChats.map((t) => [t.id, t.chatId]));
   // Derived once per request, and derived HERE rather than in the browser: this is

@@ -12,6 +12,7 @@ import { horizonFor, type ServerClass } from "./grounding";
 import { deleteNode, insertNode, restoreNode } from "./nodes";
 import { projectClaimDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { inIds } from "@/lib/db/in-ids";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
 
@@ -562,7 +563,7 @@ export async function updateClaim(
   const [target] = await ex
     .select({ spaceId: vaultClaims.spaceId })
     .from(vaultClaims)
-    .where(and(eq(vaultClaims.id, claimId), inArray(vaultClaims.spaceId, allowedSpaceIds)))
+    .where(and(eq(vaultClaims.id, claimId), inIds(vaultClaims.spaceId, allowedSpaceIds)))
     .limit(1);
   if (target) await assertSpaceLive(target.spaceId, ex);
 
@@ -586,7 +587,7 @@ export async function updateClaim(
         eq(vaultClaims.id, claimId),
         eq(vaultClaims.revision, expectedRevision),
         isNull(vaultClaims.supersededAt),
-        inArray(vaultClaims.spaceId, allowedSpaceIds),
+        inIds(vaultClaims.spaceId, allowedSpaceIds),
       ),
     )
     .returning();
@@ -800,7 +801,7 @@ export async function forgetClaim(
         eq(vaultClaims.id, claimId),
         eq(vaultClaims.revision, expectedRevision),
         isNull(vaultClaims.supersededAt),
-        inArray(vaultClaims.spaceId, allowedSpaceIds),
+        inIds(vaultClaims.spaceId, allowedSpaceIds),
         ...(args.requireCreatedTaskId
           ? [eq(vaultClaims.createdTaskId, args.requireCreatedTaskId)]
           : []),
@@ -882,7 +883,7 @@ export async function restoreClaim(
     .where(
       and(
         eq(vaultClaims.id, claimId),
-        inArray(vaultClaims.spaceId, allowedSpaceIds),
+        inIds(vaultClaims.spaceId, allowedSpaceIds),
         isNotNull(vaultNodes.deletedAt),
       ),
     )
@@ -975,7 +976,7 @@ export async function resolveConflict(
         eq(vaultClaims.id, claimId),
         isNull(vaultClaims.supersededAt),
         isNotNull(vaultClaims.conflictsWith),
-        inArray(vaultClaims.spaceId, allowedSpaceIds),
+        inIds(vaultClaims.spaceId, allowedSpaceIds),
       ),
     )
     .limit(1)
@@ -1337,7 +1338,7 @@ export async function findCurrentHead(
 ): Promise<ClaimHead | null> {
   // `inArray` with an empty list yields `false` — "no spaces" reads as "nothing is
   // visible", never as "everything".
-  const scope = allowedSpaceIds ? inArray(vaultClaims.spaceId, allowedSpaceIds) : undefined;
+  const scope = allowedSpaceIds ? inIds(vaultClaims.spaceId, allowedSpaceIds) : undefined;
   const select = (where: ReturnType<typeof eq>) =>
     ex
       .select({ ...HEAD, supersededAt: vaultClaims.supersededAt })

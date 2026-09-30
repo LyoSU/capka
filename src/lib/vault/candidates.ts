@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryCandidates } from "@/lib/db/schema";
@@ -26,6 +26,7 @@ import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote } from "./topics";
 // One home for the statement normalization the slot branch and the slotless dedup share —
 // and, since Task 9, the memory page's search box. See `text.ts` for why it is not copied.
 import { norm } from "./text";
+import { inIds } from "@/lib/db/in-ids";
 
 export type Provenance = {
   kind: "user_direct" | "derived" | "tool" | "file" | "web" | "legacy_memory_doc";
@@ -496,7 +497,7 @@ export async function confirmCandidate(args: {
       const [scope] = await tx
         .select({ spaceId: memoryCandidates.spaceId })
         .from(memoryCandidates)
-        .where(and(eq(memoryCandidates.id, candidateId), inArray(memoryCandidates.spaceId, allowedSpaceIds)))
+        .where(and(eq(memoryCandidates.id, candidateId), inIds(memoryCandidates.spaceId, allowedSpaceIds)))
         .limit(1);
       if (scope && !(await spaceAcceptsWrites(scope.spaceId, tx))) {
         return { ok: false, reason: "not_found" } as const;
@@ -512,7 +513,7 @@ export async function confirmCandidate(args: {
           and(
             eq(memoryCandidates.id, candidateId),
             isNull(memoryCandidates.resolvedAt),
-            inArray(memoryCandidates.spaceId, allowedSpaceIds),
+            inIds(memoryCandidates.spaceId, allowedSpaceIds),
           ),
         )
         .returning();
@@ -524,7 +525,7 @@ export async function confirmCandidate(args: {
         const [seen] = await tx
           .select({ id: memoryCandidates.id })
           .from(memoryCandidates)
-          .where(and(eq(memoryCandidates.id, candidateId), inArray(memoryCandidates.spaceId, allowedSpaceIds)))
+          .where(and(eq(memoryCandidates.id, candidateId), inIds(memoryCandidates.spaceId, allowedSpaceIds)))
           .limit(1);
         return { ok: false, reason: seen ? "already_resolved" : "not_found" } as const;
       }
@@ -793,7 +794,7 @@ export async function rejectCandidate(args: {
         and(
           eq(memoryCandidates.id, candidateId),
           isNull(memoryCandidates.resolvedAt),
-          inArray(memoryCandidates.spaceId, allowedSpaceIds),
+          inIds(memoryCandidates.spaceId, allowedSpaceIds),
         ),
       )
       .returning({

@@ -17,6 +17,7 @@ import { fitNoteTitle } from "./notes";
 import { type Ex } from "./spaces";
 import { TOPIC_LABELS, fitTopicTitle } from "./topics";
 import { norm } from "./text";
+import { inIds } from "@/lib/db/in-ids";
 
 /**
  * THE one route from stored text to the model.
@@ -609,7 +610,7 @@ export async function listMemoryToolRows(
   if (!spaceIds.length) return { rows: [], omitted: 0 };
   const limit = opts?.limit ?? 20;
   const channel = and(
-    inArray(vaultClaims.spaceId, spaceIds),
+    inIds(vaultClaims.spaceId, spaceIds),
     inArray(vaultClaims.promptAccess, ["manifest", "memory_search"]),
     liveClaimForModel(),
   );
@@ -658,7 +659,7 @@ export async function listMemoryToolRows(
         .innerJoin(vaultNoteVersions, eq(vaultNoteVersions.noteId, vaultNotes.id))
         .where(
           and(
-            inArray(vaultNotes.spaceId, spaceIds),
+            inIds(vaultNotes.spaceId, spaceIds),
             inArray(vaultNoteVersions.promptAccess, ["manifest", "memory_search"]),
             liveNoteForModel(),
             inArray(vaultNotes.id, candidateIds),

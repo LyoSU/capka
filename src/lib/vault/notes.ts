@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, noteVersionEvidence, vaultNodes, vaultNotes, vaultNoteVersions } from "@/lib/db/schema";
@@ -11,6 +11,7 @@ import { deleteNode, insertNode, restoreNode } from "./nodes";
 import { fitNoteTitle } from "./note-title";
 import { projectNoteDoc } from "./search-documents";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { inIds } from "@/lib/db/in-ids";
 
 /**
  * NOTE IDENTITY vs NOTE CONTENT, and the CAS between them.
@@ -579,7 +580,7 @@ export async function noteHead(
       vaultNoteVersions,
       and(eq(vaultNoteVersions.noteId, vaultNotes.id), eq(vaultNoteVersions.revision, vaultNotes.currentRevision)),
     )
-    .where(and(eq(vaultNotes.id, noteId), inArray(vaultNotes.spaceId, allowedSpaceIds)))
+    .where(and(eq(vaultNotes.id, noteId), inIds(vaultNotes.spaceId, allowedSpaceIds)))
     .limit(1);
   return row ?? null;
 }

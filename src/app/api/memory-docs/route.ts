@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireActive, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memoryDocs, projects, spaces, vaultNotes } from "@/lib/db/schema";
@@ -6,6 +6,7 @@ import { projectNotDeleted } from "@/lib/projects/live";
 import { listHeadClaims } from "@/lib/vault/claims";
 import { notCarried } from "@/lib/vault/migrate-memory-docs";
 import { DEFAULT_TOPIC_KEY } from "@/lib/vault/topics";
+import { inIds } from "@/lib/db/in-ids";
 
 /**
  * The read side of the old memory editor, kept alive across the cutover on the
@@ -100,7 +101,7 @@ export const GET = apiHandler(async () => {
   const spaceRows = await db
     .select({ id: spaces.id, type: spaces.type, refId: spaces.refId })
     .from(spaces)
-    .where(and(inArray(spaces.refId, refIds), eq(spaces.ownerUserId, userId)));
+    .where(and(inIds(spaces.refId, refIds), eq(spaces.ownerUserId, userId)));
   const userSpaceId = spaceRows.find((s) => s.type === "user" && s.refId === userId)?.id;
   const projectSpaceId = (id: string) => spaceRows.find((s) => s.type === "project" && s.refId === id)?.id;
 

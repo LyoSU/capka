@@ -9,6 +9,7 @@ import { ghFetch, ghRaw, parseMarketplace } from "./fetch";
 import { discoverSkills } from "./discover";
 import { readStoredManifest } from "./manifest-store";
 import type { CatalogItem } from "./types";
+import { inIds } from "@/lib/db/in-ids";
 
 /** Fetch + normalize a marketplace's plugin catalog from its GitHub repo. */
 async function fetchCatalog(url: string): Promise<{ name: string; owner: string | null; items: CatalogItem[] }> {
@@ -133,10 +134,10 @@ export async function getInstallMeta(
   const installs = await db
     .select({ id: pluginInstalls.id, pluginName: pluginInstalls.pluginName, marketplaceId: pluginInstalls.marketplaceId })
     .from(pluginInstalls)
-    .where(inArray(pluginInstalls.id, installIds));
+    .where(inIds(pluginInstalls.id, installIds));
   const mktIds = [...new Set(installs.map((i) => i.marketplaceId))];
   const markets = mktIds.length
-    ? await db.select({ id: pluginMarketplaces.id, catalog: pluginMarketplaces.catalog }).from(pluginMarketplaces).where(inArray(pluginMarketplaces.id, mktIds))
+    ? await db.select({ id: pluginMarketplaces.id, catalog: pluginMarketplaces.catalog }).from(pluginMarketplaces).where(inIds(pluginMarketplaces.id, mktIds))
     : [];
   const catalogByMkt = new Map(markets.map((m) => [m.id, (m.catalog ?? []) as CatalogItem[]]));
   for (const i of installs) {

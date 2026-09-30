@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { mcpServers, skills, pluginFiles, skillFiles } from "@/lib/db/schema";
 import { decrypt, fingerprint } from "@/lib/crypto";
@@ -8,6 +8,7 @@ import {
   SURFACE_SCHEMA_VERSION,
   type StoredInstallSurface, type StoredSurfaceConnector, type StoredSurfaceSkill,
 } from "./surface";
+import { inIds } from "@/lib/db/in-ids";
 
 /**
  * `runtimeBefore` — what an apply would actually OVERWRITE, read from the rows
@@ -162,7 +163,7 @@ export async function readRuntimeSurface(
   // edited in the database — or corrupted by an earlier lost-lease race — was invisible.
   const skillFileRows = skillRows.length
     ? await db.select({ skillId: skillFiles.skillId, path: skillFiles.path, content: skillFiles.content })
-        .from(skillFiles).where(inArray(skillFiles.skillId, skillRows.map((r) => r.id)))
+        .from(skillFiles).where(inIds(skillFiles.skillId, skillRows.map((r) => r.id)))
     : [];
   const filesBySkill = new Map<string, { path: string; contentHash: string }[]>();
   for (const f of skillFileRows) {
