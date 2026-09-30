@@ -248,6 +248,18 @@ export async function persistUnreadSteers(input: {
 }
 
 /**
+ * How long to wait after a mid-stream snapshot of `bytes` before writing the next.
+ * Every snapshot rewrites the WHOLE reply (content plus every part, tool results
+ * included), so a fixed cadence makes a turn's write volume grow with the square of
+ * its length. Scaling the wait with the size holds it near 64 KB/s once a snapshot
+ * outgrows 64 KB. Capped at 5s: a client resuming mid-stream holds the live deltas
+ * it cannot apply until a snapshot covers them (stream-recovery.ts).
+ */
+export function snapshotIntervalMs(bytes: number): number {
+  return Math.min(5000, Math.max(1000, bytes / 64));
+}
+
+/**
  * Run an agent task to completion. Invoked by the worker for a claimed task
  * row — independent of any HTTP request, so it keeps running with the user's
  * tab closed. Streams via Postgres realtime, renews its lease via heartbeat,
@@ -1309,14 +1321,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Progressive persistence. WITHOUT this the DB only saved at finish-step, so
     // a single long answer (one step, no tools) sat as `parts: []` in the DB the
     // whole time it streamed — a client resuming mid-stream loaded an empty
-    // prefix and saw the reply truncated. Throttled to ~1s (one UPDATE/sec per
-    // task), and only ever called off a flush, so a quiet tool run adds no writes.
+    // prefix and saw the reply truncated. Throttled to ~1s, longer for a large
+    // snapshot (snapshotIntervalMs), and only ever called off a flush, so a quiet
+    // tool run adds no writes.
+    //
+    // `content` is still written mid-stream, but only when it changed: a turn whose
+    // worker dies keeps it as the partial reply (reconcileZombies merges only
+    // metadata), and search, export and forks read it. Re-sending the same text
+    // still counts as a change to Postgres (a fresh value against the stored TOAST
+    // pointer), so each forced save of a tool-only step would re-TOAST the whole
+    // text and re-run to_tsvector for idx_messages_content_fts. Left out of the
+    // SET, no indexed column changes and the update can be HOT.
     let lastSaveAt = 0;
+    let saveEveryMs = 1000;
+    let savedContent: string | undefined;
     const saveSnapshot = async (force = false) => {
-      if (!force && Date.now() - lastSaveAt < 1000) return;
+      if (!force && Date.now() - lastSaveAt < saveEveryMs) return;
       lastSaveAt = Date.now();
-      // Capture parts + content synchronously (structuredClone, so a token
-      // appended during the DB await can't mutate what we persist).
+      // Capture parts + content synchronously (a JSON round-trip, so a token
+      // appended during the DB await can't mutate what we persist — and its
+      // length is the snapshot size the next interval is scaled by).
       //
       // Consistency trap: `parts` is updated EAGERLY (appendText, per token)
       // while `seq` is bumped LAZILY (at publish/flush). During a flush's publish
@@ -1328,11 +1352,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // So count the still-buffered runs that WILL publish next (reasoning then
       // text, each one ++seq) and fold them into streamSeq, so those upcoming
       // deltas land at seq <= streamSeq and the client ignores them as covered.
-      const snapParts = structuredClone(parts);
+      const partsJson = JSON.stringify(parts);
+      const snapParts = JSON.parse(partsJson) as typeof parts;
       const snapSeq = seq + (reasonBuf ? 1 : 0) + (textBuf ? 1 : 0);
       const snapContent = getFullText();
+      saveEveryMs = snapshotIntervalMs(partsJson.length + snapContent.length);
+      const contentChanged = snapContent !== savedContent;
       await db.update(messages).set({
-        content: snapContent,
+        ...(contentChanged ? { content: snapContent } : {}),
         // Steers ride INSIDE this object, never beside it: the update replaces the
         // row's whole metadata, so a separately-written steer would survive exactly
         // until the next token arrived. Copied, like `parts`, so a steer folded in
@@ -1340,6 +1367,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq,
           ...(consumedSteers.length ? { steers: [...consumedSteers] } : {}) },
       }).where(eq(messages.id, msgId));
+      if (contentChanged) savedContent = snapContent;
     };
 
     // Discard the partial reply before a retry re-streams from scratch

@@ -249,7 +249,8 @@ export const messages = pgTable("messages", {
   untrustedIngress: boolean("untrusted_ingress").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
-  index("idx_messages_chat_id").on(table.chatId),
+  // No bare (chat_id) index: idx_messages_chat_role_created leads with chat_id and
+  // serves every chat-scoped lookup, so a second one only cost each insert a write.
   index("idx_messages_created_at").on(table.createdAt),
   index("idx_messages_parent_id").on(table.parentId),
   // Sidebar unread probe: assistant messages newer than last_read_at per chat.
