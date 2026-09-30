@@ -17,6 +17,24 @@ function row(over: Partial<Row> & { metadata?: MessageMeta | null }): Row {
 }
 
 describe("toUIMessages", () => {
+  // The chat route refuses to regenerate a reply whose parent is not a user
+  // message, so the transcript must not offer the button on one.
+  it("marks a reply regenerable only when the message it answers is a user message", () => {
+    const [u1, a1, a2] = toUIMessages([
+      row({ id: "u1", role: "user", parentId: null }),
+      row({ id: "a1", parentId: "u1" }),
+      row({ id: "a2", parentId: "a1" }), // imported: its user turn was dropped
+    ]);
+    expect(u1.metadata.regenerable).toBeUndefined();
+    expect(a1.metadata.regenerable).toBe(true);
+    expect(a2.metadata.regenerable).toBe(false);
+  });
+
+  it("leaves regenerability unsaid when the reply's parent is not among the rows (a tail read)", () => {
+    const [a2] = toUIMessages([row({ id: "a2", parentId: "a1" })]);
+    expect(a2.metadata.regenerable).toBeUndefined();
+  });
+
   // The runner persists `errorOwned` so an admin sees whose key produced the
   // failure. It was written and read but never declared or forwarded, so the flag
   // silently vanished the moment history was reloaded from the DB.

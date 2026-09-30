@@ -2538,7 +2538,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[]; steers?: { id: string; text: string; afterToolCallId: string | null }[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; regenerable?: boolean; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[]; steers?: { id: string; text: string; afterToolCallId: string | null }[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2825,7 +2825,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                 <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
               )}
               {copyText && <CopyButton text={copyText} />}
-              {onRegenerate && (
+              {onRegenerate && metadata?.regenerable !== false && (
                 <Hint label={t("regenerate")}>
                   <button
                     type="button"

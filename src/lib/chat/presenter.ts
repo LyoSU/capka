@@ -66,8 +66,14 @@ export function toUIMessages(rows: {
   siblingIndex?: number;
   siblingCount?: number;
 }[], memoryWrites: Record<string, TurnWrite[]> = {}) {
-  return rows.map((m) => {
+  return rows.map((m, i) => {
     const meta = m.metadata as MessageMeta | null;
+    // Regenerate re-answers the user message a reply hangs off — the chat route
+    // refuses any other parent — so a reply that follows another reply (an imported
+    // chat that dropped a user turn) can't offer it. Known only when that predecessor
+    // is among these rows; a tail read's first row leaves it unsaid.
+    const prev = rows[i - 1];
+    const regenerable = m.role === "assistant" && prev && prev.id === m.parentId ? prev.role === "user" : undefined;
     const parts: unknown[] = [];
 
     if (meta?.parts) {
@@ -197,6 +203,7 @@ export function toUIMessages(rows: {
         parentId: m.parentId ?? null,
         siblingIndex: m.siblingIndex ?? 0,
         siblingCount: m.siblingCount ?? 1,
+        regenerable,
         // Surfaced so the user bubble can render attachment thumbnails.
         attachedFiles: meta?.attachedFiles,
         // Files the turn changed but never named — the folded second tier under
