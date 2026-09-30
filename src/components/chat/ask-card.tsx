@@ -32,8 +32,10 @@ export function AskCard({
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   // Why the last answer was refused, or that it was kept but its turn could not
-  // continue — the one case still shown once the card has settled.
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // continue ("stopped") — the one note still shown once the card has settled: a
+  // refusal is stale by then (the question was answered elsewhere, e.g. Telegram).
+  const [note, setNote] = useState<ReturnType<typeof readDecisionReply>["note"]>(null);
+  const refusal = note && (note === "busy" || note === "stopped" ? t(note) : tHook(note));
   const awaiting = state === "input-available" && !value;
 
   // Turn a stored answer value into its human label (choice → option label,
@@ -70,7 +72,7 @@ export function AskCard({
   const send = async (action: "submit" | "skip") => {
     if (submitting) return;
     setSubmitting(true);
-    setRefusal(null);
+    setNote(null);
     haptic("tap"); // success only once the server keeps the answer, below
     try {
       const r = await fetch("/api/ask/answer", {
@@ -84,7 +86,7 @@ export function AskCard({
       // buttons stay disabled on an answer the server never kept. See
       // readDecisionReply for which refusals bring them back and what each says.
       const reply = readDecisionReply(r.status, await r.json().catch(() => ({ ok: r.ok })));
-      if (reply.note) setRefusal(reply.note === "busy" || reply.note === "stopped" ? t(reply.note) : tHook(reply.note));
+      setNote(reply.note);
       if (reply.landed) {
         if (action === "submit") haptic("success");
       } else {
@@ -192,7 +194,7 @@ export function AskCard({
           ))}
           {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
           {/* Settled answers alone would read as the turn carrying on. */}
-          {refusal && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
+          {note === "stopped" && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
         </div>
       )}
     </div>

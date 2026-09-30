@@ -7,7 +7,7 @@ import { requireOwned } from "@/lib/db/ownership";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { BudgetExceededError } from "@/lib/errors";
+import { BudgetExceededError, isAppError } from "@/lib/errors";
 import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
@@ -112,8 +112,18 @@ export const POST = apiHandler(async (req: Request) => {
 
   // Validate the provider/model up front so the user gets immediate feedback
   // instead of a task that fails in the background. The worker re-resolves it.
-  const { isShared, modelId: resolvedModelId, provider: resolvedProvider, configId: resolvedConfigId } =
-    await resolveUserModelInfo(userId, effectiveModel);
+  // Its refusals (connection removed, no provider or default model, over the
+  // shared-key price cap) are English ValidationErrors worded for whoever set the
+  // connection up; to the composer they all mean "this model can't take the
+  // message", so they travel as one code the client can put in the user's language.
+  const resolved = await resolveUserModelInfo(userId, effectiveModel).catch((e: unknown) => {
+    if (isAppError(e) && e.code === "VALIDATION_ERROR") return null;
+    throw e;
+  });
+  if (!resolved) {
+    return Response.json({ error: "This model isn't available right now.", code: "MODEL_UNAVAILABLE" }, { status: 400 });
+  }
+  const { isShared, modelId: resolvedModelId, provider: resolvedProvider, configId: resolvedConfigId } = resolved;
 
   const text = userMessage;
   // An empty send is a regenerate, and a chat with no row yet has nothing to

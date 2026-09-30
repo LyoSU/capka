@@ -54,6 +54,7 @@ export const REFUSALS: Record<string, string> = {
   PROJECT_NOT_FOUND: "projectNotFound",
   TELEGRAM_CHAT: "telegramChat",
   STALE_CONVERSATION: "staleConversation",
+  MODEL_UNAVAILABLE: "modelUnavailable",
 };
 
 /** Turn a refused send or re-run into the error its caller throws, in the user's language. */

@@ -496,7 +496,7 @@
       "skipped": "Skipped",
       "expired": "That question is no longer active — your answer wasn't saved.",
       "busy": "This chat is still finishing another message — please answer again in a moment.",
-      "stopped": "Your reply was saved, but the assistant couldn't continue.",
+      "stopped": "Saved, but the assistant couldn't continue.",
       "yes": "Yes",
       "no": "No"
     },
@@ -722,7 +722,8 @@
       "projectDeleting": "This chat's project is being deleted, so it can't take new messages.",
       "projectNotFound": "This project couldn't be found. It may have been deleted.",
       "telegramChat": "This chat continues in Telegram. Reply there instead.",
-      "staleConversation": "This conversation has changed since the page loaded. Reload the page to continue."
+      "staleConversation": "This conversation has changed since the page loaded. Reload the page to continue.",
+      "modelUnavailable": "This model isn't available right now. Choose another one, or contact your admin if none of them work."
     },
     "citations": {
       "openSource": "Source {n}: {title}",

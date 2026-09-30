@@ -95,6 +95,17 @@ describe("POST /api/chat — refusals carry a code the composer can translate", 
     expect(await refused(await send({ chatId: "c1", userMessage: "hi", parentId: "gone" }))).toEqual({ status: 409, code: "STALE_CONVERSATION" });
   });
 
+  it("a model the resolver refuses — thrown, not written as a literal", async () => {
+    const { ValidationError } = await import("@/lib/errors");
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("No default model set. Configure one in Settings → Connections."));
+    expect(await refused(await send({ chatId: "c-new", userMessage: "hi" }))).toEqual({ status: 400, code: "MODEL_UNAVAILABLE" });
+    // Anything else it throws is not a refusal the user can act on — it stays a server error.
+    resolveUserModelInfo.mockRejectedValue(new Error("connection reset"));
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await send({ chatId: "c-new", userMessage: "hi" })).status).toBe(500);
+    quiet.mockRestore();
+  });
+
   it("every code the route sends reads as a line in both languages", () => {
     const src = readFileSync("src/app/api/chat/route.ts", "utf8");
     // BUDGET_EXCEEDED is thrown (BudgetExceededError), not written as a literal.
