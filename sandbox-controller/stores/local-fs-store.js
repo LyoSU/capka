@@ -241,8 +241,14 @@ export class LocalFsStore {
     await walk(this.#wsPath(userId, sessionId));
   }
 
+  /** Removes the whole `<user>/<session>/` dir, not just its `sandbox/` child: an
+   *  emptied session shell is still an orphan to the GC scan, which would then
+   *  "remove" it again on every sweep, forever. An id that sanitizes to nothing
+   *  is refused — its parent would be the user's (or every user's) data. */
   async remove(userId, sessionId) {
-    await rm(this.#wsPath(userId, sessionId), { recursive: true, force: true });
+    const u = sanitize(userId), s = sanitize(sessionId);
+    if (!u || !s) throw new Error("remove: empty workspace id");
+    await rm(resolve(this.dataRoot, u, s), { recursive: true, force: true });
   }
 
   /** Stream the WHOLE workspace as a zip, read straight from the host directory —

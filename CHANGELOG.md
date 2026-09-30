@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - A dictation session that does close itself — a long silence, or a speech service that stays unreachable — now says which of the two it was instead of the microphone going dark.
 - Dictation no longer erases a character typed while it is listening, and no longer restarts recognition on every keystroke.
 - Dictation keeps a word the speaker said twice ("very very"), while still collapsing the run Chrome for Android restates in its newest final.
+- `sandbox-controller` now deletes a removed workspace's whole session directory, so the orphan sweep no longer logs a `gc` line for the same emptied directories every minute.
 
 ## [0.42.0] - 2026-09-11
 

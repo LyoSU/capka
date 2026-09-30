@@ -188,6 +188,38 @@ describe("LocalFsStore.archive symlink handling", () => {
   });
 });
 
+describe("LocalFsStore.remove", () => {
+  it("removes the whole session dir, so the orphan GC scan can't find an empty shell every sweep", async () => {
+    const dataRoot = join(TMP, `ws-rm-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await store.ensure("u1", "s1");
+      await store.ensure("u1", "s2");
+
+      await store.remove("u1", "s1");
+
+      expect(existsSync(join(dataRoot, "u1", "s1"))).toBe(false);
+      expect(existsSync(join(dataRoot, "u1", "s2", "sandbox"))).toBe(true); // a sibling session is untouched
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an id that sanitizes to nothing instead of widening to the user's dir", async () => {
+    const dataRoot = join(TMP, `ws-rm-empty-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await store.ensure("u1", "s1");
+
+      await expect(store.remove("u1", "..")).rejects.toThrow();
+
+      expect(existsSync(join(dataRoot, "u1", "s1", "sandbox"))).toBe(true);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("LocalFsStore.pruneRegenerable", () => {
   it("removes regenerable dep/build dirs but keeps the user's files and .git history", async () => {
     const dataRoot = join(TMP, `ws-prune-${Math.random().toString(36).slice(2)}`);
