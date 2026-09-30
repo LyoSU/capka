@@ -3,7 +3,7 @@ import { db, pool } from "@/lib/db";
 import { realtime } from "@/lib/realtime";
 import { releaseHold } from "@/lib/billing/limits";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import type { MessageMeta } from "@/lib/chat/contracts";
+import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 
@@ -454,6 +454,23 @@ export async function cancelQueuedTurn(input: {
     status: "cancelled",
   }).catch(() => {});
   return "removed";
+}
+
+/**
+ * Give each approved call without a result the one a call that will never run gets
+ * (approveManageForUser stores the same). Without it the card spins on "Applying…"
+ * forever and every later turn sends the model a call with no result, which
+ * providers reject. A declined call keeps its decision alone, as it always does.
+ * Mutates `parts` and returns it.
+ */
+export function sealUnrunApprovals(parts: StoredPart[], error: string): StoredPart[] {
+  const settled = new Set(parts.flatMap((p) => (p.type === "tool-result" || p.type === "tool-error" ? [p.id] : [])));
+  for (const p of [...parts]) {
+    if (p.type === "tool-call" && p.approval?.approved === true && !settled.has(p.id)) {
+      parts.push({ type: "tool-result", id: p.id, name: p.name, output: { status: "error", code: "NOT_RUN", error } });
+    }
+  }
+  return parts;
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,

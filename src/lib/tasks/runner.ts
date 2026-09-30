@@ -12,7 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals } from "@/lib/tasks/queue";
 import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
@@ -323,6 +323,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // checks this flag and INSERTS a failed message instead, so the user always
   // sees what went wrong.
   let messageInserted = false;
+  // Set just before the first stream starts. A continuation runs the calls the user
+  // approved inside that stream, so one that fails before it has run none of them.
+  let streamStarted = false;
   const parts: StoredPart[] = [];
   // How many of `parts` are the suspended half an approval/`ask` continuation loaded.
   // The history already replays that half, so a stall resume must not send it again.
@@ -516,6 +519,65 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
+    // The reply hangs off the last message of the branch we're answering (the
+    // user message just sent, or the user turn being regenerated). Pointing the
+    // chat at this leaf makes the new branch the active one immediately.
+    let replyParentId = replyParentOf(payload);
+    if (resumeMessageId) {
+      // Approval continuation: the assistant message already exists (it's the chat
+      // leaf) with its suspended tool call now carrying the user's decision. Load
+      // its parts so this run APPENDS the execute-result + follow-up text to it,
+      // and build the model context from the path ENDING at it — convertToModelMessages
+      // turns that approval-responded tool part into a tool-approval-response, so
+      // the SDK re-runs the tool (approved) or the model sees the denial. No new
+      // row, no activeLeaf move. Loaded before prepareRun, so a failure there (a
+      // deleted project, say) settles this row instead of inserting one under its id.
+      const [row] = await db.select({ metadata: messages.metadata, parentId: messages.parentId })
+        .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
+      const meta = (row?.metadata ?? {}) as MessageMeta;
+      for (const p of meta.parts ?? []) parts.push(p);
+      suspendedParts = parts.length;
+      // Rebuild the effect ledger from the row, not from this process's memory: the
+      // first half of this turn ran in a DIFFERENT task (and possibly a different
+      // process), so its executed tool calls exist only here. Without this, a
+      // continuation that later overflows would report an empty ledger and re-run
+      // the first half's writes — the exact failure the ledger exists to prevent.
+      // Both sources, unioned by tool-call id with the ledger winning — not one or
+      // the other. An emergency trim clears `parts`, so the ledger is the stronger
+      // record; but during a rolling upgrade the half that ran before the table
+      // existed lives ONLY in `parts`, and an empty ledger is also what a failed
+      // write leaves behind. Choosing a source would drop the other's entries, and a
+      // dropped effect is precisely the one that gets done twice. See mergeEffects.
+      turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
+      seq = meta.streamSeq ?? 0;
+      // (The citation counter is seeded branch-wide at the path load below —
+      // the path ends at this very message, so the suspended half's numbers
+      // are covered there.)
+      // The suspended half's accounting, carried so the finalize below reports the
+      // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
+      // `status` says awaiting_*), so these were persisted; the first snapshot of
+      // this run overwrites the row's metadata, which is why they're read here and
+      // held in memory rather than merged at write time.
+      prior.usage = meta.usage;
+      prior.costUsd = meta.costUsd;
+      prior.costSource = meta.costSource;
+      prior.durationMs = meta.durationMs;
+      prior.reasoningMs = meta.reasoningMs;
+      prior.llmCalls = meta.llmCalls;
+      // The first half's steers, carried for the same reason as its usage: this run
+      // rewrites the row's metadata wholesale, so a steer the user gave before the
+      // approval would drop off the transcript when the continuation saves.
+      consumedSteers.push(...(meta.steers ?? []));
+      // …and the ones it never got to fold in. They sit on the FIRST half's task row
+      // (a steer is addressed to a running task, and that task is finished), so this
+      // is the only place they can be picked up — `meta.taskId` is still the suspended
+      // half's id at this point; our own snapshot overwrites it below.
+      if (meta.taskId) {
+        carriedSteers = (await readSteers(meta.taskId)).slice((meta.steers ?? []).length);
+      }
+      replyParentId = resumeMessageId;
+      messageInserted = true;
+    }
     const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint, quiet } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     // `taint` — has this turn read anything it did not author? — is CONSTRUCTED in
@@ -605,65 +667,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
     const turnContext: string[] = prompt.volatile ? [prompt.volatile] : [];
 
-    // The reply hangs off the last message of the branch we're answering (the
-    // user message just sent, or the user turn being regenerated). Pointing the
-    // chat at this leaf makes the new branch the active one immediately.
-    let replyParentId = replyParentOf(payload);
     let extraAttachedFiles: FileRef[] = [];
-    if (resumeMessageId) {
-      // Approval continuation: the assistant message already exists (it's the chat
-      // leaf) with its suspended tool call now carrying the user's decision. Load
-      // its parts so this run APPENDS the execute-result + follow-up text to it,
-      // and build the model context from the path ENDING at it — convertToModelMessages
-      // turns that approval-responded tool part into a tool-approval-response, so
-      // the SDK re-runs the tool (approved) or the model sees the denial. No new
-      // row, no activeLeaf move.
-      const [row] = await db.select({ metadata: messages.metadata, parentId: messages.parentId })
-        .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
-      const meta = (row?.metadata ?? {}) as MessageMeta;
-      for (const p of meta.parts ?? []) parts.push(p);
-      suspendedParts = parts.length;
-      // Rebuild the effect ledger from the row, not from this process's memory: the
-      // first half of this turn ran in a DIFFERENT task (and possibly a different
-      // process), so its executed tool calls exist only here. Without this, a
-      // continuation that later overflows would report an empty ledger and re-run
-      // the first half's writes — the exact failure the ledger exists to prevent.
-      // Both sources, unioned by tool-call id with the ledger winning — not one or
-      // the other. An emergency trim clears `parts`, so the ledger is the stronger
-      // record; but during a rolling upgrade the half that ran before the table
-      // existed lives ONLY in `parts`, and an empty ledger is also what a failed
-      // write leaves behind. Choosing a source would drop the other's entries, and a
-      // dropped effect is precisely the one that gets done twice. See mergeEffects.
-      turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
-      seq = meta.streamSeq ?? 0;
-      // (The citation counter is seeded branch-wide at the path load below —
-      // the path ends at this very message, so the suspended half's numbers
-      // are covered there.)
-      // The suspended half's accounting, carried so the finalize below reports the
-      // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
-      // `status` says awaiting_*), so these were persisted; the first snapshot of
-      // this run overwrites the row's metadata, which is why they're read here and
-      // held in memory rather than merged at write time.
-      prior.usage = meta.usage;
-      prior.costUsd = meta.costUsd;
-      prior.costSource = meta.costSource;
-      prior.durationMs = meta.durationMs;
-      prior.reasoningMs = meta.reasoningMs;
-      prior.llmCalls = meta.llmCalls;
-      // The first half's steers, carried for the same reason as its usage: this run
-      // rewrites the row's metadata wholesale, so a steer the user gave before the
-      // approval would drop off the transcript when the continuation saves.
-      consumedSteers.push(...(meta.steers ?? []));
-      // …and the ones it never got to fold in. They sit on the FIRST half's task row
-      // (a steer is addressed to a running task, and that task is finished), so this
-      // is the only place they can be picked up — `meta.taskId` is still the suspended
-      // half's id at this point; our own snapshot overwrites it below.
-      if (meta.taskId) {
-        carriedSteers = (await readSteers(meta.taskId)).slice((meta.steers ?? []).length);
-      }
-      replyParentId = resumeMessageId;
-      messageInserted = true;
-    } else {
+    if (!resumeMessageId) {
       // Batch a burst of queued follow-ups (web or Telegram) into one reply: answer
       // from the chat's CURRENT leaf — every message that piled up while we were
       // busy — and absorb the queued tasks those follow-ups created, carrying their
@@ -1260,6 +1265,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // ABOVE this line because streamText is invoked eagerly inside makeStream, so an
     // injection after it would reach only the retries.
     carryEffectsIntoRestart();
+    streamStarted = true;
     let result = makeStream();
 
     // Usage accumulated LIVE from finish-step events — the source of truth.
@@ -2807,6 +2813,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       status, elapsedMs: Date.now() - startedAt, toolCount,
       ...(failure ? { error: failure.adminDetail } : { err: String(e) }),
     });
+    // A continuation that failed before its stream started (prepareRun threw: its
+    // project was deleted, say) ran none of the calls the user approved.
+    if (resumeMessageId && !streamStarted) {
+      sealUnrunApprovals(parts, `Not run. ${failure?.userMessage ?? "The turn was stopped before this approved call ran."}`);
+    }
     const failureMeta = {
       taskId, status, parts: parts.length > 0 ? parts : undefined,
       // Which model failed/was cancelled — without it, model-filtered analytics

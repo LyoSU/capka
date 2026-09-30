@@ -194,4 +194,24 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const results = resultFor((await storedRow(chat)).parts, "c2");
     expect(results.map((r) => r.output)).toEqual(["saved"]);
   }, 30_000);
+
+  // prepareRun throws before any stream: the chat's project was deleted while the card
+  // waited. The row exists, so a failure path that inserted one rolled back on its id
+  // and left the task running and the card spinning.
+  it("settles its own row when the continuation cannot start", async () => {
+    const chat = `${C}-noproject`;
+    await seedSuspended(chat, { name: "save_row", approved: true });
+
+    expect(await continueApproval(chat, { projectId: "aplc-deleted-project" })).toBe("failed");
+
+    const row = await storedRow(chat);
+    expect(row.status).toBe("failed");
+    expect(row.error).toBeTruthy();
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+    expect(row.parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
+    const { rows } = await pool.query(`SELECT id FROM messages WHERE chat_id=$1 ORDER BY id`, [chat]);
+    expect(rows.map((r) => r.id)).toEqual([`${chat}-a1`, `${chat}-u1`]);
+    expect(prompts).toEqual([]);
+    expect(writes).toEqual([]);
+  }, 30_000);
 });
