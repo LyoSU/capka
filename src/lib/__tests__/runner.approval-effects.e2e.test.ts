@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { tool } from "ai";
 import { z } from "zod";
@@ -12,26 +12,40 @@ import { z } from "zod";
  *
  * The real road, because the defect is the runner's own message order: a suspended
  * row with one settled call and one approved call, and a continuation over it.
+ *
+ * The same continuation restarted after the approved call ran lost its result the
+ * other way: the SDK runs an approval before the first model call, the restart threw
+ * that attempt away, and the history still ended on the bare approval. So the
+ * provider got the call with no result, after the write had landed.
  */
 type Msg = { role: string; content: unknown };
 const prompts: Msg[][] = [];
+// What the next provider call does instead of answering: an overflow is thrown (the
+// emergency-trim restart), a 503 arrives mid-reply (the stall/transient resume).
+const failures: ("overflow" | "transient")[] = [];
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
       doStream: async (opts) => {
         prompts.push(opts.prompt as Msg[]);
+        const fail = failures.shift();
+        if (fail === "overflow") throw new Error("prompt is too long: 213456 tokens > 200000 maximum");
         return {
           stream: simulateReadableStream({
             chunks: [
               { type: "stream-start", warnings: [] },
               { type: "text-start", id: "1" },
-              { type: "text-delta", id: "1", delta: "Saved." },
-              { type: "text-end", id: "1" },
-              {
-                type: "finish",
-                finishReason: { unified: "stop", raw: "end_turn" },
-                usage: { inputTokens: { total: 10, noCache: 10 }, outputTokens: { total: 2 } },
-              },
+              ...(fail === "transient"
+                ? [{ type: "text-delta", id: "1", delta: "Saving" }, { type: "error", error: new Error("503 Service Unavailable") }]
+                : [
+                    { type: "text-delta", id: "1", delta: "Saved." },
+                    { type: "text-end", id: "1" },
+                    {
+                      type: "finish",
+                      finishReason: { unified: "stop", raw: "end_turn" },
+                      usage: { inputTokens: { total: 10, noCache: 10 }, outputTokens: { total: 2 } },
+                    },
+                  ]),
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ] as any,
           }),
@@ -72,49 +86,69 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "apfx-user";
 const C = "apfx-chat";
 
+/** A suspended half: a read that ran, then a write the user has just approved. */
+async function seedSuspended(chat: string) {
+  await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [chat, U]);
+  await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ($1,$2,'user','save the row')`, [`${chat}-u1`, chat]);
+  await pool.query(
+    `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ($1,$2,$3,'assistant','',$4::jsonb)`,
+    [`${chat}-a1`, chat, `${chat}-u1`, JSON.stringify({
+      status: "awaiting_approval",
+      parts: [
+        { type: "tool-call", id: "c1", name: "save_row", input: { row: "draft" } },
+        { type: "tool-result", id: "c1", name: "save_row", output: "saved" },
+        { type: "tool-call", id: "c2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
+      ],
+    })],
+  );
+  await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-a1`, chat]);
+}
+
+/** Continue the suspended row in `chat`; resolves once the task has finished. */
+async function continueApproval(chat: string) {
+  // Written already-running: the dev stack's worker would claim a `queued` row.
+  const { rows } = await pool.query<ClaimedTask>(
+    `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
+     VALUES ($1,$2,$3,'running','w-apfx', now() + interval '300 seconds', $4::jsonb)
+     RETURNING *`,
+    [`${chat}-task`, chat, U, JSON.stringify({ resumeMessageId: `${chat}-a1` })],
+  );
+  await runAgentTask(rows[0], "w-apfx");
+  const t = await pool.query(`SELECT status FROM tasks WHERE id=$1`, [`${chat}-task`]);
+  expect(t.rows[0].status).toBe("completed");
+}
+
+/** How many parts of `type` in `role` messages carry this tool-call id. */
+const count = (prompt: Msg[], role: string, type: string, id: string) =>
+  prompt.filter((m) => m.role === role && Array.isArray(m.content))
+    .flatMap((m) => m.content as { type: string; toolCallId?: string }[])
+    .filter((p) => p.type === type && p.toolCallId === id).length;
+
 run("runAgentTask: an approval continuation after a tool already ran", () => {
+  const clean = async () => {
+    await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id LIKE $1)`, [`${C}%`]);
+    await pool.query(`DELETE FROM messages WHERE chat_id LIKE $1`, [`${C}%`]);
+    await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
+    await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
+    await pool.query(`DELETE FROM chats WHERE id LIKE $1`, [`${C}%`]);
+  };
   beforeAll(async () => {
     await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'E','apfx@test.local') ON CONFLICT DO NOTHING`, [U]);
-    await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [C, U]);
-    await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id=$1)`, [C]);
-    await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [C]);
-    await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('apfx-u1',$1,'user','save the row')`, [C]);
-    // The suspended half: a read that ran, then a write the user has just approved.
-    await pool.query(
-      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ('apfx-a1',$1,'apfx-u1','assistant','',$2::jsonb)`,
-      [C, JSON.stringify({
-        status: "awaiting_approval",
-        parts: [
-          { type: "tool-call", id: "c1", name: "save_row", input: { row: "draft" } },
-          { type: "tool-result", id: "c1", name: "save_row", output: "saved" },
-          { type: "tool-call", id: "c2", name: "save_row", input: { row: "final" }, approval: { id: "ap1", approved: true } },
-        ],
-      })],
-    );
-    await pool.query(`UPDATE chats SET active_leaf_id='apfx-a1' WHERE id=$1`, [C]);
+    await clean();
+  });
+  beforeEach(() => {
+    prompts.length = 0;
+    writes.length = 0;
+    failures.length = 0;
   });
   afterAll(async () => {
-    await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id=$1)`, [C]);
-    await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [C]);
-    await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM chats WHERE id=$1`, [C]);
+    await clean();
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
   });
 
   it("runs the approved call once and tells the model what already ran", async () => {
-    // Written already-running: the dev stack's worker would claim a `queued` row.
-    const { rows } = await pool.query<ClaimedTask>(
-      `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
-       VALUES ('apfx-task',$1,$2,'running','w-apfx', now() + interval '300 seconds', $3::jsonb)
-       RETURNING *`,
-      [C, U, JSON.stringify({ resumeMessageId: "apfx-a1" })],
-    );
-    await runAgentTask(rows[0], "w-apfx");
-    const t = await pool.query(`SELECT status FROM tasks WHERE id='apfx-task'`);
-    expect(t.rows[0].status).toBe("completed");
+    await seedSuspended(C);
+    await continueApproval(C);
 
     // The finding: the approved call ran, once, before the model was asked anything.
     expect(writes).toEqual([{ row: "final" }]);
@@ -131,5 +165,26 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     const note = prompt.findIndex((m) => m.role === "user" && JSON.stringify(m.content).includes("draft"));
     expect(note).toBeGreaterThan(-1);
     expect(note).toBeLessThan(prompt.findIndex((m) => m.role === "assistant"));
+  }, 30_000);
+
+  // Two restart roads: the overflow trim rebuilds the history from the settled rows,
+  // the transient resume keeps it and appends the reply so far. Either way the write
+  // already ran before the model was first asked, so the retried prompt must hold
+  // its call and its result exactly once — and the write must not run again.
+  it.each(["overflow", "transient"] as const)("a %s restart sends the approved call with its result, once", async (kind) => {
+    const chat = `${C}-${kind}`;
+    await seedSuspended(chat);
+    failures.push(kind);
+    await continueApproval(chat);
+
+    expect(writes).toEqual([{ row: "final" }]);
+    // Control: the first attempt really failed and was retried.
+    expect(prompts).toHaveLength(2);
+    const prompt = prompts[1];
+    expect(count(prompt, "assistant", "tool-call", "c2")).toBe(1);
+    expect(count(prompt, "tool", "tool-result", "c2")).toBe(1);
+    // The suspended half is sent once too — the resume replays only this run's reply.
+    expect(count(prompt, "assistant", "tool-call", "c1")).toBe(1);
+    expect(count(prompt, "tool", "tool-result", "c1")).toBe(1);
   }, 30_000);
 });

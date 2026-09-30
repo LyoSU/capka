@@ -80,7 +80,10 @@ const UNSETTLED_MARKER = "[outcome unknown]";
  *  an account of our retry machinery. */
 const INTERNAL = "[Recovery note — internal; do not mention this note or the restart to the user]\n";
 
-const OPENING = "This turn restarted part-way through, and the tool calls below are no longer visible in the transcript above. ";
+/** True of every stream the note reaches (see buildRecoveryNote), so it names no
+ *  restart and no position: on an approval continuation's first stream nothing has
+ *  restarted, the calls are still in the replayed reply, and the note sits above it. */
+const OPENING = "The tool calls below were issued earlier while working on this request; the transcript may show them only in part, or not at all. ";
 
 /** How to act on a state that is not "completed", in one sentence, biased toward a
  *  NON-mutating call: "check it" alone also reads as "re-read this note". */
@@ -213,8 +216,10 @@ function renderArgs(input: unknown): string {
 }
 
 /**
- * Render the ledger for injection into a restarted turn, or null when there is
- * nothing to warn about.
+ * Render the ledger for a stream whose history may not show those calls, or null
+ * when there is nothing to warn about: a restarted turn, a fresh turn continuing a
+ * reply that failed part-way, and the first stream of an approval continuation whose
+ * first half already ran tools.
  *
  * Two shapes, chosen by size: the itemized list while it fits (best — the model
  * can see exactly which sku or path is done), per-tool counts once it doesn't

@@ -1,5 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import type { ModelMessage, UserModelMessage } from "ai";
+import type { JSONValue, ModelMessage, ToolResultPart, UserModelMessage } from "ai";
 import { and, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -314,6 +314,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // sees what went wrong.
   let messageInserted = false;
   const parts: StoredPart[] = [];
+  // How many of `parts` are the suspended half an approval/`ask` continuation loaded.
+  // The history already replays that half, so a stall resume must not send it again.
+  let suspendedParts = 0;
   // Every tool call this turn has actually EXECUTED. Deliberately separate from
   // `parts` because the two have opposite lifetimes: `parts` is the reply being
   // built and is thrown away by a retry, while an executed call stays executed.
@@ -609,6 +612,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
       const meta = (row?.metadata ?? {}) as MessageMeta;
       for (const p of meta.parts ?? []) parts.push(p);
+      suspendedParts = parts.length;
       // Rebuild the effect ledger from the row, not from this process's memory: the
       // first half of this turn ran in a DIFFERENT task (and possibly a different
       // process), so its executed tool calls exist only here. Without this, a
@@ -1182,6 +1186,29 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
     };
 
+    // Results of the approved calls the SDK ran ahead of this continuation's first
+    // step, in the form the model reads them — the form a settled turn's history
+    // gives them (convertToModelMessages without tools).
+    const approvedRuns = new Map<string, ToolResultPart>();
+    const recordApprovedRun = (id: string, name: string, output: ToolResultPart["output"]) => {
+      if (parts.some((p) => p.type === "tool-call" && p.id === id && p.approval)) {
+        approvedRuns.set(id, { type: "tool-result", toolCallId: id, toolName: name, output });
+      }
+    };
+    // Every restart inside a continuation, the stall resume included, re-sends a
+    // history that still ends on the approval response, while the result of the call
+    // it approved lived only in the attempt being thrown away. The SDK excuses approved
+    // ids from its own missing-result check, so the provider got the call with no
+    // result and rejected the turn after the write had landed. The recorded result
+    // goes into that same tool message, and the SDK skips an approval whose result is
+    // already there, so the write does not run again either.
+    const settleApprovedRuns = () => {
+      const tail = modelMessages.at(-1);
+      if (tail?.role !== "tool") return;
+      const settled = new Set(tail.content.flatMap((p) => (p.type === "tool-result" ? [p.toolCallId] : [])));
+      const missing = [...approvedRuns.values()].filter((r) => !settled.has(r.toolCallId));
+      if (missing.length) modelMessages[modelMessages.length - 1] = { ...tail, content: [...tail.content, ...missing] };
+    };
     let effectNote: ModelMessage | null = null;
     const carryEffectsIntoRestart = () => {
       if (effectNote) {
@@ -1189,6 +1216,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         if (i >= 0) modelMessages.splice(i, 1);
         effectNote = null;
       }
+      settleApprovedRuns();
       const note = buildRecoveryNote([...inheritedEffects, ...turnEffects]);
       if (!note) return;
       // A user turn, not an assistant prefill: it is state the model must read, and
@@ -1198,7 +1226,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // when their response is the FINAL message, so a note after it left the
       // approved call unrun and its tool call without a result. There it goes right
       // after the last user message instead, before the reply holding the call. Once
-      // the call has run (a restart), the note stays last so it cannot run twice.
+      // the call has run (a restart), its result is in the tail and the note goes last.
       const tail = modelMessages.at(-1);
       const answered = new Set(tail?.role === "tool"
         ? tail.content.flatMap((p) => (p.type === "tool-approval-response" ? [p.approvalId] : [])) : []);
@@ -1413,6 +1441,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // and they stay happened after the attempt is thrown away. Clearing them is
       // what made a restarted turn repeat its writes.
       parts.length = 0;
+      suspendedParts = 0;
       textBuf = "";
       reasonBuf = "";
       resumeMessages = [];
@@ -1600,6 +1629,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // not Capka-authored. UNSET is untrusted, which is the whole fail-closed
             // property now that the fold's own predicate is not a second belt.
             if (untrustedOutputOf(rawTools, event.toolName)) await taint.mark("tool_result");
+            recordApprovedRun(event.toolCallId, event.toolName,
+              typeof output === "string" ? { type: "text", value: output } : { type: "json", value: (output ?? null) as JSONValue });
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
             turnOutputChars += outputChars(output);
             // Ledger of what this turn has actually DONE — recorded on the result,
@@ -1635,6 +1666,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the jsonb metadata write the same way a binary tool-result would.
             const toolErr = stripNul(errMsg(event.error));
             const neverRan = invalidCalls.has(event.toolCallId);
+            recordApprovedRun(event.toolCallId, event.toolName, { type: "error-text", value: toolErr });
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: toolErr, ...(neverRan ? { invalid: true } : {}) });
             turnOutputChars += toolErr.length;
             // Ledgered too, and marked failed. Same reason the window counts above:
@@ -1910,8 +1942,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // false when there's nothing to resume from (caller restarts clean instead).
     const resume = async (): Promise<boolean> => {
       await flushBuffers(); // canonical parts in DB + client before continuing
-      const msgs = await buildResumeMessages(msgId, parts);
+      // Only this run's own parts: on a continuation the history already ends on the
+      // suspended half, and an approved call's result goes into that history's tail,
+      // next to the approval, rather than as a result without its call here.
+      const msgs = await buildResumeMessages(msgId,
+        parts.slice(suspendedParts).filter((p) => !("id" in p && approvedRuns.has(p.id))));
       if (msgs.length === 0) return false;
+      settleApprovedRuns();
       resumeTail = getFullText().slice(-500);
       stitchNextDelta = true;
       useReasoning = false; // partial reasoning isn't replayable
@@ -2510,8 +2547,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // value the write tools locate a quote in (§4.5 rule 1), and deliberately not
     // re-derived here.
     // The old derivation read `modelMessages.findLast(role === "user")`, which is not
-    // the transcript: `carryEffectsIntoRestart` pushes the recovery note onto it as a
-    // user message and nothing takes it off again, so every turn that continued after a
+    // the transcript: `carryEffectsIntoRestart` inserts the recovery note into it as a
+    // user message and nothing takes it out again, so every turn that continued after a
     // part-way failure asked "did the user write these words" about a list of tool names
     // and clamped tool ARGUMENTS — text a fetched page can reach. Two derivations of one
     // concept was the defect; one value with one source is the fix, so nothing here may
