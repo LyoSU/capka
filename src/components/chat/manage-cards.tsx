@@ -399,6 +399,23 @@ function gatedToolLabel(toolName: string, input: unknown): string {
   return toolName;
 }
 
+/** How a card reads the reply to a decision it posted (`/api/manage/approve`,
+ *  `/api/ask/answer`): whether it `landed` (the turn runs on — success feedback),
+ *  whether the buttons come back (`retry`: nothing was kept), and which refusal or
+ *  outcome to say. A 429 is the spending limit or the flood guard; "busy" is the
+ *  chat finishing another turn; "failed" was kept, but its turn could not continue.
+ *  Anything else — "gone", or an outcome this build does not know — is no success:
+ *  the buttons come back, and the turn's own reload settles the card. */
+export function readDecisionReply(
+  status: number,
+  body: { ok?: boolean; code?: string; outcome?: string },
+): { landed: boolean; retry: boolean; note: "budgetReached" | "rateLimited" | "busy" | "stopped" | null } {
+  if (status === 429) return { landed: false, retry: true, note: body.code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited" };
+  if (status >= 200 && status < 300 && body.ok) return { landed: true, retry: false, note: null };
+  if (body.outcome === "failed") return { landed: false, retry: false, note: "stopped" };
+  return { landed: false, retry: true, note: body.outcome === "busy" ? "busy" : null };
+}
+
 export function ApprovalCard({
   messageId, toolCallId, toolName, input, state, approval, output, onSend,
 }: {
@@ -415,7 +432,8 @@ export function ApprovalCard({
   const awaiting = state === "approval-requested";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Why the last decision was refused, when the reason is the user's to know.
+  // Why the last decision was refused, or that it was kept but its turn could not
+  // continue — until the turn's reload settles the card into its own state.
   const [refusal, setRefusal] = useState<string | null>(null);
 
   // Fetch the preview only while awaiting — a resolved card shows the applied
@@ -455,20 +473,18 @@ export function ApprovalCard({
       // realtime updates (and the finish reload) flip this part to its resolved
       // state, which re-renders the card. No local phase.
       //
-      // A logical refusal arrives as 200 + {ok:false} (the call was already decided,
-      // or its continuation could not be queued), so the HTTP status alone can't be
-      // the test: without reading the body the button would sit disabled forever on
-      // a decision the server never recorded. Re-enable so the user can retry; when
-      // the call really was already decided, `awaiting` flips and the card resolves.
-      //
-      // A 429 is the spending limit or the flood guard: nothing was recorded, and the
-      // card says which, in the composer's own words, instead of just coming back.
-      const { ok, code } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean; code?: string };
-      if (r.status === 429) setRefusal(tHook(code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited"));
-      if (!r.ok || !ok) {
+      // A logical refusal arrives as 200 + {ok:false}, so the HTTP status alone can't
+      // be the test: without reading the body the button would sit disabled forever
+      // on a decision the server never recorded. See readDecisionReply for which
+      // refusals bring the buttons back and what each one says.
+      const reply = readDecisionReply(r.status, await r.json().catch(() => ({ ok: r.ok })));
+      if (reply.note) setRefusal(reply.note === "busy" || reply.note === "stopped" ? ta(reply.note) : tHook(reply.note));
+      if (reply.landed) {
+        if (approved) haptic("success");
+      } else {
         haptic("error");
-        setSubmitting(false);
-      } else if (approved) haptic("success");
+        if (reply.retry) setSubmitting(false);
+      }
     } catch {
       haptic("error");
       setSubmitting(false); // let the user retry the click
@@ -548,7 +564,7 @@ export function ApprovalCard({
           spinner; a denied call reads "declined"; an applied one shows its summary.
           A gated tool keeps its "what would run" line so the outcome names its
           subject (its approved+executed state never reaches this card — the part
-          returns to the activity rail, see isApprovalPart). */}
+          returns to the activity rail, see isApprovalPart — unless it never ran). */}
       {gated && !awaiting && (
         <div className="mt-2 text-sm text-muted-foreground">{ta("prompt", { tool: gatedToolLabel(toolName, input) })}</div>
       )}
@@ -569,7 +585,7 @@ export function ApprovalCard({
           )}
         </>
       )}
-      {!awaiting && failed && <Outcome kind="error" text={oo?.summary || t("applyError")} />}
+      {!awaiting && failed && <Outcome kind="error" text={oo?.code === "NOT_RUN" ? ta("notRun") : oo?.summary || t("applyError")} />}
     </CardShell>
   );
 }

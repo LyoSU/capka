@@ -9,7 +9,7 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask, requestCancel, cancelQueuedTurn } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { BudgetExceededError } from "@/lib/errors";
+import { BudgetExceededError, isAppError } from "@/lib/errors";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
 import { getTranslator } from "@/lib/i18n/translator";
@@ -514,11 +514,22 @@ async function buildBot(): Promise<Bot | null> {
       if (!link) { await ctx.answerCallbackQuery(); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
       const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved })
-        .catch((e) => { if (e instanceof BudgetExceededError) return "budget" as const; throw e; });
-      // Over budget: nothing was recorded, so the buttons stay for when the window rolls over.
-      if (outcome === "budget") { await ctx.answerCallbackQuery({ text: t("budgetReached") }); return; }
+        .catch((e) => {
+          if (e instanceof BudgetExceededError) return "budget" as const;
+          if (isAppError(e) && e.code === "RATE_LIMITED") return "limited" as const;
+          throw e;
+        });
+      // Over budget or over the flood guard: nothing was recorded, so the buttons stay
+      // for when the window rolls over.
+      if (outcome === "budget" || outcome === "limited") {
+        await ctx.answerCallbackQuery({ text: t(outcome === "budget" ? "budgetReached" : "tooFast") });
+        return;
+      }
+      // "failed": the decision stuck, but the turn could not continue — the failure
+      // message itself was already sent, so this only must not say "Done".
       const msg = outcome === "busy" ? t("confirmBusy")
         : outcome === "gone" ? t("confirmExpired")
+        : outcome === "failed" ? t("confirmStopped")
         : approved ? t("confirmApplied") : t("confirmCancelled");
       await ctx.answerCallbackQuery({ text: msg });
       // Buttons come off unless tapping again could still do something. "busy" is

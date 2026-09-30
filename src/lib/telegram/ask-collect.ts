@@ -116,7 +116,9 @@ async function finish(bot: Bot, chatId: number, c: Collection, action: AskAnswer
     await promptField(bot, chatId, c);
     return;
   }
-  const msg = outcome === "gone" ? t("expired") : action === "skip" ? t("skipped") : t("answered");
+  // "failed": the answer stuck but the turn could not continue; its failure message
+  // was already sent, so this only must not read as a plain "Answered".
+  const msg = outcome === "gone" ? t("expired") : outcome === "failed" ? t("stopped") : action === "skip" ? t("skipped") : t("answered");
   await bot.api.sendMessage(chatId, msg).catch(() => {});
 }
 

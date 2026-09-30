@@ -23,6 +23,8 @@ export const POST = apiHandler(async (req: Request) => {
   const outcome = await approveManageForUser(userId, d);
   // 200 even when the pending call is gone (already decided, or expired): the card
   // reconciles to its resolved state — this isn't an HTTP-level failure. `outcome`
-  // rides along so the card can say WHY it refused; `ok` stays the plain gate.
+  // rides along so the card can say WHY it refused; `ok` stays the plain gate, and
+  // is false for "failed" too (recorded, but the turn could not continue), so a card
+  // that predates that outcome never reads it as success.
   return Response.json({ ok: outcome === "applied", outcome });
 });

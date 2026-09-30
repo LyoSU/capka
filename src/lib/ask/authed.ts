@@ -23,13 +23,14 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  * `answer.value` onto the suspended tool-call part AND appends a matching
  * tool-result (its output is the AskAnswer), so convertToModelMessages rebuilds a
  * normal call→result pair and the SDK finishes the SAME turn with the answer in
- * hand. Same three outcomes as `approveManageForUser`: "gone" (not the caller's,
- * no pending ask, or already answered) is final; "busy" (the chat's one queued
- * slot is taken) is worth retrying. Over budget or over the chat rate limit it
- * throws (BudgetExceededError / a 429 `RATE_LIMITED` AppError) with nothing
- * recorded — the same gates and refusals as the manage approval path.
+ * hand. Same outcomes as `approveManageForUser`: "gone" (not the caller's, no
+ * pending ask, or already answered) is final; "busy" (the chat's one queued slot
+ * is taken) is worth retrying; "failed" means the answer was recorded but the
+ * turn could not continue and was settled as failed. Over budget or over the chat
+ * rate limit it throws (BudgetExceededError / a 429 `RATE_LIMITED` AppError) with
+ * nothing recorded — the same gates and refusals as the manage approval path.
  */
-export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy"> {
+export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy" | "failed"> {
   const [msg] = await db
     .select({ chatId: messages.chatId, ownerId: chats.userId, projectId: chats.projectId, metadata: messages.metadata })
     .from(messages).innerJoin(chats, eq(messages.chatId, chats.id))
@@ -129,7 +130,9 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
           });
         })().catch((e) => log.warn("ask failure delivery failed", { messageId: d.messageId, err: String(e) }));
       }
-    } else await notifyTaskEnqueued(taskId);
+      return "failed";
+    }
+    await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
     if (e instanceof TransactionRollbackError) return refusal;

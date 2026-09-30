@@ -41,13 +41,19 @@ type TaskProbe = { id: string; status: string; error: string | null; queued: Que
 
 /** The chat.hook line a coded /api/chat refusal reads as. Budget and flood share
  *  the 429 status, so the code is what tells them apart. */
-const REFUSALS: Record<string, string> = {
+export const REFUSALS: Record<string, string> = {
   BUDGET_EXCEEDED: "budgetReached",
   RATE_LIMITED: "rateLimited",
   MESSAGE_TOO_LONG: "messageTooLong",
   CANNOT_REGENERATE: "cannotRegenerate",
   NOTHING_TO_SEND: "nothingToSend",
   MESSAGE_ID_IN_USE: "messageIdInUse",
+  CHAT_NOT_FOUND: "chatNotFound",
+  CHAT_PROJECT_MISMATCH: "chatProjectMismatch",
+  PROJECT_DELETING: "projectDeleting",
+  PROJECT_NOT_FOUND: "projectNotFound",
+  TELEGRAM_CHAT: "telegramChat",
+  STALE_CONVERSATION: "staleConversation",
 };
 
 /** Turn a refused send or re-run into the error its caller throws, in the user's language. */

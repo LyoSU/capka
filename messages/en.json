@@ -496,6 +496,7 @@
       "skipped": "Skipped",
       "expired": "That question is no longer active — your answer wasn't saved.",
       "busy": "This chat is still finishing another message — please answer again in a moment.",
+      "stopped": "Your reply was saved, but the assistant couldn't continue.",
       "yes": "Yes",
       "no": "No"
     },
@@ -715,7 +716,13 @@
       "cannotRegenerate": "This reply can't be regenerated. Send a new message instead.",
       "nothingToSend": "There's nothing to send yet. Type a message first.",
       "messageIdInUse": "This message couldn't be sent. Reload the page and try again.",
-      "offline": "No connection. Check your internet and try again."
+      "offline": "No connection. Check your internet and try again.",
+      "chatNotFound": "This chat couldn't be found. It may have been deleted.",
+      "chatProjectMismatch": "This chat has changed since the page loaded. Reload the page and try again.",
+      "projectDeleting": "This chat's project is being deleted, so it can't take new messages.",
+      "projectNotFound": "This project couldn't be found. It may have been deleted.",
+      "telegramChat": "This chat continues in Telegram. Reply there instead.",
+      "staleConversation": "This conversation has changed since the page loaded. Reload the page to continue."
     },
     "citations": {
       "openSource": "Source {n}: {title}",
@@ -744,7 +751,10 @@
       "allow": "Allow",
       "decline": "Don't allow",
       "running": "Running…",
-      "declined": "Not allowed"
+      "declined": "Not allowed",
+      "notRun": "Didn't run — the assistant couldn't continue.",
+      "stopped": "Your choice was saved, but the assistant couldn't continue.",
+      "busy": "This chat is still finishing another message — try again in a moment."
     },
     "manage": {
       "settingTitle": "Setting updated",
@@ -2436,6 +2446,7 @@
     "confirmCancelled": "Cancelled.",
     "confirmExpired": "This confirmation expired — just ask again.",
     "confirmBusy": "This chat is still finishing another message — tap again in a moment.",
+    "confirmStopped": "Your choice was saved, but the assistant couldn't continue.",
     "confirmDetails": "Details",
     "automationPaused": "I paused the automation \"{title}\": three runs in a row failed. Check the last run and re-enable it when ready."
   },

@@ -188,12 +188,16 @@ function isToolPart(part: { type: string }): part is ToolPart {
  *  approval card, never the quiet activity rail. `manage` keeps the card through
  *  its resolved states too (the applied change IS the outcome); a gated ordinary
  *  tool returns to the timeline once it has run, so its result renders with the
- *  full shape ladder instead of being trapped in a consent card. */
-function isApprovalPart(part: ToolPart): boolean {
+ *  full shape ladder instead of being trapped in a consent card. One that was
+ *  approved but never ran (its turn could not continue — a `NOT_RUN` result) has
+ *  no step to show, and in the rail would read as done: it keeps the card, which
+ *  says it did not run. One that ran and failed is a real step and goes to the rail. */
+export function isApprovalPart(part: ToolPart): boolean {
   if (getToolName(part) === "manage") {
     return part.state === "approval-requested" || part.state === "approval-responded" || !!part.approval;
   }
-  return part.state === "approval-requested" || part.state === "approval-responded";
+  return part.state === "approval-requested" || part.state === "approval-responded"
+    || (!!part.approval && (part.output as { code?: unknown } | undefined)?.code === "NOT_RUN");
 }
 
 /** An `ask` tool call the runner suspended for a human answer — it (and its

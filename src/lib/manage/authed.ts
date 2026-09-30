@@ -103,11 +103,13 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * not the caller's message, no pending call, or a racing tap already decided it
  * (nothing to retry); "busy" — the decision stuck nowhere because the chat's one
  * queued slot is taken, which IS worth tapping again. Callers that show buttons
- * must keep them alive only for "busy". A user over their shared-key budget gets
- * a BudgetExceededError instead, and one over the chat rate limit a 429
- * `RATE_LIMITED` AppError — both with nothing recorded.
+ * must keep them alive only for "busy". A fourth, "failed": the decision WAS
+ * recorded, but the turn could not continue (no model left to run it) and was
+ * settled here as failed — so it must not read as done. A user over their
+ * shared-key budget gets a BudgetExceededError instead, and one over the chat rate
+ * limit a 429 `RATE_LIMITED` AppError — both with nothing recorded.
  */
-export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy"> {
+export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy" | "failed"> {
   const [msg] = await db
     .select({ chatId: messages.chatId, ownerId: chats.userId, projectId: chats.projectId, metadata: messages.metadata })
     .from(messages)
@@ -248,7 +250,9 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
           isAdmin, toolCount: 0, elapsedMs: 0,
         })).catch((e) => log.warn("approval failure delivery failed", { messageId: d.messageId, err: String(e) }));
       }
-    } else await notifyTaskEnqueued(taskId);
+      return "failed";
+    }
+    await notifyTaskEnqueued(taskId);
     return "applied";
   } catch (e) {
     // Our own rollback: nothing was recorded either way, so the card is safe to

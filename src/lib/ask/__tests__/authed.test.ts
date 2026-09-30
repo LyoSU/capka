@@ -143,7 +143,9 @@ describe("answerAskForUser", () => {
       "This chat's model is no longer available — its connection was removed. Please choose another model.",
     ));
     const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
-    expect(outcome).toBe("applied");
+    // Kept, but not "applied": the turn it would have resumed is over, and a caller
+    // that said "Done" here would be contradicted by the failure right after it.
+    expect(outcome).toBe("failed");
     // The decision is recorded AND the turn settled, in the runner's own friendly words.
     const meta = (rows.updated as { metadata: { status: string; error: string; errorCategory: string; errorDetail: string } }).metadata;
     expect(meta).toMatchObject({ status: "failed", errorCategory: "model_unavailable" });

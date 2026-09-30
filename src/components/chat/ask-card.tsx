@@ -6,6 +6,7 @@ import { CircleQuestionMark, Loader2, ChevronLeft, ChevronRight } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { haptic } from "@/lib/haptics";
+import { readDecisionReply } from "./manage-cards";
 import type { AskForm, AskField, AskAnswer } from "@/lib/ask/types";
 
 /**
@@ -30,7 +31,8 @@ export function AskCard({
   const [values, setValues] = useState<Record<string, string | string[]>>({});
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  // Why the last answer was refused, when the reason is the user's to know.
+  // Why the last answer was refused, or that it was kept but its turn could not
+  // continue — the one case still shown once the card has settled.
   const [refusal, setRefusal] = useState<string | null>(null);
   const awaiting = state === "input-available" && !value;
 
@@ -69,7 +71,7 @@ export function AskCard({
     if (submitting) return;
     setSubmitting(true);
     setRefusal(null);
-    haptic(action === "submit" ? "success" : "tap");
+    haptic("tap"); // success only once the server keeps the answer, below
     try {
       const r = await fetch("/api/ask/answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -78,15 +80,17 @@ export function AskCard({
       // The resume turn (ask) or the unblocked MCP tool (elicitation) now runs; its
       // realtime updates + the finish reload settle this card. No local phase.
       //
-      // A refusal comes back as 200 + {ok:false} (already answered, or the
-      // continuation could not be queued), so read the body: otherwise the buttons
-      // stay disabled on an answer the server never kept.
-      //
-      // A 429 is the spending limit or the flood guard: nothing was kept, and the
-      // card says which, in the composer's own words, instead of just coming back.
-      const { ok, code } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean; code?: string };
-      if (r.status === 429) setRefusal(tHook(code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited"));
-      if (!ok) setSubmitting(false);
+      // A refusal comes back as 200 + {ok:false}, so read the body: otherwise the
+      // buttons stay disabled on an answer the server never kept. See
+      // readDecisionReply for which refusals bring them back and what each says.
+      const reply = readDecisionReply(r.status, await r.json().catch(() => ({ ok: r.ok })));
+      if (reply.note) setRefusal(reply.note === "busy" || reply.note === "stopped" ? t(reply.note) : tHook(reply.note));
+      if (reply.landed) {
+        if (action === "submit") haptic("success");
+      } else {
+        haptic("error");
+        if (reply.retry) setSubmitting(false);
+      }
     } catch {
       setSubmitting(false); // let the user retry the click
     }
@@ -187,6 +191,8 @@ export function AskCard({
             </div>
           ))}
           {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
+          {/* Settled answers alone would read as the turn carrying on. */}
+          {refusal && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
         </div>
       )}
     </div>

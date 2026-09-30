@@ -95,3 +95,16 @@ describe("telegram ask-collect — retryable refusals", () => {
     expect(sent).toEqual(["tooFast", "Your name?"]);
   });
 });
+
+describe("telegram ask-collect — a turn that could not continue", () => {
+  it("does not say 'answered' when the answer was kept but the turn failed, and stops collecting", async () => {
+    answerAskForUser.mockResolvedValueOnce("failed");
+    await startAskCollection(bot, CHAT, { userId: "u1", messageId: "m1", form: oneTextField, kind: "ask" });
+    sent.length = 0;
+
+    expect(await onAskText(bot, CHAT, "u1", "Alice")).toBe(true);
+    expect(sent).toEqual(["stopped"]);
+    // The answer is recorded, so the next message is a new turn, not another answer.
+    expect(await onAskText(bot, CHAT, "u1", "Bob")).toBe(false);
+  });
+});

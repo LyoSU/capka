@@ -79,7 +79,7 @@ export const POST = apiHandler(async (req: Request) => {
 
   // IDOR: chat exists but belongs to another user
   if (chatRow && chatRow.userId !== userId) {
-    return Response.json({ error: "Chat not found" }, { status: 404 });
+    return Response.json({ error: "Chat not found", code: "CHAT_NOT_FOUND" }, { status: 404 });
   }
   const existingChat = chatRow?.userId === userId ? chatRow : undefined;
 
@@ -88,13 +88,13 @@ export const POST = apiHandler(async (req: Request) => {
   // run this chat's history against the wrong workspace, skills, and connectors.
   const persistedProjectId = existingChat?.projectId ?? undefined;
   if (existingChat && projectId !== undefined && projectId !== persistedProjectId) {
-    return Response.json({ error: "Chat project does not match. Reload and try again." }, { status: 409 });
+    return Response.json({ error: "Chat project does not match. Reload and try again.", code: "CHAT_PROJECT_MISMATCH" }, { status: 409 });
   }
   if (existingChat?.projectId && existingChat.projectDeletedAt) {
-    return Response.json({ error: "This project is being deleted." }, { status: 409 });
+    return Response.json({ error: "This project is being deleted.", code: "PROJECT_DELETING" }, { status: 409 });
   }
   if (!existingChat && projectId && !project) {
-    return Response.json({ error: "Project not found" }, { status: 404 });
+    return Response.json({ error: "Project not found", code: "PROJECT_NOT_FOUND" }, { status: 404 });
   }
   const effectiveProjectId = existingChat ? persistedProjectId : project?.id;
 
@@ -102,7 +102,7 @@ export const POST = apiHandler(async (req: Request) => {
   // reply from Telegram, or fork the chat to take it over on the web. Block the
   // write server-side too (defense in depth beyond the disabled composer).
   if (existingChat?.source === "telegram") {
-    return Response.json({ error: "This is a Telegram chat — reply from Telegram." }, { status: 403 });
+    return Response.json({ error: "This is a Telegram chat — reply from Telegram.", code: "TELEGRAM_CHAT" }, { status: 403 });
   }
 
   // The chat's own model is the source of truth so the choice sticks across
@@ -142,7 +142,7 @@ export const POST = apiHandler(async (req: Request) => {
           .limit(1)
       : [];
     if (!parent) {
-      return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
+      return Response.json({ error: "Conversation is out of date — please reload.", code: "STALE_CONVERSATION" }, { status: 409 });
     }
     // A regenerate re-answers a USER message. An imported chat can have a reply
     // whose predecessor is another reply (its user turn was dropped on import);
