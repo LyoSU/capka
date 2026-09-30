@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, getTableColumns } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/lib/db";
+import { inIds } from "@/lib/db/in-ids";
 import { chats, messages } from "@/lib/db/schema";
 import { isShared } from "./sharing";
 
@@ -212,7 +213,20 @@ export function turnSuffix<T extends TreeNode & { role: string }>(path: PathEntr
 /** The ids bound as ONE array parameter: `inArray` spends a bind parameter per id, and
  *  Postgres caps a statement at 65535 — a path that long could never be opened. */
 export const pathRowsWhere = (chatId: string, ids: string[]) =>
-  and(eq(messages.chatId, chatId), sql`${messages.id} = ANY(${sql.param(ids)}::text[])`);
+  and(eq(messages.chatId, chatId), inIds(messages.id, ids));
+
+/** Insert rows in order, a chunk per statement: one multi-row insert spends a bind parameter
+ *  per column per row and Postgres caps a statement at 65535, so a long copied chain would
+ *  fail whole. Sized on the table's full column count, so it stays safe as columns are added. */
+export async function insertMessageChunks(
+  tx: Pick<typeof db, "insert">,
+  rows: (typeof messages.$inferInsert)[],
+) {
+  const size = Math.floor(65535 / Object.keys(getTableColumns(messages)).length);
+  for (let i = 0; i < rows.length; i += size) {
+    await tx.insert(messages).values(rows.slice(i, i + size));
+  }
+}
 
 /** The visible conversation for a chat, root → active leaf, with sibling info.
  *  With `turnOf`, only that turn onward (see `turnSuffix`). Full rows are read for
@@ -319,7 +333,7 @@ export async function forkChat(opts: {
       model: source.model,
     });
     if (copies.length > 0) {
-      await tx.insert(messages).values(copies);
+      await insertMessageChunks(tx, copies);
       await tx.update(chats)
         .set({ activeLeafId: copies[copies.length - 1].id })
         .where(eq(chats.id, newChatId));
@@ -370,7 +384,7 @@ export async function cloneSharedChat(opts: {
   await db.transaction(async (tx) => {
     await tx.insert(chats).values({ id: newChatId, userId, title, model: source.model });
     if (copies.length > 0) {
-      await tx.insert(messages).values(copies);
+      await insertMessageChunks(tx, copies);
       await tx.update(chats)
         .set({ activeLeafId: copies[copies.length - 1].id })
         .where(eq(chats.id, newChatId));

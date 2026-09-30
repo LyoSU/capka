@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { getTableColumns } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, pathRowsWhere, siblingId, turnSuffix, type TreeNode } from "../tree";
+import { messages } from "@/lib/db/schema";
+import { activePath, descendToLeaf, forkedMessageRow, importedMessageRows, insertMessageChunks, pathRowsWhere, siblingId, turnSuffix, type TreeNode } from "../tree";
 
 // Pure graph tests — no DB, so they run in the normal suite. `createdAt`
 // increments per node to give a deterministic sibling order.
@@ -160,5 +162,24 @@ describe("pathRowsWhere", () => {
     const q = new PgDialect().sqlToQuery(pathRowsWhere("c1", ids)!);
     expect(q.params).toEqual(["c1", ids]);
     expect(q.sql).toContain("= ANY($2::text[])");
+  });
+});
+
+describe("insertMessageChunks", () => {
+  it("splits a long chain so no statement binds more than 65535 parameters, keeping order", async () => {
+    const columns = Object.keys(getTableColumns(messages)).length;
+    const rows = Array.from({ length: 20000 }, (_, i) => ({ id: `m${i}`, chatId: "c", role: "user", content: "x" }));
+    const batches: { id: string }[][] = [];
+    const tx = {
+      insert: () => ({
+        values: async (v: { id: string }[]) => {
+          batches.push(v);
+        },
+      }),
+    } as unknown as Parameters<typeof insertMessageChunks>[0];
+    await insertMessageChunks(tx, rows);
+    expect(batches.length).toBeGreaterThan(1);
+    for (const b of batches) expect(b.length * columns).toBeLessThanOrEqual(65535);
+    expect(batches.flat().map((r) => r.id)).toEqual(rows.map((r) => r.id));
   });
 });
