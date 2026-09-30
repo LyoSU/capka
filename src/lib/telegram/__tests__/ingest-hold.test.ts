@@ -4,7 +4,7 @@ import { telegramLinks, users, chats, messages, tasks } from "@/lib/db/schema";
 // A Telegram turn reserves a budget hold, then saves the message, moves the leaf and
 // enqueues. The hold has to be released on every path that does not hand it to a
 // created task — and on none that does. A throw while saving the message used to
-// leak it (no task row, so the zombie sweep never finds it); a throw AFTER a created
+// leak it (no task row, so only the hour-late orphan sweep finds it); a throw AFTER a created
 // enqueue used to release the hold of a turn that was about to run.
 
 // The burst collector is the only way into `ingest`; capture its flush callback.
@@ -106,6 +106,34 @@ describe("telegram ingest budget hold", () => {
     enqueueTask.mockResolvedValue({ id: "incumbent", created: false });
     await send();
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
+  });
+
+  // The hold exists before the task row, and the orphan-hold sweep releases a hold
+  // with no task row after an hour. A download that never answers used to keep the
+  // turn in that state indefinitely; now one deadline, far inside the hour, ends it.
+  it("stops waiting for a hung file download at the deadline and still hands the hold to the turn", async () => {
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    try {
+      // Never answers on its own; only the signal it is given can end it.
+      const getFile = vi.fn((_id: string, signal?: AbortSignal) => new Promise((_, reject) => {
+        if (signal?.aborted) return reject(signal.reason);
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      }));
+      const c = { ...ctx(), api: { getFile } };
+      const files = [{ fileId: "f1", fileName: "a.jpg", mime: "image/jpeg" }, { fileId: "f2", fileName: "b.jpg", mime: "image/jpeg" }];
+      const sent = flush.fn!(42, { ctx: c, text: "hello", files });
+      await vi.waitFor(() => expect(getFile).toHaveBeenCalledOnce());
+      expect(timeout.mock.calls[0][0]).toBeLessThanOrEqual(15 * 60_000);
+      deadline.abort();
+      await sent;
+      expect(getFile).toHaveBeenCalledTimes(2); // the second file is not waited on either
+      expect(enqueueTask.mock.calls[0][0].id).toBe(heldTaskId());
+      expect(enqueueTask.mock.calls[0][0].payload.attachedFiles).toBeUndefined();
+      expect(releaseHold).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it("keeps the hold of a created task when a later step throws", async () => {

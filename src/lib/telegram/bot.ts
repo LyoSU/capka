@@ -56,6 +56,11 @@ function botState(): BotState {
 }
 
 const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
+// How long one turn may spend pulling its files in. Its budget hold is reserved and
+// its task row does not exist yet, so the orphan-hold sweep (reconcileZombies: an
+// hour) would release the hold of a turn still being admitted; this stays far inside
+// that. Each upload carries its own 60s cap, so admission ends by this plus a minute.
+const FILE_INGEST_MS = 10 * 60_000;
 
 // The command menu Telegram shows behind the "/" hint. Registered under the
 // default scope — English only, by design: the set is tiny and the menu is the
@@ -152,10 +157,12 @@ function extractFiles(msg: NonNullable<Context["message"]>): TgFile[] {
 
 /** Fetch a Telegram file's bytes as a `File` ready for the sandbox upload, or
  *  null if it exceeds the Bot API's 20 MB download cap. */
-async function downloadTgFile(ctx: Context, f: TgFile): Promise<File | null> {
-  const info = await ctx.api.getFile(f.fileId);
+async function downloadTgFile(ctx: Context, f: TgFile, signal: AbortSignal): Promise<File | null> {
+  // grammY types its signal as the abort-controller polyfill's; at runtime it only
+  // listens for "abort", which a native signal emits.
+  const info = await ctx.api.getFile(f.fileId, signal as Parameters<Context["api"]["getFile"]>[1]);
   if (!info.file_path || (info.file_size ?? 0) > MAX_TELEGRAM_FILE_BYTES) return null;
-  const res = await fetch(`https://api.telegram.org/file/bot${botState().token}/${info.file_path}`);
+  const res = await fetch(`https://api.telegram.org/file/bot${botState().token}/${info.file_path}`, { signal });
   if (!res.ok) return null;
   return new File([Buffer.from(await res.arrayBuffer())], f.fileName, { type: f.mime });
 }
@@ -261,15 +268,17 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
 
   // The hold is released on every path that doesn't hand it to a created task —
   // including a throw while saving the message or moving the leaf, which would
-  // otherwise leak a pending hold with no task row for the zombie sweep to find.
+  // otherwise hold back the user's budget until the orphan-hold sweep an hour later.
   let handedOff = false;
   try {
   // Pull each Telegram file into the user's sandbox so the assistant can read,
-  // run or analyze it — passed through as attachedFiles, exactly like the web.
+  // run or analyze it — passed through as attachedFiles, exactly like the web. A
+  // file still downloading at the deadline is skipped like one that failed.
   const attachedFiles: FileRef[] = [];
+  const deadline = AbortSignal.timeout(FILE_INGEST_MS);
   for (const f of files) {
     try {
-      const file = await downloadTgFile(ctx, f);
+      const file = await downloadTgFile(ctx, f, deadline);
       if (!file) {
         await reply(ctx, "fileTooBig", { values: { name: f.fileName } });
         continue;
