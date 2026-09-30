@@ -82,8 +82,8 @@ export class LocalFsStore {
   }
 
   /** List a workspace directory. `depth` 1 (default) = a single level — the file
-   *  browser's behavior, unchanged. depth > 1 walks subdirectories (parent before
-   *  children, full relative `path` on each) so a container-free workspace snapshot
+   *  browser's behavior, unchanged. depth > 1 walks subdirectories breadth-first (shallow
+   *  entries first, sorted by name within a directory, full relative `path` on each) so a container-free workspace snapshot
    *  can mirror the old `find -maxdepth N`. `limit` hard-caps the entry count so a
    *  huge tree can't blow up the response.
    *
@@ -109,12 +109,16 @@ export class LocalFsStore {
     const deep = depth > 1; // multi-level walk → a dir left un-descended means incomplete
     const entries = [];
     let truncated = false;
-    const walk = async (rel, d) => {
-      if (entries.length >= limit) { truncated = true; return; }
+    // Breadth-first, names sorted per directory: when `limit` cuts the walk the kept
+    // subset is the shallowest entries in a stable order, not whatever one deep folder
+    // spent the budget on first. A directory still precedes its own children.
+    const queue = [[relPath, Math.max(1, depth)]];
+    scan: for (let q = 0; q < queue.length; q++) {
+      const [rel, d] = queue[q];
       const dirPath = await safeRealPath(base, rel);
-      const names = await readdir(dirPath).catch(() => []);
+      const names = (await readdir(dirPath).catch(() => [])).sort();
       for (const name of names) {
-        if (entries.length >= limit) { truncated = true; break; }
+        if (entries.length >= limit) { truncated = true; break scan; }
         try {
           const childRel = rel === "." ? name : `${rel}/${name}`;
           // Resolve and contain EACH child before reading metadata or hashing it.
@@ -128,7 +132,7 @@ export class LocalFsStore {
           if (!isDirectory && withHash) entry.hash = await this.#hashFileCached(full, s);
           entries.push(entry);
           if (isDirectory) {
-            if (d > 1) await walk(childRel, d - 1);
+            if (d > 1) queue.push([childRel, d - 1]);
             else if (deep) {
               // Hit the depth floor with more below → the tree is incomplete.
               const kids = await readdir(full).catch(() => []);
@@ -137,8 +141,7 @@ export class LocalFsStore {
           }
         } catch { /* skip inaccessible */ }
       }
-    };
-    await walk(relPath, Math.max(1, depth));
+    }
     return { entries, truncated };
   }
 

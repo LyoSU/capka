@@ -50,6 +50,36 @@ describe("LocalFsStore.list depth", () => {
     }
   });
 
+  it("keeps the shallowest entries, in name order, when the limit cuts a deep tree", async () => {
+    const dataRoot = join(TMP, `ws-bfs-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      // "a" is a big early folder; depth-first would spend the whole budget inside it.
+      await mkdir(join(wsHostPath, "a", "x"), { recursive: true });
+      for (let i = 0; i < 10; i++) await writeFile(join(wsHostPath, "a", "x", `f${i}.txt`), "x");
+      await writeFile(join(wsHostPath, "a", "mid.txt"), "m");
+      await writeFile(join(wsHostPath, "b.txt"), "b");
+      await mkdir(join(wsHostPath, "c"));
+      await writeFile(join(wsHostPath, "c", "c1.txt"), "c");
+
+      const cut = await store.list("u1", "s1", ".", 3, 6);
+      expect(cut.entries.map((e) => e.path)).toEqual(["a", "b.txt", "c", "a/mid.txt", "a/x", "c/c1.txt"]);
+      expect(cut.truncated).toBe(true);
+
+      const again = await store.list("u1", "s1", ".", 3, 6);
+      expect(again.entries.map((e) => e.path)).toEqual(cut.entries.map((e) => e.path)); // deterministic
+
+      // A limit that exactly fits the whole tree is not a truncation.
+      const all = await store.list("u1", "s1", ".", 3, 10000);
+      const exact = await store.list("u1", "s1", ".", 3, all.entries.length);
+      expect(exact.entries.length).toBe(all.entries.length);
+      expect(exact.truncated).toBe(false);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
   it("flags truncated when a subtree is deeper than the requested depth", async () => {
     const dataRoot = join(TMP, `ws-depth-${Math.random().toString(36).slice(2)}`);
     const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
