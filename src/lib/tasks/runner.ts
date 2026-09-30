@@ -1194,7 +1194,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // A user turn, not an assistant prefill: it is state the model must read, and
       // a prefill 400s on modern Anthropic anyway.
       effectNote = { role: "user", content: note };
-      modelMessages.push(effectNote);
+      // Last, except ahead of an approval still to run: the SDK runs approvals only
+      // when their response is the FINAL message, so a note after it left the
+      // approved call unrun and its tool call without a result. There it goes right
+      // after the last user message instead, before the reply holding the call. Once
+      // the call has run (a restart), the note stays last so it cannot run twice.
+      const tail = modelMessages.at(-1);
+      const answered = new Set(tail?.role === "tool"
+        ? tail.content.flatMap((p) => (p.type === "tool-approval-response" ? [p.approvalId] : [])) : []);
+      const toRun = modelMessages.some((m) => m.role === "assistant" && typeof m.content !== "string"
+        && m.content.some((p) => p.type === "tool-approval-request" && answered.has(p.approvalId)
+          && !turnEffects.some((e) => e.id === p.toolCallId)));
+      modelMessages.splice(toRun ? modelMessages.findLastIndex((m) => m.role === "user") + 1 : modelMessages.length, 0, effectNote);
       tlog.info("stating what already ran to the next stream", {
         inherited: inheritedEffects.length, effects: turnEffects.length, noteChars: note.length,
       });
