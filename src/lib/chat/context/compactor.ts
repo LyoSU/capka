@@ -7,6 +7,7 @@ import { AUX_TIMEOUT_MS } from "./aux";
 import { buildModelContext } from "./build";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { foldReasoningIntoText } from "./step-control";
+import { isReasoningEchoRejectedError } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
@@ -94,6 +95,14 @@ export async function compactionReply(
  * paragraph into a clean-looking recap and a compacted prompt ends up CLEANER than
  * the prompt it replaced. It sits FOURTH, before the optional `onUsage`: a required
  * parameter after an optional one is a call-site trap.
+ *
+ * `providerOptions` carries the provider's server-side context edit, so the request
+ * is shed the way the live turn's prompt was (see the runner).
+ *
+ * A backend that rejects echoed `reasoning_content` gets one retry with reasoning
+ * folded into text. The turn only learns that when IT echoed, and a single-step
+ * reply over a history with no reasoning never does — but this request echoes the
+ * reply's own reasoning.
  */
 export async function compactConversation(
   model: LanguageModel,
@@ -101,18 +110,24 @@ export async function compactConversation(
   modelMessages: ModelMessage[],
   sourceTrust: boolean,
   onUsage?: (usage: TokenUsage) => void,
+  providerOptions?: Record<string, unknown>,
 ): Promise<{ text: string; trust: boolean } | null> {
+  // Own root trace, like the other aux calls — compaction is fire-and-forget and
+  // can outlive the turn that triggered it (see auxGenerate).
+  const run = (msgs: ModelMessage[]) => withoutParentContext(() => generateText({
+    model,
+    messages: buildCompactionMessages(systemMessages, msgs),
+    providerOptions: providerOptions as never,
+    // Same deadline as the other fire-and-forget aux calls: a hung provider
+    // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
+    abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
+    experimental_telemetry: telemetryFor("capka.aux.compaction"),
+  }));
   try {
-    // Own root trace, like the other aux calls — compaction is fire-and-forget and
-    // can outlive the turn that triggered it (see auxGenerate).
-    const { text, usage } = await withoutParentContext(() => generateText({
-      model,
-      messages: buildCompactionMessages(systemMessages, modelMessages),
-      // Same deadline as the other fire-and-forget aux calls: a hung provider
-      // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
-      abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
-      experimental_telemetry: telemetryFor("capka.aux.compaction"),
-    }));
+    const { text, usage } = await run(modelMessages).catch((e) => {
+      if (!isReasoningEchoRejectedError(e)) throw e;
+      return run(foldReasoningIntoText(modelMessages));
+    });
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);
     const summary = text.trim();

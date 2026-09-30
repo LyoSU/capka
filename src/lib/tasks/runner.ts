@@ -2561,7 +2561,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             if (reasoningStripped) history = foldReasoningIntoText(history);
             markCacheTail(history); // fresh objects — re-mark the cache tail
           }
-          return compactConversation(model, systemMessages, [...history, ...reply], sourceTrust, auxUsageRecorder("compaction"));
+          // The history keeps every tool body on a provider that clears server-side, and
+          // `shouldCompact` measured the size AFTER that clearing — so the request needs
+          // the same edit or it replays what the live turn shed and overflows. Without
+          // the thinking edit: compaction runs with thinking off.
+          return compactConversation(model, systemMessages, [...history, ...reply], sourceTrust, auxUsageRecorder("compaction"),
+            contextManagementOptions(provider, effectiveLimit));
         })()
           .then(async (result) => {
             if (!result) return;

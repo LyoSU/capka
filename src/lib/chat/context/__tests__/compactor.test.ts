@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildCompactionMessages, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
+import { MockLanguageModelV3 } from "ai/test";
+import { buildCompactionMessages, compactConversation, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
+import { contextManagementOptions } from "@/lib/chat/context/provider-edits";
 import { buildResumeMessages } from "@/lib/tasks/resume";
 import { estimatePromptTokens } from "@/lib/chat/context/step-control";
 import { DEFAULT_CONTEXT_LENGTH, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
@@ -97,5 +99,42 @@ describe("compactionReply", () => {
     const folded = (await compactionReply("m", parts, [], true)).at(-1)!;
     expect(JSON.stringify(folded.content)).not.toContain('"type":"reasoning"');
     expect(JSON.stringify(folded.content)).toContain("The user wants metric.");
+  });
+});
+
+describe("compactConversation", () => {
+  const generated = (text: string) => ({
+    content: [{ type: "text", text }],
+    finishReason: { unified: "stop", raw: "stop" },
+    usage: { inputTokens: { total: 10, noCache: 10 }, outputTokens: { total: 2 } },
+    warnings: [],
+  }) as never;
+  const history: ModelMessage[] = [
+    { role: "user", content: "Convert it." },
+    { role: "assistant", content: [{ type: "reasoning", text: "The user wants metric." }, { type: "text", text: "Done." }] },
+  ];
+
+  it("sends the provider's server-side context edit, so the history is shed like the live turn's", async () => {
+    // Anthropic's history is never cleared on our side; without the edit the request
+    // replays every tool body the turn's measured size had already shed.
+    const model = new MockLanguageModelV3({ doGenerate: async () => generated("summary") });
+    const opts = contextManagementOptions("anthropic", DEFAULT_CONTEXT_LENGTH)!;
+    await compactConversation(model, [], history, false, undefined, opts);
+    expect(model.doGenerateCalls[0].providerOptions).toEqual(opts);
+  });
+
+  it("retries once with reasoning folded when the backend rejects its echo", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async ({ prompt }) => {
+        if (JSON.stringify(prompt).includes('"type":"reasoning"')) {
+          throw new Error("Invalid request: reasoning_content is not supported");
+        }
+        return generated("summary");
+      },
+    });
+    expect(await compactConversation(model, [], history, true)).toEqual({ text: "summary", trust: true });
+    expect(model.doGenerateCalls).toHaveLength(2);
+    // Folded, not dropped: the reasoning is still in the summary's input.
+    expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("The user wants metric.");
   });
 });
