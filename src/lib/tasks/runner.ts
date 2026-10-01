@@ -1842,7 +1842,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
     // Capability errors can arrive two ways: thrown from the stream, or as a
     // `error` part (streamError) with the iterator finishing normally. Retry the
-    // same way for both. Returns true if a retry was launched.
+    // same way for both. Returns true if a retry was launched; the loop below consumes
+    // the new stream, so a retry that hits a second limit gets that one's retry too.
+    // A new branch MUST set a once-flag before returning true, or the loop never ends.
     const retryOnCapabilityError = async (err: unknown): Promise<boolean> => {
       if (injectedNative && !retried && isModalityUnsupportedError(err)) {
         tlog.info("attachment modality unsupported — retrying with files stripped + note");
@@ -1855,7 +1857,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         blindModalities = Array.from(new Set([...blindModalities, ...nativeModalities]));
         foldDiscarded();
         result = makeStream();
-        await consume();
         return true;
       }
       // MUST be tested before isReasoningUnsupportedError: some backends phrase an
@@ -1885,7 +1886,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         await discardPartial();
         foldDiscarded();
         result = makeStream();
-        await consume();
         return true;
       }
       if (useReasoning && isReasoningUnsupportedError(err)) {
@@ -1904,7 +1904,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         await discardPartial();
         foldDiscarded();
         result = makeStream();
-        await consume();
         return true;
       }
       if (!reasoningStripped && isReasoningEchoRejectedError(err)) {
@@ -1926,7 +1925,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         modelMessages = foldReasoningIntoText(modelMessages);
         foldDiscarded();
         result = makeStream();
-        await consume();
         return true;
       }
       if (isStreamUsageRejectedError(err) && disableStreamUsage(configId)) {
@@ -1943,7 +1941,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         await discardPartial();
         foldDiscarded();
         result = makeStream();
-        await consume();
         return true;
       }
       return false;
@@ -2000,7 +1997,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
       foldDiscarded();
       result = makeStream();
-      await consume();
       return true;
     };
 
@@ -2037,9 +2033,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         await consume();
         // Provider surfaced the error as a stream event, not a throw.
         if (streamError && !ac.signal.aborted) {
-          if (!(await retryOnCapabilityError(streamError)) && !(await retryOnContextOverflow(streamError))) {
-            if (isTransientError(streamError)) transient = streamError;
-          }
+          if (await retryOnCapabilityError(streamError) || await retryOnContextOverflow(streamError)) continue;
+          if (isTransientError(streamError)) transient = streamError;
         }
       } catch (e) {
         // A lost ledger write must not be re-read as a provider hiccup: a Postgres
@@ -2047,10 +2042,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // re-stream and carry on with an executed call unrecorded — losing the
         // durability this is all for. recordEffect already retried; fail the turn.
         if (e instanceof EffectLedgerError) throw e;
-        if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) {
-          if (isTransientError(e)) transient = e;
-          else throw e;
-        }
+        if (await retryOnCapabilityError(e) || await retryOnContextOverflow(e)) continue;
+        if (isTransientError(e)) transient = e;
+        else throw e;
       }
 
       if (ac.signal.aborted) break;

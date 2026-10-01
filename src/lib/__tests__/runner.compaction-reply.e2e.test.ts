@@ -29,9 +29,10 @@ let provider = "mock";
 let limit = 0;
 // Every provider call's prompt, and what each next call does. An empty script answers
 // REPLY past the compaction threshold; "overflow" rejects the prompt as too long, with
-// no figure in it, so the runner learns no window from it.
+// no figure in it, so the runner learns no window from it; "echo" rejects the reasoning
+// echoed back in it, the way a Cerebras backend behind LiteLLM does.
 const prompts: ModelMessage[][] = [];
-const script: (unknown[] | "overflow")[] = [];
+const script: (unknown[] | "overflow" | "echo")[] = [];
 const finish = (unified: string, tokens: number) => ({
   type: "finish",
   finishReason: { unified, raw: unified },
@@ -71,6 +72,7 @@ vi.mock("@/lib/providers/resolve", () => ({
         // Past 75% of the window by default, so the turn trips compaction.
         const next = script.shift() ?? answer(Math.ceil(limit * 0.9));
         if (next === "overflow") throw new Error("prompt is too long");
+        if (next === "echo") throw new Error("unexpected property: reasoning_content");
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return { stream: simulateReadableStream({ chunks: next as any }) };
       },
@@ -351,6 +353,18 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     const text = JSON.stringify(msgs);
     expect(text).toContain("Kestrel");
     expect(text).toContain(REPLY);
+  }, 30_000);
+
+  it("recovers from a retry that hits a second limit", async () => {
+    const chat = `${CX}-two-limits`;
+    await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "how many suppliers do we have?" }]);
+    script.push("echo", "overflow");
+    const from = prompts.length;
+    // runTask asserts the turn completed; it used to fail on the overflow.
+    await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` });
+    expect(prompts.length - from).toBe(3);
+    const { rows } = await pool.query(`SELECT content FROM messages WHERE chat_id=$1 AND parent_id=$2`, [chat, `${chat}-u1`]);
+    expect(rows[0].content).toContain(REPLY);
   }, 30_000);
 
   it("after an emergency trim, compacts even though the trimmed prompt measured small", async () => {
