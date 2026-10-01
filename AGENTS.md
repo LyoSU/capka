@@ -331,3 +331,11 @@ symlink). For verifying a commit's build, make the throwaway worktree on the sam
 filesystem and hard-link the module tree (`cp -al`) instead of symlinking; remove the
 worktree after. Found verifying the knowledge-graph slice; the symlink recipe above
 remains correct for tests and typechecking.
+
+`cp -al` copies symlinks as they are, so check the copy for a stray
+`node_modules/node_modules` symlink (one pointed back at the main tree's own
+`node_modules`) and delete it there before building: Turbopack fails on it with
+some 1355 errors (`Symlink [project]/node_modules/node_modules is invalid`, `Cannot
+find module @vercel/turbopack/postcss`). The main tree carried one until
+2026-10-01; `test -L node_modules/node_modules` in the copy says whether one is
+back.
