@@ -4,9 +4,9 @@ import type { StoredPart } from "@/lib/chat/contracts";
  * Placeholder swapped in for a stale tool result's body. The matching `tool-call`
  * keeps its name and id, so the model still knows the call happened — it just no
  * longer re-reads a result it already acted on, or the arguments it already sent.
+ * Short, because every cleared exchange in a deep chat pays for it on every turn.
  */
-export const CLEARED_TOOL_OUTPUT =
-  "[Older tool result cleared to save context. The call is listed above by name.]";
+export const CLEARED_TOOL_OUTPUT = "[cleared to save context]";
 
 /**
  * Placeholder swapped in for a stale tool CALL's arguments — the other half of the
@@ -14,10 +14,11 @@ export const CLEARED_TOOL_OUTPUT =
  * A hundred `upsert_product` calls carry a hundred full rows in their arguments and
  * get back an id apiece: clearing only outputs sheds the receipts and keeps the
  * freight. Mirrors `clearToolInputs` on Anthropic's server-side edit, so the policy
- * reads the same on every provider.
+ * reads the same on every provider. The call keeps its name and id, and the input
+ * stays an object (`{ note }`, see the callers) so no model sees, and imitates, a
+ * call with `{}`.
  */
-export const CLEARED_TOOL_INPUT =
-  "[Older tool call's arguments cleared to save context.]";
+export const CLEARED_TOOL_INPUT = "[cleared]";
 
 /**
  * Drop the bodies of tool exchanges buried deep in the history, keeping only the
