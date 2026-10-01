@@ -686,7 +686,7 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
          -- runner then finalizes again → the user sees "interrupted" flip to the real
          -- answer (double finalize).
          WHERE status = 'running' AND lease_expires_at < now() - interval '15 seconds'
-         RETURNING id, user_id, chat_id
+         RETURNING id, user_id, chat_id, payload->>'resumeMessageId' AS resume_message_id
      ), reconciled_messages AS (
         UPDATE messages m
            SET content = ${REPLY_TEXT_SQL},
@@ -696,6 +696,21 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
            AND m.metadata->>'status' = 'running'
         -- The verdict just written, handed back so the live tab is told the same
         -- thing the reloaded row will say.
+        RETURNING dead.id AS task_id, m.metadata->>'errorCategory' = 'interrupted_partial' AS partial
+     ), reconciled_continuations AS (
+        -- An approval/ask continuation that died before its first snapshot never put
+        -- its own taskId on the row it was finishing: that row still waits under the
+        -- first half's id, out of reach of the match above, and its card spins on
+        -- "Applying…" for good. Reached through the task's resumeMessageId instead,
+        -- and only while the row still waits: a snapshot would have moved it to
+        -- 'running' under this task's id, and a concurrent one is re-checked against
+        -- this condition before the write. The approved calls run ahead of that first
+        -- snapshot, so one may have landed — interrupted, never "didn't run".
+        UPDATE messages m
+           SET metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
+          FROM dead
+         WHERE m.id = dead.resume_message_id
+           AND m.metadata->>'status' IN ('awaiting_approval', 'awaiting_answer')
         RETURNING dead.id AS task_id, m.metadata->>'errorCategory' = 'interrupted_partial' AS partial
      ), reconciled_terminal AS (
         -- Messages stranded at 'running' whose owning task ALREADY reached a
@@ -743,8 +758,10 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
            AND u.created_at < now() - make_interval(secs => $3)
            AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = u.task_id)
      )
-     SELECT d.id, d.user_id, d.chat_id, COALESCE(rm.partial, false) AS partial
-       FROM dead d LEFT JOIN reconciled_messages rm ON rm.task_id = d.id`,
+     SELECT d.id, d.user_id, d.chat_id, COALESCE(rm.partial, rc.partial, false) AS partial
+       FROM dead d
+       LEFT JOIN reconciled_messages rm ON rm.task_id = d.id
+       LEFT JOIN reconciled_continuations rc ON rc.task_id = d.id`,
     [INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE, ORPHAN_HOLD_AGE_MS / 1000],
   );
   return rows;

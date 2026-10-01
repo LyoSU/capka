@@ -149,6 +149,36 @@ run("durable queue", () => {
       const { rows } = await pool.query(`SELECT metadata->>'errorCategory' AS c FROM messages WHERE id = $1`, ["msg-qt-zomb-ran"]);
       expect(rows[0].c).toBe("interrupted_partial");
     });
+
+    // A continuation that died before its first snapshot left its row waiting under
+    // the FIRST half's taskId, so matching on taskId alone never reached it.
+    it("fails the row a continuation died finishing, found through its resumeMessageId", async () => {
+      const waiting = (id: string, status: string) => pool.query(
+        `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','first half',$3)`,
+        [id, C, JSON.stringify({ taskId: "qt-zomb-half1", status, parts: [
+          { type: "tool-call", id: "c1", name: "save_row", input: {}, approval: { id: "ap1", approved: true } },
+        ] })],
+      );
+      await waiting("msg-qt-zomb-cont", "awaiting_approval");
+      // Control: a row the dead task does not point at keeps waiting.
+      await waiting("msg-qt-zomb-other", "awaiting_approval");
+      await pool.query(
+        `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
+         VALUES ('qt-zomb-cont',$1,$2,'running','w-zomb', now() - interval '2 minutes', $3::jsonb)`,
+        [C, U, JSON.stringify({ resumeMessageId: "msg-qt-zomb-cont" })],
+      );
+
+      const reaped = await reconcileZombies();
+
+      expect(reaped.find((r) => r.id === "qt-zomb-cont")).toMatchObject({ partial: false });
+      const { rows } = await pool.query(
+        `SELECT id, content, metadata->>'status' AS s, metadata->>'errorCategory' AS c FROM messages WHERE id IN ('msg-qt-zomb-cont','msg-qt-zomb-other') ORDER BY id`,
+      );
+      expect(rows).toEqual([
+        { id: "msg-qt-zomb-cont", content: "first half", s: "failed", c: "interrupted" },
+        { id: "msg-qt-zomb-other", content: "first half", s: "awaiting_approval", c: null },
+      ]);
+    });
   });
 
   it("claims a queued task atomically and only once", async () => {
