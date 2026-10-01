@@ -70,10 +70,12 @@ function downloadUrl(f: PreviewFile) {
 // each mount. Cheap: only "gone" changes rendering; "ok" and "checking" look the
 // same (present and clickable).
 //
-// A file deleted (or re-created) while its chip stays mounted is caught by
-// recheckFiles, which the page calls when a file may have been removed under it — a
-// turn that ran a command or a delete finished, the user deleted a file — so every
-// mounted chip asks once more. Chips naming the same file share one request.
+// A file deleted while its chip stays mounted is caught by recheckFiles, which the
+// page calls when a file may have been removed under it — a turn that ran a command or
+// a delete finished, the user deleted a file — so every mounted chip asks once more.
+// After any other turn that ran tools, recheckFiles("gone") asks again only for chips
+// showing "gone", so a file re-created by a write turns clickable again at the cost of
+// one request per greyed-out chip. Chips naming the same file share one request.
 const PRESENT_TTL_MS = 30_000;
 const presentFiles = new Map<string, number>();
 const isPresent = (key: string) => {
@@ -96,9 +98,13 @@ const checkListeners = new Set<() => void>();
 const onRecheck = (l: () => void) => { checkListeners.add(l); return () => { checkListeners.delete(l); }; };
 const checkGeneration = () => checks;
 
+const goneListeners = new Set<() => void>();
+
 /** The workspace may have changed: forget what is known present and have every
- *  mounted file chip and tile ask again. */
-export function recheckFiles() {
+ *  mounted file chip and tile ask again — or, with "gone", only those showing a
+ *  missing file (a turn that may have created one but could not have removed one). */
+export function recheckFiles(only?: "gone") {
+  if (only) { for (const l of goneListeners) l(); return; }
   presentFiles.clear();
   probes.clear(); // one in flight may have started before the change
   checks += 1;
@@ -114,6 +120,14 @@ export function useFileStatus(file: PreviewFile, enabled = true): "checking" | F
   const key = fileStatusKey(file);
   const [status, setStatus] = useState<"checking" | FileStatus>(() => (isPresent(key) ? "ok" : "checking"));
   const generation = useSyncExternalStore(onRecheck, checkGeneration, checkGeneration);
+  // Only a chip showing "gone" listens for recheckFiles("gone"); the rest stay quiet.
+  const [revived, setRevived] = useState(0);
+  useEffect(() => {
+    if (status !== "gone") return;
+    const l = () => setRevived((n) => n + 1);
+    goneListeners.add(l);
+    return () => { goneListeners.delete(l); };
+  }, [status]);
   // The key (chat+path) drives the effect — not `file`, which is a fresh object
   // every render — so the probe fires once per file, not once per render. A recheck
   // keeps the verdict on screen until the new one lands.
@@ -125,7 +139,7 @@ export function useFileStatus(file: PreviewFile, enabled = true): "checking" | F
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `file` is derivable from `key`; depending on it would re-fire every render
-  }, [key, enabled, generation]);
+  }, [key, enabled, generation, revived]);
   return enabled ? status : "ok";
 }
 

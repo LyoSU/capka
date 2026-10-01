@@ -704,7 +704,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // reply's chip names, and a chip that stays mounted would not ask again. The recheck
   // is one GET (body cancelled) per distinct file named anywhere in the loaded
   // transcript, so a turn that only searched, read, wrote or changed settings — none
-  // of which leaves a chip pointing at nothing — does not pay it.
+  // of which leaves a chip pointing at nothing — does not pay it; it rechecks only the
+  // chips showing "gone", since a write may have brought their file back. Connector
+  // tools get only that lighter recheck: most are remote, so a sandboxed (stdio) one
+  // that deletes a file leaves its chip clickable until a remount or a command turn.
   const removals = messages.reduce(
     (n, m) =>
       n +
@@ -713,12 +716,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       ).length ?? 0),
     0,
   );
-  const removalsAtStart = useRef<number | null>(null);
+  const atStart = useRef<{ tools: number; removals: number } | null>(null);
   useEffect(() => {
-    if (isLoading) { removalsAtStart.current ??= removals; return; }
-    if (removalsAtStart.current !== null && removalsAtStart.current !== removals) recheckFiles();
-    removalsAtStart.current = null;
-  }, [isLoading, removals]);
+    if (isLoading) { atStart.current ??= { tools: toolRevision, removals }; return; }
+    const s = atStart.current;
+    atStart.current = null;
+    if (s && s.removals !== removals) recheckFiles();
+    else if (s && s.tools !== toolRevision) recheckFiles("gone");
+  }, [isLoading, removals, toolRevision]);
 
   // A failed assistant message renders its own ErrorNotice — don't also show
   // the bottom banner for the same failure (the banner stays for load errors).
