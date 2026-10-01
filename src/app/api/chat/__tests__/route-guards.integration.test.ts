@@ -197,6 +197,29 @@ run("POST /api/chat guards against the real tables", () => {
     expect(publishTaskEvent).not.toHaveBeenCalled();
   });
 
+  // The reply was compacted after this tab loaded: its checkpoint now sits directly under
+  // it, with the message that followed below that. The tab still names the reply when
+  // editing that message, and the edit belongs beside the original, under the checkpoint.
+  it("puts an edit from a tab that missed the compaction under the reply's checkpoint", async () => {
+    await q(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES
+        ('rg-cp', 'rg-mine', 'rg-a2', 'assistant', '', $1::jsonb),
+        ('rg-u2', 'rg-mine', 'rg-cp', 'user', 'next', NULL)`,
+      [JSON.stringify({ status: "completed", compaction: { summary: "s", summarizedUpTo: "rg-a2" } })],
+    );
+    await q(`UPDATE chats SET active_leaf_id = 'rg-u2' WHERE id = 'rg-mine'`, []);
+
+    expect((await send({ chatId: "rg-mine", userMessage: "next, edited", userMessageId: "rg-u2b", parentId: "rg-a2" })).status).toBe(200);
+
+    expect(await q(`SELECT parent_id FROM messages WHERE id = 'rg-u2b'`, [])).toEqual([{ parent_id: "rg-cp" }]);
+    expect(await leafOf("rg-mine")).toBe("rg-u2b");
+    expect(enqueueTask.mock.calls[0][0].payload.replyParentId).toBe("rg-u2b");
+
+    // Control: a reply with no checkpoint under it stays the parent it was named as.
+    expect((await send({ chatId: "rg-mine", userMessage: "and more, edited", userMessageId: "rg-a2b", parentId: "rg-a1" })).status).toBe(200);
+    expect(await q(`SELECT parent_id FROM messages WHERE id = 'rg-a2b'`, [])).toEqual([{ parent_id: "rg-a1" }]);
+  });
+
   it("still regenerates a reply to a user message", async () => {
     const res = await send({ chatId: "rg-mine", userMessage: "", parentId: "rg-u1" });
 

@@ -149,6 +149,7 @@ export const POST = apiHandler(async (req: Request) => {
   // Whether that parent still waits on a card the user never decided or answered is
   // read in the same lookup: this message goes past it, so it is settled below.
   let parentWaits = false;
+  let parentIsReply = false;
   if (parentId || !text) {
     const [parent] = parentId
       ? await db
@@ -168,6 +169,7 @@ export const POST = apiHandler(async (req: Request) => {
       return Response.json({ error: "This reply can't be regenerated.", code: "CANNOT_REGENERATE" }, { status: 422 });
     }
     parentWaits = parent.status === "awaiting_approval" || parent.status === "awaiting_answer";
+    parentIsReply = parent.role === "assistant";
   }
   // A brand-new chat's first message can't reuse an id another row already holds.
   // The check after the message insert below refuses that too and stays the
@@ -242,7 +244,15 @@ export const POST = apiHandler(async (req: Request) => {
         // React key when history reloads — otherwise it remounts and flashes.
         id: newUserId,
         chatId,
-        parentId,
+        // A compacted reply's checkpoint is spliced in directly under it, and what
+        // follows the reply hangs below the checkpoint. A client that has not reloaded
+        // since `chat:compacted` still names the reply — an edit of the message after it,
+        // a send from that leaf — and would land beside the checkpoint: a version switcher
+        // counting the divider, and a turn run at full window. Resolved in this INSERT
+        // rather than at the lookup above, so a checkpoint committed in between counts too.
+        parentId: parentIsReply
+          ? sql<string>`coalesce((select c.id from messages c where c.parent_id = ${parentId} and c.metadata ? 'compaction' limit 1), ${parentId})`
+          : parentId,
         role: "user",
         content: text,
         platform: "web",
