@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { realtime } from "../realtime";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run realtime.integration
@@ -8,7 +8,13 @@ const unit = process.env.RUN_INTEGRATION ? describe.skip : describe;
 // Count every pg Client opened, so the C6 test can assert single-flight. Hoisted
 // so it applies to the statically-imported realtime singleton too — keeping this
 // a pure unit test (no live DB).
-const opened = vi.hoisted(() => ({ count: 0 }));
+const opened = vi.hoisted(() => ({ count: 0, clients: [] as FakeClient[] }));
+type FakeClient = {
+  queries: string[];
+  hang: boolean;
+  ended: boolean;
+  emit: (event: string, ...args: unknown[]) => void;
+};
 // vi.mock is hoisted to the top of the module regardless of where it sits, so the
 // stub-vs-real choice has to live INSIDE the factory: the opt-in integration block
 // needs the real pg (live LISTEN/NOTIFY), the unit test below needs the stub.
@@ -20,17 +26,37 @@ vi.mock("pg", async (importOriginal) => {
     // It also pins pg's date encoding to UTC at import — see db/index.ts.
     defaults: {},
     types: { builtins: { TIMESTAMP: 1114 }, setTypeParser: () => {} },
+    // Keeps its handlers and records every query, so a test can watch what the
+    // code sends and break the connection the way a real one breaks.
     Client: class {
+      queries: string[] = [];
+      hang = false;
+      ended = false;
+      private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
       constructor() {
         opened.count++;
+        opened.clients.push(this);
       }
-      on() {}
+      on(event: string, fn: (...args: unknown[]) => void) {
+        this.handlers.set(event, [...(this.handlers.get(event) ?? []), fn]);
+      }
+      emit(event: string, ...args: unknown[]) {
+        for (const fn of this.handlers.get(event) ?? []) fn(...args);
+      }
       async connect() {
         // A real connect isn't instant; the await lets a second concurrent
         // publish reach the guard and (correctly) reuse the in-flight connect.
         await new Promise((r) => setTimeout(r, 10));
       }
-      async query() {}
+      query(text: string) {
+        this.queries.push(text);
+        // A half-open socket: the query is written and nothing ever comes back.
+        return this.hang ? new Promise(() => {}) : Promise.resolve();
+      }
+      async end() {
+        this.ended = true;
+        this.emit("end");
+      }
     },
   };
 });
@@ -52,6 +78,48 @@ unit("realtime.publish connection single-flight (C6)", () => {
     // A subsequent publish reuses the same connected client.
     await realtime.publish("user:race", { n: 4 });
     expect(opened.count).toBe(1);
+  });
+});
+
+unit("realtime LISTEN heartbeat", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("replaces a LISTEN connection that stops answering and re-LISTENs on the new one", async () => {
+    vi.useFakeTimers();
+    opened.clients.length = 0;
+    const received: unknown[] = [];
+    const subscribing = realtime.subscribe("user:hb", (d) => received.push(d));
+    await vi.advanceTimersByTimeAsync(10);
+    const unsub = await subscribing;
+    const [first] = opened.clients;
+    expect(first.queries).toContain('LISTEN "ch_user_hb"');
+
+    // A healthy connection answers every ping and is kept.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(first.queries.filter((q) => q === "SELECT 1")).toHaveLength(2);
+    expect(opened.clients).toHaveLength(1);
+
+    // It goes half-open: no error, no end, just silence.
+    first.hang = true;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(first.ended).toBe(true);
+    // Reconnect backoff (1s) plus the connect.
+    await vi.advanceTimersByTimeAsync(1_010);
+    expect(opened.clients).toHaveLength(2);
+    const second = opened.clients[1];
+    expect(second.queries).toEqual(['LISTEN "ch_user_hb"']);
+
+    // Events reach the subscriber over the new connection; the dead one is no
+    // longer pinged.
+    second.emit("notification", { channel: "ch_user_hb", payload: '{"n":1}' });
+    expect(received).toEqual([{ n: 1 }]);
+    const pings = first.queries.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(first.queries).toHaveLength(pings);
+    expect(second.queries.filter((q) => q === "SELECT 1")).toHaveLength(2);
+    unsub();
   });
 });
 

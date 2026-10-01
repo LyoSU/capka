@@ -19,6 +19,8 @@ const NOTIFY_LIMIT = 7500;
 
 const RECONNECT_MAX_MS = 30_000;
 
+const HEARTBEAT_MS = 30_000;
+
 class Realtime {
   private sub: Client | null = null;
   private pub: Client | null = null;
@@ -27,6 +29,7 @@ class Realtime {
   private chans = new Map<string, Set<Cb>>();
   private reconnectDelay = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   private buildSubClient(): Client {
     const client = new Client({ connectionString: DATABASE_URL, keepAlive: true, keepAliveInitialDelayMillis: 10_000 });
@@ -61,6 +64,8 @@ class Realtime {
     // Ignore drops from a stale client we've already replaced.
     if (this.sub && this.sub !== dropped) return;
     this.sub = null;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
     // Nothing to keep alive if no one is listening.
     if (this.chans.size > 0) this.scheduleReconnect();
   }
@@ -86,6 +91,27 @@ class Realtime {
       const client = this.buildSubClient();
       await client.connect();
       this.sub = client;
+      // A half-open socket (a NAT or proxy that forgot the flow, a failed-over DB)
+      // raises neither `error` nor `end`; the kernel's TCP keepalive notices it after
+      // ~11 minutes, and until then every SSE stream and the worker's wake-up channel
+      // are silently deaf. One SELECT 1 per interval on this one connection notices
+      // within two: a ping still unanswered when the next is due means nothing is
+      // coming back. Cleared with the connection in handleSubDrop; unref'd so it
+      // never holds a process open — the worker's shutdown exits past it.
+      let waiting = false;
+      this.heartbeat = setInterval(() => {
+        if (!waiting) {
+          waiting = true;
+          // A query that fails on a broken connection also raises `error`, which
+          // drops it; leaving `waiting` set reconnects on the next tick regardless.
+          client.query("SELECT 1").then(() => { waiting = false; }, () => {});
+          return;
+        }
+        log.warn("LISTEN connection stopped answering, will reconnect");
+        this.handleSubDrop(client);
+        client.end().catch(() => {});
+      }, HEARTBEAT_MS);
+      this.heartbeat.unref();
       // (Re-)subscribe to every channel we still have listeners for.
       for (const ch of this.chans.keys()) await client.query(`LISTEN "${ch}"`);
     })();
