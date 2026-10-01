@@ -186,7 +186,7 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
         "absolute links and the trusted origin come from each request's Host / X-Forwarded-Host " +
         "header (http://localhost:3000 without one)" +
         (env.BETTER_AUTH_URL?.trim()
-          ? "; BETTER_AUTH_URL is only a partial fallback (sign-in and MCP OAuth links use it; other absolute links and origin checks still follow the headers)"
+          ? "; BETTER_AUTH_URL is only a partial fallback (sign-in, MCP OAuth and trace links use it, and better-auth also trusts its origin; other absolute links still follow the headers)"
           : "") +
         ". Set PUBLIC_URL to the https:// address users open.",
     });
