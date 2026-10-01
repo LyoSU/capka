@@ -2759,7 +2759,9 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               // An `elicit:` toolCallId marks a block-and-poll MCP elicitation — the
               // answer routes to the row writer, not a suspended tool call.
               const kind = g.part.toolCallId?.startsWith("elicit:") ? "elicitation" : "ask";
-              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} />;
+              // A failed turn whose last thing is this answer never went on from it.
+              const stopped = metadata?.taskStatus === "failed" && gi === groups.length - 1;
+              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} stopped={stopped} />;
             }
             if (g.kind === "manage") {
               return <ManageCard key={gi} output={g.output} onSend={onSend} chatId={chatId} />;

@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../../../messages/en.json";
 import { readDecisionReply, ApprovalCard } from "../manage-cards";
+import { AskCard } from "../ask-card";
 
 /**
  * An approval whose turn can no longer run (its model connection was removed) is
@@ -131,5 +132,28 @@ describe("ApprovalCard — an approved change that ended with no result", () => 
     const html = render(reply("completed", { type: "tool-result", id: "c1", name: "manage", output: { status: "error", summary: "That value isn't allowed." } } as StoredPart));
     expect(html).toContain("That value isn&#x27;t allowed.");
     expect(html).not.toContain(en.chat.manage.interrupted);
+  });
+});
+
+/**
+ * An answer that was kept while its turn could not continue says so under the card.
+ * That note used to live only in the card's own state, so a reload dropped it and the
+ * settled answer read as the turn carrying on from it.
+ */
+describe("AskCard — an answer its turn never went on from", () => {
+  const render = (stopped: boolean) =>
+    // eslint-disable-next-line react/no-children-prop
+    renderToStaticMarkup(createElement(NextIntlClientProvider, {
+      locale: "en", messages: en,
+      children: createElement(AskCard, {
+        messageId: "m1", toolCallId: "c1", state: "output-available", stopped,
+        form: { fields: [{ id: "f", label: "Which file?", kind: "text" }] },
+        value: { action: "submit", values: { f: "report.pdf" } },
+      }),
+    }));
+
+  it("says so from the message's status, which a reload keeps", () => {
+    expect(render(true)).toContain(en.chat.ask.stopped.replaceAll("'", "&#x27;"));
+    expect(render(false)).not.toContain("couldn&#x27;t continue");
   });
 });

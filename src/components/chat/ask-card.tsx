@@ -22,9 +22,11 @@ import type { AskForm, AskField, AskAnswer } from "@/lib/ask/types";
  * the server matches by messageId.
  */
 export function AskCard({
-  messageId, toolCallId, form, value, state, kind = "ask",
+  messageId, toolCallId, form, value, state, kind = "ask", stopped,
 }: {
   messageId: string; toolCallId?: string; form: AskForm; value?: AskAnswer; state: string; kind?: "ask" | "elicitation";
+  /** The turn failed with nothing after this answer: it was kept, but the turn did not go on. */
+  stopped?: boolean;
 }) {
   const t = useTranslations("chat.ask");
   const tHook = useTranslations("chat.hook");
@@ -193,8 +195,9 @@ export function AskCard({
             </div>
           ))}
           {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
-          {/* Settled answers alone would read as the turn carrying on. */}
-          {note === "stopped" && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
+          {/* Settled answers alone would read as the turn carrying on. `stopped` holds
+              across a reload; the reply's own note covers the moment before it. */}
+          {(stopped || note === "stopped") && <div role="alert" className="text-xs text-destructive">{t("stopped")}</div>}
         </div>
       )}
     </div>
