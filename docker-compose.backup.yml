@@ -4,7 +4,7 @@
 # BACKUP_INTERVAL_SECONDS and RETENTION_DAYS (0 or empty keeps every dump).
 # scripts/up.sh and update.sh do not layer this file and remove the sidecar as an
 # orphan — bring it back after each run (docs/DEPLOY.md "Backup & restore"). The
-# dump is the database only; .env and ./data/storage need backing up too.
+# dump is the database only; .env and ./data (minus backups/) need backing up too.
 services:
   pg-backup:
     image: postgres:17-alpine

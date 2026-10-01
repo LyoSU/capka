@@ -20,7 +20,7 @@ the stack. To go to one specific release instead:
 
 Re-running `up.sh` alone does not upgrade: it re-applies the version already
 pinned in `.env`. The database dump is not a complete backup — see
-[Backup & restore](DEPLOY.md#backup--restore) for `.env` and `./data/storage`, and
+[Backup & restore](DEPLOY.md#backup--restore) for `.env` and `./data`, and
 for bringing the scheduled-backup sidecar back after an update.
 
 ### Did the migration work?
@@ -33,7 +33,11 @@ Read the log instead:
 docker compose logs platform | grep '\[db\]'
 ```
 
-- `[db] migrations up to date` — the schema is current.
+The **last** of these lines decides:
+
+- `[db] migrations up to date` — the schema is current. A failure line before it
+  only means an earlier attempt failed (often Postgres was still starting) and a
+  retry succeeded.
 - `[db] auto-migration failed (continuing; retrying in the background)` or
   `[db] auto-migration retry failed: …` — the schema is NOT current; the error
   after it says why. Fix the cause or roll back (below).

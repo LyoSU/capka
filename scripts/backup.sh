@@ -4,7 +4,8 @@
 #   ./scripts/backup.sh
 # The dump covers the database only. A complete backup also needs .env
 # (CAPKA_MASTER_KEY decrypts the provider keys and secrets stored in the dump)
-# and ./data/storage (users' files) — see docs/DEPLOY.md "Backup & restore".
+# and ./data except ./data/backups (users' files) — see docs/DEPLOY.md
+# "Backup & restore".
 # Dumps hold session tokens and password hashes: they are written 0600, and
 # copies kept off-box should be encrypted.
 set -euo pipefail

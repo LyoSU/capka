@@ -101,7 +101,7 @@ A complete backup is three things. The database dump alone is not enough:
 |---|---|---|
 | Database | `./scripts/backup.sh` writes `./data/backups/capka-<UTC timestamp>.sql.gz` | Users, chats, settings, the task queue. |
 | `.env` | The install directory (Coolify: the resource's environment variables) | `CAPKA_MASTER_KEY` decrypts the provider keys, connector sign-in tokens and chat secrets stored in the dump; with any other key they are unreadable and everyone is signed out. |
-| User files | `./data/storage` | Chat and project workspaces: uploads and agent outputs. |
+| Files | `./data`, except `./data/backups` | Chat and project workspaces (`./data/storage`: uploads and agent outputs) and the platform's other on-disk state. |
 
 Dumps contain session tokens, password hashes and the encrypted secrets, so
 `backup.sh` and the sidecar write them with mode `0600`. Keep copies **off the
@@ -109,9 +109,9 @@ box** (a disk failure or a lost VPS takes `./data/backups` with it), encrypt the
 (e.g. `restic`, `age`, `gpg`), and store `.env` apart from the dumps — together
 they decrypt everything.
 
-`./data/storage` is copied as files (`sudo tar` or `sudo rsync -a`, keeping
-owners). Copied while the stack runs it can be a few minutes off from the dump;
-stop the stack for a consistent pair.
+`./data` is copied as files (`sudo tar` or `sudo rsync -a`, keeping owners).
+Copied while the stack runs it can be a few minutes off from the dump; stop the
+stack for a consistent pair.
 
 ### Scheduling
 
@@ -135,16 +135,27 @@ Both delete dumps older than `RETENTION_DAYS` days (default 14; `0` or empty kee
 every dump), and only after a dump succeeded. The sidecar reads it from `.env`;
 `backup.sh` from its environment (`RETENTION_DAYS=30 ./scripts/backup.sh`).
 
-To test a backup without touching the live database, restore it into a scratch
-one:
+To test a backup without touching the live database, check that it is complete
+and restore it into a scratch one. A dump that was cut short (pg_dump died, the
+disk filled up) still restores without an error, just with part of the data, so
+the end-of-dump marker is what tells them apart:
 
 ```bash
-docker compose exec -T postgres createdb -U Capka capka_restore_test
-gunzip -c ./data/backups/capka-<timestamp>.sql.gz \
-  | docker compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d capka_restore_test >/dev/null \
-  && echo "restore OK"
-docker compose exec -T postgres dropdb -U Capka capka_restore_test
+F=./data/backups/capka-<timestamp>.sql.gz
+if gunzip -t "$F" && gunzip -c "$F" | tail -n 20 | grep -q 'PostgreSQL database dump complete'; then
+  docker compose exec -T postgres createdb -U Capka capka_restore_test
+  gunzip -c "$F" \
+    | docker compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d capka_restore_test >/dev/null \
+    && docker compose exec -T postgres psql -U Capka -d capka_restore_test \
+         -c 'SELECT (SELECT count(*) FROM chats) AS chats, (SELECT count(*) FROM messages) AS messages' \
+    && echo "restore OK"
+  docker compose exec -T postgres dropdb -U Capka capka_restore_test
+else
+  echo "INCOMPLETE: $F is cut short or unreadable"
+fi
 ```
+
+The counts should be close to the live database's at the time of the dump.
 
 ### Restore
 
@@ -166,7 +177,7 @@ from current `pg_dump` start with `\restrict`, which older `psql` clients reject
 git clone --branch v<release-of-the-dump> https://github.com/LyoSU/capka.git /opt/capka
 cd /opt/capka
 sudo cp /path/to/backup/.env .env && sudo chmod 600 .env   # same CAPKA_MASTER_KEY
-sudo mkdir -p data && sudo rsync -a /path/to/backup/storage/ data/storage/
+sudo rsync -a /path/to/backup/data/ data/                  # ./data, without backups/
 sudo sh scripts/up.sh                                      # boots on an empty database
 sudo ./scripts/restore.sh /path/to/backup/capka-<timestamp>.sql.gz
 sudo sh scripts/up.sh
@@ -181,13 +192,25 @@ Coolify deploys one compose file, so the sidecar overlay cannot be layered and
 there is no checkout to run the scripts from. Back up from the host instead.
 Coolify names each container `<service>-<resource uuid>`; `docker ps` lists them.
 
-```bash
-# Database (bash, for pipefail): run from cron, then copy the file off-box.
-set -o pipefail
-docker exec postgres-<uuid> pg_dump -U Capka -d Capka --clean --if-exists \
-  | gzip > capka-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+Save the database dump as a script (e.g. `/root/capka-backup.sh`, `chmod 700`)
+and run it from root's crontab by its path, so the `bash` shebang applies — a
+`sh` cron line has no `pipefail` and would keep a failed dump. Then copy the file
+off-box:
 
-# User files: the host directory mounted at /data in the controller.
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077                                  # dumps hold session tokens and password hashes
+mkdir -p /var/backups/capka && cd /var/backups/capka
+F=capka-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+trap 'rm -f "$F.tmp"' EXIT
+docker exec postgres-<uuid> pg_dump -U Capka -d Capka --clean --if-exists | gzip > "$F.tmp"
+mv "$F.tmp" "$F"                           # only a finished dump gets the final name
+```
+
+The files live in the host directory mounted at `/data` in the controller:
+
+```bash
 docker inspect sandbox-controller-<uuid> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
 ```
 
@@ -196,11 +219,20 @@ variables. To restore, stop the writers, replace the database, then redeploy the
 resource from Coolify:
 
 ```bash
-docker stop platform-<uuid> sandbox-controller-<uuid>
-{ echo 'DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
-  gunzip -c capka-<timestamp>.sql.gz; } \
-  | docker exec -i postgres-<uuid> psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d Capka >/dev/null
+F=capka-<timestamp>.sql.gz
+if gunzip -t "$F" && gunzip -c "$F" | tail -n 20 | grep -q 'PostgreSQL database dump complete'; then
+  docker stop platform-<uuid> sandbox-controller-<uuid>
+  { echo 'DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+    gunzip -c "$F"; } \
+    | docker exec -i postgres-<uuid> psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d Capka >/dev/null \
+    && echo "restore OK"
+else
+  echo "Not restoring: $F is cut short or unreadable"
+fi
 ```
+
+Check the marker first, as above: psql commits whatever a cut-short dump
+contains, after dropping the old schema.
 
 ## Routing / TLS
 
