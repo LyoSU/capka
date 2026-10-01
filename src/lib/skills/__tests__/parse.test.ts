@@ -99,4 +99,46 @@ describe("parseSkillMarkdown", () => {
     expect(() => parseSkillMarkdown(`---\n${"\n".repeat(8000)}name: x\n---\nbody`)).not.toThrow();
     expect(performance.now() - started).toBeLessThan(500);
   });
+
+  it("reads the frontmatter language the way gray-matter does, whatever the line endings", () => {
+    const g = globalThis as { __skillProbe?: number };
+    delete g.__skillProbe;
+    // gray-matter takes the language up to the first \r?\n and trims it, so a lone CR
+    // after the dashes still selects an engine.
+    for (const open of ["---\rjson\n", "---\rjson\r\n", "--- \r\rjson \n", "﻿---\rjson\n"]) {
+      expect(() => parseSkillMarkdown(`${open}{"name": "x"}\n---\nbody`), JSON.stringify(open)).toThrow(
+        "SKILL.md frontmatter must be YAML",
+      );
+    }
+    expect(() =>
+      parseSkillMarkdown(`---\rjs\n{ name: "x", probe: (globalThis.__skillProbe = 1) }\n---\nbody`),
+    ).toThrow("SKILL.md frontmatter must be YAML");
+    expect(g.__skillProbe).toBeUndefined();
+    expect(parseSkillMarkdown(`---\r\nname: x\r\n---\r\nbody`).name).toBe("x");
+    expect(parseSkillMarkdown(`---yaml\r\nname: x\r\n---\r\nbody`).name).toBe("x");
+  });
+
+  it("refuses a name of any shape as a parse error, quoting at most 64 chars of it", () => {
+    for (const fm of ["name:\n  toString: x", "name:\n  valueOf: 1\n  toString: 2", "name: [{ toString: x }]"]) {
+      expect(() => parseSkillMarkdown(md(fm)), fm).toThrow(SkillParseError);
+    }
+    const long = "a".repeat(5000);
+    let message = "";
+    try {
+      parseSkillMarkdown(md(`name: ${long}`));
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain(`"${"a".repeat(64)}…"`);
+    expect(message).not.toContain("a".repeat(65));
+  });
+
+  it("recovers an unquoted colon in a CRLF or BOM file just as in an LF one", () => {
+    const fm = "name: x\ndescription: Use when: the user asks";
+    for (const raw of [md(fm).replace(/\n/g, "\r\n"), `﻿${md(fm)}`, `﻿${md(fm).replace(/\n/g, "\r\n")}`]) {
+      const r = parseSkillMarkdown(raw);
+      expect(r.description, JSON.stringify(raw)).toBe("Use when: the user asks");
+      expect(r.body).toBe("Do the thing.");
+    }
+  });
 });

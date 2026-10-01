@@ -10,16 +10,17 @@ const MAX_DESC = 1024;
 // bound the block before handing it to the parser at all.
 const MAX_FRONTMATTER = 8 * 1024;
 
+const notYaml = () => {
+  throw new SkillParseError("SKILL.md frontmatter must be YAML");
+};
+
 // gray-matter picks its engine from the opening line, and `---js` selects one that
-// evals the block in this process. The language check in parseSkillMarkdown refuses
-// it first; this keeps the engine inert should anything get past. Passing options at
+// evals the block in this process. The language check in parseSkillMarkdown reads
+// that line with gray-matter's own reader and refuses it first; these keep every
+// other engine gray-matter knows inert should anything get past. Passing options at
 // all also keeps gray-matter's module-level cache, which never evicts, out of it.
 const MATTER_OPTS = {
-  engines: {
-    javascript: () => {
-      throw new SkillParseError("SKILL.md frontmatter must be YAML");
-    },
-  },
+  engines: { javascript: notYaml, json: notYaml, coffee: notYaml },
   // Nothing here uses the excerpt; without a function gray-matter reads
   // `excerpt_separator` out of the parsed data and stringifies it.
   excerpt: () => "",
@@ -42,17 +43,18 @@ const MATTER_OPTS = {
  * scalar values that contain a colon, then re-parse.
  */
 function sanitizeFrontmatter(raw: string): string {
-  const m = raw.match(/^---\n([\s\S]*?)\n---/);
+  const m = raw.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
   if (!m) return raw;
   const fixed = m[1]
     .split("\n")
     .map((line) => {
-      const kv = line.match(/^(\s*[A-Za-z0-9_-]+:)\s+(.*)$/);
+      // A CRLF file keeps its CR, which `.` would not match.
+      const kv = line.match(/^(\s*[A-Za-z0-9_-]+:)\s+(.*)(\r?)$/);
       if (!kv) return line;
-      const [, key, value] = kv;
+      const [, key, value, cr] = kv;
       const v = value.trim();
       if (!v || /^["'[{|>]/.test(v) || !v.includes(":")) return line;
-      return `${key} "${v.replace(/"/g, '\\"')}"`;
+      return `${key} "${v.replace(/"/g, '\\"')}"${cr}`;
     })
     .join("\n");
   // A replacer function: a string replacement would expand `$&` and friends in a value.
@@ -60,11 +62,10 @@ function sanitizeFrontmatter(raw: string): string {
 }
 
 export function parseSkillMarkdown(raw: string): ParsedSkill {
-  const opening = /^﻿?---([^\r\n]*)/.exec(raw);
-  if (opening) {
-    // gray-matter reads the rest of the opening line as the block's language; a
-    // fourth dash means the file has no frontmatter at all.
-    const lang = opening[1].trim().toLowerCase();
+  if (/^\uFEFF?---/.test(raw)) {
+    // gray-matter reads the block's language up to the first \r?\n, so a lone CR does
+    // not end it: ask its own reader. A fourth dash means no frontmatter at all.
+    const lang = matter.language(raw.replace(/^\uFEFF/, "")).name.toLowerCase();
     if (lang && !lang.startsWith("-") && lang !== "yaml" && lang !== "yml") {
       throw new SkillParseError("SKILL.md frontmatter must be YAML");
     }
@@ -94,8 +95,10 @@ export function parseSkillMarkdown(raw: string): ParsedSkill {
   const data = (parsed.data ?? {}) as Record<string, unknown>;
   const name = data.name;
   if (typeof name !== "string" || !NAME_RE.test(name) || name.length > MAX_NAME) {
+    // String() on a mapping calls its own toString/valueOf keys, which YAML can set.
+    const shown = typeof name === "object" && name !== null ? Object.prototype.toString.call(name) : String(name);
     throw new SkillParseError(
-      `Invalid skill name "${String(name)}" — must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be ≤${MAX_NAME} chars`,
+      `Invalid skill name "${shown.length > MAX_NAME ? `${shown.slice(0, MAX_NAME)}…` : shown}" — must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be ≤${MAX_NAME} chars`,
     );
   }
 
