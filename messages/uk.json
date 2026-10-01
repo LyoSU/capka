@@ -1274,9 +1274,7 @@
         "generateCode": "Згенерувати код підключення",
         "configureFirstAdmin": "Додайте токен бота в розділі",
         "configureFirstAdminLink": "«Інтеграції»",
-        "configureFirstUser": "Ще не налаштовано. Зверніться до адміністратора.",
-        "oidcLink": "Підключити Telegram",
-        "oidcFailed": "Не вдалося підключити Telegram. Спробуйте ще раз."
+        "configureFirstUser": "Ще не налаштовано. Зверніться до адміністратора."
       },
       "linkMovedHint": "Кожен підключає свій Telegram у Налаштуваннях → Загальні."
     },

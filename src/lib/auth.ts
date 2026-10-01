@@ -91,6 +91,9 @@ export async function getAuth() {
     },
     // Account linking is enabled so an already-signed-in user can explicitly link
     // Telegram via /oauth2/link (an authenticated action, gated by the session).
+    // better-auth only completes that link when the session email equals the
+    // provider's, i.e. for a tg<id>@telegram.local user re-linking the same
+    // Telegram; every other account links through the bot's one-time /link code.
     // Telegram is deliberately NOT a trustedProvider: trustedProviders would
     // auto-link a Telegram sign-in to any existing account whose email matches —
     // and our synthetic tg<id>@telegram.local addresses are predictable, so a

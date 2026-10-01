@@ -1274,9 +1274,7 @@
         "generateCode": "Generate link code",
         "configureFirstAdmin": "Add the bot token in",
         "configureFirstAdminLink": "Integrations settings",
-        "configureFirstUser": "Not set up yet. Ask your administrator to connect Telegram.",
-        "oidcLink": "Connect with Telegram",
-        "oidcFailed": "Couldn't connect to Telegram. Please try again."
+        "configureFirstUser": "Not set up yet. Ask your administrator to connect Telegram."
       },
       "linkMovedHint": "Users link their own Telegram accounts from Settings → General."
     },

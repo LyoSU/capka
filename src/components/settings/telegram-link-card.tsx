@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Hint } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { authClient } from "@/lib/auth-client";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { copyToClipboard } from "@/lib/clipboard";
 
@@ -36,10 +35,10 @@ export function TelegramLinkCard() {
   const [copied, setCopied] = useState(false);
   const [linkLoading, setLinkLoading] = useState(true);
   const [unlinking, setUnlinking] = useState(false);
-  // When Telegram login is configured, an existing user can link in one tap via
-  // the OIDC flow instead of the manual /link CODE dance (kept as a fallback).
-  const [oidcEnabled, setOidcEnabled] = useState(false);
-  const [linkingOidc, setLinkingOidc] = useState(false);
+  // No "link via Telegram login" button: better-auth's /oauth2/link requires the
+  // signed-in email to equal the one the provider returns, and Telegram's is always
+  // the synthetic tg<id>@telegram.local, so it failed for every email account. The
+  // one-time /link code below is the linking path.
 
   const fetchLinkStatus = useCallback(async () => {
     try {
@@ -57,20 +56,7 @@ export function TelegramLinkCard() {
 
   useEffect(() => {
     fetchLinkStatus();
-    fetch("/api/auth/registration-status")
-      .then((r) => r.json())
-      .then((d) => setOidcEnabled(!!d.telegram?.enabled))
-      .catch(() => setOidcEnabled(false));
   }, [fetchLinkStatus]);
-
-  const handleOidcLink = async () => {
-    setLinkingOidc(true);
-    const { error } = await authClient.oauth2.link({ providerId: "telegram", callbackURL: "/settings?linked=1" });
-    if (error) {
-      toast.error(t("link.oidcFailed"));
-      setLinkingOidc(false);
-    }
-  };
 
   const handleGenerateCode = async () => {
     setGeneratingCode(true);
@@ -147,16 +133,6 @@ export function TelegramLinkCard() {
         </div>
       ) : (
         <div className="space-y-3">
-          {oidcEnabled && !linkCode && (
-            <div className="space-y-3">
-              <Button onClick={handleOidcLink} disabled={linkingOidc} className="bg-[#229ED9] text-white hover:bg-[#1c8dc2]">
-                {linkingOidc ? <Loader2 className="animate-spin" /> : <Send />}
-                {t("link.oidcLink")}
-              </Button>
-              <Separator />
-              <p className="text-xs text-muted-foreground">{t("link.orManually")}</p>
-            </div>
-          )}
           {linkCode ? (
             <div className="space-y-3 rounded-xl border p-4">
               {botUsername ? (
