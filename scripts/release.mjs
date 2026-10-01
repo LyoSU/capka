@@ -28,7 +28,8 @@ if (git("status", "--porcelain")) die("working tree is dirty; commit or stash fi
 // Resolve the target version.
 const lastTag = (() => {
   try {
-    return git("describe", "--tags", "--abbrev=0").replace(/^v/, "");
+    // The last RELEASE: a prerelease tag (v1.0.0-rc.1) is not a base to bump from.
+    return git("describe", "--tags", "--abbrev=0", "--exclude", "*-*").replace(/^v/, "");
   } catch {
     return "0.0.0";
   }

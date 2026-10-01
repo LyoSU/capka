@@ -42,7 +42,66 @@ permissions:
   packages: write
 
 jobs:
+  # Publish only a commit CI already passed: cutting the tag is the deploy, so a
+  # red commit must stop here, before any image or channel moves. Waits (bounded)
+  # for a CI run still in progress — the release commit and its tag are usually
+  # pushed together — and refuses when CI failed, was cancelled, or never ran on a
+  # push of this exact commit. Re-run CI for the commit, then re-run this workflow.
+  #
+  # Also decides the channel: only a plain vX.Y.Z moves `latest`, `stable` and the
+  # GitHub Release marked latest. A prerelease tag (v1.0.0-rc.1) publishes its own
+  # image tag and nothing else, so nobody following a channel is moved onto it.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      plain: ${{ steps.channel.outputs.plain }}
+    steps:
+      - id: channel
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = tag ] && [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "plain=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "plain=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require green CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          deadline=$((SECONDS + 90 * 60))
+          while :; do
+            runs="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=50" \
+              --jq '[.workflow_runs[] | {status, conclusion}]')"
+            if jq -e 'any(.[]; .conclusion == "success")' <<< "$runs" > /dev/null; then
+              echo "CI passed for $SHA."
+              exit 0
+            fi
+            if jq -e 'length > 0 and all(.[]; .status == "completed")' <<< "$runs" > /dev/null; then
+              echo "::error::CI did not pass for $SHA ($(jq -c 'map(.conclusion)' <<< "$runs")). Fix or re-run CI for this commit, then re-run this workflow."
+              exit 1
+            fi
+            # No run at all after a few minutes: this commit was never pushed to
+            # master (a PR run tests a merge commit, not this one), so none is coming.
+            if jq -e 'length == 0' <<< "$runs" > /dev/null && [ "$SECONDS" -gt 600 ]; then
+              echo "::error::No CI run exists for $SHA. Push the commit to master so CI runs, then re-run this workflow."
+              exit 1
+            fi
+            if [ "$SECONDS" -gt "$deadline" ]; then
+              echo "::error::CI for $SHA did not finish within 90 minutes."
+              exit 1
+            fi
+            sleep 30
+          done
+
   build:
+    needs: gate
     # One job per (image, arch) cell → 6 native jobs, no QEMU. arm64 cells land
     # on GitHub's free public-repo ARM runner; amd64 on the standard one.
     runs-on: ${{ matrix.platform.runner }}
@@ -163,7 +222,7 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [gate, build]
     strategy:
       fail-fast: false
       matrix:
@@ -192,11 +251,15 @@ jobs:
       # {{version}} pattern strips it, which would make the scripts' `:v0.1.0`
       # pull 404 and fall back to a local build.
       #
+      # vX.Y and vX are moving tags for pinning a line: CAPKA_VERSION=v1 follows
+      # every 1.x release and never a 2.0. metadata-action skips both for a
+      # prerelease (and vX for a 0.x version), so those get only their own tag.
+      #
       # `latest` means "the newest RELEASE", and every pull-only deployment that
-      # sets no CAPKA_VERSION resolves to it — so only a tag push may move it. A
-      # manual workflow_dispatch (any branch, any commit) publishes a `sha-` tag
-      # instead: still pullable for debugging, but it cannot make every `:latest`
-      # stack jump to an unreleased build.
+      # sets no CAPKA_VERSION resolves to it — so only a push of a plain vX.Y.Z tag
+      # may move it. A manual workflow_dispatch (any branch, any commit) publishes a
+      # `sha-` tag instead: still pullable for debugging, but it cannot make every
+      # `:latest` stack jump to an unreleased build.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -208,7 +271,8 @@ jobs:
           tags: |
             type=semver,pattern=v{{version}},enable=${{ github.event_name == 'push' }}
             type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && needs.gate.outputs.plain == 'true' }}
             type=sha,format=long,prefix=sha-,enable=${{ github.event_name != 'push' }}
 
       # Stitch the per-arch digests into one manifest list per tag. jq builds the
@@ -238,8 +302,8 @@ jobs:
   # development tip and requires building from source.
   stable:
     runs-on: ubuntu-latest
-    needs: merge
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [gate, merge]
+    if: github.event_name == 'push' && needs.gate.outputs.plain == 'true'
     permissions:
       contents: write
     steps:
@@ -265,9 +329,14 @@ jobs:
     runs-on: ubuntu-latest
     # Also needs `stable`: a Release announcing a version whose deploy channel
     # never moved would send everyone tracking `stable` to update to code they
-    # cannot get. If the branch push fails, no Release is published either.
-    needs: [merge, stable]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # cannot get. If the branch push fails, no Release is published either. A
+    # prerelease skips `stable` by design and is published as a prerelease, which
+    # /releases/latest (the in-app update banner) never returns.
+    needs: [gate, merge, stable]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      && needs.merge.result == 'success'
+      && (needs.stable.result == 'success' || (needs.stable.result == 'skipped' && needs.gate.outputs.plain == 'false')) }}
     permissions:
       contents: write
     steps:
@@ -279,6 +348,7 @@ jobs:
           # string (workflow-injection hygiene), even though vX.Y.Z tags are trusted.
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          PLAIN: ${{ needs.gate.outputs.plain }}
         run: |
           version="${TAG#v}"
           # Slice this version's section out of CHANGELOG: from its `## [x.y.z]`
@@ -294,8 +364,9 @@ jobs:
           # Idempotent and forgiving of a pre-created draft: if a release already
           # exists for this tag (e.g. an operator staged notes as a draft), publish
           # it as latest; otherwise create it fresh from the CHANGELOG slice.
+          if [ "$PLAIN" = true ]; then channel=(--latest); else channel=(--prerelease --latest=false); fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Capka $TAG 🐾" --notes "$notes"
+            gh release edit "$TAG" --repo "$REPO" --draft=false "${channel[@]}" --title "Capka $TAG 🐾" --notes "$notes"
           else
-            gh release create "$TAG" --repo "$REPO" --latest --title "Capka $TAG 🐾" --notes "$notes"
+            gh release create "$TAG" --repo "$REPO" "${channel[@]}" --title "Capka $TAG 🐾" --notes "$notes"
           fi

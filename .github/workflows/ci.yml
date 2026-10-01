@@ -97,3 +97,90 @@ jobs:
 
       - name: Test database integrations
         run: npm run test:integration:db
+
+  # The release images, built (never pushed) on every push and PR, so a broken
+  # Dockerfile fails here instead of on the release tag — where cutting the tag is
+  # already the deploy. amd64 only: the arm64 cells differ in runner, not in recipe.
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: platform
+            context: .
+            file: Dockerfile
+            target: runner
+          - name: controller
+            context: ./sandbox-controller
+            file: ./sandbox-controller/Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          target: ${{ matrix.image.target }}
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=ci-${{ matrix.image.name }}
+          cache-to: type=gha,scope=ci-${{ matrix.image.name }},mode=max
+
+  # Whether this change can affect the sandbox image: the heavy one (~4.5 GB, the
+  # slowest build by far), so it is built only when something it is made of moved.
+  sandbox-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sandbox: ${{ steps.filter.outputs.sandbox }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            sandbox:
+              - Dockerfile.sandbox
+              - sandbox-entrypoint.sh
+              - scripts/sandbox-*
+              - sandbox-controller/**
+
+  # Build the sandbox image and run the same smoke test the release runs on it
+  # (publish-images.yml), through the real DockerBackend. The `docker` driver
+  # builds straight into the runner's daemon, so the smoke test needs no second
+  # copy of the image; no layer cache, because one would evict every other cache
+  # from the repository's 10 GB budget.
+  sandbox-image:
+    needs: sandbox-changes
+    if: needs.sandbox-changes.outputs.sandbox == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sandbox-controller/package-lock.json
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.sandbox
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: capka-sandbox:ci
+
+      - name: Smoke-test the sandbox image
+        run: |
+          npm ci --prefix sandbox-controller
+          node sandbox-controller/smoke-image.mjs capka-sandbox:ci
