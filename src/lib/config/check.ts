@@ -161,6 +161,28 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     }
   }
 
+  // auth.ts reads the same pair: Secure session cookies only for an https:// origin,
+  // and with neither set better-auth takes the origin from each request's headers.
+  const publicUrl = env.PUBLIC_URL?.trim() || env.BETTER_AUTH_URL?.trim();
+  if (isProd && !publicUrl) {
+    issues.push({
+      level: "warn",
+      key: "PUBLIC_URL",
+      message:
+        "not set — session cookies are issued without the Secure flag, and the sign-in origin is " +
+        "taken from each request's Host / X-Forwarded-Host header. Set PUBLIC_URL to the https:// " +
+        "address users open.",
+    });
+  } else if (isProd && publicUrl?.startsWith("http://")) {
+    issues.push({
+      level: "warn",
+      key: "PUBLIC_URL",
+      message:
+        "is not https — session cookies are issued without the Secure flag. Fine for a " +
+        "loopback-only install; behind TLS, set PUBLIC_URL to the https:// address users open.",
+    });
+  }
+
   for (const { key, fallback, shape } of NUMERIC_KNOBS) {
     const raw = env[key]?.trim();
     if (raw === undefined || raw === "") continue;

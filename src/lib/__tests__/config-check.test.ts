@@ -52,6 +52,20 @@ describe("checkConfig", () => {
     expect(keysOf(VALID)).not.toContain("BETTER_AUTH_URL");
   });
 
+  it("warns in production when PUBLIC_URL is unset or not https, and only there", () => {
+    const prodNoUrl = checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined });
+    expect(prodNoUrl).toContainEqual(
+      expect.objectContaining({ key: "PUBLIC_URL", level: "warn", message: expect.stringContaining("X-Forwarded-Host") }),
+    );
+    expect(checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: "http://10.0.0.5:3000" })).toContainEqual(
+      expect.objectContaining({ key: "PUBLIC_URL", level: "warn", message: expect.stringContaining("Secure") }),
+    );
+    // The legacy alias is what auth.ts falls back to, so it satisfies the check too.
+    expect(keysOf({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined, BETTER_AUTH_URL: "https://a.example" })).not.toContain("PUBLIC_URL");
+    expect(keysOf({ ...VALID, NODE_ENV: "production" })).not.toContain("PUBLIC_URL");
+    expect(keysOf({ ...VALID, PUBLIC_URL: undefined })).not.toContain("PUBLIC_URL");
+  });
+
   it("escalates insecure-but-tolerable defaults to errors in production", () => {
     const dev = checkConfig({ ...VALID, CAPKA_MASTER_KEY: undefined, DATABASE_URL: undefined });
     expect(dev.find((i) => i.key === "CAPKA_MASTER_KEY")?.level).toBe("warn");
