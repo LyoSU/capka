@@ -70,6 +70,24 @@ describe("manage/skills edit — check a skill out to the workspace", () => {
     expect(await skillMd.text()).toMatch(/name: greeter[\s\S]*Say hello\./);
   });
 
+  it("writes the stored body verbatim, never parsing it as frontmatter", async () => {
+    const g = globalThis as { __skillEditProbe?: number };
+    delete g.__skillEditProbe;
+    const body = "---js\n{ probe: (globalThis.__skillEditProbe = 1) }\n---\nSay hello.";
+    getSkillForRun.mockResolvedValue({ info: { name: "greeter", description: "says hi", body }, files: [] });
+    await skillCollection.edit!(ctx, "sk1");
+    expect(g.__skillEditProbe).toBeUndefined();
+    const skillMd = uploadFile.mock.calls.find((c) => (c[2] as File).name === "SKILL.md")![2] as File;
+    expect(await skillMd.text()).toBe(`---\nname: greeter\ndescription: says hi\n---\n${body}\n`);
+  });
+
+  it("checks out a skill that has no description", async () => {
+    getSkillForRun.mockResolvedValue({ info: { name: "greeter", description: null, body: "Say hello." }, files: [] });
+    await skillCollection.edit!(ctx, "sk1");
+    const skillMd = uploadFile.mock.calls.find((c) => (c[2] as File).name === "SKILL.md")![2] as File;
+    expect(await skillMd.text()).toBe("---\nname: greeter\n---\nSay hello.\n");
+  });
+
   it("refuses without an active workspace", async () => {
     await expect(skillCollection.edit!({ ...ctx, sessionKey: undefined }, "sk1")).rejects.toThrow(/workspace/i);
   });

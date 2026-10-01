@@ -300,8 +300,11 @@ export const skillCollection: Collection = {
     if (!run) throw new Error("No such skill.");
     const dir = `.capka/skills/${s.name}`;
     // Reconstruct SKILL.md from the stored name+description+body (the load-bearing
-    // frontmatter). Re-ingest on save re-parses whatever the agent writes.
-    const md = matter.stringify(run.info.body, { name: run.info.name, description: run.info.description ?? undefined });
+    // frontmatter). Re-ingest on save re-parses whatever the agent writes. The body goes
+    // in as `{content}`: a string would be parsed as frontmatter first, outside
+    // parseSkillMarkdown's options. YAML cannot dump `undefined`, so omit a missing description.
+    const { name, description } = run.info;
+    const md = matter.stringify({ content: run.info.body }, description ? { name, description } : { name });
     await uploadFile(ctx.sessionKey, dir, new File([md], "SKILL.md"), ctx.userId);
     for (const f of run.files) {
       const slash = f.path.lastIndexOf("/");
