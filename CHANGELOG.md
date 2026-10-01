@@ -14,6 +14,7 @@ All notable changes to Capka are documented here. Format follows
 - The platform's V8 heap is now 75% of `PLATFORM_MEM_LIMIT` (3 GB at the default 4g) instead of a fixed 3 GB, so lowering the limit on a small box needs no `NODE_OPTIONS` override. Building the image locally needs `node:22-alpine` ≥ 22.21 (`docker pull node:22-alpine`).
 - A browser tab reconnecting mid-stream backs its full-chat reloads off from 250 ms to 2 s instead of re-fetching every 250 ms.
 - Forking a chat reads only the copied path instead of every message in the chat.
+- The KaTeX stylesheet now loads only when a reply contains a formula, so chats without math download about 24 KB less CSS.
 - Tool approvals and answers to agent questions now count against the per-user chat rate limit (429 `RATE_LIMITED`), and the card says when the rate or spending limit refused it.
 - When a chat that was emergency-trimmed fails to compact, the platform log has a `warn` line "compaction failed after an emergency trim" with `taskId`, `chatId` and `userId`; the other compaction failure lines carry `emergencyTrimmed`.
 - `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
@@ -46,7 +47,7 @@ All notable changes to Capka are documented here. Format follows
 - A shared-key budget hold stranded by a crash before its turn was queued is released after an hour instead of reducing the user's budget for the rest of the window; a Telegram attachment whose download never finishes is dropped after 10 minutes so the message still goes through.
 - In a very large workspace the agent's workspace overview keeps the shallowest files instead of whatever the walk reached first, and one unreadable subfolder no longer fails the whole listing. Redeploy `sandbox-controller`.
 - Folder sync no longer deletes local copies of files when the workspace listing hits a read error (e.g. `EACCES`, `EIO`) on a directory or file (the sync stops with an error instead), or when the workspace copy is missing (e.g. reaped after `WORKSPACE_TTL_MS`), which now re-uploads the folder without deleting anything even if that re-upload is cut short. Redeploy both `sandbox-controller` and `platform`.
-- Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s, so a silently dropped database connection is detected within minutes instead of about 2 hours.
+- Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s and the LISTEN connection is pinged every 30 s, so live chat updates recover within about a minute of a silently dropped database connection instead of about 2 hours.
 - A deleted workspace file no longer stays clickable for the rest of the session (its existence check expires after 30 s); the in-memory list of pending Telegram usernames is now bounded.
 - The memory page shows a topic's newest 200 facts when it has more than 200, instead of an arbitrary 200.
 
