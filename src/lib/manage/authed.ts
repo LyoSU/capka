@@ -100,9 +100,9 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * then queues a resume task that re-opens the SAME assistant message — the AI SDK
  * re-runs the tool (approved) or the model sees the denial, and finishes the turn.
  * Three outcomes, because the two refusals are not the same to a user: "gone" —
- * not the caller's message, no pending call, or a racing tap already decided it
- * (nothing to retry); "busy" — the decision stuck nowhere because the chat's one
- * queued slot is taken, which IS worth tapping again. Callers that show buttons
+ * not the caller's message, no pending call, a racing tap already decided it, or
+ * the chat has moved past it (nothing to retry); "busy" — the decision stuck
+ * nowhere because the chat's one queued slot is taken, which IS worth tapping again. Callers that show buttons
  * must keep them alive only for "busy". A fourth, "failed": the decision WAS
  * recorded, but the turn could not continue (no model left to run it) and was
  * settled here as failed — so it must not read as done. A user over their
@@ -196,6 +196,11 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
       // Telegram at once) can't both win — the first flips it, the second matches 0
       // rows and bails WITHOUT enqueuing a duplicate resume. (answerElicitationForUser
       // already had this shape via isNull(answer); this brings approve in line.)
+      // Only while the row is still the chat's leaf: a stale tab or an old Telegram
+      // button would otherwise resume a reply the chat went past, mid-history. The
+      // chat row is locked, so a send moving the leaf lands wholly before or after.
+      const [chat] = await tx.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, msg.chatId)).for("update");
+      if (chat?.leaf !== d.messageId) tx.rollback();
       const settled = failure
         ? { status: "failed", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category }
         : {};

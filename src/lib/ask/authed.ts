@@ -24,8 +24,8 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  * tool-result (its output is the AskAnswer), so convertToModelMessages rebuilds a
  * normal call→result pair and the SDK finishes the SAME turn with the answer in
  * hand. Same outcomes as `approveManageForUser`: "gone" (not the caller's, no
- * pending ask, or already answered) is final; "busy" (the chat's one queued slot
- * is taken) is worth retrying; "failed" means the answer was recorded but the
+ * pending ask, already answered, or the chat moved past it) is final; "busy" (the
+ * chat's one queued slot is taken) is worth retrying; "failed" means the answer was recorded but the
  * turn could not continue and was settled as failed. Over budget or over the chat
  * rate limit it throws (BudgetExceededError / a 429 `RATE_LIMITED` AppError) with
  * nothing recorded — the same gates and refusals as the manage approval path.
@@ -83,6 +83,10 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
       // still unanswered, so two racing answers (double-submit, or web + Telegram) can't
       // both enqueue a resume — the first writes the value, the second matches 0 rows
       // and bails. Mirrors answerElicitationForUser's isNull(answer) guard.
+      // Only while the row is still the chat's leaf, under the chat row's lock — the
+      // same rule as approveManageForUser.
+      const [chat] = await tx.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, msg.chatId)).for("update");
+      if (chat?.leaf !== d.messageId) tx.rollback();
       const settled = failure
         ? { status: "failed", error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category }
         : {};

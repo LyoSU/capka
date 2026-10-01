@@ -41,7 +41,12 @@ const writeApi = {
     set: (v: unknown) => { rows.updated = v; return { where: () => ({ returning: () => rows.updateReturn ?? [] }) }; },
   }),
 };
-const tx = { ...writeApi, rollback: () => { throw new TransactionRollbackError(); } };
+// `select` in the transaction is the chat row it locks: `leaf` is the chat's active leaf.
+const tx = {
+  ...writeApi,
+  select: () => ({ from: () => ({ where: () => ({ for: () => [rows.chat] }) }) }),
+  rollback: () => { throw new TransactionRollbackError(); },
+};
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -72,6 +77,7 @@ describe("answerAskForUser", () => {
     rows.updated = undefined;
     rows.updateReturn = undefined;
     rows.rolledBack = false;
+    rows.chat = { leaf: "m1" };
     reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
     releaseHold.mockReset().mockResolvedValue(undefined);
     resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
@@ -223,6 +229,18 @@ describe("answerAskForUser", () => {
     ).rejects.toThrow("could not settle");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
+  });
+
+  it("refuses as gone when the chat has moved past the row (a stale tab or an old Telegram button)", async () => {
+    rows.msg = pendingAsk();
+    rows.task = { payload: {} };
+    rows.updateReturn = [{ id: "m1" }];
+    rows.chat = { leaf: "m2" };
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(outcome).toBe("gone");
+    expect(rows.updated).toBeUndefined();
+    expect(enqueueTask).not.toHaveBeenCalled();
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 

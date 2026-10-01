@@ -36,7 +36,8 @@ const rows: Record<string, unknown> = {};
 // drizzle's does, and `db.transaction` rolls back and RETHROWS (drizzle's own
 // semantics — the caller is what turns the rollback back into `false`).
 const tx = {
-  select: () => ({ from: () => ({ where: () => ({ limit: () => [rows.task] }) }) }),
+  // The chat row the decision locks: `leaf` is the chat's active leaf.
+  select: () => ({ from: () => ({ where: () => ({ for: () => [rows.chat] }) }) }),
   update: () => ({
     set: (v: unknown) => { rows.updated = v; return { where: () => ({ returning: () => rows.updateReturn ?? [] }) }; },
   }),
@@ -80,6 +81,7 @@ describe("approveManageForUser — atomic single-use approval", () => {
     rows.updated = undefined;
     rows.updateReturn = undefined;
     rows.rolledBack = false;
+    rows.chat = { leaf: "m1" };
     reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
     releaseHold.mockReset().mockResolvedValue(undefined);
     resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
@@ -261,6 +263,18 @@ describe("approveManageForUser — atomic single-use approval", () => {
     await expect(approveManageForUser("u1", { messageId: "m1", approved: true })).rejects.toThrow("could not settle");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
+  });
+
+  it("refuses as gone when the chat has moved past the row (a stale tab or an old Telegram button)", async () => {
+    rows.msg = pendingApproval();
+    rows.task = { payload: {} };
+    rows.updateReturn = [{ id: "m1" }];
+    rows.chat = { leaf: "m2" };
+    const outcome = await approveManageForUser("u1", { messageId: "m1", approved: true });
+    expect(outcome).toBe("gone");
+    expect(rows.updated).toBeUndefined();
+    expect(enqueueTask).not.toHaveBeenCalled();
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
