@@ -271,7 +271,7 @@ type FileEntry = {
 /** `withHash` asks the controller for a per-file content SHA-256. Only folder
  *  sync needs it — the file browser leaves it off, so an ordinary listing never
  *  pays for reading every file. */
-export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number, limit?: number, withHash?: boolean): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
+export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number, limit?: number, withHash?: boolean): Promise<{ entries: FileEntry[]; truncated?: boolean; missing?: boolean; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
   if (depth && depth > 1) params.set("depth", String(depth));

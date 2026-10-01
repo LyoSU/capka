@@ -624,9 +624,12 @@ const INTERRUPTED_METADATA_SQL = `CASE WHEN ${PRODUCED_WORK_SQL}
           END`;
 
 /**
- * The SQL twin of `replyText` (chat/tree.ts): a stranded reply's text, rebuilt from
- * its parts. Mid-stream snapshots leave `content` to the finishing write, which a
- * dead worker never reaches, so failing the row is also what gives it the text that
+ * `replyText` (chat/tree.ts) in SQL, near enough: a stranded reply's text, rebuilt
+ * from its parts. Not exact — `btrim` strips only ASCII whitespace where `trim()` also
+ * takes Unicode spaces, so a part keeps an edge NBSP or ideographic space, and a part
+ * holding nothing else is joined in where `replyText` drops it.
+ * Mid-stream snapshots leave `content` to the finishing write, which a dead worker
+ * never reaches, so failing the row is also what gives it the text that
  * search, export and a later fork read. A row without parts keeps its content.
  */
 const REPLY_TEXT_SQL = `CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'

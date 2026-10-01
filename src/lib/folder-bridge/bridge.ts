@@ -68,12 +68,13 @@ const saveHandle = (id: string, handle: DirHandle) => withStore<void>("readwrite
 const loadHandle = (id: string) => withStore<DirHandle | undefined>("readonly", (s) => s.get(id));
 const dropHandle = (id: string) => withStore<void>("readwrite", (s) => s.delete(id));
 
-// The 3-way merge ancestor is NOT trusted from tab memory — it's loaded fresh
-// from the shared server row at the start of every sync (loadState) and written
-// back with an optimistic revision (CAS), so two tabs (or two project members)
-// syncing the same folder can't clobber each other's ancestor and resurrect a
-// deleted file. `bases` here is only a *badge cache* for the file browser (the
-// last manifest THIS tab synced); it never feeds the merge.
+// The 3-way merge ancestor is NOT trusted from tab memory — every sync loads it
+// fresh from the shared server row once the server listing is in (loadAncestor,
+// still under the sync's lease) and writes it back with an optimistic revision
+// (CAS), so two tabs (or two project members) syncing the same folder can't
+// clobber each other's ancestor and resurrect a deleted file. `bases` here is
+// only a *badge cache* for the file browser (the last manifest THIS tab synced);
+// it never feeds the merge.
 const bases = new Map<string, Manifest>();
 // Per-folder hash cache for the local prefilter (skip re-hashing unchanged files).
 const lastLocal = new Map<string, HashedManifest>();
@@ -238,7 +239,7 @@ async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p:
 }
 
 /** Load the 3-way merge ancestor + its revision from the shared server row. Read
- *  FRESH at the start of every sync (the row is the cross-tab source of truth), so
+ *  FRESH on every sync, via loadAncestor (the row is the cross-tab source of truth), so
  *  a stale tab never reverts an ancestor another tab already advanced. Only accepts
  *  the versioned `{v:1,rev,files,dirs}` shape; anything else (absent, legacy,
  *  malformed) yields an empty base (rev 0) — the safe union fallback. Never throws;
