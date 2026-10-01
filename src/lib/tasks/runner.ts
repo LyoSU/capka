@@ -1514,6 +1514,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }, Math.max(0, lastSaveAt + TOOL_SAVE_MS - Date.now()));
     };
     const saveSnapshot = async () => {
+      // Not on a lost lease, whichever path got here (a timer, the stream's last flush):
+      // the row may be another worker's by now, and only the terminal write, which is
+      // compare-and-set against the task, may still touch it.
+      if (leaseLost) return;
       if (owed !== "now" && Date.now() - lastSaveAt < saveEveryMs) return;
       owed = undefined;
       if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; }
@@ -1550,7 +1554,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           ...(consumedSteers.length ? { steers: [...consumedSteers] } : {}) },
       }).where(eq(messages.id, msgId));
       saved = { json: partsJson, seq: snapSeq, steers };
-      snapshotBytes += partsJson.length;
+      snapshotBytes += Buffer.byteLength(partsJson); // jsonb stores UTF-8, not UTF-16 units
       snapshotWrites += 1;
     };
 
@@ -1925,9 +1929,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         }
       }
       // A save still owed lands with this last flush, not on a timer that could fire
-      // after the finishing write and put a `running` snapshot back over it. Not on a
-      // lost lease: the row is no longer this run's to write.
-      if (owed && !leaseLost) owed = "now";
+      // after the finishing write and put a `running` snapshot back over it.
+      if (owed) owed = "now";
       await flushBuffers();
       } catch (e) {
         // A stall aborts THIS attempt's signal. Depending on the SDK that ends the

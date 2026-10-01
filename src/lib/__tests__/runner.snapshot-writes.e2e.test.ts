@@ -9,7 +9,8 @@ import { z } from "zod";
 // delta, then a second of reasoning. The large snapshot has to push the next unforced
 // save past the old 1s cadence, and no mid-stream save may set `content` (under the
 // full-text index) at all — only the finishing write does. Then a tool-heavy turn,
-// where the writes come from tool events instead of text.
+// where the writes come from tool events instead of text. Last, a run that loses its
+// lease mid-turn: from then on the row is not its to write, so no snapshot may follow.
 const BIG = "a".repeat(200_000);
 const THOUGHTS = Array.from({ length: 10 }, (_, i) => `thought ${i}. `);
 
@@ -22,7 +23,11 @@ const RESULT_BYTES = 16_000;
 const SLOW = 10;
 const SLOW_MS = 1500;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const turn = { tools: false, calls: 0, probe: null as null | (() => Promise<void>) };
+const turn = {
+  tools: false, calls: 0, slowAt: SLOW, probe: null as null | (() => Promise<void>),
+  // While set, the runner's lease renewal is refused; `onLost` fires the moment it is.
+  leaseGone: false, onLost: null as null | (() => void),
+};
 
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
@@ -71,7 +76,7 @@ vi.mock("@/lib/sandbox/tools", () => ({
           fetch_page: tool({
             inputSchema: z.object({ n: z.number() }),
             execute: async ({ n }) => {
-              if (n === SLOW) await turn.probe?.();
+              if (n === turn.slowAt) await turn.probe?.();
               else await sleep(20);
               return `${n}:`.padEnd(RESULT_BYTES, "x");
             },
@@ -81,6 +86,20 @@ vi.mock("@/lib/sandbox/tools", () => ({
     close: async () => {},
   }),
 }));
+// The renewal is refused outright, with no database round trip, once `turn.leaseGone` is
+// set: the run learns of the loss in the same tick as the step that finished, with no
+// timer free to land a snapshot first, which is the order the test needs to pin.
+vi.mock("@/lib/tasks/queue", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/tasks/queue")>();
+  return {
+    ...real,
+    heartbeat: async (id: string, workerId: string) => {
+      if (!turn.leaseGone) return real.heartbeat(id, workerId);
+      turn.onLost?.();
+      return null;
+    },
+  };
+});
 // Memory stubbed out whole — see the note in runner.e2e.test.ts.
 vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
@@ -99,6 +118,7 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "e2e-snap-user";
 const C = "e2e-snap-chat";
 const C2 = "e2e-snap-tools";
+const C3 = "e2e-snap-lost";
 const W = "w-e2e-snap";
 
 type Meta = { status?: string; taskId?: string; parts?: { type: string; id?: string; text?: string }[] };
@@ -132,18 +152,19 @@ async function claim(id: string, chat: string, parent: string) {
 
 run("runAgentTask: mid-stream snapshot writes", () => {
   const clean = async () => {
-    await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN ($1,$2))`, [C, C2]);
-    await pool.query(`DELETE FROM messages WHERE chat_id IN ($1,$2)`, [C, C2]);
+    await pool.query(`DELETE FROM message_effects WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN ($1,$2,$3))`, [C, C2, C3]);
+    await pool.query(`DELETE FROM messages WHERE chat_id IN ($1,$2,$3)`, [C, C2, C3]);
     await pool.query(`DELETE FROM usage WHERE user_id=$1`, [U]);
     await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
-    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2)`, [C, C2]);
+    await pool.query(`DELETE FROM chats WHERE id IN ($1,$2,$3)`, [C, C2, C3]);
   };
   beforeAll(async () => {
     await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'E','e2e-snap@test.local') ON CONFLICT (id) DO NOTHING`, [U]);
     await clean();
-    for (const chat of [C, C2]) await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2)`, [chat, U]);
+    for (const chat of [C, C2, C3]) await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2)`, [chat, U]);
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('ms1',$1,'user','hi')`, [C]);
     await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('ms2',$1,'user','read them all')`, [C2]);
+    await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('ms3',$1,'user','read them all')`, [C3]);
   });
   afterEach(() => { vi.restoreAllMocks(); });
   afterAll(async () => {
@@ -156,8 +177,9 @@ run("runAgentTask: mid-stream snapshot writes", () => {
     await runAgentTask(await claim("e2e-snap-1", C, "ms1"), W);
 
     const running = sets.filter((s) => (s.metadata as { status?: string } | undefined)?.status === "running");
-    // The first flush after the big delta, then the step's forced save — no unforced
-    // save a second later while the reasoning streamed (the old 1s cadence).
+    // The first flush after the big delta, then the finish-step's save, which is owed and
+    // lands with the stream's last flush (or its 1 s timer) — no unforced save a second
+    // later while the reasoning streamed (the old 1s cadence).
     expect(running).toHaveLength(2);
     expect(running.filter((s) => "content" in s)).toEqual([]);
     // The text rides in parts instead, from the first save on.
@@ -204,8 +226,8 @@ run("runAgentTask: mid-stream snapshot writes", () => {
     expect(duringCall?.parts?.some((p) => p.type === "tool-call" && p.id === `c${SLOW}`)).toBe(true);
 
     const running = sets.map((s) => s.metadata as Meta | undefined).filter((m) => m?.status === "running" && m.taskId === "e2e-snap-2");
-    const bytes = running.reduce((n, m) => n + JSON.stringify(m!.parts).length, 0);
-    const finalBytes = JSON.stringify(final.metadata.parts).length;
+    const bytes = running.reduce((n, m) => n + Buffer.byteLength(JSON.stringify(m!.parts)), 0);
+    const finalBytes = Buffer.byteLength(JSON.stringify(final.metadata.parts));
     expect(running.length).toBeLessThan(STEPS);
     expect(running.length).toBeLessThanOrEqual(Math.ceil(durationMs / 1000) + 2);
     expect(bytes).toBeLessThanOrEqual(running.length * finalBytes);
@@ -214,5 +236,40 @@ run("runAgentTask: mid-stream snapshot writes", () => {
     const finished = lines.map((l) => { try { return JSON.parse(l); } catch { return {}; } })
       .find((l) => l.msg === "task finished" && l.taskId === "e2e-snap-2");
     expect(finished).toMatchObject({ snapshotWrites: running.length, snapshotBytes: bytes });
+  }, 30_000);
+
+  // The renewal at a step's end is what tells a run its lease is gone, and the row stops
+  // being its to write from then on: a long call leaves the last snapshot more than a
+  // second old, so the stream's closing flush would have written the finished call into
+  // the row another worker may already own. Only the terminal write, which is
+  // compare-and-set against the task, may still reach it.
+  it("writes no snapshot once the lease is lost, only the terminal state", async () => {
+    turn.tools = true;
+    turn.calls = 0;
+    // The first call, while the snapshot is small and the cadence still at its 1 s
+    // floor, and long enough that the last save is past it when the call returns.
+    turn.slowAt = 0;
+    turn.probe = async () => {
+      await sleep(2500);
+      turn.leaseGone = true;
+    };
+    const sets = recordSets();
+    let lostAt = -1;
+    turn.onLost = () => { if (lostAt < 0) lostAt = sets.length; };
+    try {
+      await runAgentTask(await claim("e2e-snap-3", C3, "ms3"), W);
+    } finally {
+      turn.slowAt = SLOW;
+      turn.leaseGone = false;
+      turn.onLost = null;
+    }
+
+    expect(lostAt).toBeGreaterThan(0);
+    // Control: it was writing snapshots until the loss, and the finishing write follows it.
+    const before = sets.slice(0, lostAt).map((s) => s.metadata as Meta | undefined);
+    expect(before.some((m) => m?.status === "running")).toBe(true);
+    expect(sets.slice(lostAt).map((s) => (s.metadata as Meta | undefined)?.status)).not.toContain("running");
+    const final = (await pool.query(`SELECT metadata FROM messages WHERE chat_id=$1 AND role='assistant'`, [C3])).rows[0];
+    expect(final.metadata.status).toBe("failed");
   }, 30_000);
 });
