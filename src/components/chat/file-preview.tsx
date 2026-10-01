@@ -71,9 +71,9 @@ function downloadUrl(f: PreviewFile) {
 // same (present and clickable).
 //
 // A file deleted (or re-created) while its chip stays mounted is caught by
-// recheckFiles, which the page calls when the workspace may have changed under it —
-// a turn that ran tools finished, the user deleted a file — so every mounted chip asks
-// once more. Chips naming the same file share one request.
+// recheckFiles, which the page calls when a file may have been removed under it — a
+// turn that ran a command or a delete finished, the user deleted a file — so every
+// mounted chip asks once more. Chips naming the same file share one request.
 const PRESENT_TTL_MS = 30_000;
 const presentFiles = new Map<string, number>();
 const isPresent = (key: string) => {

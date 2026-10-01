@@ -115,6 +115,10 @@ function TranscriptSkeleton() {
  *  is its final one. */
 const FOLD_QUIET_MS = 1500;
 
+/** The sandbox tools that can remove a workspace file: the three runners (and a
+ *  background job they started, seen through check_job) and delete_path. */
+const REMOVES_FILES = new Set(["execute_bash", "execute_python", "execute_node", "check_job", "delete_path"]);
+
 export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
   const tGreeting = useTranslations("chat.greetings");
@@ -696,15 +700,25 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     0,
   );
 
-  // A turn that ran tools may have deleted (or re-created) a file an earlier reply's
-  // chip names, and a chip that stays mounted would not ask again. A turn that ran
-  // none changed nothing, so it costs no request.
-  const toolsAtStart = useRef<number | null>(null);
+  // A turn that ran a tool able to remove a file may have deleted one an earlier
+  // reply's chip names, and a chip that stays mounted would not ask again. The recheck
+  // is one GET (body cancelled) per distinct file named anywhere in the loaded
+  // transcript, so a turn that only searched, read, wrote or changed settings — none
+  // of which leaves a chip pointing at nothing — does not pay it.
+  const removals = messages.reduce(
+    (n, m) =>
+      n +
+      ((m.parts as { type: string; state?: string; toolName?: string }[] | undefined)?.filter(
+        (p) => p.type === "dynamic-tool" && (p.state === "output-available" || p.state === "output-error") && REMOVES_FILES.has(p.toolName ?? ""),
+      ).length ?? 0),
+    0,
+  );
+  const removalsAtStart = useRef<number | null>(null);
   useEffect(() => {
-    if (isLoading) { toolsAtStart.current ??= toolRevision; return; }
-    if (toolsAtStart.current !== null && toolsAtStart.current !== toolRevision) recheckFiles();
-    toolsAtStart.current = null;
-  }, [isLoading, toolRevision]);
+    if (isLoading) { removalsAtStart.current ??= removals; return; }
+    if (removalsAtStart.current !== null && removalsAtStart.current !== removals) recheckFiles();
+    removalsAtStart.current = null;
+  }, [isLoading, removals]);
 
   // A failed assistant message renders its own ErrorNotice — don't also show
   // the bottom banner for the same failure (the banner stays for load errors).
