@@ -26,8 +26,9 @@ export default function PendingPage() {
   // A bare `router.refresh()` re-rendered this page identically, so someone
   // waiting on approval could not tell the button from a broken one. The
   // transition gives it a pending state, and the "still waiting" line is the
-  // answer to the question they actually asked. Approval unmounts this page, so
-  // the message only ever appears when nothing has changed.
+  // answer to the question they actually asked. Approval ends every session the
+  // account holds, so a check that finds none sends them to sign in, which lands
+  // in the app; the message only appears while they are still waiting.
   const [checking, startCheck] = useTransition();
   const asked = useRef(false);
 
@@ -58,7 +59,13 @@ export default function PendingPage() {
           disabled={checking}
           onClick={() => {
             asked.current = true;
-            startCheck(() => router.refresh());
+            startCheck(async () => {
+              const { data } = await authClient.getSession();
+              if (!data) {
+                asked.current = false;
+                router.push("/login");
+              }
+            });
           }}
         >
           {checking ? <Loader2 className="animate-spin" /> : <RotateCw />}

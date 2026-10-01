@@ -178,10 +178,12 @@ export function AskCard({
             {onLastPage && !complete && !submitting && (
               <span className="text-xs text-muted-foreground">{t("needsAnswer")}</span>
             )}
+            {/* "gone" is not a failure, just a question that has passed: a quiet note by
+                the buttons. Mounted empty and filled later, since a status inserted
+                already filled is often not announced; inside the row, so the empty
+                element adds no space under the card. */}
+            <span role="status" className="text-xs text-muted-foreground">{note === "gone" ? refusal : null}</span>
           </div>
-          {/* "gone" is not a failure, just a question that has passed: a quiet line. */}
-          {/* Mounted empty and filled later: a status inserted already filled is often not announced. */}
-          <div role="status" className={note === "gone" ? "text-xs text-muted-foreground" : undefined}>{note === "gone" ? refusal : null}</div>
           {refusal && note !== "gone" && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
         </>
       ) : (
