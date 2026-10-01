@@ -679,6 +679,12 @@
       "steer": "Ви додали",
       "compacted": "Контекст стиснуто",
       "imageUnavailable": "Зображення недоступне",
+      "plan": "План",
+      "planStep": {
+        "done": "Виконано: {title}",
+        "current": "Виконується: {title}",
+        "pending": "Далі: {title}"
+      },
       "workedFor": "Працював {duration}",
       "activity": "Дії",
       "stepCount": "{count, plural, one {# дія} few {# дії} many {# дій} other {# дії}}",

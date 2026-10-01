@@ -16,6 +16,7 @@ import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
 import type { Modality } from "@/lib/providers/registry";
 import type { AskForm } from "@/lib/ask/types";
+import { planLines, type PlanStep } from "@/lib/chat/plan";
 
 // `locale` carries the originating Telegram client's language so the bot's
 // outbound text (status header, collapsed log, error fallbacks) matches what the
@@ -82,8 +83,7 @@ export interface TaskResult {
  *  ("Running a command…", "Creating logo.svg…"), with an optional dim `detail`
  *  (e.g. the command). */
 export type StreamStatus =
-  | { kind: "thinking" }
-  | { kind: "tool"; label: string; detail?: string }
+  | (({ kind: "thinking" } | { kind: "tool"; label: string; detail?: string }) & { plan?: PlanStep[] })
   | undefined;
 
 /** A draft is sent as Markdown normally, but as HTML when it needs the native
@@ -230,7 +230,10 @@ export function composeDraft(answer: string, reasoning: string, status: StreamSt
     status?.kind === "tool"
       ? `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`
       : escapeHtml(think) || t("statusThinking");
-  return { html: `<tg-thinking>${inner}</tg-thinking>` };
+  // The plan heads the block while the work runs; like reasoning, it is dropped
+  // once answer text exists (content wins, see above).
+  const plan = status?.plan?.length ? `${escapeHtml(planLines(status.plan))}\n\n` : "";
+  return { html: `<tg-thinking>${plan}${inner}</tg-thinking>` };
 }
 
 /** Final view: the answer verbatim, then a light one-line tool log

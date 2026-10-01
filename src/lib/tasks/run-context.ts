@@ -16,6 +16,7 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { makeManageTool } from "@/lib/manage/tool";
 import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
 import { makeAskTool } from "@/lib/ask/tool";
+import { makePlanTool } from "@/lib/chat/plan-tool";
 import { makeQuietTool, type QuietState } from "@/lib/automations/quiet-tool";
 import { askAnswerSchema, askFormSchema } from "@/lib/ask/types";
 import { makeVaultMemoryTools } from "@/lib/vault/tools";
@@ -382,6 +383,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     const tools = {
       ...quietTools,
       ...sandbox.tools,
+      // The live checklist. Sandbox-gated with the prompt rule that describes it:
+      // multi-step work is sandbox work.
+      ...(caps.sandbox ? makePlanTool() : {}),
       ...(caps.sandbox && visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
       ...mcp.tools,
       // Skills without the sandbox still deliver their instructions: `ensureSession`

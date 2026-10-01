@@ -42,6 +42,8 @@ import type { TurnWrite } from "@/lib/vault/turn-writes";
 import type { AuxRecord } from "@/lib/chat/contracts";
 import { edited, undoRequest } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
+import { PlanChecklist } from "./plan-checklist";
+import { PLAN_TOOL, latestPlan, type PlanStep } from "@/lib/chat/plan";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
 
@@ -1373,7 +1375,7 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdm
  *  `timing` is present on the ONE group that owns the turn's measured span (see
  *  the call site); every other group shows its action count and no duration,
  *  because no honest number exists for it. */
-function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean }) {
+function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sandboxPending, plan }: { items: ActivityItem[]; writes?: TurnWrite[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean; plan?: PlanStep[] }) {
   const t = useTranslations("chat.message");
   const tDuration = useTranslations("chat.duration");
   const anchorDisclosure = useDisclosureAnchor();
@@ -1520,6 +1522,7 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
+          {plan && <div className="pb-1.5"><PlanChecklist steps={plan} /></div>}
           <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} isAdmin={isAdmin} sandboxPending={sandboxPending} quiet={firstRender.current} />
         </div>
       </CollapsibleContent>
@@ -2620,6 +2623,13 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   // when the message changes. Above the user-bubble return: hooks run on every
   // path, and a user message simply has no tool parts to fold.
   const edits = useMemo(() => editStatsFromParts(message.parts.filter(isToolPart)), [message.parts]);
+  // The plan from the latest `update_plan` call (null when the turn never made
+  // one). `sawLive`: this row watched the turn run, so the live checklist above the
+  // answer is mounted and can fold away when it ends; a finished turn loaded from
+  // history only has the copy inside its "Worked for" spoiler.
+  const plan = isUser ? null : latestPlan(message.parts as { type: string; toolName?: string; input?: unknown }[], !!isStreaming);
+  const [sawLive, setSawLive] = useState(!!isStreaming);
+  if (isStreaming && !sawLive) setSawLive(true);
 
   if (isUser) {
     const text = message.parts
@@ -2689,6 +2699,8 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
     // the card branches below `continue`, and a steer after an approval card would
     // otherwise be skipped.
     for (const s of steerAt.get(pi - 1) ?? []) pushSteer(s);
+    // The plan is drawn as its own checklist, never as a step on the rail.
+    if (isToolPart(part) && getToolName(part as ToolPart) === PLAN_TOOL) continue;
     // A `manage` call suspended for native approval (and its resolved states) is
     // the user's one required action — it always renders as the prominent card.
     if (isToolPart(part) && isApprovalPart(part as ToolPart)) {
@@ -2794,7 +2806,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   // the single "working…" indicator in the panel owns that state. Rendering an
   // empty padded bubble here would just shove the indicator down a notch the
   // moment the row is created, then again when the first step replaces it.
-  if (!isUser && groups.length === 0 && isStreaming && metadata?.taskStatus !== "failed") {
+  if (!isUser && groups.length === 0 && !plan && isStreaming && metadata?.taskStatus !== "failed") {
     return null;
   }
 
@@ -2807,6 +2819,18 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
     <div className="group/msg px-4 md:px-6 py-4 [--table-bleed:1rem] md:[--table-bleed:0px]">
       <CitationOrdinals.Provider value={ordinals}>
       <div className="max-w-none">
+        {/* While the turn runs the plan sits above everything it is producing; when
+            it ends this folds shut (the `.reveal` grid-rows grammar) and the plan
+            lives on inside the first "Worked for" spoiler instead. */}
+        {plan && sawLive && (
+          <div className="reveal" data-shut={isStreaming ? undefined : ""} inert={!isStreaming}>
+            <div>
+              <div className="pb-2">
+                <PlanChecklist steps={plan} live />
+              </div>
+            </div>
+          </div>
+        )}
         {groups.length > 0 ? (
           groups.map((g, gi) => {
             // Each part settles in on mount (message-in) — new steps and text
@@ -2860,6 +2884,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                   // count, which is genuinely theirs.
                   timing={gi === firstActivityIdx ? { measuredMs: metadata?.reasoningMs, startedMsAgo: metadata?.runningMs } : undefined}
                   writes={gi === lastActivityIdx ? memoryWrites : undefined}
+                  plan={gi === firstActivityIdx && !isStreaming ? plan ?? undefined : undefined}
                   chatId={chatId}
                   isAdmin={isAdmin}
                   sandboxPending={sandboxPending}

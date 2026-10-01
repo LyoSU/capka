@@ -54,6 +54,7 @@ import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { foldAssembledRows, untrustedOutputOf } from "./turn-taint";
 import { prepareRun, replyParentOf } from "./run-context";
+import { PLAN_TOOL, planSchema, type PlanStep } from "@/lib/chat/plan";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
@@ -480,6 +481,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let firstTextAt: number | null = null;
   let toolCount = 0;
   let currentStatus: StreamStatus;
+  // The checklist from the latest `update_plan` call, shown in the Telegram draft
+  // above the step in progress (the web reads it from the parts).
+  let livePlan: PlanStep[] | undefined;
   // When each tool call ran, so the finalize path can tell which workspace files
   // THIS turn touched. Chats in a project share one folder, so "changed since the
   // turn began" would credit us with a parallel chat's output; only the moments we
@@ -1440,7 +1444,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Mirror progress to the outbound channel (Telegram): the full answer so
       // far + the live reasoning, rendered as one animated draft preview.
       // Throttled + coalesced inside the sink, so calling it on every flush is cheap.
-      sink.push(getFullText(), getReasoning(), currentStatus);
+      sink.push(getFullText(), getReasoning(), currentStatus && livePlan ? { ...currentStatus, plan: livePlan } : currentStatus);
       // Persist progress so a client resuming mid-stream gets a fresh snapshot
       // (throttled inside saveSnapshot). Runs AFTER the flushes above, so the
       // snapshot's streamSeq covers every delta published this tick.
@@ -1693,7 +1697,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             break;
           }
           case "tool-call": {
-            toolCount += 1;
+            // The plan is bookkeeping about the work, not a step of it: it is not
+            // counted in the "N tools" log and does not replace the step on show.
+            const isPlan = event.toolName === PLAN_TOOL;
+            if (!isPlan) toolCount += 1;
             if ("invalid" in event && event.invalid) invalidCalls.add(event.toolCallId);
             // Strip NUL from the model-generated args before they enter `parts`
             // (a model can emit a literal NUL escape in a JSON string arg, which
@@ -1701,8 +1708,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // carry NUL" invariant across every source.
             const input = stripNul(event.input);
             toolStartedAt.set(event.toolCallId, Date.now());
-            const step = describeStep(stepsT, event.toolName, input);
-            currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
+            if (isPlan) {
+              const plan = planSchema.safeParse(input);
+              if (plan.success) livePlan = plan.data.steps;
+            } else {
+              const step = describeStep(stepsT, event.toolName, input);
+              currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
+            }
             await flushBuffers();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input });
             await publishTaskEvent(userId, {

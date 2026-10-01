@@ -1241,12 +1241,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 // and so whether the row should read as its next node rather than
                 // as a separate indicator floating a message-gap below it. A
                 // `manage` or `ask` result escapes the rail into its own prominent
-                // card, and those resolve to an `output-` state like any other tool
+                // card (and `update_plan` into the checklist), and those resolve to an `output-` state like any other tool
                 // — so `afterTool` alone would hang a timeline off a card. Excluded
                 // by name on purpose: the real predicates are private to message.tsx
                 // and a second copy here would drift out of step with them, whereas
                 // this errs only toward the row keeping its old spacing.
-                const continuesRail = afterTool && tail?.toolName !== "manage" && tail?.toolName !== "ask";
+                const continuesRail = afterTool && tail?.toolName !== "manage" && tail?.toolName !== "ask" && tail?.toolName !== "update_plan";
                 // The third silent stretch: text has streamed and the last part IS
                 // that text, but nothing has arrived for a while. The rule "once the
                 // first part arrives, the rail takes over" assumes the model's next

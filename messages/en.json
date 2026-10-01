@@ -679,6 +679,12 @@
       "steer": "You added",
       "compacted": "Context compressed",
       "imageUnavailable": "Image unavailable",
+      "plan": "Plan",
+      "planStep": {
+        "done": "Done: {title}",
+        "current": "In progress: {title}",
+        "pending": "Next: {title}"
+      },
       "workedFor": "Worked for {duration}",
       "activity": "Activity",
       "stepCount": "{count, plural, one {# action} other {# actions}}",

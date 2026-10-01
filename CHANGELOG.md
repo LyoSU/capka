@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - An installed Capka app (Chromium/Android) appears in the system share sheet and in "Open with" for office files, PDFs, CSV and text: the files land staged in a new chat's composer, not sent. Reinstalling is not needed; browsers pick up the new `manifest.json` on their own.
 - File tiles for Word, Excel, PowerPoint, OpenDocument and PDF files show the first page, rendered in the chat's sandbox when one is already running (cached in its `/tmp`, never in the workspace); otherwise the typed icon stays.
 - When the agent edits a user's .docx it now also hands back `<name> (with tracked changes).docx` (suffix in the user's language), built by the new `docx-redline` sandbox tool, so each edit can be accepted or rejected in Word. Needs a sandbox image from this release (or `npm run sandbox:build` for a local build).
+- For multi-step work the agent shows a live checklist above the answer (done / in progress / next) that folds into the "Worked for …" header when the turn ends, and heads the Telegram draft while it runs. Restart the platform so the worker picks up the new `update_plan` tool.
 
 ### Changed
 - One type scale (12/14/16/18px with paired line heights) and whole-pixel corner radii (6/8/12/16px) across the UI; transitions default to 140ms on the app's own easing.
