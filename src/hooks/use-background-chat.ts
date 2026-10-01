@@ -16,7 +16,7 @@ import { subscribeEvents } from "@/lib/event-stream";
 type Part =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
-  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; approval?: { id: string; approved?: boolean; reason?: string }; askForm?: import("@/lib/ask/types").AskForm; askValue?: import("@/lib/ask/types").AskAnswer };
+  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; errorText?: string; approval?: { id: string; approved?: boolean; reason?: string }; askForm?: import("@/lib/ask/types").AskForm; askValue?: import("@/lib/ask/types").AskAnswer };
 
 // The events the reconcile path can hold and replay: the ones that mutate a
 // specific reply and carry a seq (see GATED below). Narrowed off TaskEvent so a
@@ -480,9 +480,13 @@ export function useBackgroundChat({
             // legitimately carry an `error: null` field, which must not read
             // as a failure (otherwise it flashes red mid-stream).
             const isError = data.isError === true;
+            // The thrown message as errorText, the way the presenter draws the stored
+            // row: an approval card tells a throw from an interruption by it, and must
+            // not read "interrupted" until the reload at task:finish.
+            const errorText = isError ? String((data.result as { error?: unknown } | undefined)?.error ?? "") : undefined;
             const parts = msg.parts.map((p) =>
               p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
+                ? { ...p, state: isError ? "output-error" : "output-available", output: data.result, errorText }
                 : p,
             );
             msgs[idx] = { ...msg, parts };

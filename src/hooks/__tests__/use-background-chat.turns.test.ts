@@ -188,3 +188,16 @@ describe("an edit that keeps only files", () => {
     expect(ids()).toEqual(["u1", "a1"]);
   });
 });
+
+describe("a tool that throws while the reply is on screen", () => {
+  it("carries the thrown message as errorText, as the reloaded row does", async () => {
+    const call = { type: "dynamic-tool", toolCallId: "tc1", toolName: "save_row", state: "approval-responded", input: {} };
+    branch = [msg("u1", "user"), { id: "a1", role: "assistant", parts: [call] } as unknown as Msg];
+    await mount();
+
+    await emit({ type: "task:tool-result", messageId: "a1", toolCallId: "tc1", result: { error: "disk full" }, isError: true });
+
+    // An approval card reads "interrupted" for an output-error with no errorText.
+    expect(api.messages[1].parts[0]).toMatchObject({ state: "output-error", errorText: "disk full" });
+  });
+});
