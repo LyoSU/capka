@@ -21,6 +21,16 @@ Local development is separate: `npm run docker:dev`; see
 
 Pin a release with `CAPKA_VERSION=vX.Y.Z` in `.env`; unset ⇒ `:latest`.
 
+Each release publishes its images as `vX.Y.Z`, `vX.Y` and `vX`, and as `latest`
+when it is the newest release overall. `vX.Y` and `vX` move only to the newest
+release in that line; a prerelease (`vX.Y.Z-rc.N`) publishes only its own tag.
+`CAPKA_VERSION=v1` pulls every 1.x release and never 2.0, but it pins the images
+only: use it with a compose file from a v1.x release tag, not from `stable` or
+`master`, which move on to the next major. `latest` follows every release,
+including a new major. `scripts/update.sh` writes `CAPKA_VERSION` itself and
+already stays on the installed major (see [`UPGRADE.md`](UPGRADE.md)), so do not
+set `v1` on an install that it updates.
+
 Run one Capka stack per Docker daemon. The stack creates fixed-name networks
 (`capka-sandbox-egress`, `capka-egress-out`), so a second stack on the same
 daemon is not supported.
@@ -35,7 +45,7 @@ contain yet cannot start at all.
 
 | Ref | Use it for | Images |
 |---|---|---|
-| `stable` | **Pull-only deployments** (Coolify, `update.sh`). CI moves it to each release after its images are published, so compose and images always match. | `:latest` |
+| `stable` | **Pull-only deployments** (Coolify, `update.sh`). CI moves it to the newest release, a new major included, after its images are published, so compose and images always match. | `:latest` |
 | `vX.Y.Z` | Pinning one exact release. | that tag |
 | `master` | Development tip. Requires `CAPKA_BUILD=1` — the scripts refuse to pair it with prebuilt images. | built locally |
 

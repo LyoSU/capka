@@ -13,15 +13,30 @@ sudo ./scripts/backup.sh && sudo ./scripts/update.sh
 ```
 
 `backup.sh` dumps the database to `./data/backups/`; the `&&` stops the update if
-the dump fails. `update.sh` checks out the newest release, pins its images in
-`.env` (`CAPKA_VERSION`) and hands off to `up.sh`, which pulls them and recreates
-the stack. To go to one specific release instead:
+the dump fails. `update.sh` checks out the newest release of the major version
+you run now, pins its images in `.env` (`CAPKA_VERSION`) and hands off to `up.sh`,
+which pulls them and recreates the stack. To go to one specific release instead:
 `sudo CAPKA_BRANCH=vX.Y.Z ./scripts/update.sh`.
 
 Re-running `up.sh` alone does not upgrade: it re-applies the version already
 pinned in `.env`. The database dump is not a complete backup — see
 [Backup & restore](DEPLOY.md#backup--restore) for `.env` and `./data`, and
 for bringing the scheduled-backup sidecar back after an update.
+
+### New major versions and prereleases
+
+`update.sh` does not move to a new major version (for example 0.x to 1.0) or to a
+prerelease (`vX.Y.Z-rc.N`) on its own. When a newer major exists it prints a note
+and stays on the one you run; Settings → Updates announces the new major all the
+same. Given a newer major as `CAPKA_BRANCH` (a tag, or `stable` pointing at one),
+or a prerelease, it refuses. Read that release's notes first, then:
+
+```bash
+# the newest release, whatever its major
+sudo CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh
+# one prerelease (add CAPKA_ALLOW_MAJOR=1 too if it starts a new major)
+sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=vX.Y.Z-rc.N ./scripts/update.sh
+```
 
 ### Did the migration work?
 
