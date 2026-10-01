@@ -8,6 +8,31 @@ const MAX_DESC = 1024;
 // and a crafted block can cost it superlinear CPU. Real frontmatter is a name and
 // a description; bound the block before handing it to the parser at all.
 const MAX_FRONTMATTER = 64 * 1024;
+// YAML aliases share nodes, so a block under the byte cap can still expand into a
+// huge value once it is stored as jsonb. Bound what the parse returns as well.
+const MAX_EXPANDED = 256 * 1024;
+const MAX_DEPTH = 32;
+
+// gray-matter picks its engine from the opening line, and `---js` selects one that
+// evals the block in this process. Passing options also keeps gray-matter's
+// module-level cache, which never evicts, out of the picture.
+const MATTER_OPTS = {
+  engines: {
+    javascript: () => {
+      throw new SkillParseError("SKILL.md frontmatter must be YAML");
+    },
+  },
+};
+
+function assertBounded(value: unknown, budget: { left: number }, depth: number): void {
+  budget.left -= typeof value === "string" ? value.length + 1 : 1;
+  if (budget.left < 0 || depth > MAX_DEPTH) {
+    throw new SkillParseError("SKILL.md frontmatter is too large once expanded");
+  }
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) assertBounded(child, budget, depth + 1);
+  }
+}
 
 /**
  * gray-matter's YAML parser is strict: an unquoted colon in a scalar value
@@ -43,12 +68,13 @@ export function parseSkillMarkdown(raw: string): ParsedSkill {
 
   let parsed: matter.GrayMatterFile<string>;
   try {
-    parsed = matter(raw);
+    parsed = matter(raw, MATTER_OPTS);
   } catch {
-    parsed = matter(sanitizeFrontmatter(raw));
+    parsed = matter(sanitizeFrontmatter(raw), MATTER_OPTS);
   }
 
   const data = (parsed.data ?? {}) as Record<string, unknown>;
+  assertBounded(data, { left: MAX_EXPANDED }, 0);
   const name = data.name;
   if (typeof name !== "string" || !NAME_RE.test(name) || name.length > MAX_NAME) {
     throw new SkillParseError(

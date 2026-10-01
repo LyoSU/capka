@@ -48,4 +48,24 @@ describe("parseSkillMarkdown", () => {
     // Only the frontmatter is bounded: a long body still parses.
     expect(parseSkillMarkdown(md(`name: x`, "b".repeat(128 * 1024))).name).toBe("x");
   });
+
+  it("refuses JavaScript frontmatter without evaluating it", () => {
+    const g = globalThis as { __skillProbe?: number };
+    delete g.__skillProbe;
+    for (const tag of ["js", "JS", "javascript"]) {
+      const raw = `---${tag}\n{ name: "x", probe: (globalThis.__skillProbe = 1) }\n---\nbody`;
+      expect(() => parseSkillMarkdown(raw)).toThrow(SkillParseError);
+    }
+    expect(g.__skillProbe).toBeUndefined();
+  });
+
+  it("refuses frontmatter whose aliases expand past the bound", () => {
+    // 8 levels of 10-way aliases: about 400 bytes in, 10^8 nodes out.
+    const levels = [`a0: &a0 [${Array(10).fill("x").join(", ")}]`];
+    for (let i = 1; i < 8; i++) levels.push(`a${i}: &a${i} [${Array(10).fill(`*a${i - 1}`).join(", ")}]`);
+    expect(() => parseSkillMarkdown(md(`name: x\n${levels.join("\n")}`))).toThrow(/too large once expanded/);
+    // A long scalar repeated by alias, still under the byte cap.
+    const long = `s: &s ${"a".repeat(30_000)}\nr: [${Array(10).fill("*s").join(", ")}]`;
+    expect(() => parseSkillMarkdown(md(`name: x\n${long}`))).toThrow(/too large once expanded/);
+  });
 });
