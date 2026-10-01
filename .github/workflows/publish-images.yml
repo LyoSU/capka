@@ -302,8 +302,9 @@ jobs:
       # vX.Y and vX are moving image tags for pinning a line: CAPKA_VERSION=v1
       # pulls every 1.x release and never a 2.0. That pins the IMAGES only — it is
       # coherent with a compose file from the same major, not with one from
-      # `stable` or `master`. metadata-action skips both for a prerelease (and vX
-      # for a 0.x version); the gate skips each one this tag is not the newest of.
+      # `stable` or `master`. metadata-action skips both for a prerelease but not
+      # vX for a 0.x version, so that tag carries its own condition (no `v0`; the
+      # action's README recipe). The gate skips each one this tag is not the newest of.
       #
       # `latest` means "the newest RELEASE", and every pull-only deployment that
       # sets no CAPKA_VERSION resolves to it — so only a push of the newest plain
@@ -321,7 +322,7 @@ jobs:
           tags: |
             type=semver,pattern=v{{version}},enable=${{ github.event_name == 'push' }}
             type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' && needs.gate.outputs.newest_minor == 'true' }}
-            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' && needs.gate.outputs.newest_major == 'true' }}
+            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' && needs.gate.outputs.newest_major == 'true' && !startsWith(github.ref, 'refs/tags/v0.') }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && needs.gate.outputs.newest == 'true' }}
             type=sha,format=long,prefix=sha-,enable=${{ github.event_name != 'push' }}
 
