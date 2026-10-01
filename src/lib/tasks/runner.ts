@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import type { JSONValue, ModelMessage, ToolResultPart, UserModelMessage } from "ai";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chats, messages, users } from "@/lib/db/schema";
@@ -157,6 +157,12 @@ const MAX_RECOVERIES = nonNegInt(process.env.MAX_STREAM_RECOVERIES, 3);
  *  messages to keep when mechanically trimming a prompt the model rejected as too
  *  long. Generous enough to preserve the live exchange, small enough to fit. */
 const EMERGENCY_KEEP_RECENT = 10;
+
+/** The compaction job running for each chat, so the next turn's job waits for it
+ *  instead of paying for a second summary of the same window. One entry per chat
+ *  while a job runs, deleted when that job settles; each job is bounded by
+ *  AUX_TIMEOUT_MS per request. */
+const compactionsInFlight = new Map<string, Promise<unknown>>();
 
 /** How far the end-of-turn scan looks for files the turn changed but the reply
  *  never named. Three levels covers the way agents actually organise output (a
@@ -760,6 +766,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // [N] markers against branch + own sources (a follow-up may legitimately
     // cite a source the previous turn's search produced).
     const branchSources: NumberedSource[] = [];
+    // The first row after the newest reply on this path, as loaded: a compaction
+    // checkpoint landing above this turn re-parents exactly that row (see below).
+    let loadedHead: { id: string; parentId: string | null } | undefined;
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
       // Shape the path into the model's view: collapse history at the newest
@@ -778,6 +787,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // worth more than the tokens. The signal is the prompt size the previous
       // turn already measured and persisted — nothing new to compute or store.
       const nodes = path.map((p) => p.node);
+      // Past this turn's own row (a continuation's path ends at it) and every user row
+      // since the reply: a batched burst chains its follow-ups below that reply.
+      const own = nodes.at(-1)?.id === msgId ? nodes.slice(0, -1) : nodes;
+      const head = own[own.findLastIndex((n) => n.role !== "user") + 1];
+      if (head) loadedHead = { id: head.id, parentId: head.parentId };
       // Collect from the FULL path, not the compaction-collapsed model view:
       // the transcript still renders every old message, so uniqueness has to
       // hold against everything the user can see.
@@ -2734,8 +2748,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // this turn's own marks, and it over-approximates in the safe direction: the
       // summary covers this turn too.
       const sourceTrust = taint.seen();
-      void trackAux(
+      const prior = compactionsInFlight.get(chatId);
+      const job = trackAux(
         (async () => {
+          // A turn that overlapped the previous turn's compaction measured a prompt built
+          // before that checkpoint existed, so it trips the threshold too. Wait for that
+          // job (it never rejects), then skip if its checkpoint landed above this turn:
+          // only the splice below re-parents a row, and the next turn already collapses
+          // there.
+          await prior;
+          if (loadedHead) {
+            const [row] = await db.select({ parentId: messages.parentId }).from(messages).where(eq(messages.id, loadedHead.id)).limit(1);
+            if (row && row.parentId !== loadedHead.parentId) return undefined;
+          }
           // The summary must cover THIS reply too: the checkpoint hangs below it, and
           // the next turn drops everything up to the checkpoint — so a reply left out
           // of the summary input is a reply the model never sees again. `modelMessages`
@@ -2767,6 +2792,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit), tlog);
         })()
           .then(async (result) => {
+            if (result === undefined) return;
             if (!result) {
               // compactConversation already logged why: an emergency-trimmed turn that cannot
               // compact leaves the chat near the window, so it keeps overflowing.
@@ -2786,24 +2812,29 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               });
               return;
             }
-            // Race guard: only checkpoint if the chat's leaf is STILL this reply.
-            // A follow-up that already moved the leaf would otherwise get a
-            // checkpoint grafted as its sibling — skip and let the next turn
-            // re-evaluate the budget instead.
-            const [row] = await db.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1);
-            if (row?.leaf !== msgId) return;
+            // Spliced in directly under the reply. applyCompaction is positional
+            // (compaction.ts), so a checkpoint there collapses exactly the prefix it
+            // summarized on every branch below it: a follow-up sent while the summary ran,
+            // a late steer, an edit's branch. The leaf moves only when nothing followed.
+            // A reply left with no children (regenerated or edited above) keeps the
+            // checkpoint as a dead end, which only ever helps if that branch comes back.
             const checkpointId = nanoid();
-            await db.insert(messages).values({
-              id: checkpointId, chatId, parentId: msgId, role: "assistant", content: "",
-              platform: payload.origin?.platform ?? "web",
-              metadata: { status: "completed", compaction: { summary: stripNul(summary), summarizedUpTo: msgId, tokensSaved: budget.used } },
-              // The checkpoint IS a message row, so it carries the same column: the OR of
-              // the marks of everything its summary replaced. Written in the SAME insert —
-              // a checkpoint that existed for even a moment without its mark is a window
-              // in which the next turn folds a compacted prompt clean.
-              untrustedIngress: result.trust,
+            await db.transaction(async (tx) => {
+              await tx.insert(messages).values({
+                id: checkpointId, chatId, parentId: msgId, role: "assistant", content: "",
+                platform: payload.origin?.platform ?? "web",
+                metadata: { status: "completed", compaction: { summary: stripNul(summary), summarizedUpTo: msgId, tokensSaved: budget.used } },
+                // The checkpoint IS a message row, so it carries the same column: the OR of
+                // the marks of everything its summary replaced. Written in the SAME insert —
+                // a checkpoint that existed for even a moment without its mark is a window
+                // in which the next turn folds a compacted prompt clean.
+                untrustedIngress: result.trust,
+              });
+              await tx.update(messages).set({ parentId: checkpointId })
+                .where(and(eq(messages.chatId, chatId), eq(messages.parentId, msgId), ne(messages.id, checkpointId)));
+              await tx.update(chats).set({ activeLeafId: checkpointId })
+                .where(and(eq(chats.id, chatId), eq(chats.activeLeafId, msgId)));
             });
-            await db.update(chats).set({ activeLeafId: checkpointId }).where(eq(chats.id, chatId));
             // Tell the client so it reloads: the transcript gains the divider and
             // the context meter re-derives (hides until the next turn measures the
             // collapsed context). Without this the UI only catches up on a manual
@@ -2817,6 +2848,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             tlog.error("compaction failed", { err: String(e), emergencyTrimmed });
           }),
       );
+      compactionsInFlight.set(chatId, job);
+      void job.finally(() => { if (compactionsInFlight.get(chatId) === job) compactionsInFlight.delete(chatId); });
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";

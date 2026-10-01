@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { tool, type ModelMessage } from "ai";
 import { z } from "zod";
@@ -52,12 +52,15 @@ const readStep = (id: string, tokens: number) => [
 // Tool bodies: the ones an earlier turn read, and the ones this turn's reads return.
 const OLD = "o".repeat(4_000);
 const NEW = "n".repeat(4_000);
+// What the compactor answers. Unset, it abstains and no checkpoint is written; a test
+// that wants one sets this, and can do its racing inside before it returns.
+let summarize: (() => Promise<string>) | undefined;
 vi.mock("@/lib/chat/context/compactor", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chat/context/compactor")>()),
   compactConversation: async (_m: unknown, _s: unknown, msgs: ModelMessage[], _t: unknown, _u: unknown, opts: unknown) => {
     compacted.push(msgs);
     compactOpts.push(opts);
-    return null;
+    return summarize ? { text: await summarize(), trust: false } : null;
   },
 }));
 vi.mock("@/lib/providers/resolve", () => ({
@@ -99,6 +102,7 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
+import { auxInFlight } from "../tasks/queue";
 import { contextBudget } from "../chat/context/budget";
 import { contextManagementOptions } from "../chat/context/provider-edits";
 import { getModelContextLength } from "../models/catalog";
@@ -163,6 +167,30 @@ async function runTask(id: string, chatId: string, payload: object, compacts = t
   // Every scripted call was made: a turn that stopped early tested nothing.
   expect(script).toHaveLength(0);
   return compacted.at(-1)!;
+}
+
+/** Wait out every fire-and-forget pass the turns dispatched. */
+async function settle() {
+  for (let i = 0; i < 200 && auxInFlight() > 0; i++) await new Promise((r) => setTimeout(r, 25));
+  expect(auxInFlight()).toBe(0);
+}
+
+/** The reply a turn wrote under `parentId`. */
+async function replyUnder(chatId: string, parentId: string): Promise<string> {
+  const { rows } = await pool.query(`SELECT id FROM messages WHERE chat_id=$1 AND parent_id=$2 AND role='assistant'`, [chatId, parentId]);
+  expect(rows).toHaveLength(1);
+  return rows[0].id;
+}
+const checkpoints = async (chatId: string) =>
+  (await pool.query(`SELECT id, parent_id FROM messages WHERE chat_id=$1 AND metadata ? 'compaction'`, [chatId])).rows;
+const leafOf = async (chatId: string) =>
+  (await pool.query(`SELECT active_leaf_id FROM chats WHERE id=$1`, [chatId])).rows[0].active_leaf_id;
+const parentOf = async (id: string) =>
+  (await pool.query(`SELECT parent_id FROM messages WHERE id=$1`, [id])).rows[0].parent_id;
+/** A user message sent under `parentId`, made the leaf the way a send does. */
+async function send(chatId: string, id: string, parentId: string) {
+  await pool.query(`INSERT INTO messages (id, chat_id, parent_id, role, content) VALUES ($1,$2,$3,'user','and the year before?')`, [id, chatId, parentId]);
+  await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [id, chatId]);
 }
 
 run("runAgentTask: compaction summarizes the reply that triggered it", () => {
@@ -324,4 +352,58 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     expect(text).toContain("Kestrel");
     expect(text).toContain(REPLY);
   }, 30_000);
+
+  describe("a summary that lands after the chat moved on", () => {
+    afterEach(() => { summarize = undefined; });
+
+    it("with nothing sent meanwhile, becomes the leaf", async () => {
+      const chat = `${CX}-quiet`;
+      await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "how many suppliers do we have?" }]);
+      summarize = async () => "Forty-two suppliers.";
+      await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` });
+      await settle();
+      const reply = await replyUnder(chat, `${chat}-u1`);
+      const [cp, ...more] = await checkpoints(chat);
+      expect(more).toHaveLength(0);
+      expect(cp.parent_id).toBe(reply);
+      expect(await leafOf(chat)).toBe(cp.id);
+    }, 30_000);
+
+    it("with a follow-up sent while it ran, still checkpoints, under that follow-up", async () => {
+      const chat = `${CX}-race`;
+      await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "how many suppliers do we have?" }]);
+      summarize = async () => {
+        await send(chat, `${chat}-m2`, await replyUnder(chat, `${chat}-u1`));
+        return "Forty-two suppliers.";
+      };
+      await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` });
+      await settle();
+      // The finding: the summary was paid for and then thrown away, because the leaf moved.
+      const [cp, ...more] = await checkpoints(chat);
+      expect(more).toHaveLength(0);
+      expect(cp.parent_id).toBe(await replyUnder(chat, `${chat}-u1`));
+      // Spliced between the reply and the follow-up, so the follow-up's path collapses at it.
+      expect(await parentOf(`${chat}-m2`)).toBe(cp.id);
+      expect(await leafOf(chat)).toBe(`${chat}-m2`);
+    }, 30_000);
+
+    it("does not pay for a second summary of the turn that overlapped it", async () => {
+      const chat = `${CX}-dedupe`;
+      await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "how many suppliers do we have?" }]);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      summarize = async () => { await gate; return "Forty-two suppliers."; };
+      const before = compacted.length;
+      await runTask(`${chat}-task1`, chat, { replyParentId: `${chat}-u1` });
+      // The next turn runs while that summary is still being written, and is just as long.
+      await send(chat, `${chat}-m2`, await replyUnder(chat, `${chat}-u1`));
+      await runTask(`${chat}-task2`, chat, { replyParentId: `${chat}-m2` }, false);
+      release();
+      await settle();
+      expect(compacted.length - before).toBe(1);
+      const [cp, ...more] = await checkpoints(chat);
+      expect(more).toHaveLength(0);
+      expect(await parentOf(`${chat}-m2`)).toBe(cp.id);
+    }, 30_000);
+  });
 });
