@@ -361,17 +361,13 @@ deployments — not a turnkey-certified multi-tenant platform.
   In a DB outage a critical event could go unrecorded. Treat the audit log as
   strong evidence, not a hard guarantee; for compliance, ship logs off-box.
 - **Dependency audit has accepted residual advisories.** Fixable ones are pinned
-  via `overrides` (postcss, dompurify, and `js-yaml` under `gray-matter`, whose
-  input is also capped: SKILL.md frontmatter over 64 KB is refused before parsing).
-  The unused `/_next/image` optimizer is switched off (`images.unoptimized`). What
-  `npm audit --omit=dev` still lists is **dev tooling pulled into the prod tree by
-  `better-auth`'s optional peer declarations** — the `esbuild` dev-server advisory
-  under `drizzle-kit` (only affects `esbuild serve`) and `vitest` (only while tests
-  run); neither ships in the standalone runner image. The sandbox controller's one
-  hit is `uuid` under `dockerode`, used only by BuildKit session code the controller
-  never calls. Their npm-offered fixes are major-version changes (or, for `vitest`,
-  a patch npm 10 currently fails to resolve), so they're accepted, not applied.
-  Re-evaluate on each dependency bump.
+  via `overrides` (postcss, dompurify). The rest are **dev-tooling reaching the
+  prod tree through a dependency's loose declarations** — chiefly the `esbuild`
+  dev-server advisory (it only affects `esbuild serve`, which a deployed app never
+  runs) and a `js-yaml` quadratic-DoS in `gray-matter` frontmatter parsing
+  (bounded by the 2 MB fetch cap on plugin/skill files). Their only npm-offered
+  "fix" is absurd major downgrades, so they're accepted, not applied. Re-evaluate
+  on each dependency bump.
 
 If your threat model exceeds these boundaries, run rootless + gVisor, front the app
 with your own WAF/egress controls, and budget for a security review before exposing
