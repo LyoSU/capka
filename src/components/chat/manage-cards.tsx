@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { Check, Undo2, AlertTriangle, SlidersHorizontal, ShieldQuestion, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
+import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
+import { formatSize } from "@/lib/constants";
 import type { StepTranslator } from "@/lib/chat/steps";
 
 type RequiredAction = { kind: string; url?: string; label: string; description?: string };
@@ -140,6 +142,7 @@ function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnec
  *  browser can open that picker. Opens it, creates the folder row, and runs a
  *  first sync (all in the bridge). Needs the chatId to key the sandbox side. */
 function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; action: RequiredAction; onPicked?: (name: string) => void }) {
+  const t = useTranslations("chat.folders");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (!chatId) return null;
@@ -152,7 +155,12 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
       const folder = await pickAndCreate(chatTarget(chatId));
       if (folder) onPicked?.(folder.name);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not attach the folder.");
+      // The bridge's errors are English and technical — the same localized lines the
+      // composer menu shows for the same picker, never the raw message.
+      if (e instanceof Error && e.name === "FolderTooLargeError") {
+        const m = e as Error & { count?: number; bytes?: number };
+        setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+      } else setErr(t("syncFailed"));
     } finally {
       setBusy(false);
     }
