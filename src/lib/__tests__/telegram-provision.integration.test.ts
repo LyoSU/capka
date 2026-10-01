@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { pool } from "../db";
 import { provisionTelegramUser, unlinkTelegramIdentity } from "../auth";
 import { getSetting, setSetting } from "../settings";
@@ -140,6 +140,43 @@ run("provisionTelegramUser", () => {
     expect(r).toEqual({ refused: "conflict" });
     expect(await accountCount(id)).toBe(0);
     expect(await linkCount(id)).toBe(0);
+  });
+
+  it("treats a concurrent web sign-in's own Telegram account as known, not a conflict", async () => {
+    await setSetting("registration_mode", "open");
+    const id = IDS[5];
+    const email = `tg${id}@telegram.local`;
+    const webId = `web-race-${id}`;
+    // The web OIDC sign-in writes user + telegram account in one transaction. Hold it
+    // open so provisioning's account lookup misses and its insert waits on the email.
+    const web = await pool.connect();
+    try {
+      await web.query("BEGIN");
+      await web.query(`INSERT INTO "user" (id, name, email, role, status) VALUES ($1, 'Web', $2, 'user', 'active')`, [webId, email]);
+      await web.query(`INSERT INTO account (id, account_id, provider_id, user_id) VALUES ($1, $2, 'telegram', $3)`, [
+        `acc-${webId}`,
+        String(id),
+        webId,
+      ]);
+      const pending = provisionTelegramUser(id, { name: "Web", username: "web" });
+      await vi.waitFor(
+        async () => {
+          const { rows } = await pool.query(
+            `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+          );
+          expect(rows.length).toBe(1);
+        },
+        { timeout: 5000, interval: 20 },
+      );
+      await web.query("COMMIT");
+
+      expect(await pending).toEqual({ userId: webId, status: "active" });
+    } finally {
+      await web.query("ROLLBACK").catch(() => {});
+      web.release();
+    }
+    expect(await accountCount(id)).toBe(1);
+    expect(await linkCount(id)).toBe(1);
   });
 
   it("unlink revokes BOTH the delivery link and the login identity (account row)", async () => {

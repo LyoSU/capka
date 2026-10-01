@@ -341,11 +341,17 @@ export async function provisionTelegramUser(
     // binding this Telegram id to it would hand the Telegram user's chats to
     // whoever controls that row. Refuse instead of guessing.
     if (userId !== newUserId) {
-      const [other] = await tx
-        .select({ providerId: schema.accounts.providerId })
+      const rows = await tx
+        .select({ providerId: schema.accounts.providerId, accountId: schema.accounts.accountId })
         .from(schema.accounts)
-        .where(eq(schema.accounts.userId, userId))
-        .limit(1);
+        .where(eq(schema.accounts.userId, userId));
+      // This very identity: a web "Sign in with Telegram" committed user + account
+      // after the `known` lookup above missed. That is the user, not a squatter.
+      if (rows.some((a) => a.providerId === TELEGRAM_PROVIDER_ID && a.accountId === accountId)) {
+        await upsertTelegramLink(userId, telegramUserId, profile.username, tx);
+        return { userId, status: u!.status as AccountStatus };
+      }
+      const other = rows[0];
       if (other) {
         console.error(
           `[auth] refused to bind Telegram id ${telegramUserId} to existing user ${userId}: ` +
