@@ -2185,16 +2185,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // gone (idle-evicted), the controller may be down, or the listing may time
     // out. None of that is worth failing a finished turn over — the user still
     // gets their answer, just without the secondary file list.
+    //
+    // A continuation's first half ran in its own windows, which this run's listing
+    // cannot see, so its files are carried over — minus any this half's reply now names.
     let touchedFiles: string[] | undefined;
-    if (toolWindows.length > 0) {
-      try {
-        const named = extractWorkspacePaths(getFullText());
-        const { entries } = await listFiles(sessionKey, ".", userId, WORKSPACE_SCAN_DEPTH, WORKSPACE_SCAN_LIMIT);
-        const touched = selectTouchedFiles(entries ?? [], toolWindows, named);
-        if (touched.length > 0) touchedFiles = touched;
-      } catch (e) {
-        tlog.debug("artifacts.scan_skipped", { err: errMsg(e) });
+    const carried = firstHalf?.touchedFiles ?? [];
+    if (toolWindows.length > 0 || carried.length > 0) {
+      const named = extractWorkspacePaths(getFullText());
+      let touched: string[] = [];
+      if (toolWindows.length > 0) {
+        try {
+          const { entries } = await listFiles(sessionKey, ".", userId, WORKSPACE_SCAN_DEPTH, WORKSPACE_SCAN_LIMIT);
+          touched = selectTouchedFiles(entries ?? [], toolWindows, named);
+        } catch (e) {
+          tlog.debug("artifacts.scan_skipped", { err: errMsg(e) });
+        }
       }
+      const all = [...new Set([...touched, ...carried.filter((p) => !named.includes(p))])];
+      if (all.length > 0) touchedFiles = all;
     }
 
     // The message row carries the WHOLE turn, which for an approval continuation is

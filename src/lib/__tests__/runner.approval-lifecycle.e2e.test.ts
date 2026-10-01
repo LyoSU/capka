@@ -14,24 +14,26 @@ import { expectWireShape, type WireMsg } from "./wire-shape";
  * The real runner over a real database, because each road is the runner's own.
  */
 const prompts: WireMsg[][] = [];
-// What the next provider call answers: text, or a new gated call (a second round).
-const replies: ("text" | "gated")[] = [];
+// What the next provider call answers: text ("Done." unless given), a new gated call
+// (a second round), or a call that runs without asking.
+const replies: ("text" | "gated" | "read" | { text: string })[] = [];
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
       doStream: async (opts) => {
         prompts.push(opts.prompt as WireMsg[]);
-        const gated = replies.shift() === "gated";
+        const next = replies.shift();
+        const call = next === "gated" ? { id: "c9", name: "save_row" } : next === "read" ? { id: "c8", name: "read_row" } : null;
         return {
           stream: simulateReadableStream({
             chunks: [
               { type: "stream-start", warnings: [] },
-              ...(gated
-                ? [{ type: "tool-call", toolCallId: "c9", toolName: "save_row", input: JSON.stringify({ row: "next" }) }]
-                : [{ type: "text-start", id: "1" }, { type: "text-delta", id: "1", delta: "Done." }, { type: "text-end", id: "1" }]),
+              ...(call
+                ? [{ type: "tool-call", toolCallId: call.id, toolName: call.name, input: JSON.stringify({ row: "next" }) }]
+                : [{ type: "text-start", id: "1" }, { type: "text-delta", id: "1", delta: typeof next === "object" ? next.text : "Done." }, { type: "text-end", id: "1" }]),
               {
                 type: "finish",
-                finishReason: gated ? { unified: "tool-calls", raw: "tool_use" } : { unified: "stop", raw: "end_turn" },
+                finishReason: call ? { unified: "tool-calls", raw: "tool_use" } : { unified: "stop", raw: "end_turn" },
                 usage: { inputTokens: { total: 10, noCache: 10 }, outputTokens: { total: 2 } },
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,10 +82,18 @@ vi.mock("@/lib/tasks/queue", async (importOriginal) => {
     },
   };
 });
+// A workspace to list, so the turn context is on these prompts. A test that needs a
+// file this turn wrote adds it here, stamped with the moment it is listed.
+const written: string[] = [];
 vi.mock("@/lib/sandbox/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sandbox/client")>()),
-  // A workspace to list, so the turn context is on these prompts.
-  listFiles: async () => ({ entries: [{ path: "rows.csv", isDirectory: false }], truncated: false }),
+  listFiles: async () => ({
+    entries: [
+      { path: "rows.csv", isDirectory: false, size: 1, modifiedAt: null },
+      ...written.map((path) => ({ path, isDirectory: false, size: 1, modifiedAt: new Date().toISOString() })),
+    ],
+    truncated: false,
+  }),
 }));
 vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
@@ -163,6 +173,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     prompts.length = 0;
     writes.length = 0;
     replies.length = 0;
+    written.length = 0;
   });
   afterAll(async () => {
     await clean();
@@ -221,6 +232,46 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(writes).toEqual([{ row: "final" }]);
     const results = resultFor((await storedRow(chat)).parts, "c2");
     expect(results.map((r) => r.output)).toEqual(["saved"]);
+  }, 30_000);
+
+  // The first half's files were found in its own tool windows, which the
+  // continuation's listing cannot see — they have to be carried, not re-derived.
+  it("keeps the first half's files beside the ones the continuation wrote", async () => {
+    const chat = `${C}-files`;
+    await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
+    replies.push("read");
+    written.push("out.csv");
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    // Control: a call ran in this half's own window.
+    expect(writes).toEqual([{ row: "final" }, { row: "next" }]);
+    expect((await storedRow(chat)).touchedFiles).toEqual(["out.csv", "rows.csv"]);
+  }, 30_000);
+
+  it("keeps the first half's files when the continuation runs no tool", async () => {
+    const chat = `${C}-files-declined`;
+    await seedSuspended(chat, { name: "save_row", approved: false }, FIRST_HALF);
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    expect(writes).toEqual([]);
+    expect((await storedRow(chat)).touchedFiles).toEqual(["rows.csv"]);
+  }, 30_000);
+
+  // Tier one is derived from the reply's text, so a file the reply now names would
+  // otherwise show twice.
+  it("drops a first-half file the continuation's reply names", async () => {
+    const chat = `${C}-files-named`;
+    await seedSuspended(chat, { name: "save_row", approved: false }, FIRST_HALF);
+    replies.push({ text: "The rows are in /workspace/rows.csv." });
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    const row = await storedRow(chat);
+    expect(row.touchedFiles).toBeUndefined();
+    // Control: the reply that names it is the one stored.
+    expect(JSON.stringify(row.parts)).toContain("/workspace/rows.csv");
   }, 30_000);
 
   // prepareRun throws before any stream: the chat's project was deleted while the card
