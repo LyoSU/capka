@@ -258,6 +258,20 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect((await storedRow(chat)).touchedFiles).toEqual(["out.csv", "rows.csv"]);
   }, 30_000);
 
+  // The SDK runs the approved call ahead of the first step, without the `tool-call`
+  // event that opens every other call's window, so what it wrote went unlisted.
+  it("lists the files the approved call itself wrote", async () => {
+    const chat = `${C}-files-approved`;
+    await seedSuspended(chat, { name: "save_row", approved: true });
+    written.push("out.csv");
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    // Control: the approved call ran, and it is the only call this half made.
+    expect(writes).toEqual([{ row: "final" }]);
+    expect((await storedRow(chat)).touchedFiles).toEqual(["out.csv"]);
+  }, 30_000);
+
   // One run is capped at MAX_TOUCHED; the turn's two halves together are held to the same.
   it("caps the files of both halves together, this half's first", async () => {
     const chat = `${C}-files-cap`;

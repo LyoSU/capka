@@ -485,11 +485,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // toolChoice override in prepareStep), never by rewriting a result.
   let turnOutputChars = 0;
   let toolWindows: ToolWindow[] = [];
+  // The windows of the calls a continuation's user approved, kept apart because a
+  // restart keeps those calls' results (see discardPartial), so their files too.
+  const approvedWindows: ToolWindow[] = [];
   const closeToolWindow = (toolCallId: string) => {
     const start = toolStartedAt.get(toolCallId);
     if (start === undefined) return;
     toolStartedAt.delete(toolCallId);
-    toolWindows.push({ start, end: Date.now() });
+    const approved = parts.some((p) => p.type === "tool-call" && p.id === toolCallId && p.approval);
+    (approved ? approvedWindows : toolWindows).push({ start, end: Date.now() });
   };
 
   // Renew lease + poll for cooperative cancellation cross-process.
@@ -1289,6 +1293,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // injection after it would reach only the retries.
     carryEffectsIntoRestart();
     streamStarted = true;
+    // The SDK runs the calls the user approved inside streamText, ahead of the first
+    // step and with no `tool-call` event, so their windows open here or never.
+    const settledIds = new Set(parts.flatMap((p) => (p.type === "tool-result" || p.type === "tool-error" ? [p.id] : [])));
+    for (const p of parts) {
+      if (p.type === "tool-call" && p.approval?.approved === true && !settledIds.has(p.id)) toolStartedAt.set(p.id, Date.now());
+    }
     let result = makeStream();
 
     // Usage accumulated LIVE from finish-step events — the source of truth.
@@ -1495,7 +1505,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       firstTextAt = null;
       toolCount = 0;
       // Same reasoning as the tool count: windows from a thrown-away attempt would
-      // credit this turn with files the user never saw it produce.
+      // credit this turn with files the user never saw it produce. The approved
+      // calls' windows stay, like their results.
       toolStartedAt.clear();
       toolWindows = [];
       currentStatus = { kind: "thinking" };
@@ -2207,13 +2218,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The cap is the turn's, not each half's: this half's newest files come first.
     let touchedFiles: string[] | undefined;
     const carried = firstHalf?.touchedFiles ?? [];
-    if (toolWindows.length > 0 || carried.length > 0) {
+    const windows = [...approvedWindows, ...toolWindows];
+    if (windows.length > 0 || carried.length > 0) {
       const named = extractWorkspacePaths(getFullText());
       let touched: string[] = [];
-      if (toolWindows.length > 0) {
+      if (windows.length > 0) {
         try {
           const { entries } = await listFiles(sessionKey, ".", userId, WORKSPACE_SCAN_DEPTH, WORKSPACE_SCAN_LIMIT);
-          touched = selectTouchedFiles(entries ?? [], toolWindows, named);
+          touched = selectTouchedFiles(entries ?? [], windows, named);
         } catch (e) {
           tlog.debug("artifacts.scan_skipped", { err: errMsg(e) });
         }
