@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { encrypt } from "../crypto";
+import { CANARY_PLAINTEXT } from "../master-key";
 
 // Mock the DB so getMasterKey's fallback path never touches a real database.
+const dbRows = vi.hoisted(() => ({ rows: [] as unknown[] }));
 vi.mock("../db", () => ({
   db: {
-    select: () => ({ from: () => ({ where: () => ({ limit: async () => [] as unknown[] }) }) }),
+    select: () => ({ from: () => ({ where: () => ({ limit: async () => dbRows.rows }) }) }),
     insert: () => ({ values: async () => undefined }),
   },
 }));
@@ -15,6 +18,7 @@ describe("getMasterKey", () => {
     vi.resetModules();
   });
   afterEach(() => {
+    dbRows.rows = [];
     if (ORIGINAL === undefined) delete process.env.CAPKA_MASTER_KEY;
     else process.env.CAPKA_MASTER_KEY = ORIGINAL;
   });
@@ -39,5 +43,16 @@ describe("getMasterKey", () => {
     process.env.CAPKA_MASTER_KEY = "abc123";
     const { getMasterKey } = await import("../settings");
     await expect(getMasterKey()).rejects.toThrow(/64 hex characters/);
+  });
+
+  it("on a key mismatch, points at both places the original key can live", async () => {
+    // The original may have been an env key (.env backup) or a DB-stored one that an
+    // operator replaced with a new env value (the auth_secret row) — name both.
+    process.env.CAPKA_MASTER_KEY = "a".repeat(64);
+    dbRows.rows = [{ value: encrypt(CANARY_PLAINTEXT, "b".repeat(64)) }];
+    const { assertMasterKeyConsistent } = await import("../settings");
+    const err = await assertMasterKeyConsistent().then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/\.env backup/);
+    expect(err?.message).toMatch(/auth_secret/);
   });
 });
