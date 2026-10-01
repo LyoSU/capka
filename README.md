@@ -154,8 +154,9 @@ curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOM
 ```
 
 Already cloned the repo? Run `./scripts/up.sh` (or `DOMAIN=… ./scripts/up.sh`).
-To upgrade, re-run the installer, or run `sudo ./scripts/backup.sh && sudo
-./scripts/update.sh` in the install directory ([`docs/UPGRADE.md`](docs/UPGRADE.md)).
+To upgrade, run `sudo ./scripts/backup.sh && sudo ./scripts/update.sh` in the
+install directory ([`docs/UPGRADE.md`](docs/UPGRADE.md)). Re-running the installer
+also upgrades, but to the newest tag of any major, a prerelease included.
 Re-running `up.sh` keeps the installed version and reprints the address.
 
 Running on a server that already hosts other sites? The installer notices an

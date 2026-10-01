@@ -38,6 +38,9 @@ sudo CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh
 sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=vX.Y.Z-rc.N ./scripts/update.sh
 ```
 
+Re-running the installer has neither guard: it moves an existing install to the
+newest tag of any major, a prerelease included. Upgrade with `update.sh`.
+
 ### Did the migration work?
 
 The healthcheck does not tell you: it probes `/login`, and a failed migration

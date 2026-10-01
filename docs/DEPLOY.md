@@ -21,12 +21,13 @@ Local development is separate: `npm run docker:dev`; see
 
 Pin a release with `CAPKA_VERSION=vX.Y.Z` in `.env`; unset ⇒ `:latest`.
 
-Each release publishes its images as `vX.Y.Z`, `vX.Y` and `vX`, and as `latest`
-when it is the newest release overall. `vX.Y` and `vX` move only to the newest
-release in that line; a prerelease (`vX.Y.Z-rc.N`) publishes only its own tag.
+Each release publishes its images as `vX.Y.Z`, `vX.Y` and `vX` (`vX` from 1.0 on:
+a 0.x release has no `v0`), and as `latest` when it is the newest release
+overall. `vX.Y` and `vX` move only to the newest release in that line; a
+prerelease (`vX.Y.Z-rc.N`) publishes only its own tag.
 `CAPKA_VERSION=v1` pulls every 1.x release and never 2.0, but it pins the images
 only: use it with a compose file from a v1.x release tag, not from `stable` or
-`master`, which move on to the next major. `latest` follows every release,
+`master`, which move on to the next major. `latest` follows the newest release,
 including a new major. `scripts/update.sh` writes `CAPKA_VERSION` itself and
 already stays on the installed major (see [`UPGRADE.md`](UPGRADE.md)), so do not
 set `v1` on an install that it updates.
@@ -60,9 +61,10 @@ curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOM
 
 No domain? Omit `DOMAIN` and the installer offers a free `<ip>.sslip.io`
 hostname, or serves plain `:3000` to front with your own proxy. Already have a
-clone: `DOMAIN=capka.example.com ./scripts/up.sh` (or `npm run up`). Re-running
-the installer, or `sudo ./scripts/update.sh` in the install directory, upgrades in
-place ([`UPGRADE.md`](UPGRADE.md)). Environment variables are listed in
+clone: `DOMAIN=capka.example.com ./scripts/up.sh` (or `npm run up`). To upgrade in
+place, run `sudo ./scripts/update.sh` in the install directory
+([`UPGRADE.md`](UPGRADE.md)). Re-running the installer also upgrades, but to the
+newest tag of any major, a prerelease included. Environment variables are listed in
 [`.env.example`](../.env.example).
 
 ## Path B — Coolify
