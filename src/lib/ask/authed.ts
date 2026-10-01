@@ -28,7 +28,8 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  * chat's one queued slot is taken) is worth retrying; "failed" means the answer was recorded but the
  * turn could not continue and was settled as failed. Over budget or over the chat
  * rate limit it throws (BudgetExceededError / a 429 `RATE_LIMITED` AppError) with
- * nothing recorded — the same gates and refusals as the manage approval path.
+ * nothing recorded — the same gates and refusals as the manage approval path, and
+ * likewise only for a row the chat is still on: a moved-past one answers "gone" first.
  */
 export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy" | "failed"> {
   const [msg] = await db

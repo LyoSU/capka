@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
@@ -23,6 +25,9 @@ vi.mock("@/components/ui/input", async () => {
   const { createElement } = await import("react");
   return { Input: (p: Record<string, unknown>) => createElement("input", p) };
 });
+
+const haptic = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/haptics", () => ({ haptic }));
 
 import { ApprovalCard } from "../manage-cards";
 import { AskCard } from "../ask-card";
@@ -84,6 +89,7 @@ beforeEach(() => {
   root = createRoot(container as unknown as HTMLElement);
   reloads = 0;
   posts = [];
+  haptic.mockClear();
 });
 
 afterEach(async () => {
@@ -96,6 +102,7 @@ const mount = async (card: ReturnType<typeof createElement>) => {
   // eslint-disable-next-line react/no-children-prop
   await act(async () => { root.render(createElement(NextIntlClientProvider, { locale: "en", messages: en, children: card })); });
 };
+const status = () => container.all().find((n) => n.getAttribute("role") === "status")!;
 const button = (label: string) => container.all().find((n) => n.nodeName === "BUTTON" && n.textContent === label)!;
 /** A click as the browser delivers it: the root's capture listeners, then its bubble ones. */
 const tap = async (label: string) => {
@@ -122,8 +129,12 @@ describe("a decision on a request that is no longer current", () => {
   it("an approval card says so, keeps its buttons down and reloads the chat", async () => {
     reply = { ok: false, outcome: "gone" };
     await mount(approval());
+    // The live region is on the page empty BEFORE the note arrives, so it is announced.
+    expect(status().textContent).toBe("");
     await tap(en.chat.approval.allow);
     expect(posts).toEqual(["/api/manage/approve"]);
+    expect(status().textContent).toBe(en.chat.approval.gone);
+    expect(haptic).not.toHaveBeenCalledWith("error");
     expect(reloads).toBe(1);
     expect(container.textContent).toContain(en.chat.approval.gone);
     expect(button(en.chat.approval.allow).hasAttribute("disabled")).toBe(true);
@@ -136,8 +147,11 @@ describe("a decision on a request that is no longer current", () => {
   it("a question card says so, keeps its buttons down and reloads the chat", async () => {
     reply = { ok: false, outcome: "gone" };
     await mount(ask());
+    expect(status().textContent).toBe("");
     await tap(en.chat.ask.skip);
     expect(posts).toEqual(["/api/ask/answer"]);
+    expect(status().textContent).toBe(en.chat.ask.gone);
+    expect(haptic).not.toHaveBeenCalledWith("error");
     expect(reloads).toBe(1);
     expect(container.textContent).toContain(en.chat.ask.gone);
     expect(button(en.chat.ask.skip).hasAttribute("disabled")).toBe(true);
@@ -148,7 +162,23 @@ describe("a decision on a request that is no longer current", () => {
     await mount(approval());
     await tap(en.chat.approval.allow);
     expect(reloads).toBe(0);
+    expect(haptic).toHaveBeenCalledWith("error");
     expect(button(en.chat.approval.allow).hasAttribute("disabled")).toBe(false);
     expect(container.textContent).not.toContain(en.chat.approval.gone);
+  });
+});
+
+describe("the reload a gone reply triggers is wired through", () => {
+  // The cards only call onReload if the panel and message hand it down; dropping
+  // either link passes every card test above, so pin the call sites themselves.
+  const src = (f: string) => readFileSync(join(__dirname, "..", f), "utf8");
+  it("chat-panel gives each message reload", () => {
+    const p = src("chat-panel.tsx");
+    expect(p.slice(p.indexOf("<ChatMessage\n"))).toMatch(/^[\s\S]*?\bonReload=\{reload\}/);
+  });
+  it("message hands onReload to both cards", () => {
+    const m = src("message.tsx");
+    expect(m).toMatch(/<ApprovalCard\b[^>]*\bonReload=\{onReload\}/);
+    expect(m).toMatch(/<AskCard\b[^>]*\bonReload=\{onReload\}/);
   });
 });

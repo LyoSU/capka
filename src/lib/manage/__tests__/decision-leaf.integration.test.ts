@@ -11,6 +11,7 @@ vi.mock("@/lib/billing/limits", () => ({
 }));
 
 import { pool } from "@/lib/db";
+import { BudgetExceededError } from "@/lib/errors";
 import { approveManageForUser } from "../authed";
 import { answerAskForUser } from "@/lib/ask/authed";
 
@@ -73,7 +74,7 @@ run("a decision lands only on the chat's leaf", () => {
       await seed(kind, "dl-u2");
       expect(await decide[kind]()).toBe("gone");
       await pool.query(`UPDATE chats SET active_leaf_id = 'dl-a1' WHERE id = $1`, [C]);
-      await expect(decide[kind]()).rejects.toThrow();
+      await expect(decide[kind]()).rejects.toBeInstanceOf(BudgetExceededError);
       expect(await stored()).toEqual(waiting[kind]);
     });
 

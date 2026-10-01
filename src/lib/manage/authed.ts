@@ -106,8 +106,9 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * must keep them alive only for "busy". A fourth, "failed": the decision WAS
  * recorded, but the turn could not continue (no model left to run it) and was
  * settled here as failed — so it must not read as done. A user over their
- * shared-key budget gets a BudgetExceededError instead, and one over the chat rate
- * limit a 429 `RATE_LIMITED` AppError — both with nothing recorded.
+ * shared-key budget gets a BudgetExceededError, and one over the chat rate limit a
+ * 429 `RATE_LIMITED` AppError — both with nothing recorded — but only for a row the
+ * chat is still on: a moved-past row answers "gone" first.
  */
 export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy" | "failed"> {
   const [msg] = await db

@@ -514,7 +514,7 @@ export function ApprovalCard({
       if (reply.landed) {
         if (approved) haptic("success");
       } else {
-        haptic("error");
+        if (reply.note !== "gone") haptic("error"); // "gone" reads calm, not as a failure
         if (reply.retry) setSubmitting(false);
       }
     } catch {
@@ -590,9 +590,10 @@ export function ApprovalCard({
         </>
       )}
       {/* "gone" is not a failure, just a request that has passed: a quiet line. */}
-      {awaiting && refusal && (note === "gone"
-        ? <div role="status" className="mt-1.5 text-xs text-muted-foreground">{refusal}</div>
-        : <div role="alert" className="mt-1.5 text-xs text-destructive">{refusal}</div>)}
+      {/* The status region is mounted empty and filled later: one inserted already
+          filled is often not announced. */}
+      {awaiting && <div role="status" className={note === "gone" ? "mt-1.5 text-xs text-muted-foreground" : undefined}>{note === "gone" ? refusal : null}</div>}
+      {awaiting && refusal && note !== "gone" && <div role="alert" className="mt-1.5 text-xs text-destructive">{refusal}</div>}
 
       {/* Resolved states — the agent's follow-up text carries the details, so the
           card settles into a quiet confirmation. Approved-but-still-running shows a

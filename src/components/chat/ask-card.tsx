@@ -96,7 +96,7 @@ export function AskCard({
       if (reply.landed) {
         if (action === "submit") haptic("success");
       } else {
-        haptic("error");
+        if (reply.note !== "gone") haptic("error"); // "gone" reads calm, not as a failure
         if (reply.retry) setSubmitting(false);
       }
     } catch {
@@ -180,9 +180,9 @@ export function AskCard({
             )}
           </div>
           {/* "gone" is not a failure, just a question that has passed: a quiet line. */}
-          {refusal && (note === "gone"
-            ? <div role="status" className="text-xs text-muted-foreground">{refusal}</div>
-            : <div role="alert" className="text-xs text-destructive">{refusal}</div>)}
+          {/* Mounted empty and filled later: a status inserted already filled is often not announced. */}
+          <div role="status" className={note === "gone" ? "text-xs text-muted-foreground" : undefined}>{note === "gone" ? refusal : null}</div>
+          {refusal && note !== "gone" && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
         </>
       ) : (
         // Settled: each question reads as a quiet label and its answer as a
