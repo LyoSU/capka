@@ -17,9 +17,13 @@ Local development is separate: `npm run docker:dev`; see
 | `docker-compose.dev.yml` | Local dev overlay (hot reload, dev secrets). |
 | `docker-compose.build.yml` | Build-from-source overlay (`CAPKA_BUILD=1`). |
 | `docker-compose.tls.yml` | Automatic HTTPS via Caddy (`up.sh` layers it when `DOMAIN` is set). |
-| `docker-compose.backup.yml` | Scheduled `pg_dump` sidecar. |
+| `docker-compose.backup.yml` | Scheduled `pg_dump` sidecar — see [Backup & restore](#backup--restore). |
 
 Pin a release with `CAPKA_VERSION=vX.Y.Z` in `.env`; unset ⇒ `:latest`.
+
+Run one Capka stack per Docker daemon. The stack creates fixed-name networks
+(`capka-sandbox-egress`, `capka-egress-out`), so a second stack on the same
+daemon is not supported.
 
 ## Which git ref to deploy
 
@@ -47,7 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOM
 No domain? Omit `DOMAIN` and the installer offers a free `<ip>.sslip.io`
 hostname, or serves plain `:3000` to front with your own proxy. Already have a
 clone: `DOMAIN=capka.example.com ./scripts/up.sh` (or `npm run up`). Re-running
-the installer upgrades in place. Environment variables are listed in
+the installer, or `sudo ./scripts/update.sh` in the install directory, upgrades in
+place ([`UPGRADE.md`](UPGRADE.md)). Environment variables are listed in
 [`.env.example`](../.env.example).
 
 ## Path B — Coolify
@@ -66,7 +71,11 @@ deploys onto a host with a Docker daemon.
      (better-auth `trustedOrigins`). Missing/wrong ⇒ `INVALID_ORIGIN` on
      login/register.
    - `CAPKA_MASTER_KEY`, `CONTROLLER_SECRET`, `POSTGRES_PASSWORD` =
-     `openssl rand -hex 32` each.
+     `openssl rand -hex 32` each. Keep a copy of `CAPKA_MASTER_KEY` outside
+     Coolify: a restored database is unreadable without it.
+   - `SETUP_TOKEN` = `openssl rand -hex 32`. Without it a deploy reachable from
+     the network refuses the first-run admin claim (`/setup` answers 403). Open
+     `https://<your-domain>/setup#token=<value>` to create the admin account.
    - `SANDBOX_RUNTIME` = `runc` (default). For untrusted/multi-tenant code,
      install gVisor on the host (`sudo sh scripts/install-gvisor.sh`) and set
      `runsc` — the controller then refuses to boot until gVisor is present
@@ -83,6 +92,115 @@ deploys onto a host with a Docker daemon.
      `=` and `,` (`Authorization=Basic <base64>,x-langfuse-ingestion-version=4`),
      and wrapping it in quotes makes them part of the value.
 4. Deploy.
+
+## Backup & restore
+
+A complete backup is three things. The database dump alone is not enough:
+
+| What | Where | Why |
+|---|---|---|
+| Database | `./scripts/backup.sh` writes `./data/backups/capka-<UTC timestamp>.sql.gz` | Users, chats, settings, the task queue. |
+| `.env` | The install directory (Coolify: the resource's environment variables) | `CAPKA_MASTER_KEY` decrypts the provider keys, connector sign-in tokens and chat secrets stored in the dump; with any other key they are unreadable and everyone is signed out. |
+| User files | `./data/storage` | Chat and project workspaces: uploads and agent outputs. |
+
+Dumps contain session tokens, password hashes and the encrypted secrets, so
+`backup.sh` and the sidecar write them with mode `0600`. Keep copies **off the
+box** (a disk failure or a lost VPS takes `./data/backups` with it), encrypt them
+(e.g. `restic`, `age`, `gpg`), and store `.env` apart from the dumps — together
+they decrypt everything.
+
+`./data/storage` is copied as files (`sudo tar` or `sudo rsync -a`, keeping
+owners). Copied while the stack runs it can be a few minutes off from the dump;
+stop the stack for a consistent pair.
+
+### Scheduling
+
+Either run `backup.sh` from the host's root crontab:
+
+```cron
+0 3 * * * cd /opt/capka && ./scripts/backup.sh >>/var/log/capka-backup.log 2>&1
+```
+
+or layer the sidecar, which dumps daily (`BACKUP_INTERVAL_SECONDS` in `.env`):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d pg-backup
+```
+
+`up.sh`, `update.sh` and the installer run `docker compose up --remove-orphans`
+without this overlay, which **removes the sidecar**. Re-run the command above
+after each of them, or use the cron job, which updates do not touch.
+
+Both delete dumps older than `RETENTION_DAYS` days (default 14; `0` or empty keeps
+every dump), and only after a dump succeeded. The sidecar reads it from `.env`;
+`backup.sh` from its environment (`RETENTION_DAYS=30 ./scripts/backup.sh`).
+
+To test a backup without touching the live database, restore it into a scratch
+one:
+
+```bash
+docker compose exec -T postgres createdb -U Capka capka_restore_test
+gunzip -c ./data/backups/capka-<timestamp>.sql.gz \
+  | docker compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d capka_restore_test >/dev/null \
+  && echo "restore OK"
+docker compose exec -T postgres dropdb -U Capka capka_restore_test
+```
+
+### Restore
+
+```bash
+sudo ./scripts/restore.sh ./data/backups/capka-<timestamp>.sql.gz
+```
+
+It refuses a dump that is not complete, stops `platform`, `sandbox-controller` and
+`pg-backup`, replaces the database in one transaction (an error leaves it as it
+was) and leaves the stack stopped. Then start the **same release the dump came
+from**: `sudo sh scripts/up.sh`, or for a rollback see
+[`UPGRADE.md`](UPGRADE.md#rollback). A newer image migrates the restored database
+forward on boot. Restore with the stack's own `psql`, as the script does: dumps
+from current `pg_dump` start with `\restrict`, which older `psql` clients reject.
+
+### Restoring on a new host
+
+```bash
+git clone --branch v<release-of-the-dump> https://github.com/LyoSU/capka.git /opt/capka
+cd /opt/capka
+sudo cp /path/to/backup/.env .env && sudo chmod 600 .env   # same CAPKA_MASTER_KEY
+sudo mkdir -p data && sudo rsync -a /path/to/backup/storage/ data/storage/
+sudo sh scripts/up.sh                                      # boots on an empty database
+sudo ./scripts/restore.sh /path/to/backup/capka-<timestamp>.sql.gz
+sudo sh scripts/up.sh
+```
+
+If the log shows `[security] CAPKA_MASTER_KEY does not match the key that
+encrypted the stored data`, the `.env` is not the one that belongs to the dump.
+
+### Coolify
+
+Coolify deploys one compose file, so the sidecar overlay cannot be layered and
+there is no checkout to run the scripts from. Back up from the host instead.
+Coolify names each container `<service>-<resource uuid>`; `docker ps` lists them.
+
+```bash
+# Database (bash, for pipefail): run from cron, then copy the file off-box.
+set -o pipefail
+docker exec postgres-<uuid> pg_dump -U Capka -d Capka --clean --if-exists \
+  | gzip > capka-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+
+# User files: the host directory mounted at /data in the controller.
+docker inspect sandbox-controller-<uuid> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+```
+
+Copy `CAPKA_MASTER_KEY` and the other secrets out of the resource's environment
+variables. To restore, stop the writers, replace the database, then redeploy the
+resource from Coolify:
+
+```bash
+docker stop platform-<uuid> sandbox-controller-<uuid>
+{ echo 'DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+  gunzip -c capka-<timestamp>.sql.gz; } \
+  | docker exec -i postgres-<uuid> psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d Capka >/dev/null
+```
 
 ## Routing / TLS
 

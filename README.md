@@ -131,7 +131,7 @@ npm run docker:dev
 ```
 
 Open <http://localhost:3000>. If no admin account exists, Capka redirects you to
-setup. After that, add a provider key in **Settings -> Connections**.
+setup. After that, add a provider key in **Settings -> Providers**.
 
 ## Deploy
 
@@ -154,7 +154,9 @@ curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOM
 ```
 
 Already cloned the repo? Run `./scripts/up.sh` (or `DOMAIN=… ./scripts/up.sh`).
-Re-running the installer or `up.sh` upgrades in place and reprints the address.
+To upgrade, re-run the installer, or run `sudo ./scripts/backup.sh && sudo
+./scripts/update.sh` in the install directory ([`docs/UPGRADE.md`](docs/UPGRADE.md)).
+Re-running `up.sh` keeps the installed version and reprints the address.
 
 Running on a server that already hosts other sites? The installer notices an
 existing web server on ports 80/443, or a busy port 3000, stays out of their way,
@@ -180,13 +182,13 @@ sandbox image alone unpacks to ~7.5 GB).
    address, or `http://<server-ip>:3000`. Lost it? Re-run `sudo ./scripts/up.sh`
    in the install directory and it prints the address again.
 2. Capka redirects to setup if no admin account exists
-3. Add provider keys in **Settings -> Connections**
+3. Add provider keys in **Settings -> Providers**
 4. Choose default models
 5. Open registration or use approval mode from the admin panel
-6. Optional: add a Telegram bot token in **Settings -> Integrations**
+6. Optional: add a Telegram bot token in **Settings -> Agent**
 
 Registration is closed by default after setup. Admins can switch it to open or
-approval mode in **Settings -> Authentication**.
+approval mode in **Settings -> People -> Sign-in**.
 
 ## Troubleshooting
 
@@ -214,8 +216,9 @@ turns on folder access (off by default, optionally limited to the roots in
 `SANDBOX_MOUNT_ALLOW`). The controller reaches Docker through `socket-proxy`, not the
 raw Docker socket.
 
-Sandbox internet access is controlled in **Settings -> Security -> Internet
-access**. When enabled, Capka blocks private ranges and cloud metadata endpoints.
+Sandbox internet access is controlled in **Settings -> Security -> Network**
+("Let code reach the internet"). When enabled, Capka blocks private ranges and
+cloud metadata endpoints.
 
 For untrusted or multi-tenant use, read [`SECURITY.md`](SECURITY.md). Turn on
 gVisor for kernel-level sandbox isolation:
@@ -225,6 +228,13 @@ sudo sh scripts/install-gvisor.sh   # installs runsc, enables userns-remap
 # restart Docker, then set in .env:
 SANDBOX_RUNTIME=runsc
 ```
+
+On a host that already runs Capka, back up first ([Backup &
+restore](docs/DEPLOY.md#backup--restore)): with `userns-remap` on, Docker keeps
+containers, images and volumes in a separate storage root, so the database volume
+seems to vanish and Capka comes back as a fresh install, and files under `./data`
+keep owners the remapped containers may not be allowed to write. Restore the
+backup after the switch.
 
 The default `runc` is the right answer while you know who runs code; gVisor is
 the answer when you don't. It is a trade, not a free upgrade — a root install on

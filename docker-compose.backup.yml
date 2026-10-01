@@ -1,7 +1,10 @@
 # Scheduled-backup overlay. Layer it to run a daily pg_dump sidecar:
 #   docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
-# Dumps land in ./data/backups (host-mounted). Tune BACKUP_INTERVAL_SECONDS and
-# RETENTION_DAYS. For off-box durability, sync ./data/backups to remote storage.
+# Dumps land in ./data/backups (host-mounted, mode 0600). Tune
+# BACKUP_INTERVAL_SECONDS and RETENTION_DAYS (0 or empty keeps every dump).
+# scripts/up.sh and update.sh do not layer this file and remove the sidecar as an
+# orphan — bring it back after each run (docs/DEPLOY.md "Backup & restore"). The
+# dump is the database only; .env and ./data/storage need backing up too.
 services:
   pg-backup:
     image: postgres:17-alpine
@@ -12,20 +15,30 @@ services:
     environment:
       - PGPASSWORD=${POSTGRES_PASSWORD}
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
-      - RETENTION_DAYS=${RETENTION_DAYS:-14}
+      - RETENTION_DAYS=${RETENTION_DAYS-14}
     volumes:
       - ./data/backups:/backups
     entrypoint:
       - sh
       - -c
       - |
-        echo "pg-backup: dumping every $$BACKUP_INTERVAL_SECONDS s, keeping $$RETENTION_DAYS days"
+        set -o pipefail
+        umask 077
+        echo "pg-backup: dumping every $$BACKUP_INTERVAL_SECONDS s, keeping $${RETENTION_DAYS:-0} days (0 = all)"
         while true; do
           STAMP=$$(date -u +%Y%m%dT%H%M%SZ)
-          pg_dump -h postgres -U Capka -d Capka --clean --if-exists \
-            | gzip > /backups/capka-$$STAMP.sql.gz \
-            && echo "pg-backup: wrote capka-$$STAMP.sql.gz" \
-            || echo "pg-backup: dump FAILED at $$STAMP"
-          find /backups -name 'capka-*.sql.gz' -mtime +$$RETENTION_DAYS -delete 2>/dev/null || true
+          OUT=/backups/capka-$$STAMP.sql.gz
+          # .tmp until pg_dump has exited 0; prune only after a dump succeeded, so a
+          # run of failures never deletes the last good backups.
+          if pg_dump -h postgres -U Capka -d Capka --clean --if-exists | gzip > "$$OUT.tmp" \
+            && mv "$$OUT.tmp" "$$OUT"; then
+            echo "pg-backup: wrote capka-$$STAMP.sql.gz"
+            if [ "$${RETENTION_DAYS:-0}" -gt 0 ]; then
+              find /backups -name 'capka-*.sql.gz' -mtime +$$RETENTION_DAYS -delete
+            fi
+          else
+            rm -f "$$OUT.tmp"
+            echo "pg-backup: dump FAILED at $$STAMP"
+          fi
           sleep "$$BACKUP_INTERVAL_SECONDS"
         done

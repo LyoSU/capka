@@ -25,8 +25,10 @@ container only ever bind-mounts the requesting user's own paths — so the share
 bind mount, not by uid).
 
 The controller reaches the Docker daemon through a **socket-proxy** that exposes
-only the container and exec endpoints (build, pull, image, network, volume, and
-swarm management are denied), so the raw host socket is never mounted into the
+the container and exec endpoints, image inspect/pull (`IMAGES=1`, so the
+controller can re-pull a pruned sandbox image) and read-only `GET /info`
+(`INFO=1`, for the gVisor runtime probe). Build, network, volume and swarm
+endpoints are denied, and the raw host socket is never mounted into the
 controller itself. The platform never touches the Docker socket directly.
 
 ### Isolation runtime: runc by default, gVisor opt-in
@@ -255,7 +257,8 @@ marketplace sources as you would any dependency: install from repos you trust.
   database, so a DB leak alone cannot decrypt them. 64 hex chars. In production the
   app is **fail-closed**: with no `CAPKA_MASTER_KEY` it refuses to start rather than
   fall back to a DB-stored key. Set `ALLOW_DB_MASTER_KEY=true` to knowingly accept
-  the insecure fallback (dev/testing).
+  the insecure fallback (dev/testing). With a DB-stored key, every database dump
+  — including each backup — also contains the key that decrypts it.
 - `CONTROLLER_SECRET` gates the platform↔controller channel; the controller
   refuses to boot on the default value in production.
 - `scripts/up.sh` generates strong values into `.env` (mode `600`) on first run
@@ -308,9 +311,13 @@ deployments — not a turnkey-certified multi-tenant platform.
   XSS containment for model/user-generated content.
 - **SSRF is narrowed and connection-pinned.** Outbound fetches to user-supplied
   URLs (MCP servers, OAuth discovery, marketplace, custom provider base URLs, and
-  provider model listing) block private/loopback/metadata ranges, strip credentials
-  on cross-host redirects, and pin the TCP connection to the vetted IP so DNS can't
-  rebind between the address check and the connect. First-party fixed hosts (e.g.
+  provider model listing) always block link-local/cloud-metadata ranges, strip
+  credentials on cross-host redirects, and pin the TCP connection to the vetted IP
+  so DNS can't rebind between the address check and the connect. **Loopback and
+  private ranges are reachable by default**, so a provider on your own network
+  (e.g. Ollama) works; an admin blocks them with Settings → Security → Network →
+  "Block internal addresses for providers". Turn that on when people you don't
+  fully trust can add connectors or providers. First-party fixed hosts (e.g.
   api.anthropic.com) use the default fetch — not a user-controlled SSRF vector. This
   is app-level defense-in-depth, not a substitute for network-level egress controls
   on an instance where reaching an internal service would be catastrophic.

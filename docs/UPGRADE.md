@@ -1,46 +1,68 @@
 # Upgrading Capka
 
 Capka runs database migrations **automatically on platform boot** from the
-`drizzle/` SQL files baked into the image. Upgrades are forward-only by default.
+`drizzle/` SQL files baked into the image. Migrations are forward-only: an older
+image does not undo them.
 
 ## Standard upgrade
 
+In the install directory (`/opt/capka` for the installer):
+
 ```bash
-# 1. Back up first — migrations are forward-only.
-./scripts/backup.sh
-
-# 2. Pin the target release (or leave CAPKA_VERSION unset for latest).
-echo 'CAPKA_VERSION=v0.2.0' >> .env   # edit if already present
-
-# 3. Pull the new images and recreate. The platform migrates the DB on boot.
-docker compose pull
-docker compose up -d
-
-# 4. Watch the platform come up healthy (migrations run during start_period).
-docker compose logs -f platform
+sudo ./scripts/backup.sh && sudo ./scripts/update.sh
 ```
 
-The platform healthcheck (`/login`) flips healthy once migrations finish and the
-server is serving. If it stays unhealthy, check the logs for a migration error.
+`backup.sh` dumps the database to `./data/backups/`; the `&&` stops the update if
+the dump fails. `update.sh` checks out the newest release, pins its images in
+`.env` (`CAPKA_VERSION`) and hands off to `up.sh`, which pulls them and recreates
+the stack. To go to one specific release instead:
+`sudo CAPKA_BRANCH=vX.Y.Z ./scripts/update.sh`.
+
+Re-running `up.sh` alone does not upgrade: it re-applies the version already
+pinned in `.env`. The database dump is not a complete backup — see
+[Backup & restore](DEPLOY.md#backup--restore) for `.env` and `./data/storage`, and
+for bringing the scheduled-backup sidecar back after an update.
+
+### Did the migration work?
+
+The healthcheck does not tell you: it probes `/login`, and a failed migration
+leaves the platform serving and healthy while it retries in the background.
+Read the log instead:
+
+```bash
+docker compose logs platform | grep '\[db\]'
+```
+
+- `[db] migrations up to date` — the schema is current.
+- `[db] auto-migration failed (continuing; retrying in the background)` or
+  `[db] auto-migration retry failed: …` — the schema is NOT current; the error
+  after it says why. Fix the cause or roll back (below).
 
 ## Rollback
 
-Migrations are forward-only, so rolling the image back does **not** roll the
-schema back. To revert:
+Rolling the image back does **not** roll the schema back, and the newer image
+re-applies its migrations every time it boots. So the database has to be
+restored while nothing runs, and the next thing to start must be the previous
+release:
 
 ```bash
-docker compose stop platform
-./scripts/restore.sh ./data/backups/capka-<timestamp-before-upgrade>.sql.gz
-echo 'CAPKA_VERSION=<previous-tag>' > /tmp/v && \
-  sed -i.bak '/^CAPKA_VERSION=/d' .env && cat /tmp/v >> .env
-docker compose pull && docker compose up -d
+# 1. Stops platform, sandbox-controller and pg-backup, restores the dump taken
+#    before the upgrade, and leaves them stopped.
+sudo ./scripts/restore.sh ./data/backups/capka-<taken-before-the-upgrade>.sql.gz
+
+# 2. Checks out the previous release, pins its images and starts it.
+sudo CAPKA_BRANCH=v<previous> ./scripts/update.sh
 ```
 
-Always keep the pre-upgrade dump until the new version is verified.
+Do not `docker compose start`/`up` between the two steps: the newer image would
+migrate the restored database forward again. Run step 1 from the current
+checkout — older releases ship a `restore.sh` that restores over the live schema
+and restarts the platform itself.
 
-## Zero/low-downtime note
+Anything written after the dump was taken is lost. Keep the pre-upgrade dump
+until the new version is verified.
 
-A single-host compose deploy has a brief restart gap while the platform
-recreates. For teams that need continuity, run behind the Caddy overlay (Phase B)
-and accept the few-second gap, or move to the company-tier external-Postgres +
-multi-replica topology (see the roadmap).
+## Downtime
+
+A single-host compose deploy has a brief gap while the platform container is
+recreated.
