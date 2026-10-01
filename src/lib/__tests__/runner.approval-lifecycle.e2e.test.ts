@@ -258,6 +258,19 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect((await storedRow(chat)).touchedFiles).toEqual(["out.csv", "rows.csv"]);
   }, 30_000);
 
+  // One run is capped at MAX_TOUCHED; the turn's two halves together are held to the same.
+  it("caps the files of both halves together, this half's first", async () => {
+    const chat = `${C}-files-cap`;
+    const firstFiles = Array.from({ length: 12 }, (_, i) => `f${i + 1}.csv`);
+    await seedSuspended(chat, { name: "save_row", approved: true }, { ...FIRST_HALF, touchedFiles: firstFiles });
+    replies.push("read");
+    written.push("out.csv");
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    expect((await storedRow(chat)).touchedFiles).toEqual(["out.csv", ...firstFiles.slice(0, 11)]);
+  }, 30_000);
+
   it("keeps the first half's files when the continuation runs no tool", async () => {
     const chat = `${C}-files-declined`;
     await seedSuspended(chat, { name: "save_row", approved: false }, FIRST_HALF);

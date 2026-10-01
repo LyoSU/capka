@@ -17,7 +17,7 @@ import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEf
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
-import { extractWorkspacePaths, selectTouchedFiles, type ToolWindow } from "@/lib/chat/artifacts";
+import { extractWorkspacePaths, MAX_TOUCHED, selectTouchedFiles, type ToolWindow } from "@/lib/chat/artifacts";
 import { classifyFiles, findBlindModalities, wrapTurnContext } from "@/lib/chat/prompt";
 import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { buildViewFileInjection } from "@/lib/sandbox/view-file";
@@ -2204,6 +2204,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     //
     // A continuation's first half ran in its own windows, which this run's listing
     // cannot see, so its files are carried over — minus any this half's reply now names.
+    // The cap is the turn's, not each half's: this half's newest files come first.
     let touchedFiles: string[] | undefined;
     const carried = firstHalf?.touchedFiles ?? [];
     if (toolWindows.length > 0 || carried.length > 0) {
@@ -2217,7 +2218,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           tlog.debug("artifacts.scan_skipped", { err: errMsg(e) });
         }
       }
-      const all = [...new Set([...touched, ...carried.filter((p) => !named.includes(p))])];
+      const all = [...new Set([...touched, ...carried.filter((p) => !named.includes(p))])].slice(0, MAX_TOUCHED);
       if (all.length > 0) touchedFiles = all;
     }
 

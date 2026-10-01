@@ -111,7 +111,7 @@ const MTIME_SLACK_MS = 1_500;
 
 /** Past this many, the fold has stopped being a list and become a file browser —
  *  and the row would start to weigh on every message read from the DB. */
-const MAX_TOUCHED = 12;
+export const MAX_TOUCHED = 12;
 
 /**
  * Tier two: files whose mtime falls inside one of the turn's tool windows.
