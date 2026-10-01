@@ -872,7 +872,8 @@ export function useBackgroundChat({
             attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
           }),
         });
-        if (!res.ok) throw await refusal(res, t, "rerunFailed");
+        // An edit sends a message; only a regenerate (no userMessage) does not.
+        if (!res.ok) throw await refusal(res, t, userMessage ? "requestFailed" : "rerunFailed");
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
       } catch (e) {
