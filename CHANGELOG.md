@@ -23,6 +23,7 @@ All notable changes to Capka are documented here. Format follows
 - Older turns that ended with steps but no reply now show the `no_reply` notice with Continue instead of a bare "Worked for …" header.
 - Non-admin users no longer see raw tool errors or connector parameters in a step's details; a failed step says "This step couldn't be completed" and only opens itself for admins.
 - A web search run through an MCP connector (e.g. SearXNG) reads "Searched the web for …"; an `_mcp`/`-mcp` suffix is dropped from connector names, and unknown tools read "Used a tool" (the tool id is shown to admins).
+- Settings row labels are 14px medium again (not 16px); deleting a file and an automation's "nothing new" exit have their own localized step labels; durations keep number and unit together in Ukrainian and drop seconds past ten minutes.
 - Citation numbers in a reply and its sources footer now count from 1 per reply instead of showing branch-wide numbers, and `[[2]]`/`\[[2]\]` markers no longer leave stray brackets.
 - Reasoning on the step rail is set smaller and muted so it no longer reads as the answer, and the run header always says "Worked for …".
 

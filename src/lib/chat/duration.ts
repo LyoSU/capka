@@ -10,7 +10,11 @@ function render(sec: number, t: Translator): string {
   // Padded: this is the one string that ticks under the reader's eye, and an
   // unpadded "1 m 5 s" → "1 m 10 s" jogs the row a character wider every
   // tenth second. `tabular-nums` fixes digit WIDTH, not digit COUNT.
-  return t("minSec", { m: Math.floor(sec / 60), s: String(sec % 60).padStart(2, "0") });
+  const min = Math.floor(sec / 60);
+  if (min < 10) return t("minSec", { m: min, s: String(sec % 60).padStart(2, "0") });
+  // Past ten minutes seconds are noise, and a ticking pair of numbers is restless.
+  if (min < 60) return t("min", { m: min });
+  return t("hourMin", { h: Math.floor(min / 60), m: min % 60 });
 }
 
 /** A finished span, for the "Thought for …" / "Worked for …" group header. Rounds:

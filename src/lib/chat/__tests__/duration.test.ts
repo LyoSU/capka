@@ -7,6 +7,8 @@ import { formatShortDuration, formatLiveElapsed } from "../duration";
 const t = (key: string, v?: Record<string, string | number>) => {
   if (key === "sec") return `${v!.s} s`;
   if (key === "minSec") return `${v!.m} m ${v!.s} s`;
+  if (key === "min") return `${v!.m} m`;
+  if (key === "hourMin") return `${v!.h} h ${v!.m} m`;
   throw new Error(`unknown key: ${key}`);
 };
 
@@ -32,6 +34,21 @@ describe("formatShortDuration", () => {
 
   it("clamps a negative span rather than printing a minus", () => {
     expect(formatShortDuration(-5_000, t)).toBe("0 s");
+  });
+});
+
+describe("long spans", () => {
+  it("drops the seconds from ten minutes", () => {
+    expect(formatShortDuration(599_000, t)).toBe("9 m 59 s");
+    expect(formatShortDuration(600_000, t)).toBe("10 m");
+    expect(formatShortDuration(752_000, t)).toBe("12 m");
+    expect(formatShortDuration(3_599_000, t)).toBe("59 m");
+  });
+
+  it("switches to hours and minutes from an hour", () => {
+    expect(formatShortDuration(3_600_000, t)).toBe("1 h 0 m");
+    expect(formatShortDuration(3_900_000, t)).toBe("1 h 5 m");
+    expect(formatLiveElapsed(7_500_000, t)).toBe("2 h 5 m");
   });
 });
 

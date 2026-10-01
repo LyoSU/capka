@@ -17,7 +17,7 @@ export type StepCategory = "file" | "exec" | "search" | "browse" | "mcp" | "skil
 export type StepIconKey =
   | "file-plus" | "file-pen" | "file-text" | "folder" | "search"
   | "terminal" | "code" | "globe" | "wrench" | "sparkles" | "plug" | "sliders"
-  | "bookmark";
+  | "bookmark" | "trash";
 
 /** A connected app behind an MCP tool — shown by brand, not a wrench. */
 export interface StepBrand {
@@ -266,6 +266,17 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
         category: "file",
       };
+    case "delete_path":
+      return {
+        iconKey: "trash",
+        label: t("deletedPath"),
+        activeLabel: t("deletingPath"),
+        detail: basename(args.path) || undefined,
+        category: "file",
+      };
+    // The automation's quiet exit: it ends a run that found nothing for the owner.
+    case "nothing_to_report":
+      return { iconKey: "sparkles", label: t("nothingToReport"), activeLabel: t("working"), category: "other" };
     case "check_job":
       return { iconKey: "terminal", label: t("checkedJob"), activeLabel: t("checkingJob"), category: "exec" };
     case "execute_bash":

@@ -154,6 +154,9 @@
     "usedSkillGeneric": "Навичку застосовано",
     "usingSkillGeneric": "Застосовую навичку…",
     "usedTool": "Використано інструмент",
+    "deletedPath": "Видалено файл або папку",
+    "deletingPath": "Видалення файлу або папки…",
+    "nothingToReport": "Нічого нового — без сповіщення",
     "working": "Працюю…",
     "managedSettings": "Налаштування оновлено",
     "managingSettings": "Оновлюю налаштування…",
@@ -334,8 +337,10 @@
       "copyFailed": "Не вдалося скопіювати посилання"
     },
     "duration": {
-      "sec": "{s} с",
-      "minSec": "{m} хв {s} с"
+      "sec": "{s} с",
+      "minSec": "{m} хв {s} с",
+      "min": "{m} хв",
+      "hourMin": "{h} год {m} хв"
     },
     "taskStatus": {
       "thinking": "Думаю…",
@@ -651,8 +656,8 @@
       "generationTime": "Час генерації",
       "route": "Маршрут",
       "loadingRoute": "Завантаження…",
-      "durationSec": "{s} с",
-      "durationMin": "{m} хв {s} с",
+      "durationSec": "{s} с",
+      "durationMin": "{m} хв {s} с",
       "requests": "Запитів до моделі",
       "purposeTurn": "Відповідь",
       "purposeTitle": "Назва чату",

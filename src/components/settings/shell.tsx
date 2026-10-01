@@ -143,7 +143,7 @@ export function SettingsChoice<K extends string>({
               <span className={cn("size-2 rounded-full bg-foreground transition-micro", on ? "scale-100" : "scale-0")} />
             </span>
             <span className="min-w-0 space-y-0.5">
-              <span className="block text-base">{o.label}</span>
+              <span className="block text-sm font-medium">{o.label}</span>
               {o.hint && <span className="block text-sm leading-relaxed text-muted-foreground">{o.hint}</span>}
             </span>
           </button>
@@ -406,9 +406,9 @@ export function SettingsRow({
               bold label on every row makes a page of thirty bold lines. Weight is
               kept for the section title above them. */}
           {labelFor ? (
-            <label htmlFor={labelFor} className="block text-base">{title}</label>
+            <label htmlFor={labelFor} className="block text-sm font-medium">{title}</label>
           ) : (
-            <p className="text-base">{title}</p>
+            <p className="text-sm font-medium">{title}</p>
           )}
           {/* 14px, not 12: the hint is the sentence a non-technical reader
               actually decides by, and it was the smallest text on the page. */}

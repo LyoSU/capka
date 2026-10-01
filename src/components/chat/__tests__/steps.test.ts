@@ -467,3 +467,20 @@ describe("describeStep — tool search", () => {
     expect(d.activeLabel).toBe("lookingForTool");
   });
 });
+
+describe("describeStep — delete_path and nothing_to_report", () => {
+  it("delete_path names the file in the well, with a trash icon", () => {
+    const d = describeStep(t, "delete_path", { path: "old/report.docx" });
+    expect(d.label).toBe("deletedPath");
+    expect(d.activeLabel).toBe("deletingPath");
+    expect(d.detail).toBe("report.docx");
+    expect(d.iconKey).toBe("trash");
+    expect(d.adminDetail).toBeUndefined();
+  });
+
+  it("nothing_to_report has its own calm label, not the generic one", () => {
+    const d = describeStep(t, "nothing_to_report", { reason: "no changes" });
+    expect(d.label).toBe("nothingToReport");
+    expect(d.adminDetail).toBeUndefined();
+  });
+});
