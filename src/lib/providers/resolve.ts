@@ -239,12 +239,14 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   }
 
   // SSRF guard on the real inference path — same policy as listing/testing. Its
-  // refusal (a host that stopped resolving, or the strict private-URL policy turned
-  // on after this connection was saved) is a plain Error; re-raised as a
+  // policy refusal (the strict private-URL policy turned on after this connection
+  // was saved, or a URL it never accepts) is a plain Error; re-raised as a
   // ValidationError it takes the same "this model can't be used" path as the
-  // refusals above instead of surfacing from /api/chat as a 500.
+  // refusals above instead of surfacing from /api/chat as a 500. A host that did not
+  // resolve stays a plain error: a DNS blip is transient, and the ask/approval
+  // continuations settle a turn for good on any ValidationError from here.
   await assertSafeProviderConfig(config.provider, config.baseUrl).catch((e: unknown) => {
-    throw e instanceof UnsafeUrlError ? new ValidationError(e.message) : e;
+    throw e instanceof UnsafeUrlError && e.reason !== "unresolved" ? new ValidationError(e.message) : e;
   });
 
   const model = getModel(config.provider, modelId, {

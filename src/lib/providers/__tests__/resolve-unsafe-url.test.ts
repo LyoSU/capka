@@ -6,7 +6,16 @@ import { describe, it, expect, vi } from "vitest";
  * reach /api/chat as the resolver's ValidationError, which the route answers with
  * MODEL_UNAVAILABLE (and the admin pointer). The guard's own UnsafeUrlError is not
  * an AppError, so it used to escape as a 500 with nothing to act on.
+ *
+ * A host that merely failed to resolve is the exception: a DNS blip is transient, and
+ * the ask/approval continuations settle a turn for good on any ValidationError from
+ * resolution, so it must stay a plain (retryable) error.
  */
+const lookup = vi.hoisted(() => vi.fn());
+vi.mock("node:dns/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:dns/promises")>();
+  return { ...actual, lookup: (host: string, opts: object) => host === "gw.example" ? lookup() : actual.lookup(host, opts as never) };
+});
 vi.mock("@/lib/settings", () => ({
   getAuxModelRef: vi.fn(async () => null),
   getMasterKey: vi.fn(async () => "k"),
@@ -32,11 +41,26 @@ vi.mock("@/lib/db", () => ({
 
 import { resolveUserModelInfo } from "../resolve";
 import { isAppError } from "@/lib/errors";
+import { UnsafeUrlError } from "@/lib/net/ssrf";
 
 describe("resolveUserModelInfo — a connection the URL guard refuses", () => {
   it("refuses with a ValidationError, not a bare error the route turns into a 500", async () => {
     const err = await resolveUserModelInfo("u1", "cfg-local:m1").catch((e: unknown) => e);
     expect(isAppError(err) && err.code).toBe("VALIDATION_ERROR");
     expect((err as Error).message).toMatch(/address isn't allowed/);
+  });
+
+  it("leaves a host that did not resolve a plain error, so a DNS blip stays retryable", async () => {
+    lookup.mockRejectedValueOnce(Object.assign(new Error("getaddrinfo EAI_AGAIN gw.example"), { code: "EAI_AGAIN" }));
+    const saved = row.baseUrl;
+    row.baseUrl = "https://gw.example/v1";
+    try {
+      const err = await resolveUserModelInfo("u1", "cfg-local:m1").catch((e: unknown) => e);
+      expect(lookup).toHaveBeenCalled();
+      expect(err).toBeInstanceOf(UnsafeUrlError);
+      expect(isAppError(err)).toBe(false);
+    } finally {
+      row.baseUrl = saved;
+    }
   });
 });
