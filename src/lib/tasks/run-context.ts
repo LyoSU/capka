@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats, messages, projects, users, attachedFolders } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
+import { ProjectDeletedError } from "@/lib/errors/friendly";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
 import { modelTakesImages, supportsImageToolResults } from "@/lib/providers/registry";
@@ -166,7 +167,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // of an old task, or a delete that raced the enqueue). Running now would apply the
   // gone project's egress and point at its wiped workspace — fail calmly instead.
   if (payload.projectId && !project) {
-    throw new Error("This project was deleted, so this chat can no longer run here. Start a new chat to continue.");
+    throw new ProjectDeletedError();
   }
 
   // What this project lets its agent be, clamped by the org ceiling AND by the

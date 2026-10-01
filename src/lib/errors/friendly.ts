@@ -31,6 +31,7 @@ export const LLM_ERROR_CATEGORIES = [
   "response_truncated",
   "interrupted",
   "interrupted_partial",
+  "project_deleted",
   "unknown",
 ] as const;
 
@@ -578,4 +579,24 @@ export function interruptedError(
   executedWork = false,
 ): FriendlyError {
   return producedWork(parts, executedWork) ? INTERRUPTED_PARTIAL_ERROR : INTERRUPTED_ERROR;
+}
+
+/**
+ * The chat's project was deleted before this task could run (a queued turn, or an
+ * approval continuation whose card waited past the delete). Nothing about it is
+ * transient: the project's workspace and settings are gone, so "try again" can never
+ * work — the way on is a new chat. Thrown by prepareRun as `ProjectDeletedError` and
+ * mapped by type, not by matching the message text.
+ */
+export const PROJECT_DELETED_ERROR: FriendlyError = {
+  category: "project_deleted",
+  userMessage: "This chat's project was deleted, so the chat can't continue here. Start a new chat to keep going.",
+  adminDetail: "The chat's project was deleted before this task ran; the task was not started.",
+};
+
+export class ProjectDeletedError extends Error {
+  constructor() {
+    super(PROJECT_DELETED_ERROR.adminDetail);
+    this.name = "ProjectDeletedError";
+  }
 }

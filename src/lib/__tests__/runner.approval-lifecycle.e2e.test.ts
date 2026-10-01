@@ -400,10 +400,12 @@ run("runAgentTask: an approval continuation always settles its row", () => {
 
     const row = await storedRow(chat);
     expect(row.status).toBe("failed");
-    expect(row.error).toBeTruthy();
+    // Its own category, not `unknown`: "try again" can never work once the project is gone.
+    expect(row.errorCategory).toBe("project_deleted");
+    expect(row.error).toMatch(/new chat/i);
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
     // Why it did not run is why the turn failed.
-    expect(resultFor(row.parts, "c2")[0].output?.reason).toBe(row.errorCategory);
+    expect(resultFor(row.parts, "c2")[0].output?.reason).toBe("project_deleted");
     expect(row.parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
     const { rows } = await pool.query(`SELECT id FROM messages WHERE chat_id=$1 ORDER BY id`, [chat]);
     expect(rows.map((r) => r.id)).toEqual([`${chat}-a1`, `${chat}-u1`]);

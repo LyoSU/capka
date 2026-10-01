@@ -38,7 +38,7 @@ import { take } from "@/lib/rate-limit";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, parseContextWindow, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, parseContextWindow, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR, PROJECT_DELETED_ERROR, ProjectDeletedError } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelCannotReason, rememberModelContextLength, rememberModelEfforts } from "@/lib/models/catalog";
@@ -2921,7 +2921,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const hadEffects = turnEffects.length > 0
       || ((deadlineHit || leaseLost)
           && await loadEffects(msgId).then((r) => r.length > 0, () => true));
-    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : isAbort ? undefined : classifyLLMError(e);
+    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : isAbort ? undefined
+      : e instanceof ProjectDeletedError ? PROJECT_DELETED_ERROR : classifyLLMError(e);
     // This catch swallows the error to finalize gracefully, so the worker's
     // crash log never fires — record it here instead. A clean cancel is info.
     tlog[status === "cancelled" ? "info" : "error"]("task ended", {
