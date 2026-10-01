@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, loadAncestor, LEASE_GONE } from "../bridge";
+import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, loadAncestor, pickAndCreate, LEASE_GONE } from "../bridge";
 import { conflictName, planSync, planDirs } from "../plan";
 import { chatTarget } from "@/lib/workspace-target";
 
@@ -360,5 +360,31 @@ describe("runSync guards each mutation individually", () => {
     expect(runSync).toContain("if (!put?.ok)");
     expect(runSync).toMatch(/if \(!put\?\.ok\) \{\s*\n\s*throw new Error/);
     expect(runSync).not.toContain("console.warn");
+  });
+});
+
+describe("pickAndCreate — a failure once the row exists still reads as attached", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Picks an empty folder; the POST answers `status`. Storing the handle — the first
+   *  step once the row exists — fails, as blocked site storage would make it. */
+  const pick = (status: number) => {
+    vi.stubGlobal("window", { showDirectoryPicker: async () => ({ kind: "directory", name: "docs", async *entries() {} }) });
+    vi.stubGlobal("indexedDB", { open: () => { throw new Error("storage blocked"); } });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Response.json(status === 200 ? { folder: { id: "f1", name: "docs" } } : { error: "nope" }, { status })
+        : Response.json({ folders: [] })));
+    return pickAndCreate(chatTarget("c1")).then(() => null, (e: unknown) => e);
+  };
+
+  it("says attached when the row was created, so the UI promises the retry the next turn runs", async () => {
+    expect(await pick(200)).toMatchObject({ attached: true, message: "storage blocked" });
+  });
+
+  it("does not when the row was never created, so the UI says it could not be added", async () => {
+    const e = await pick(500);
+    expect(e).toBeInstanceOf(Error);
+    expect(e).not.toHaveProperty("attached");
   });
 });

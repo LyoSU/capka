@@ -331,6 +331,20 @@ export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: str
   const listed = await fetch(`/api/folders?${targetQuery(target)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const rows = ((listed?.folders as (PcFolder & { kind?: string })[] | undefined) ?? []).filter((f) => f.kind !== "host");
 
+  // Once a row exists (adopted below, or created by the POST) a failure leaves the
+  // folder attached: it lists as a chip and the next turn's sync retries it. The error says so (`attached`), and
+  // the UI must not tell the person it could not be added — re-picking a folder this
+  // browser holds no handle for would attach it a second time under a free name.
+  const finish = async (row: PcFolder) => {
+    try {
+      await saveHandle(row.id, handle);
+      await sync(target, row, opts?.onProgress);
+      return row;
+    } catch (e) {
+      throw Object.assign(e instanceof Error ? e : new Error(String(e)), { attached: true });
+    }
+  };
+
   // Which row this directory already belongs to is decided by the HANDLE, not by the
   // name. The name was the first key until the sanitizer changed — transliteration
   // turned "My Reports" from "myreports" into "my-reports" — and every folder attached
@@ -341,9 +355,7 @@ export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: str
     const stored = await loadHandle(row.id).catch(() => undefined);
     if (!stored || !handle.isSameEntry) continue;
     if (!(await handle.isSameEntry(stored).catch(() => false))) continue;
-    await saveHandle(row.id, handle);
-    await sync(target, row, opts?.onProgress);
-    return row;
+    return finish(row);
   }
 
   // No stored handle claims this directory. The name is all that is left, and in a
@@ -364,9 +376,7 @@ export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: str
   });
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Could not attach the folder.");
   const { folder } = (await res.json()) as { folder: PcFolder };
-  await saveHandle(folder.id, handle);
-  await sync(target, folder, opts?.onProgress);
-  return folder;
+  return finish(folder);
 }
 
 /** After a reload the handle survives in IndexedDB but its permission may have

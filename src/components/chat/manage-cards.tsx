@@ -159,11 +159,12 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
       if (folder) onPicked?.(folder.name);
     } catch (e) {
       // The bridge's errors are English and technical — the same localized lines the
-      // composer menu shows for the same picker, never the raw message.
+      // composer menu shows for the same picker, never the raw message. A folder whose
+      // row exists is attached and the next turn's sync retries it.
       if (e instanceof Error && e.name === "FolderTooLargeError") {
         const m = e as Error & { count?: number; bytes?: number };
         setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      } else setErr(t("attachFailed"));
+      } else setErr(t(e instanceof Error && "attached" in e ? "syncFailed" : "attachFailed"));
     } finally {
       setBusy(false);
     }

@@ -8,7 +8,8 @@ import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
 /** "busy-elsewhere": every folder in this run was held by another window's sync, so
  *  nothing was reconciled — distinct from "idle", which claims a finished sync. */
 export type FolderSyncPhase = "idle" | "syncing" | "error" | "busy-elsewhere";
-export type ConnectResult = { ok: boolean; tooLarge?: { count: number; bytes: number } };
+/** `attached`: the folder's row exists although its first sync failed (see pickAndCreate). */
+export type ConnectResult = { ok: boolean; tooLarge?: { count: number; bytes: number }; attached?: boolean };
 /** Why a folder is disconnected: "prompt" — the handle is here and only the
  *  permission lapsed (one click re-grants it); "gone" — this browser has no handle at
  *  all (another browser, cleared site data), so the person has to show the folder again. */
@@ -176,7 +177,7 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
         return { ok: false, tooLarge: { count: m.count ?? 0, bytes: m.bytes ?? 0 } };
       }
       if (started) setPhase("error");
-      return { ok: false };
+      return { ok: false, attached: e instanceof Error && "attached" in e };
     } finally {
       setProgress(null);
     }

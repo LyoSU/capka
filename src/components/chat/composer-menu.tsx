@@ -49,10 +49,10 @@ export function ComposerMenu({
     setBusy(true); setErr("");
     const r = await folders.connect();
     if (!r.ok) {
-      // Not syncFailed's "will retry": a folder whose row was never created has
-      // nothing retrying it.
+      // A folder that did attach is listed in this menu with the status line's "will retry";
+      // only one that was never added needs a line of its own — and nothing retries it.
       if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, size: formatSize(r.tooLarge.bytes), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      else setErr(t("attachFailed"));
+      else if (!r.attached) setErr(t("attachFailed"));
     }
     setBusy(false);
     if (r.ok) setOpen(false);
