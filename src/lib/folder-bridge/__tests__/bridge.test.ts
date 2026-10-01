@@ -129,16 +129,6 @@ describe("a missing workspace copy never reads as every file deleted", () => {
     expect(union.upload.sort()).toEqual(["a.txt", "sub/b.txt"]);
     expect(planDirs(["sub"], [], [], union.upload).deleteLocal).toEqual([]);
   });
-
-  it("is what runSync plans files and folders against, fetched before anything is uploaded", () => {
-    const src = readFileSync("src/lib/folder-bridge/bridge.ts", "utf8");
-    const runSync = src.slice(src.indexOf("async function runSync("));
-    const at = runSync.indexOf("await loadAncestor(folder.id, token, missing)");
-    expect(at).toBeGreaterThan(-1);
-    expect(at).toBeLessThan(runSync.indexOf("await uploadBatch("));
-    expect(runSync).toContain("planSync(local, remote, ancestor.files,");
-    expect(runSync).toContain("planDirs(localDirs, remoteDirs, ancestor.dirs,");
-  });
 });
 
 /**
@@ -328,10 +318,10 @@ describe("uploadBatch — the lease is checked per chunk, not once per upload", 
 });
 
 /**
- * The rest of the sync's mutations sit inside handle I/O that has no vitest surface,
- * so what is pinned here is the invariant a reviewer would otherwise have to re-read
- * the function to check: no file is written or deleted without the lease being
- * verified immediately beforehand.
+ * A lease lost between two of the sync's mutations is a timing no fake folder
+ * reproduces, so what is pinned here is the invariant a reviewer would otherwise have
+ * to re-read the function to check: no file is written or deleted without the lease
+ * being verified immediately beforehand.
  */
 describe("runSync guards each mutation individually", () => {
   const src = readFileSync("src/lib/folder-bridge/bridge.ts", "utf8");

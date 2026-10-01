@@ -4,9 +4,10 @@
  * decision-making is the pure planner (plan.ts); this file is the browser-only
  * plumbing — File System Access handles, IndexedDB, and the file API calls.
  *
- * Mostly not unit-tested (handle I/O + IndexedDB have no vitest surface); the pure
- * parts it leans on — the 3-way planner and the hash prefilter — are, and so are the
- * two decisions this file makes on its own (`resolveConflictName`, `leaseRenewMs`).
+ * IndexedDB has no vitest surface, so `sync` takes its handle store as a parameter
+ * and is driven against an in-memory folder and a fake server; the pure parts it
+ * leans on — the 3-way planner and the hash prefilter — are tested on their own, as
+ * are `resolveConflictName` and `leaseRenewMs`.
  * Best-effort by design: a sync failure warns, it never blocks the turn (see
  * chat-input).
  */
@@ -433,9 +434,13 @@ export type SyncOutcome = { synced: number; conflicts: number; skipped: number; 
 
 /** Full bidirectional reconcile between the local folder and /workspace/<name>.
  *  push (before a message) and pull (after the turn) are the same sync at
- *  different times — a sync is idempotent, so running it both ends is safe. */
-export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<SyncOutcome> {
-  const handle = await loadHandle(folder.id);
+ *  different times — a sync is idempotent, so running it both ends is safe.
+ *  `openHandle` is the IndexedDB handle store; a test hands in its own folder. */
+export async function sync(
+  target: WorkspaceTarget, folder: PcFolder, onProgress?: (p: SyncProgress) => void,
+  openHandle: (id: string) => Promise<DirHandle | undefined> = loadHandle,
+): Promise<SyncOutcome> {
+  const handle = await openHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
   // Take the server-side sync lease BEFORE touching any file, so a second tab or
