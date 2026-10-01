@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
 import { canDownloadAll } from "./workspace-paths";
-import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
+import { FileThumb, FileTile, SandboxFileTile, recheckFiles, usePreview, type PreviewFile } from "./file-preview";
 import type { useFolderSync } from "./use-folder-sync";
 
 export type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string | null };
@@ -345,7 +345,10 @@ export function WorkspaceBrowser({
       const res = await fetch(`${filesApi}?${scopeQuery}path=${encodeURIComponent(pendingDelete.path)}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) toast.error(t("deleteFailed"));
-      else toast.success(t("deleted"));
+      else {
+        toast.success(t("deleted"));
+        recheckFiles(); // the transcript's chips for it should stop looking clickable
+      }
       fetchFiles();
     } catch {
       toast.error(t("deleteFailed"));

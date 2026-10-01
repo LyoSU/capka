@@ -40,7 +40,7 @@ import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { ChatSecrets } from "@/components/chat/chat-secrets";
 import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
-import { PreviewProvider } from "@/components/chat/file-preview";
+import { PreviewProvider, recheckFiles } from "@/components/chat/file-preview";
 import { ChatMenuButton } from "@/components/chat/chat-menu-button";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { SelectionActions } from "@/components/chat/selection-actions";
@@ -695,6 +695,16 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       ).length ?? 0),
     0,
   );
+
+  // A turn that ran tools may have deleted (or re-created) a file an earlier reply's
+  // chip names, and a chip that stays mounted would not ask again. A turn that ran
+  // none changed nothing, so it costs no request.
+  const toolsAtStart = useRef<number | null>(null);
+  useEffect(() => {
+    if (isLoading) { toolsAtStart.current ??= toolRevision; return; }
+    if (toolsAtStart.current !== null && toolsAtStart.current !== toolRevision) recheckFiles();
+    toolsAtStart.current = null;
+  }, [isLoading, toolRevision]);
 
   // A failed assistant message renders its own ErrorNotice — don't also show
   // the bottom banner for the same failure (the banner stays for load errors).

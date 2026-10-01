@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -68,6 +69,11 @@ function downloadUrl(f: PreviewFile) {
 // a stale negative would wrongly grey out a real file — so it is re-checked on
 // each mount. Cheap: only "gone" changes rendering; "ok" and "checking" look the
 // same (present and clickable).
+//
+// A file deleted (or re-created) while its chip stays mounted is caught by
+// recheckFiles, which the page calls when the workspace may have changed under it —
+// a turn that ran tools finished, the user deleted a file — so every mounted chip asks
+// once more. Chips naming the same file share one request.
 const PRESENT_TTL_MS = 30_000;
 const presentFiles = new Map<string, number>();
 const isPresent = (key: string) => {
@@ -84,6 +90,21 @@ const isPresent = (key: string) => {
 // A 776-line component had quietly opted out of code review.
 const fileStatusKey = (f: PreviewFile) => `${f.projectId ?? f.chatId}\0${f.path}`;
 
+const probes = new Map<string, Promise<FileStatus>>();
+let checks = 0;
+const checkListeners = new Set<() => void>();
+const onRecheck = (l: () => void) => { checkListeners.add(l); return () => { checkListeners.delete(l); }; };
+const checkGeneration = () => checks;
+
+/** The workspace may have changed: forget what is known present and have every
+ *  mounted file chip and tile ask again. */
+export function recheckFiles() {
+  presentFiles.clear();
+  probes.clear(); // one in flight may have started before the change
+  checks += 1;
+  for (const l of checkListeners) l();
+}
+
 /** Probe a workspace file's status. `enabled` gates the probe off while a reply
  *  is still streaming: a file the model is about to write shouldn't flash as
  *  "missing" before its write lands, so we judge existence only once the turn is
@@ -92,51 +113,53 @@ const fileStatusKey = (f: PreviewFile) => `${f.projectId ?? f.chatId}\0${f.path}
 export function useFileStatus(file: PreviewFile, enabled = true): "checking" | FileStatus {
   const key = fileStatusKey(file);
   const [status, setStatus] = useState<"checking" | FileStatus>(() => (isPresent(key) ? "ok" : "checking"));
+  const generation = useSyncExternalStore(onRecheck, checkGeneration, checkGeneration);
   // The key (chat+path) drives the effect — not `file`, which is a fresh object
-  // every render — so the probe fires once per file, not once per render.
+  // every render — so the probe fires once per file, not once per render. A recheck
+  // keeps the verdict on screen until the new one lands.
   useEffect(() => {
     if (!enabled || isPresent(key)) return;
     let alive = true;
-    (async () => {
-      let result: FileStatus;
-      try {
-        const res = await fetch(inlineUrl(file));
-        await res.body?.cancel().catch(() => {});
-        result = fileStatusFromHttp(res.status);
-      } catch {
-        result = "temporary"; // network blip — retryable, not a hard miss
-      }
-      if (result === "ok") presentFiles.set(key, Date.now());
-      if (alive) setStatus(result);
-    })();
+    void probeFile(file).then((result) => { if (alive) setStatus(result); });
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `file` is derivable from `key`; depending on it would re-fire every render
-  }, [key, enabled]);
+  }, [key, enabled, generation]);
   return enabled ? status : "ok";
 }
 
 /**
- * Is this file still there? For restoring a viewer that was open when the tab was
- * closed — a workspace is scratch space and may have been cleaned out since.
+ * Is this file still there? The status hook's own probe, and for restoring a viewer
+ * that was open when the tab was closed — a workspace is scratch space and may have
+ * been cleaned out since.
  *
  * Returns the same verdict every other surface reads, because the difference
  * matters here: `gone` means forget the stored path, while `temporary` means the
  * controller is momentarily unreachable and the path is still good. A positive
- * answer is remembered the way the status hook remembers one, so the viewer that
- * opens next does not ask a second time.
+ * answer is remembered, so the viewer that opens next does not ask a second time,
+ * and callers asking about one file at once share one request.
  */
-export async function probeFile(file: PreviewFile): Promise<FileStatus> {
-  try {
-    const res = await fetch(inlineUrl(file));
-    await res.body?.cancel().catch(() => {});
-    const verdict = fileStatusFromHttp(res.status);
-    if (verdict === "ok") presentFiles.set(fileStatusKey(file), Date.now());
-    return verdict;
-  } catch {
-    return "temporary";
+export function probeFile(file: PreviewFile): Promise<FileStatus> {
+  const key = fileStatusKey(file);
+  let probe = probes.get(key);
+  if (!probe) {
+    probe = (async (): Promise<FileStatus> => {
+      try {
+        const res = await fetch(inlineUrl(file));
+        await res.body?.cancel().catch(() => {});
+        const verdict = fileStatusFromHttp(res.status);
+        if (verdict === "ok") presentFiles.set(key, Date.now());
+        return verdict;
+      } catch {
+        return "temporary"; // network blip — retryable, not a hard miss
+      }
+    })();
+    const own = probe;
+    probes.set(key, own);
+    void own.finally(() => { if (probes.get(key) === own) probes.delete(key); });
   }
+  return probe;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
