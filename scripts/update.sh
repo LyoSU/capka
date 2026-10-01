@@ -4,9 +4,9 @@
 #
 #   cd /opt/capka && sudo ./scripts/update.sh
 #
-# It fetches the newest release tag, checks it out, then hands off to up.sh which
-# pulls the matching prebuilt images and recreates the stack. Your .env and data
-# are kept.
+# It fetches the newest release tag of the installed major, checks it out, then
+# hands off to up.sh which pulls the matching prebuilt images and recreates the
+# stack. Your .env and data are kept.
 #
 # CAPKA_BRANCH picks a different ref: `stable` tracks the newest release as a
 # branch (what a Coolify-style pull deployment should follow), a `vX.Y.Z` tag
@@ -44,7 +44,7 @@ if [ -z "${CAPKA_BRANCH:-}" ]; then
     LATEST="$(printf '%s\n' "$RELEASES" | grep -E "^v${CURRENT_MAJOR}\." | tail -n1 || true)"
     if [ -n "$NEWEST" ] && [ "$NEWEST" != "$LATEST" ]; then
       echo "Note: $NEWEST is a new major version. Staying on v$CURRENT_MAJOR.x; to move, read its release notes, then run:" >&2
-      echo "  CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh" >&2
+      echo "  sudo CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh" >&2
     fi
   fi
   CAPKA_BRANCH="${LATEST:-master}"
@@ -91,7 +91,7 @@ case "$TARGET" in
   v*-*)
     if [ "${CAPKA_ALLOW_PRERELEASE:-}" != "1" ]; then
       echo "Refusing to update to prerelease $TARGET: it is a test build, not a release." >&2
-      echo "To run it anyway:  CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=$TARGET ./scripts/update.sh" >&2
+      echo "To run it anyway:  sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=$TARGET ./scripts/update.sh" >&2
       exit 1
     fi
     ;;
@@ -100,7 +100,7 @@ TARGET_MAJOR="$(major "${TARGET%%-*}")"
 if [ -n "$CURRENT_MAJOR" ] && [ -n "$TARGET_MAJOR" ] && [ "$TARGET_MAJOR" -gt "$CURRENT_MAJOR" ] \
    && [ "${CAPKA_ALLOW_MAJOR:-}" != "1" ]; then
   echo "Refusing to update from v$CURRENT_MAJOR.x to $TARGET: a new major version can need manual steps." >&2
-  echo "Read its release notes, then run:  CAPKA_ALLOW_MAJOR=1 CAPKA_BRANCH=$CAPKA_BRANCH ./scripts/update.sh" >&2
+  echo "Read its release notes, then run:  sudo CAPKA_ALLOW_MAJOR=1 CAPKA_BRANCH=$CAPKA_BRANCH ./scripts/update.sh" >&2
   exit 1
 fi
 
