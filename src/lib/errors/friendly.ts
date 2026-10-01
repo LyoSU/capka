@@ -585,13 +585,15 @@ export function interruptedError(
  * The chat's project was deleted before this task could run (a queued turn, or an
  * approval continuation whose card waited past the delete). Retrying the same task
  * would only hit the same gone project, but the chat itself survives as a plain chat
- * (projectId is SET NULL), so the copy says it can go on here without the project's
- * files. Thrown by prepareRun as `ProjectDeletedError` and mapped by type, not by
- * matching the message text.
+ * (projectId is SET NULL) once the deletion finishes, so the copy says it can go on
+ * here then, without the project's files. Until then /api/chat refuses a send with
+ * PROJECT_DELETING, which is why the copy does not promise it at once. Thrown by
+ * prepareRun as `ProjectDeletedError` and mapped by type, not by matching the
+ * message text.
  */
 export const PROJECT_DELETED_ERROR: FriendlyError = {
   category: "project_deleted",
-  userMessage: "This chat's project was deleted, so this step didn't run. You can keep going here without the project's files, or start a new chat.",
+  userMessage: "This chat's project was deleted, so this step didn't run. Once the deletion finishes you can keep going here without the project's files, or start a new chat.",
   adminDetail: "The chat's project was deleted before this task ran; the task was not started.",
 };
 
