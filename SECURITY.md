@@ -302,29 +302,45 @@ Telegram sign-in creates users with the predictable placeholder address
 on every sign-up path, so someone may have registered one before its owner signed in
 with Telegram; later releases refuse it everywhere but leave an existing row alone.
 If this install ever ran v0.42.0 or earlier, list the users on those addresses who
-sign in some other way (read-only; run it in the install directory):
+sign in, or are linked to the bot, as anyone but the Telegram id in their address
+(read-only; run it in the install directory):
 
 ```bash
 docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
 SELECT u.id, u.email, u.role, u.status, u.created_at,
-       (SELECT string_agg(a.provider_id, ', ') FROM account a WHERE a.user_id = u.id) AS sign_in
+       (SELECT string_agg(a.provider_id || ':' || a.account_id, ', ')
+          FROM account a WHERE a.user_id = u.id) AS sign_in,
+       (SELECT string_agg(l.telegram_user_id::text, ', ')
+          FROM telegram_links l WHERE l.user_id = u.id) AS bot_link
 FROM "user" u
 WHERE lower(btrim(u.email)) LIKE '%@telegram.local'
-  AND EXISTS (SELECT 1 FROM account a WHERE a.user_id = u.id AND a.provider_id <> 'telegram');
+  AND (EXISTS (SELECT 1 FROM account a WHERE a.user_id = u.id
+                 AND NOT (a.provider_id = 'telegram'
+                          AND 'tg' || a.account_id || '@telegram.local' = lower(btrim(u.email))))
+    OR EXISTS (SELECT 1 FROM telegram_links l WHERE l.user_id = u.id
+                 AND 'tg' || l.telegram_user_id || '@telegram.local' <> lower(btrim(u.email))));
 SQL
 ```
 
-No rows is the expected result: a Telegram user's only sign-in is `telegram`. A row
-without `telegram` in `sign_in` is a squat: in Settings → People (`/settings/users`)
-suspend that user, which signs them out everywhere, then remove them.
+No rows is the expected result: a Telegram user's only sign-in is `telegram:<n>`, where
+`<n>` is the number in their own `tg<n>@telegram.local` address. Only that entry
+proves the row belongs to the address's owner. A `telegram:` entry with any other
+number is someone else's Telegram linked through a link code, not the owner.
 
-A row whose `sign_in` includes `telegram` is the real Telegram user's account, with
-their chats, that the squatter can also sign in to; removing it deletes their data.
-Suspend it, delete only the other sign-ins, then reactivate it:
+A row without `telegram:<n>` for its own `<n>` in `sign_in` is a squat: in Settings →
+People (`/settings/users`) suspend that user, which signs them out everywhere, then
+remove them.
+
+A row with `telegram:<n>` for its own `<n>` is the real Telegram user's account, with
+their chats, that someone else can also sign in to; removing it deletes their data.
+Suspend it, delete every other sign-in and bot link, then reactivate it. If that
+removes their own bot link, their next message to the bot restores it:
 
 ```bash
-docker compose exec -T postgres psql -X -U Capka -d Capka \
-  -c "DELETE FROM account WHERE user_id = '<id>' AND provider_id <> 'telegram'"
+docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
+DELETE FROM account WHERE user_id = '<id>' AND NOT (provider_id = 'telegram' AND account_id = '<n>');
+DELETE FROM telegram_links WHERE user_id = '<id>' AND telegram_user_id <> <n>;
+SQL
 ```
 
 ## Known limitations & residual risks
