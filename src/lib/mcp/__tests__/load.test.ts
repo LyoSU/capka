@@ -28,7 +28,8 @@ vi.mock("../adapt", () => ({
     ({ __caller: client, __server: server, __tool: tool.name, __needsApproval: needsApproval }),
   mcpToolName: (s: string, t: string) => `mcp__${s}__${t}`,
 }));
-vi.mock("../connect-errors", () => ({
+vi.mock("../connect-errors", async (importOriginal) => ({
+  AUTH_FAILURE_RE: (await importOriginal<typeof import("../connect-errors")>()).AUTH_FAILURE_RE,
   recordConnectError: (...a: unknown[]) => recordConnectError(...a),
   clearConnectError: vi.fn(),
   recentlyFailed: vi.fn(() => false),
@@ -179,6 +180,18 @@ describe("loadMcpTools — remote connectors are lazy too", () => {
     expect(connectMcpServer).toHaveBeenCalledTimes(1);
     expect(callTool).toHaveBeenCalledTimes(1);
     expect(ensureSession).not.toHaveBeenCalled();
+  });
+
+  it("records a call refused over the service's sign-in as an auth failure", async () => {
+    setCachedTools("api", [{ name: "q", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    const raw = "Upstream refresh failed: invalid_request: Redirection is not available on /oauth/token endpoint.";
+    const callTool = vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: raw }] });
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool } });
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    const caller = (res.tools["mcp__api__q"] as unknown as { __caller: { callTool: (...a: unknown[]) => Promise<unknown> } }).__caller;
+    await caller.callTool({ name: "q", arguments: {} }, undefined, {});
+    expect(recordConnectError).toHaveBeenCalledWith("u1", expect.anything(), raw, true);
   });
 });
 

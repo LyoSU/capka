@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- A turn whose model ran tools and then ended without writing a reply (seen with Gemini) is continued once and, if still empty, ends as failed with a `no_reply`/`no_reply_partial` message instead of looking finished.
+- A connector whose tool calls fail on the service's own sign-in (e.g. Tavily's "Upstream refresh failed") now shows "Token rejected" with a Sign in button in Connectors, and the step says to sign in again instead of showing the raw provider error.
+- The tool-search step is labeled "Looked for a suitable tool" (localized) instead of an untranslated "Find tool".
+
 ## [0.43.0] - 2026-10-01
 
 ### Added

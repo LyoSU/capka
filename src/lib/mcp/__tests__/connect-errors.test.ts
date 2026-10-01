@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { recordConnectError, clearConnectError, getConnectError, recentlyFailed } from "../connect-errors";
+import { recordConnectError, clearConnectError, getConnectError, recentlyFailed, getAuthFailure, AUTH_FAILURE_RE } from "../connect-errors";
 
 const U = "user-1";
 
@@ -65,5 +65,23 @@ describe("retention", () => {
     recordConnectError(U, "retention-other", "boom");
 
     expect(recentlyFailed(U, "retention-recent", TTL_MS)).toBe(true);
+  });
+});
+
+describe("auth failures recorded from a tool call", () => {
+  it("recognizes the service-side refresh failure Tavily returned", () => {
+    expect(AUTH_FAILURE_RE.test("Upstream refresh failed: invalid_request: Redirection is not available on /oauth/token endpoint.")).toBe(true);
+    expect(AUTH_FAILURE_RE.test("invalid_grant: refresh token revoked")).toBe(true);
+    expect(AUTH_FAILURE_RE.test("rate limited, try later")).toBe(false);
+    expect(AUTH_FAILURE_RE.test("No results found for query")).toBe(false);
+  });
+
+  it("is reported only when recorded as auth, and a successful connect clears it", () => {
+    recordConnectError(U, "plain", "ECONNREFUSED");
+    expect(getAuthFailure(U, "plain")).toBeNull();
+    recordConnectError(U, "auth", "Upstream refresh failed", true);
+    expect(getAuthFailure(U, "auth")).toBe("Upstream refresh failed");
+    clearConnectError(U, "auth");
+    expect(getAuthFailure(U, "auth")).toBeNull();
   });
 });

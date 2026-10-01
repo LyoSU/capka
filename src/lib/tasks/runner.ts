@@ -38,7 +38,7 @@ import { take } from "@/lib/rate-limit";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, parseContextWindow, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR, PROJECT_DELETED_ERROR, ProjectDeletedError } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, parseContextWindow, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR, noReplyError, PROJECT_DELETED_ERROR, ProjectDeletedError } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelCannotReason, rememberModelContextLength, rememberModelEfforts } from "@/lib/models/catalog";
@@ -2236,6 +2236,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         model: modelId, provider, steps: stepCount,
       });
     }
+    // The model ran its tools and then ended cleanly without writing a single word of
+    // reply (seen with Gemini after a search step). The retry above does not catch it —
+    // a tool call counts as content there — so the turn used to persist as "completed":
+    // steps, no answer, no explanation. Continue once, as a stall recovery would; if
+    // there is still nothing, fail with a message that says so. Any text at all counts
+    // as a reply, so an answer followed by a trailing memory write is not flagged. Read
+    // off `firstTextAt` (this run's, reset with a discarded attempt), not `parts`: a
+    // continuation's text merges into the loaded half's last text part. A step-cap stop
+    // ("tool-calls") is not continued: that would grant a second full budget of steps.
+    let noReply = false;
+    if (!ac.signal.aborted && !streamError && !stalledOut && !truncated && !awaitingApproval && !awaitingAnswer && firstTextAt == null) {
+      tlog.warn("model ended the turn without a reply", { model: modelId, provider, finishReason: lastFinishReason, steps: stepCount });
+      if (lastFinishReason !== "tool-calls" && await resume()) {
+        try {
+          await consume();
+        } catch (e) {
+          streamError = errMsg(e);
+        }
+      }
+      noReply = !ac.signal.aborted && !streamError && !awaitingApproval && !awaitingAnswer && firstTextAt == null;
+    }
     // `parts` is not the whole story: discardPartial drops an attempt's parts when it
     // is thrown away and keeps the executed-call ledger, so a failure right after a
     // restart has writes standing with nothing in parts to show for them.
@@ -2250,7 +2271,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const hadEffects = turnEffects.length > 0
       || ((deadlineHit || leaseLost || stalledOut)
           && await loadEffects(msgId).then((r) => r.length > 0, () => true));
-    const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : truncated ? "failed" : "completed";
+    const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : (truncated || noReply) ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
     // A stall-out gets its own category (distinct from a clean timeout) so the
@@ -2258,7 +2279,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and a two-way split within it, because a stall that hit mid-work must not
     // advise "try again": regenerating re-runs every tool and rewrites what this
     // turn already wrote. `parts` is what the turn is keeping, so it decides.
-    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : stalledOut ? providerUnresponsiveError(parts, hadEffects) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
+    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : stalledOut ? providerUnresponsiveError(parts, hadEffects) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : noReply ? noReplyError(parts, hadEffects, lastFinishReason) : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage

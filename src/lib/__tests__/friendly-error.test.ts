@@ -4,6 +4,7 @@ import {
   isVisionUnsupportedError,
   PROVIDER_UNRESPONSIVE_ERROR,
   RESPONSE_TRUNCATED_ERROR,
+  noReplyError,
   LLM_ERROR_CATEGORIES,
 } from "@/lib/errors/friendly";
 import en from "../../../messages/en.json";
@@ -136,5 +137,21 @@ describe("isVisionUnsupportedError", () => {
       "",
     ];
     for (const m of misses) expect(isVisionUnsupportedError(m), m).toBe(false);
+  });
+});
+
+describe("noReplyError", () => {
+  it("after tools ran, says the work is kept and asks to continue, not to retry", () => {
+    const e = noReplyError([{ type: "tool-result" }], false, "stop");
+    expect(e.category).toBe("no_reply_partial");
+    expect(e.userMessage).toMatch(/continue/i);
+    expect(e.userMessage).not.toMatch(/try again|finish reason|token/i);
+    expect(e.adminDetail).toMatch(/finish reason "stop"/);
+  });
+
+  it("with nothing done, suggests a retry or another model", () => {
+    const e = noReplyError([{ type: "reasoning", text: "thinking" }], false, undefined);
+    expect(e.category).toBe("no_reply");
+    expect(e.userMessage).toMatch(/try again/i);
   });
 });

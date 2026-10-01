@@ -4,7 +4,7 @@ import { mcpServers } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp } from "./client";
-import { getConnectError } from "./connect-errors";
+import { getConnectError, getAuthFailure } from "./connect-errors";
 import { setCachedTools } from "./tool-cache";
 import { McpOAuthProvider } from "./oauth/provider";
 import { hasUserTokens } from "./oauth/store";
@@ -150,6 +150,10 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   // connector won't authorize instead of a silent "needs sign-in". Any transport;
   // a healthy probe always wins (a recorded error is only the last FAILED attempt).
   for (const r of rows) {
+    // …except a server that dials fine but refused a recent CALL over its sign-in:
+    // "Connected" there is exactly the wrong reading (see AUTH_FAILURE_RE).
+    const authFailure = out[r.id]?.status === "ok" ? getAuthFailure(userId, r.id) : null;
+    if (authFailure) { out[r.id] = { status: "unauthorized", detail: authFailure }; continue; }
     if (out[r.id]?.status === "ok") continue;
     const detail = getConnectError(userId, r.id);
     if (detail) out[r.id] = { ...(out[r.id] ?? { status: "unreachable" }), detail };

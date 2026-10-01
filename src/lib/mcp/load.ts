@@ -5,7 +5,7 @@ import { withChildSpan } from "@/lib/telemetry";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
-import { recordConnectError, clearConnectError, recentlyFailed } from "./connect-errors";
+import { recordConnectError, clearConnectError, recentlyFailed, AUTH_FAILURE_RE } from "./connect-errors";
 import { getCachedTools, setCachedTools, cachedToolsAreStale } from "./tool-cache";
 import { hasUserTokens } from "./oauth/store";
 import { McpOAuthProvider } from "./oauth/provider";
@@ -141,7 +141,15 @@ export async function loadMcpTools(opts: {
       params: { name: string; arguments: Record<string, unknown> },
       resultSchema?: undefined,
       options?: { signal?: AbortSignal },
-    ) => (await connect(c)).client.callTool(params, resultSchema, options),
+    ) => {
+      const result = await (await connect(c)).client.callTool(params, resultSchema, options);
+      // The server accepted the connection but refused the call over its sign-in —
+      // remember it so the connectors list stops calling this connector healthy.
+      const r = result as { isError?: boolean; content?: Array<{ text?: string }> };
+      const text = r.isError ? (r.content ?? []).map((b) => b.text ?? "").join("\n") : "";
+      if (AUTH_FAILURE_RE.test(text)) recordConnectError(opts.userId, c.id, text, true);
+      return result;
+    },
   });
 
   /** Read a remote server's schemas and hang up. No sandbox, no elicitation (a

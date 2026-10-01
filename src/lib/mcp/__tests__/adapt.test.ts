@@ -115,6 +115,15 @@ describe("adaptMcpTool", () => {
     await expect(t.execute!({}, opts as never)).rejects.toThrow("rate limited");
   });
 
+  it("replaces a service-side sign-in failure with a plain sign-in-again sentence", async () => {
+    const raw = "Upstream refresh failed: invalid_request: Redirection is not available on /oauth/token endpoint.";
+    const client = { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: raw }] }) };
+    const t = adaptMcpTool(client as never, "Tavily", { name: "search" });
+    const err = await Promise.resolve(t.execute!({}, opts as never)).then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/Tavily needs to be signed in again/);
+    expect(err?.message).not.toMatch(/invalid_request|oauth\/token/);
+  });
+
   it("maps result content to model output parts (text + media)", async () => {
     const client = { callTool: vi.fn() };
     const t = adaptMcpTool(client as never, "x", { name: "y" });

@@ -312,6 +312,10 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
       return { iconKey: "bookmark", label: t("memoryRead"), activeLabel: t("readingMemory"), category: "search" };
     case "memory_forget":
       return { iconKey: "bookmark", label: t("memoryRemoval"), activeLabel: t("removingFromMemory"), category: "other" };
+    // Tool search over deferred connectors (mcp/tool-search.ts). Without its own case the
+    // fallback below title-cased the raw name into an English "Find tool" in every locale.
+    case "find_tool":
+      return { iconKey: "search", label: t("lookedForTool"), activeLabel: t("lookingForTool"), category: "other" };
   }
 
   // The one object that stays INSIDE the sentence. Every other step puts the

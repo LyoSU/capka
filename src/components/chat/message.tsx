@@ -82,6 +82,7 @@ const LOCALIZED_ERROR_CATEGORIES = new Set<string>(LLM_ERROR_CATEGORIES);
 const PARTIAL_ERROR_CATEGORIES = new Set<string>([
   "provider_unresponsive_partial",
   "response_truncated",
+  "no_reply_partial",
   "timed_out_partial",
   "interrupted_partial",
 ] satisfies LLMErrorCategory[]);

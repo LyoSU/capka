@@ -9,14 +9,14 @@
  * Keying on the bare server id would let one user's sign-in failure back off the
  * connector for — and leak its error detail to — every other user.
  */
-const errors = new Map<string, { detail: string; at: number }>();
+const errors = new Map<string, { detail: string; at: number; auth?: boolean }>();
 const TTL_MS = 10 * 60_000;
 
 function key(userId: string, id: string): string {
   return `${userId}:${id}`;
 }
 
-export function recordConnectError(userId: string, id: string | undefined, detail: string): void {
+export function recordConnectError(userId: string, id: string | undefined, detail: string, auth = false): void {
   if (!id) return;
   const now = Date.now();
   // Bound the map on the way in. An entry for a connector that was edited away or
@@ -29,7 +29,7 @@ export function recordConnectError(userId: string, id: string | undefined, detai
   // CONNECT_BACKOFF_MS is exactly TTL_MS. A longer window would need this threshold
   // raised to match, or the backoff it asks for would be silently cut short.
   for (const [k, e] of errors) if (now - e.at > TTL_MS) errors.delete(k);
-  errors.set(key(userId, id), { detail: detail.slice(0, 400), at: now });
+  errors.set(key(userId, id), { detail: detail.slice(0, 400), at: now, ...(auth ? { auth } : {}) });
 }
 
 export function clearConnectError(userId: string, id: string | undefined): void {
@@ -59,4 +59,22 @@ export function getConnectError(userId: string, id: string): string | null {
 export function recentlyFailed(userId: string, id: string, withinMs: number, now: () => number = Date.now): boolean {
   const e = errors.get(key(userId, id));
   return !!e && now() - e.at < withinMs;
+}
+
+/**
+ * A server that connects fine but fails its tool CALLS on sign-in grounds — Tavily's
+ * remote server answered every search with "Upstream refresh failed: invalid_request …"
+ * once its own upstream session expired, while `initialize` and `tools/list` kept
+ * succeeding. The health probe only dials, so it reported "Connected" for a connector
+ * that could not do anything. The call path records such a failure with `auth` set, and
+ * the health endpoint lets it override an "ok" probe until a fresh connect or sign-in
+ * clears it. Matched on the error TEXT because that is all an `isError` result carries.
+ */
+export const AUTH_FAILURE_RE =
+  /\b(refresh(ing)? (the )?(access )?token failed|refresh failed|invalid_grant|(access|refresh) token (is |has )?(expired|invalid|revoked)|token has expired|re-?authenticate|re-?authori[sz]e)\b/i;
+
+/** The recorded auth failure for this user's connector, if one is still current. */
+export function getAuthFailure(userId: string, id: string): string | null {
+  const e = errors.get(key(userId, id));
+  return e?.auth && Date.now() - e.at <= TTL_MS ? e.detail : null;
 }

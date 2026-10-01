@@ -14,7 +14,8 @@ const { connectMcpServer, disconnectMcp, rows } = vi.hoisted(() => ({
 vi.mock("../client", () => ({ connectMcpServer, disconnectMcp }));
 vi.mock("../oauth/store", () => ({ hasUserTokens: vi.fn(async () => true) }));
 vi.mock("../oauth/provider", () => ({ McpOAuthProvider: class {} }));
-vi.mock("../connect-errors", () => ({ getConnectError: vi.fn(() => undefined) }));
+const { getAuthFailure } = vi.hoisted(() => ({ getAuthFailure: vi.fn((): string | null => null) }));
+vi.mock("../connect-errors", () => ({ getConnectError: vi.fn(() => undefined), getAuthFailure }));
 vi.mock("@/lib/db", () => ({ db: { select: () => ({ from: () => ({ where: () => Promise.resolve(rows) }) }) } }));
 vi.mock("@/lib/crypto", () => ({ decrypt: (s: string) => s }));
 vi.mock("@/lib/settings", () => ({
@@ -70,5 +71,18 @@ describe("probeUserServers cache", () => {
     expect(connectMcpServer).toHaveBeenCalledTimes(1); // same user: cached
     await probeUserServers("bob");
     expect(connectMcpServer).toHaveBeenCalledTimes(2); // other user: own probe
+  });
+});
+
+describe("probeUserServers: a server that dials fine but refuses calls over its sign-in", () => {
+  it("reports the recorded auth failure instead of a healthy probe", async () => {
+    rows.push({
+      id: "tavily", name: "tavily", url: "https://mcp.example/mcp", transport: "http",
+      authKind: "oauth", secrets: null, updatedAt: new Date(2),
+    });
+    getAuthFailure.mockReturnValue("Upstream refresh failed: invalid_request");
+    const out = await probeUserServers("carol");
+    expect(out.tavily).toEqual({ status: "unauthorized", detail: "Upstream refresh failed: invalid_request" });
+    getAuthFailure.mockReturnValue(null);
   });
 });

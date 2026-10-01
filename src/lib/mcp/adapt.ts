@@ -3,6 +3,7 @@ import { clampOutput, MAX_TOOL_OUTPUT_CHARS } from "@/lib/tool-output";
 import { spillToWorkspace } from "./spill";
 import { extractSearchRecords, sourcesModelText, type NumberedSource } from "./search-normalize";
 import { nonNegInt, posInt } from "@/lib/config/env";
+import { AUTH_FAILURE_RE } from "./connect-errors";
 
 /** Ceiling for a single MCP media/blob block, measured on the base64 STRING
  *  length — that is what lands in Postgres and re-enters the model context every
@@ -220,7 +221,16 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
         undefined,
         { signal: abortSignal },
       )) as McpCallResult;
-      if (result.isError) throw new Error(textOf(result) || `${serverName} ${mcpTool.name} failed`);
+      if (result.isError) {
+        const text = textOf(result);
+        // A sign-in failure on the SERVICE's side ("Upstream refresh failed: invalid_request
+        // …") is shown on the step and relayed by the model; the raw provider text means
+        // nothing to the person reading it, and the one useful move is to sign in again.
+        if (AUTH_FAILURE_RE.test(text)) {
+          throw new Error(`${serverName} needs to be signed in again: its access to the service has expired. Open Settings → Connectors and sign in to ${serverName} again, then retry.`);
+        }
+        throw new Error(text || `${serverName} ${mcpTool.name} failed`);
+      }
       // Extract from the INTACT result, before bounding: bounding clamps an
       // oversized text block head+tail with a marker in between, and a clamped
       // JSON body no longer parses — which silently disabled citations on

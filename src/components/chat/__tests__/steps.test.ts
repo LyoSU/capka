@@ -441,3 +441,11 @@ describe("describeInvocation — how a field reads", () => {
     expect(inv.json).toContain(long);
   });
 });
+
+describe("describeStep — tool search", () => {
+  it("find_tool gets its own localized label, not the title-cased raw name", () => {
+    const d = describeStep(t, "find_tool", { query: "web search" });
+    expect(d.label).toBe("lookedForTool");
+    expect(d.activeLabel).toBe("lookingForTool");
+  });
+});

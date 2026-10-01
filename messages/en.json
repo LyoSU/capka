@@ -51,6 +51,8 @@
       "provider_unresponsive": "The model never responded. Please try again, or switch to a different model.",
       "provider_unresponsive_partial": "The reply broke off part-way — the model went quiet. What it already did is kept; ask it to continue.",
       "response_truncated": "The reply reached the model's length limit and stops part-way. What's above is kept — ask it to continue.",
+      "no_reply": "The model finished without writing a reply. Please try again — if it keeps happening, switch to a different model.",
+      "no_reply_partial": "The assistant did the steps above but stopped without writing a reply. What it did is kept — ask it to continue.",
       "interrupted": "The task was interrupted before it finished. Please try again.",
       "interrupted_partial": "This task was interrupted part-way. What's above is kept — ask it to continue.",
       "project_deleted": "This chat's project was deleted, so this step didn't run. Once the deletion finishes you can keep going here without the project's files, or start a new chat.",
@@ -159,7 +161,9 @@
     "checkingSettings": "Checking settings…",
     "reviewedNamed": "Reviewed {name}",
     "checkedConnector": "Checked a connector",
-    "checkingConnector": "Checking a connector…"
+    "checkingConnector": "Checking a connector…",
+    "lookedForTool": "Looked for a suitable tool",
+    "lookingForTool": "Looking for a suitable tool…"
   },
   "chat": {
     "untitled": "New chat",

@@ -29,6 +29,8 @@ export const LLM_ERROR_CATEGORIES = [
   "provider_unresponsive",
   "provider_unresponsive_partial",
   "response_truncated",
+  "no_reply",
+  "no_reply_partial",
   "interrupted",
   "interrupted_partial",
   "project_deleted",
@@ -547,6 +549,29 @@ export const RESPONSE_TRUNCATED_ERROR: FriendlyError = {
   adminDetail:
     "Provider finished with reason \"length\": the model reached its maximum output tokens. Raise the model's output limit (or the gateway's default max_tokens) if replies keep being cut off.",
 };
+
+/**
+ * The provider ended the turn cleanly — no error, no stall, no length cut — yet the
+ * model never wrote a word of reply, even after one automatic "continue". Seen with
+ * Gemini after a tool step: it finishes with an empty message. Without this the turn
+ * persisted as "completed" and the user got a reply bubble with steps and no answer,
+ * which reads as the product silently doing nothing. Split like the stall: when tools
+ * already ran, the move is to continue, not to regenerate and run them again.
+ */
+export function noReplyError(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+  executedWork: boolean,
+  finishReason: string | undefined,
+): FriendlyError {
+  const work = producedWork(parts, executedWork);
+  return {
+    category: work ? "no_reply_partial" : "no_reply",
+    userMessage: work
+      ? "The assistant did the steps above but stopped without writing a reply. What it did is kept — ask it to continue."
+      : "The model finished without writing a reply. Please try again — if it keeps happening, switch to a different model.",
+    adminDetail: `Provider ended the turn (finish reason "${finishReason ?? "unknown"}") with no answer text${work ? " after its tool calls" : ""}; an automatic continuation produced none either.`,
+  };
+}
 
 /**
  * The worker running this turn lost its lease — the server restarted, or the
