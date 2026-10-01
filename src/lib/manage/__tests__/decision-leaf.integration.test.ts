@@ -4,8 +4,9 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({ isShared: false, modelId: "m", provider: "p", configId: "cfg" }),
 }));
+const budget = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@/lib/billing/limits", () => ({
-  reserveBudget: async () => ({ allowed: true, window: null, reason: null }),
+  reserveBudget: async () => ({ allowed: budget.allowed, window: "m1", reason: null }),
   releaseHold: async () => {},
 }));
 
@@ -48,6 +49,7 @@ run("a decision lands only on the chat's leaf", () => {
     await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [C, U]);
   });
   beforeEach(async () => {
+    budget.allowed = true;
     await pool.query(`DELETE FROM tasks WHERE chat_id = $1`, [C]);
     await pool.query(`UPDATE chats SET active_leaf_id = NULL WHERE id = $1`, [C]);
     await pool.query(`DELETE FROM messages WHERE chat_id = $1`, [C]);
@@ -64,6 +66,15 @@ run("a decision lands only on the chat's leaf", () => {
       expect(await decide[kind]()).toBe("gone");
       expect(await stored()).toEqual(waiting[kind]);
       expect(await resumes()).toEqual([]);
+    });
+
+    it(`${kind}: a moved-past row reads as gone even when the user is over budget, a live one does not`, async () => {
+      budget.allowed = false;
+      await seed(kind, "dl-u2");
+      expect(await decide[kind]()).toBe("gone");
+      await pool.query(`UPDATE chats SET active_leaf_id = 'dl-a1' WHERE id = $1`, [C]);
+      await expect(decide[kind]()).rejects.toThrow();
+      expect(await stored()).toEqual(waiting[kind]);
     });
 
     it(`${kind}: still resumes the row that is the chat's leaf`, async () => {

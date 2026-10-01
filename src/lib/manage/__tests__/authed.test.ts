@@ -68,7 +68,7 @@ import { toUIMessages } from "@/lib/chat/presenter";
 import { approveManageForUser } from "../authed";
 
 const pendingApproval = () => ({
-  chatId: "chat1", ownerId: "u1", projectId: null,
+  chatId: "chat1", ownerId: "u1", projectId: null, leaf: "m1",
   metadata: { taskId: "t1", status: "awaiting_approval", parts: [
     { type: "tool-call", id: "c1", name: "manage", input: {}, approval: { id: "ap1" } }, // no `approved` yet
   ] },
@@ -266,7 +266,17 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
-  it("refuses as gone when the chat has moved past the row (a stale tab or an old Telegram button)", async () => {
+  it("refuses a row the chat has moved past before the rate limit, model or budget is touched", async () => {
+    rows.msg = { ...pendingApproval(), leaf: "m2" };
+    take.mockReturnValue({ ok: false, retryAfterSec: 5 });
+    reserveBudget.mockResolvedValue({ allowed: false, window: "m1", reason: null });
+    expect(await approveManageForUser("u1", { messageId: "m1", approved: true })).toBe("gone");
+    expect(take).not.toHaveBeenCalled();
+    expect(resolveUserModelInfo).not.toHaveBeenCalled();
+    expect(reserveBudget).not.toHaveBeenCalled();
+  });
+
+  it("refuses as gone when a send moves the leaf after the row was read (the in-transaction check)", async () => {
     rows.msg = pendingApproval();
     rows.task = { payload: {} };
     rows.updateReturn = [{ id: "m1" }];

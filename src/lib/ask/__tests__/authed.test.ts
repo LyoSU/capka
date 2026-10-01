@@ -90,7 +90,7 @@ describe("answerAskForUser", () => {
   const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 
   const pendingAsk = () => ({
-    chatId: "chat1", ownerId: "u1", projectId: null,
+    chatId: "chat1", ownerId: "u1", projectId: null, leaf: "m1",
     metadata: { taskId: "t1", status: "awaiting_answer", parts: [
       { type: "tool-call", id: "c1", name: "ask", input: {}, answer: { form: { fields: [{ id: "q", label: "Q?", kind: "text" }] } } },
     ] },
@@ -232,7 +232,17 @@ describe("answerAskForUser", () => {
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 
-  it("refuses as gone when the chat has moved past the row (a stale tab or an old Telegram button)", async () => {
+  it("refuses a row the chat has moved past before the rate limit, model or budget is touched", async () => {
+    rows.msg = { ...pendingAsk(), leaf: "m2" };
+    take.mockReturnValue({ ok: false, retryAfterSec: 5 });
+    reserveBudget.mockResolvedValue({ allowed: false, window: "m1", reason: null });
+    expect(await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } })).toBe("gone");
+    expect(take).not.toHaveBeenCalled();
+    expect(resolveUserModelInfo).not.toHaveBeenCalled();
+    expect(reserveBudget).not.toHaveBeenCalled();
+  });
+
+  it("refuses as gone when a send moves the leaf after the row was read (the in-transaction check)", async () => {
     rows.msg = pendingAsk();
     rows.task = { payload: {} };
     rows.updateReturn = [{ id: "m1" }];
@@ -252,7 +262,7 @@ describe("answerAskForUser", () => {
   });
 
   it("refuses as gone when there is no pending ask call", async () => {
-    rows.msg = { chatId: "chat1", ownerId: "u1", projectId: null, metadata: { parts: [{ type: "text", text: "hi" }] } };
+    rows.msg = { chatId: "chat1", ownerId: "u1", projectId: null, leaf: "m1", metadata: { parts: [{ type: "text", text: "hi" }] } };
     const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
     expect(outcome).toBe("gone");
   });

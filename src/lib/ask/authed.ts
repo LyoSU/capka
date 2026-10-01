@@ -32,10 +32,12 @@ export type AskDecision = { messageId: string; toolCallId?: string; action: AskA
  */
 export async function answerAskForUser(userId: string, d: AskDecision): Promise<"applied" | "gone" | "busy" | "failed"> {
   const [msg] = await db
-    .select({ chatId: messages.chatId, ownerId: chats.userId, projectId: chats.projectId, metadata: messages.metadata })
+    .select({ chatId: messages.chatId, ownerId: chats.userId, projectId: chats.projectId, leaf: chats.activeLeafId, metadata: messages.metadata })
     .from(messages).innerJoin(chats, eq(messages.chatId, chats.id))
     .where(eq(messages.id, d.messageId)).limit(1);
-  if (!msg || msg.ownerId !== userId) return "gone";
+  // A reply the chat has moved past is final — refuse before the rate limit or the budget is touched.
+  // The transaction below re-checks under the chat lock, which is what guards a racing send.
+  if (!msg || msg.ownerId !== userId || msg.leaf !== d.messageId) return "gone";
 
   const meta = (msg.metadata ?? {}) as MessageMeta;
   const parts = (meta.parts ?? []) as StoredPart[];
