@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// MAX_WORKSPACE_MB=0 means "no limit" (compose and .env.example promise it, and the
+// MAX_WORKSPACE_MB=0 means "no limit" (docker-compose.yml promises it, and the
 // exec gate already honoured it); the upload path used to read it as a zero-byte cap
 // and refuse every file. Own file: the limit is read once at import.
 const dbUrl = process.env.TEST_DATABASE_URL;
