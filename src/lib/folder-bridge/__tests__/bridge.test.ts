@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, LEASE_GONE } from "../bridge";
+import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, loadAncestor, LEASE_GONE } from "../bridge";
 import { conflictName, planSync, planDirs } from "../plan";
 import { chatTarget } from "@/lib/workspace-target";
 
@@ -130,12 +130,113 @@ describe("a missing workspace copy never reads as every file deleted", () => {
     expect(planDirs(["sub"], [], [], union.upload).deleteLocal).toEqual([]);
   });
 
-  it("is what runSync plans files and folders against when the copy is missing", () => {
+  it("is what runSync plans files and folders against, fetched before anything is uploaded", () => {
     const src = readFileSync("src/lib/folder-bridge/bridge.ts", "utf8");
     const runSync = src.slice(src.indexOf("async function runSync("));
-    expect(runSync).toContain("const ancestor = missing ? { files: {}, dirs: [] } : { files: base, dirs: dbase };");
+    const at = runSync.indexOf("await loadAncestor(folder.id, token, missing)");
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(runSync.indexOf("await uploadBatch("));
     expect(runSync).toContain("planSync(local, remote, ancestor.files,");
     expect(runSync).toContain("planDirs(localDirs, remoteDirs, ancestor.dirs,");
+  });
+});
+
+/**
+ * The union above re-uploads the whole folder, in chunks. Planning against an empty
+ * ancestor only in memory left the old full one stored until the very last write, so a
+ * run cut short part-way handed the next sync a full ancestor over a partial workspace —
+ * and that sync, no longer seeing a missing copy, deleted every local file the
+ * re-upload had not reached. The reset is stored before the first upload instead.
+ */
+describe("loadAncestor — a missing copy's reset is stored before the re-upload", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const entry = { mtime: 0, size: 1, hash: "ha" };
+  // 150 files over three folders: two upload chunks, the second one never lands.
+  const local = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`d${i % 3}/f${i}.txt`, entry]));
+  const localDirs = ["d0", "d1", "d2"];
+
+  /** The state route and the upload route, enough of each to hold the ancestor row
+   *  (revision CAS + lease token, like the real UPDATE) and fail the second chunk. */
+  function server(row: { v: 1; rev: number; files: Record<string, typeof entry>; dirs: string[] } | null, opts: { stateReadable?: boolean } = {}) {
+    const calls: string[] = [];
+    const uploaded: string[] = [];
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = new URL(url, "http://capka.test");
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${u.pathname}`);
+      if (u.pathname === "/api/folders/f1/state" && method === "GET") {
+        return opts.stateReadable === false ? new Response(null, { status: 500 }) : Response.json({ state: row });
+      }
+      if (u.pathname === "/api/folders/f1/state" && method === "PUT") {
+        const { expectedRev, state } = JSON.parse(init!.body as string);
+        if (u.searchParams.get("token") !== "tok" || (row?.rev ?? 0) !== expectedRev) return Response.json({}, { status: 409 });
+        row = state;
+        return Response.json({ ok: true });
+      }
+      if (u.pathname === "/api/folders/upload") {
+        if (calls.filter((c) => c.endsWith("/upload")).length > 1) return new Response(null, { status: 500 });
+        uploaded.push(...(init!.body as FormData).getAll("files").map((f) => (f as File).name));
+        return Response.json({ ok: true });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    return { calls, uploaded, row: () => row };
+  }
+
+  it("leaves the next sync a union, not a delete, when the re-upload is cut short", async () => {
+    const full = { v: 1 as const, rev: 4, files: local, dirs: localDirs };
+    const srv = server(full);
+
+    // Run 1: the workspace copy is gone. The ancestor it plans against is empty AND stored.
+    const first = await loadAncestor("f1", "tok", true);
+    expect(first).toEqual({ files: {}, dirs: [], rev: 5 });
+    const plan = planSync(local, {}, first.files);
+    await expect(uploadBatch(chatTarget("c1"), "docs", plan.upload, async () => new Blob(["x"]), { lease: "tok" }))
+      .rejects.toThrow("upload failed");
+    // The reset went out before the first chunk did.
+    expect(srv.calls.indexOf("PUT /api/folders/f1/state")).toBeLessThan(srv.calls.indexOf("POST /api/folders/upload"));
+    expect(srv.uploaded).toHaveLength(100);
+
+    // Run 2: the copy exists again, holding only what the first chunk carried.
+    const remote = Object.fromEntries(srv.uploaded.map((p) => [p, entry]));
+    const remoteDirs = [...new Set(srv.uploaded.map((p) => p.split("/")[0]))];
+    expect(remoteDirs).not.toContain("d2"); // a whole folder the re-upload never reached
+    const second = await loadAncestor("f1", "tok", false);
+    const next = planSync(local, remote, second.files);
+    expect(next.deleteLocal).toEqual([]);
+    expect(next.upload).toHaveLength(50);
+    expect(planDirs(localDirs, remoteDirs, second.dirs, next.upload).deleteLocal).toEqual([]);
+
+    // What the stored full ancestor would have planned instead.
+    expect(planSync(local, remote, full.files).deleteLocal).toHaveLength(50);
+    expect(planDirs(localDirs, remoteDirs, full.dirs, []).deleteLocal).toEqual(["d2"]);
+  });
+
+  it("fails the sync before any upload when the reset does not land", async () => {
+    // A lease that is no longer this run's: the route refuses the swap.
+    const srv = server({ v: 1, rev: 4, files: local, dirs: localDirs });
+    await expect(loadAncestor("f1", "lost-lease", true)).rejects.toThrow(/sync state \(HTTP 409\)/);
+    expect(srv.row()!.files).toBe(local);
+    expect(srv.calls.some((c) => c.endsWith("/upload"))).toBe(false);
+  });
+
+  it("resets an unreadable row too, and fails rather than guess when one is there", async () => {
+    const srv = server({ v: 1, rev: 4, files: local, dirs: localDirs }, { stateReadable: false });
+    await expect(loadAncestor("f1", "tok", true)).rejects.toThrow(/HTTP 409/);
+    expect(srv.row()!.files).toBe(local);
+    // No state at all: the rev-0 reset lands and the sync goes on as a union.
+    server(null, { stateReadable: false });
+    expect(await loadAncestor("f1", "tok", true)).toEqual({ files: {}, dirs: [], rev: 1 });
+  });
+
+  it("costs no extra request when there is nothing to forget, or nothing is missing", async () => {
+    let srv = server(null);
+    expect(await loadAncestor("f1", "tok", true)).toEqual({ files: {}, dirs: [], rev: 0 });
+    expect(srv.calls).toEqual(["GET /api/folders/f1/state"]);
+    srv = server({ v: 1, rev: 4, files: local, dirs: localDirs });
+    expect((await loadAncestor("f1", "tok", false)).files).toEqual(local);
+    expect(srv.calls).toEqual(["GET /api/folders/f1/state"]);
   });
 });
 
@@ -257,7 +358,8 @@ describe("runSync guards each mutation individually", () => {
   });
 
   it("sends the lease token with the ancestor write", () => {
-    expect(runSync).toContain("/state?token=${encodeURIComponent(token)}");
+    expect(runSync).toContain("await putState(folder.id, token, ancestor.rev,");
+    expect(src).toContain("/state?token=${encodeURIComponent(token)}");
   });
 
   // A state PUT that did not land means no new merge ancestor exists, so the run did

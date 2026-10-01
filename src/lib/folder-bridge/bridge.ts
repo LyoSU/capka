@@ -241,16 +241,55 @@ async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p:
  *  FRESH at the start of every sync (the row is the cross-tab source of truth), so
  *  a stale tab never reverts an ancestor another tab already advanced. Only accepts
  *  the versioned `{v:1,rev,files,dirs}` shape; anything else (absent, legacy,
- *  malformed) yields an empty base (rev 0) — the safe union fallback. Never throws. */
-async function loadState(folderId: string): Promise<{ files: Manifest; dirs: string[]; rev: number }> {
+ *  malformed) yields an empty base (rev 0) — the safe union fallback. Never throws;
+ *  null when the row could not be read at all, which loadAncestor has to tell apart. */
+async function loadState(folderId: string): Promise<{ files: Manifest; dirs: string[]; rev: number } | null> {
   try {
     const res = await fetch(`/api/folders/${folderId}/state`);
-    if (res.ok) {
-      const { state } = (await res.json()) as { state?: { v?: number; rev?: number; files?: Manifest; dirs?: string[] } };
-      if (state?.v === 1 && state.files) return { files: state.files, dirs: state.dirs ?? [], rev: state.rev ?? 0 };
-    }
-  } catch { /* best-effort — empty base is a safe union */ }
-  return { files: {}, dirs: [], rev: 0 };
+    if (!res.ok) return null;
+    const { state } = (await res.json()) as { state?: { v?: number; rev?: number; files?: Manifest; dirs?: string[] } };
+    if (state?.v === 1 && state.files) return { files: state.files, dirs: state.dirs ?? [], rev: state.rev ?? 0 };
+    return { files: {}, dirs: [], rev: 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** Swap the stored ancestor for `state`, under the sync's lease and only if the row is
+ *  still at `expectedRev` (see the route). Null when the request never got an answer. */
+function putState(folderId: string, token: string, expectedRev: number, state: { rev: number; files: Manifest; dirs: string[] }): Promise<Response | null> {
+  return fetch(`/api/folders/${folderId}/state?token=${encodeURIComponent(token)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expectedRev, state: { v: 1, ...state } }),
+  }).catch(() => null);
+}
+
+/** The ancestor a sync plans against, plus the revision its final write must claim.
+ *
+ *  No workspace copy at all — a fresh chat, the agent removed the whole folder, or the
+ *  idle-workspace reaper (WORKSPACE_TTL_MS) deleted the workspace — is no evidence that
+ *  its files were deleted one by one. Against the stored ancestor it would read exactly
+ *  that and delete every local copy, so the sync merges against no ancestor instead: a
+ *  safe union that deletes nothing and puts the copy back.
+ *
+ *  That reset has to be stored BEFORE the union re-uploads anything. Otherwise a run cut
+ *  short part-way (a closed tab, a failed chunk, a lost lease) leaves the old full
+ *  ancestor in place over a workspace that now holds only part of the files, and the
+ *  next sync — which no longer sees a missing copy — deletes every local file the
+ *  re-upload had not reached yet. With the empty ancestor stored, that next sync is a
+ *  union again. A reset that does not land fails the sync before any write. */
+export async function loadAncestor(folderId: string, token: string, missing: boolean): Promise<{ files: Manifest; dirs: string[]; rev: number }> {
+  const stored = await loadState(folderId);
+  const base = stored ?? { files: {}, dirs: [], rev: 0 };
+  // Nothing to forget (a first sync is always this case): no extra request. An
+  // unreadable row may still hold a full ancestor, so it is reset like one — at rev 0,
+  // which lands only if there really is no state and otherwise fails the sync.
+  if (!missing || (stored && !Object.keys(stored.files).length && !stored.dirs.length)) return base;
+  const empty = { rev: base.rev + 1, files: {}, dirs: [] };
+  const put = await putState(folderId, token, base.rev, empty);
+  if (!put?.ok) throw new Error(put ? `Could not record the folder's sync state (HTTP ${put.status}).` : "Could not record the folder's sync state.");
+  return empty;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -453,20 +492,15 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   const guard = () => {
     if (leaseGone()) throw new Error(LEASE_GONE);
   };
-  // Load the merge ancestor FRESH from the shared row (source of truth across
-  // tabs/members) plus its revision for the optimistic write below. A missing/empty
-  // base makes this sync a safe union (no data loss, just forgets deletes once).
-  const { files: base, dirs: dbase, rev } = await loadState(folder.id);
   onProgress?.({ phase: "scanning", done: 0, total: 0 });
   const { hashed: local, skipped, excluded: localExcluded } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
   const { files: remote, dirs: remoteDirs, excluded: remoteExcluded, missing } = await serverTree(target, folder.name);
-  // No workspace copy at all — a fresh chat, the agent removed the whole folder, or
-  // the idle-workspace reaper (WORKSPACE_TTL_MS) deleted the workspace — is no
-  // evidence that its files were deleted one by one. Against the stored ancestor it
-  // would read exactly that and delete every local copy, so merge against no ancestor
-  // instead: a safe union, which deletes nothing and puts the copy back.
-  const ancestor = missing ? { files: {}, dirs: [] } : { files: base, dirs: dbase };
+  // Load the merge ancestor FRESH from the shared row (source of truth across
+  // tabs/members) plus its revision for the optimistic write below. A missing/empty
+  // base makes this sync a safe union (no data loss, just forgets deletes once), and
+  // so does a missing workspace copy (see loadAncestor).
+  const ancestor = await loadAncestor(folder.id, token, missing);
   // Paths skipped (oversized) on either side: their absence from a manifest is a
   // "didn't look", not a delete. The planner leaves them untouched entirely.
   const excluded = new Set([...localExcluded, ...remoteExcluded]);
@@ -491,7 +525,7 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // Every path either side already knows about. A conflict copy must not land on one
   // of them — the write here and the upload that follows both truncate — and the set
   // grows as we go, so two copies in one run cannot pick the same name either.
-  const claimed = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(base), ...localDirs, ...remoteDirs]);
+  const claimed = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(ancestor.files), ...localDirs, ...remoteDirs]);
   const keptCopies: string[] = [];
   for (const c of plan.conflictCopies) {
     guard();
@@ -551,11 +585,7 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   // sync could still win, so the server refuses the swap unless this sync is the
   // holder (see the route). Without it a run whose lease lapsed could publish a
   // half-finished manifest over the run that took the folder from it.
-  const put = await fetch(`/api/folders/${folder.id}/state?token=${encodeURIComponent(token)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ expectedRev: rev, state: { v: 1, rev: rev + 1, files: merged, dirs: mergedDirs } }),
-  }).catch(() => null);
+  const put = await putState(folder.id, token, ancestor.rev, { rev: ancestor.rev + 1, files: merged, dirs: mergedDirs });
   // A PUT that did not land means there is no new merge ancestor, so this sync did
   // NOT finish: reporting success would claim a merge the next run cannot see, and
   // that run would start from the old base believing it was current. Fail instead —
