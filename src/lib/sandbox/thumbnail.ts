@@ -40,7 +40,14 @@ if [ ! -s "$out" ]; then
       HOME="$d" timeout 40 /usr/bin/soffice -env:UserInstallation="file://$d/profile" --headless --norestore \
         --convert-to pdf --outdir "$w" "$w/in.$ext" >/dev/null 2>&1 || exit 8
     fi
-    timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to 480 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9
+    case "$ext" in
+      # A sheet prints small in a corner of an empty page: render larger, cut the
+      # margins away and scale back, so the tile shows cells rather than paper.
+      xlsx|xls|ods)
+        timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to 1400 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9
+        timeout 15 convert "$w/t.png" -trim +repage -bordercolor white -border 24 -resize '480x480>' "$w/t.png" >/dev/null 2>&1 || exit 9 ;;
+      *) timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to 480 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9 ;;
+    esac
     mv "$w/t.png" "$out" || exit 6
     ls -1t "$d"/*.png 2>/dev/null | tail -n +201 | xargs -r rm -f
   fi
