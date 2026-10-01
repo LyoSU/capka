@@ -392,15 +392,8 @@ describe("every documented knob reaches the container that reads it", () => {
     { service: "egress-proxy", sources: () => ["sandbox-controller/egress-proxy.js"], internal: PROXY_INTERNAL },
   ])("$service", ({ service, sources, internal }) => {
     const read = () => envRead(sources());
-    const raw = () => serviceBlock(COMPOSE, service, { comments: true }).split("\n");
     /** Passed from the operator's `.env`, not set to a fixed value by compose. */
     const passedFromEnv = (n: string) => new RegExp(`^\\s*- ${n}=\\$\\{${n}[:}]`, "m").test(serviceBlock(COMPOSE, service));
-    /** Its compose line has a comment right above it saying what it is. */
-    const commentedInCompose = (n: string) => {
-      const lines = raw();
-      const i = lines.findIndex((l) => l.trim().startsWith(`- ${n}=`));
-      return i > 0 && lines[i - 1].trim().startsWith("#");
-    };
 
     it("passes every variable it reads through from .env, or names it internal", () => {
       const unreachable = [...read()].filter((n) => !internal.has(n) && !passedFromEnv(n)).sort();
@@ -410,7 +403,7 @@ describe("every documented knob reaches the container that reads it", () => {
     it("documents every variable it reads, or names it internal", () => {
       const undocumented = [...read()]
         .filter((n) => !internal.has(n))
-        .filter((n) => !documented.has(n) && !new RegExp(`\\b${n}\\b`).test(DOCS) && !commentedInCompose(n))
+        .filter((n) => !documented.has(n) && !new RegExp(`\\b${n}\\b`).test(DOCS))
         .sort();
       expect(undocumented, `read by ${service} but documented nowhere: ${undocumented.join(", ")}`).toEqual([]);
     });
@@ -428,7 +421,8 @@ describe("every documented knob reaches the container that reads it", () => {
    * 2 sessions per user, 7-day orphan grace) over different code defaults (512, 5,
    * 1 hour), so a deployment without compose silently ran other limits than the
    * documented ones. Compose now passes the knobs empty; this keeps it that way and
-   * holds every default quoted in compose comments and DEPLOY.md to the code.
+   * holds every default quoted in compose comments, .env.example and DEPLOY.md to
+   * the code.
    */
   describe("controller defaults", () => {
     const code = new Map(
@@ -445,7 +439,7 @@ describe("every documented knob reaches the container that reads it", () => {
       expect(repeated, `compose repeats a controller default: ${repeated.join(", ")}`).toEqual([]);
     });
 
-    it("match what compose comments and DEPLOY.md quote", () => {
+    it("match what compose comments, .env.example and DEPLOY.md quote", () => {
       const quoted: [string, string, number][] = [];
       const lines = serviceBlock(COMPOSE, "sandbox-controller", { comments: true }).split("\n");
       lines.forEach((l, i) => {
@@ -458,6 +452,9 @@ describe("every documented knob reaches the container that reads it", () => {
       });
       for (const m of readFileSync("docs/DEPLOY.md", "utf8").matchAll(/`([A-Z][A-Z0-9_]*)` \(([0-9]+(?:\.[0-9]+)?)\)/g)) {
         if (code.has(m[1])) quoted.push(["docs/DEPLOY.md", m[1], Number(m[2])]);
+      }
+      for (const m of ENV_EXAMPLE.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=([0-9]+(?:\.[0-9]+)?)\s*$/gm)) {
+        if (code.has(m[1])) quoted.push([".env.example", m[1], Number(m[2])]);
       }
       // The comparison must have something to compare, or a format change would pass it.
       expect(quoted.length).toBeGreaterThan(15);
