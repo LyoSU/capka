@@ -258,16 +258,26 @@ resolve_version() {
       | awk -F/ '{ print $NF }' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V || true)
     latest=$(printf '%s\n' "$releases" | tail -n1)
     # Re-running over an install stays on its major, like update.sh; a new major
-    # needs CAPKA_ALLOW_MAJOR=1 (read its release notes first).
-    cur=$(git -C "$CAPKA_DIR" describe --tags --abbrev=0 2>/dev/null || true)
-    cur="${cur#v}"; cur="${cur%%.*}"
-    case "$cur" in ''|*[!0-9]*) ;; *)
-      if [ "${CAPKA_ALLOW_MAJOR:-}" != "1" ]; then
-        kept=$(printf '%s\n' "$releases" | grep -E "^v${cur}\." | tail -n1 || true)
-        if [ -n "$latest" ] && [ "$latest" != "$kept" ]; then
-          warn "$latest is a new major version. Staying on v$cur.x; to move, read its release notes, then re-run with CAPKA_ALLOW_MAJOR=1."
+    # needs CAPKA_ALLOW_MAJOR=1 (read its release notes first). $SUDO: a non-root
+    # run cloned the checkout as root, and git refuses to read it otherwise.
+    cur=""
+    [ -d "$CAPKA_DIR/.git" ] && cur=$($SUDO git -C "$CAPKA_DIR" describe --tags --abbrev=0 2>/dev/null || true)
+    curmaj="${cur#v}"; curmaj="${curmaj%%.*}"
+    case "$curmaj" in ''|*[!0-9]*) ;; *)
+      newmaj="${latest#v}"; newmaj="${newmaj%%.*}"
+      if [ -z "$latest" ] || [ "$newmaj" -le "$curmaj" ] || [ "${CAPKA_ALLOW_MAJOR:-}" != "1" ]; then
+        if [ -n "$latest" ] && [ "$newmaj" -gt "$curmaj" ]; then
+          warn "$latest is a new major version. Staying on v$curmaj.x; to move, read its release notes, then re-run with CAPKA_ALLOW_MAJOR=1."
         fi
-        latest="$kept"
+        latest=$(printf '%s\n' "$releases" | grep -E "^v${curmaj}\." | tail -n1 || true)
+      fi
+      # Installed from a prerelease newer than every release of its major: stay
+      # on it, never fall through to master or down over a database it migrated.
+      if [ -z "$latest" ] || [ "$(printf '%s\n' "${cur%%-*}" "$latest" | sort -V | tail -n1)" != "$latest" ]; then
+        info "$cur is newer than any release of v$curmaj.x — staying on it."
+        CAPKA_BRANCH="$cur"
+        CAPKA_VERSION="$cur"
+        return 0
       fi
     ;; esac
     if [ -n "$latest" ]; then
