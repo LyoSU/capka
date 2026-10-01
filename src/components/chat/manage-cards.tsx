@@ -423,15 +423,19 @@ function gatedToolLabel(toolName: string, input: unknown): string {
  *  whether the buttons come back (`retry`: nothing was kept), and which refusal or
  *  outcome to say. A 429 is the spending limit or the flood guard; "busy" is the
  *  chat finishing another turn; "failed" was kept, but its turn could not continue.
- *  Anything else — "gone", or an outcome this build does not know — is no success:
- *  the buttons come back, and the turn's own reload settles the card. */
+ *  "gone" is final: the request is no longer current (the chat moved past it, a
+ *  branch was switched, or it was settled elsewhere), so no tap can help — the card
+ *  says so and reloads the chat to show how it really ended. Anything else — an
+ *  outcome this build does not know, a server error — is no success: the buttons
+ *  come back, and the turn's own reload settles the card. */
 export function readDecisionReply(
   status: number,
   body: { ok?: boolean; code?: string; outcome?: string },
-): { landed: boolean; retry: boolean; note: "budgetReached" | "rateLimited" | "busy" | "stopped" | null } {
+): { landed: boolean; retry: boolean; note: "budgetReached" | "rateLimited" | "busy" | "stopped" | "gone" | null } {
   if (status === 429) return { landed: false, retry: true, note: body.code === "BUDGET_EXCEEDED" ? "budgetReached" : "rateLimited" };
   if (status >= 200 && status < 300 && body.ok) return { landed: true, retry: false, note: null };
   if (body.outcome === "failed") return { landed: false, retry: false, note: "stopped" };
+  if (body.outcome === "gone") return { landed: false, retry: false, note: "gone" };
   return { landed: false, retry: true, note: body.outcome === "busy" ? "busy" : null };
 }
 
@@ -441,10 +445,12 @@ const NOT_RUN_COPY: Record<string, "notRunStopped" | "notRunUnavailable" | "notR
 };
 
 export function ApprovalCard({
-  messageId, toolCallId, toolName, input, state, approval, output, errorText, onSend,
+  messageId, toolCallId, toolName, input, state, approval, output, errorText, onSend, onReload,
 }: {
   messageId: string; toolCallId: string; toolName: string; input: unknown; state: string;
   approval?: { id: string; approved?: boolean; reason?: string }; output?: unknown; errorText?: string; onSend?: (text: string) => void;
+  /** Reloads the chat's history — called when the request turns out no longer current. */
+  onReload?: () => void;
 }) {
   const t = useTranslations("chat.manage");
   const ta = useTranslations("chat.approval");
@@ -456,9 +462,10 @@ export function ApprovalCard({
   const awaiting = state === "approval-requested";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Why the last decision was refused, or that it was kept but its turn could not
-  // continue — until the turn's reload settles the card into its own state.
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // Why the last decision was refused, that it was kept but its turn could not
+  // continue, or that it is no longer current — until a reload settles the card.
+  const [note, setNote] = useState<ReturnType<typeof readDecisionReply>["note"]>(null);
+  const refusal = note && (note === "busy" || note === "stopped" || note === "gone" ? ta(note) : tHook(note));
 
   // Fetch the preview only while awaiting — a resolved card shows the applied
   // result's own summary instead, so we never re-probe a connector after the fact.
@@ -485,7 +492,7 @@ export function ApprovalCard({
   const decide = async (approved: boolean) => {
     if (submitting) return;
     setSubmitting(true);
-    setRefusal(null);
+    setNote(null);
     haptic("tap"); // press acknowledgement — success only once the server accepts, below
     try {
       const r = await fetch("/api/manage/approve", {
@@ -502,7 +509,8 @@ export function ApprovalCard({
       // on a decision the server never recorded. See readDecisionReply for which
       // refusals bring the buttons back and what each one says.
       const reply = readDecisionReply(r.status, await r.json().catch(() => ({ ok: r.ok })));
-      if (reply.note) setRefusal(reply.note === "busy" || reply.note === "stopped" ? ta(reply.note) : tHook(reply.note));
+      setNote(reply.note);
+      if (reply.note === "gone") onReload?.();
       if (reply.landed) {
         if (approved) haptic("success");
       } else {
@@ -581,7 +589,10 @@ export function ApprovalCard({
           </div>
         </>
       )}
-      {awaiting && refusal && <div role="alert" className="mt-1.5 text-xs text-destructive">{refusal}</div>}
+      {/* "gone" is not a failure, just a request that has passed: a quiet line. */}
+      {awaiting && refusal && (note === "gone"
+        ? <div role="status" className="mt-1.5 text-xs text-muted-foreground">{refusal}</div>
+        : <div role="alert" className="mt-1.5 text-xs text-destructive">{refusal}</div>)}
 
       {/* Resolved states — the agent's follow-up text carries the details, so the
           card settles into a quiet confirmation. Approved-but-still-running shows a

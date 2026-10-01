@@ -499,6 +499,7 @@
       "expired": "That question is no longer active — your answer wasn't saved.",
       "busy": "This chat is still finishing another message — please answer again in a moment.",
       "stopped": "Saved, but the assistant couldn't continue.",
+      "gone": "This question is no longer current — the chat has moved on.",
       "yes": "Yes",
       "no": "No"
     },
@@ -759,13 +760,14 @@
       "decline": "Don't allow",
       "running": "Running…",
       "declined": "Not allowed",
-      "notDecided": "Not decided, the chat moved on",
+      "notDecided": "Not decided — the chat moved on",
       "notRun": "Didn't run — the assistant couldn't continue.",
       "notRunStopped": "Didn't run — the reply was stopped first.",
       "notRunUnavailable": "Didn't run — this tool wasn't available at the time.",
       "notRunRuleChanged": "Didn't run — this no longer needs your permission, so the request was dropped.",
       "stopped": "Your choice was saved, but the assistant couldn't continue.",
-      "busy": "This chat is still finishing another message — try again in a moment."
+      "busy": "This chat is still finishing another message — try again in a moment.",
+      "gone": "This request is no longer current — the chat has moved on."
     },
     "manage": {
       "settingTitle": "Setting updated",

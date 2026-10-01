@@ -1591,8 +1591,9 @@ export function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, c
             five files says "nothing happened" and pushes the reader toward
             regenerating, which would redo it all. The part-way state gets the
             warning tone and an ellipsis — cut off mid-sentence, not broken — and
-            keeps a border, because the amber surface is too light to read as a
-            disc against the card on its own. */}
+            so does a calm one (a deleted project: this step didn't run, nothing to
+            redo). It keeps a border, because the amber surface is too light to read
+            as a disc against the card on its own. */}
         {partial || calm ? (
           <span
             aria-hidden
@@ -1908,14 +1909,15 @@ export function QueuedBubble({
 export function QueuedCaption({
   count, held, label, onSendNow, onDrop,
 }: {
-  /** How many local ghosts this caption speaks for. Omitted with `label`, which
-   *  carries its own sentence about a single server-side turn. */
+  /** How many local ghosts this caption speaks for. Omitted for a server-side
+   *  turn, whose `label` carries its own sentence. */
   count?: number;
   /** An editor is open, so the drain is deliberately parked. */
   held?: boolean;
   /** Replaces the ghost-run sentence. Used for a turn queued on the SERVER — a
    *  message from Telegram, another device, or an automation: there is no ghost
-   *  bubble above it to count, only a sentence saying where it came from. */
+   *  bubble above it to count, only a sentence saying where it came from — and for
+   *  local ghosts waiting behind a card, which go out only once it is answered. */
   label?: string;
   /** Absent when there is nothing to interrupt (or when interrupting would be
    *  wrong — see the panel: a turn awaiting an approval is waiting on the user,
@@ -2467,6 +2469,9 @@ interface ChatMessageProps {
    *  so a config change is driven through the same chat turn (works in Telegram
    *  too, where the agent still holds the confirm/undo token in its context). */
   onSend?: (text: string) => void;
+  /** Reloads the chat's history — a card whose request is no longer current calls
+   *  it, so the card settles into how it really ended. */
+  onReload?: () => void;
   /** False for a user message that the transcript already showed as a queued
    *  ghost — suppresses the entrance animation so it solidifies in place
    *  instead of blinking out and sliding back in. */
@@ -2535,7 +2540,7 @@ function QuietRow({ reason, children }: { reason: string; children: ReactNode })
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter, pendingSteers }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onReload, onContinue, enter, pendingSteers }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -2753,7 +2758,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               );
             }
             if (g.kind === "approval") {
-              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} toolName={getToolName(g.part)} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} errorText={g.part.errorText} onSend={onSend} />;
+              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} toolName={getToolName(g.part)} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} errorText={g.part.errorText} onSend={onSend} onReload={onReload} />;
             }
             if (g.kind === "ask") {
               // An `elicit:` toolCallId marks a block-and-poll MCP elicitation — the
@@ -2761,7 +2766,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               const kind = g.part.toolCallId?.startsWith("elicit:") ? "elicitation" : "ask";
               // A failed turn whose last thing is this answer never went on from it.
               const stopped = metadata?.taskStatus === "failed" && gi === groups.length - 1;
-              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} stopped={stopped} />;
+              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} stopped={stopped} onReload={onReload} />;
             }
             if (g.kind === "manage") {
               return <ManageCard key={gi} output={g.output} onSend={onSend} chatId={chatId} />;

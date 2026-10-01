@@ -522,8 +522,8 @@ export async function settleCancelledContinuation(messageId: string, tx: QueueTx
  * Settle a reply still waiting on the user once a new turn goes past it. Nobody will
  * decide or answer it after that: its card would stay live (keeping the web composer
  * blocked), and a late tap would resume a reply the conversation has moved on from.
- * Each undecided approval is declined with the reason the model reads, so its card
- * reads declined / not allowed; each unanswered ask is skipped with the result an
+ * Each undecided approval is declined with the reason the model reads, and its card
+ * reads "Not decided" by that reason; each unanswered ask is skipped with the result an
  * explicit Skip stores. Calls already decided are left to the continuation that owns
  * them. Pass the admission's transaction, so the new message and this settle land
  * together.

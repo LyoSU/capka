@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { toUIMessages } from "@/lib/chat/presenter";
 import type { StoredPart } from "@/lib/chat/contracts";
-import { isApprovalPart, ErrorNotice } from "../message";
+import { isApprovalPart, ErrorNotice, ChatMessage } from "../message";
 import { UNDECIDED_APPROVAL_REASON } from "@/lib/chat/tool-results";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -68,8 +68,12 @@ describe("readDecisionReply", () => {
     expect(readDecisionReply(429, { code: "RATE_LIMITED" }).retry).toBe(true);
   });
 
-  it("gone, an outcome this build does not know, or a server error is never success", () => {
-    for (const [status, body] of [[200, { ok: false, outcome: "gone" }], [200, { ok: false, outcome: "later-outcome" }], [500, { ok: true }]] as const) {
+  it("no longer current: says so, no second tap — the card reloads the chat instead", () => {
+    expect(readDecisionReply(200, { ok: false, outcome: "gone" })).toEqual({ landed: false, retry: false, note: "gone" });
+  });
+
+  it("an outcome this build does not know, or a server error, is never success and can be retried", () => {
+    for (const [status, body] of [[200, { ok: false, outcome: "later-outcome" }], [500, { ok: true }]] as const) {
       expect(readDecisionReply(status, body)).toEqual({ landed: false, retry: true, note: null });
     }
   });
@@ -197,5 +201,36 @@ describe("ErrorNotice — project_deleted", () => {
   it("reads as a calm notice, not the red failure badge", () => {
     expect(render(true)).not.toContain("bg-destructive");
     expect(render(false)).toContain("bg-destructive");
+  });
+});
+
+/**
+ * The same, where the message decides it: a failed turn whose project was deleted
+ * gets the calm notice and no regenerate, since there is nothing to redo. Rendered
+ * through the whole message rather than ErrorNotice alone, because both conditions
+ * live at the call site and either could go without the notice's own test noticing.
+ */
+describe("ChatMessage — a turn stopped by a deleted project", () => {
+  const render = (errorCategory: string) =>
+    // eslint-disable-next-line react/no-children-prop
+    renderToStaticMarkup(createElement(NextIntlClientProvider, {
+      locale: "en", messages: en,
+      children: createElement(ChatMessage, {
+        message: { id: "m1", role: "assistant", parts: [], metadata: { taskStatus: "failed", errorCategory } } as never,
+        onRegenerate: () => {},
+      }),
+    }));
+
+  it("reads as a calm notice and offers no regenerate", () => {
+    const html = render("project_deleted");
+    expect(html).toContain("project was deleted");
+    expect(html).not.toContain("bg-destructive");
+    expect(html).not.toContain("lucide-rotate-ccw");
+  });
+
+  it("any other failure keeps the red badge and the regenerate button", () => {
+    const html = render("unknown");
+    expect(html).toContain("bg-destructive");
+    expect(html).toContain("lucide-rotate-ccw");
   });
 });

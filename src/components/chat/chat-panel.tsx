@@ -1174,6 +1174,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       onFork={handleFork}
                       actionsDisabled={isLoading}
                       onSend={readOnly ? undefined : handleSendAsUser}
+                      onReload={reload}
                       // Same gate as regenerate: continuing is only meaningful for
                       // the newest reply, since anything later has already moved on.
                       onContinue={i === lastAssistantIndex && !readOnly ? handleSendAsUser : undefined}

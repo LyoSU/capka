@@ -22,22 +22,25 @@ import type { AskForm, AskField, AskAnswer } from "@/lib/ask/types";
  * the server matches by messageId.
  */
 export function AskCard({
-  messageId, toolCallId, form, value, state, kind = "ask", stopped,
+  messageId, toolCallId, form, value, state, kind = "ask", stopped, onReload,
 }: {
   messageId: string; toolCallId?: string; form: AskForm; value?: AskAnswer; state: string; kind?: "ask" | "elicitation";
   /** The turn failed with nothing after this answer: it was kept, but the turn did not go on. */
   stopped?: boolean;
+  /** Reloads the chat's history — called when the question turns out no longer current. */
+  onReload?: () => void;
 }) {
   const t = useTranslations("chat.ask");
   const tHook = useTranslations("chat.hook");
   const [values, setValues] = useState<Record<string, string | string[]>>({});
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  // Why the last answer was refused, or that it was kept but its turn could not
-  // continue ("stopped") — the one note still shown once the card has settled: a
-  // refusal is stale by then (the question was answered elsewhere, e.g. Telegram).
+  // Why the last answer was refused, that the question is no longer current, or
+  // that it was kept but its turn could not continue ("stopped") — the one note
+  // still shown once the card has settled: a refusal is stale by then (the
+  // question was answered elsewhere, e.g. Telegram).
   const [note, setNote] = useState<ReturnType<typeof readDecisionReply>["note"]>(null);
-  const refusal = note && (note === "busy" || note === "stopped" ? t(note) : tHook(note));
+  const refusal = note && (note === "busy" || note === "stopped" || note === "gone" ? t(note) : tHook(note));
   const awaiting = state === "input-available" && !value;
 
   // Turn a stored answer value into its human label (choice → option label,
@@ -89,6 +92,7 @@ export function AskCard({
       // readDecisionReply for which refusals bring them back and what each says.
       const reply = readDecisionReply(r.status, await r.json().catch(() => ({ ok: r.ok })));
       setNote(reply.note);
+      if (reply.note === "gone") onReload?.();
       if (reply.landed) {
         if (action === "submit") haptic("success");
       } else {
@@ -175,7 +179,10 @@ export function AskCard({
               <span className="text-xs text-muted-foreground">{t("needsAnswer")}</span>
             )}
           </div>
-          {refusal && <div role="alert" className="text-xs text-destructive">{refusal}</div>}
+          {/* "gone" is not a failure, just a question that has passed: a quiet line. */}
+          {refusal && (note === "gone"
+            ? <div role="status" className="text-xs text-muted-foreground">{refusal}</div>
+            : <div role="alert" className="text-xs text-destructive">{refusal}</div>)}
         </>
       ) : (
         // Settled: each question reads as a quiet label and its answer as a
