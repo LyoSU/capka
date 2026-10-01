@@ -225,8 +225,9 @@
      exactly still, and the engine can only hold it for as long as it moves. The
      panel doesn't exist yet at the moment you click a CLOSED one, so its duration
      cannot be measured off the element — one token both sides read is the only
-     way to keep them from drifting apart. */
-  --collapse-dur: 200ms;
+     way to keep them from drifting apart. 300ms, the same beat as a rail row's
+     `fade-up`, so a panel and the rows inside it land together. */
+  --collapse-dur: 300ms;
   /* Where a pinned question comes to rest, and the top of the region the browser
      should keep its own scrolls clear of. One token drives the scroll container's
      padding-top, its `scroll-padding-block-start`, and — because the engine reads
@@ -580,12 +581,21 @@
    anything else that changes MANY times inside one row while a turn runs. Opacity
    only: a glyph that slid or scaled every time a tool returned would read as noise
    on the hottest surface in the app. Rows themselves use `fade-up` below — they
-   arrive once each, seconds apart. */
+   arrive once each, seconds apart. 150ms on the micro-interaction curve: it is a
+   state change inside a row, not an entrance, and the spinner it replaces fades
+   out over the same 150ms (`.step-glyph-out`), so the two read as one crossfade.
+   Also the run header's label swap ("12s" → "Worked for 14s"). */
 @keyframes step-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-.animate-step-in { animation: step-in 0.18s var(--ease-out) both; }
+.animate-step-in { animation: step-in 150ms var(--ease-strong) both; }
+/* The running step's spinner on its way out: stacked under the glyph that
+   replaces it, fading while it keeps turning, then unmounted on transitionend. */
+.step-glyph-out {
+  opacity: 0;
+  transition: opacity 150ms var(--ease-strong);
+}
 
 /* The rail's one entrance: a rail row, the controls under a finished answer, the
    memory notice — each rises 8px on the micro-interaction curve. `--i` is the
@@ -623,31 +633,47 @@
    here that is not decoration: a panel that snaps into existence makes the reader
    re-find their place, because nothing said where the content came from. Growing
    it out of the trigger row keeps the eye anchored — the same expanding grammar
-   the whole reference leans on, and the reason a "Reasoned for 6s ›" row reads as
+   the whole reference leans on, and the reason a "Worked for 6s ›" row reads as
    a lid rather than a link.
-   Base UI does the measuring: it pins `--collapsible-panel-height` to the panel's
-   real pixel height only for the duration of the transition, then hands the var
-   back to `auto`. That last part is load-bearing here — the activity rail streams
-   NEW rows into an already-open panel, and a permanently pinned height would clip
-   every one of them. `overflow: hidden` (not `clip`) is equally deliberate: the
-   measurement reads `scrollHeight`, which only reports content past the box on a
-   scroll container.
-   200ms, not the reference's 300–400: animating height is layout work on every
-   frame, and our panels can hold a whole reasoning dump rather than three demo
-   rows. The global reduced-motion reset collapses this automatically. */
-[data-slot="collapsible-content"] {
-  height: var(--collapsible-panel-height);
-  overflow: hidden;
-  transition: height var(--collapse-dur) var(--ease-out);
+   ONE grammar for every disclosure: a one-row grid whose track goes 0fr → 1fr
+   while the contents fade, with the single child clipping (`min-height: 0` is
+   what lets a grid item shrink below its content). Nothing is measured, so a
+   panel that streams new rows while open simply grows, and the same rule drives
+   Base UI panels (via its starting/ending-style hooks, whose transition it waits
+   for before unmounting) and hand-rolled ones (`.reveal` + `data-shut`). The
+   wrapper child is supplied by `CollapsibleContent` (components/ui/collapsible).
+   The track and the fade share `--collapse-dur`, which the scroll engine also
+   reads to hold the clicked row still for exactly as long as the panel moves.
+   The global reduced-motion reset collapses this automatically. */
+[data-slot="collapsible-content"],
+.reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--collapse-dur) var(--ease-strong),
+    opacity var(--collapse-dur) var(--ease-strong);
 }
 [data-slot="collapsible-content"][data-starting-style],
-[data-slot="collapsible-content"][data-ending-style] {
-  height: 0;
+[data-slot="collapsible-content"][data-ending-style],
+.reveal[data-shut] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+[data-slot="collapsible-content"] > *,
+.reveal > * {
+  min-height: 0;
+  overflow: hidden;
+}
+/* `display: grid` above out-ranks the UA's `[hidden] { display: none }`, which a
+   kept-mounted closed panel relies on. */
+[data-slot="collapsible-content"][hidden] {
+  display: none;
 }
 /* A panel the app closes on the reader's behalf, while it sits outside the
    viewport, closes instantly. The motion above is for a lid the reader can see
-   moving; off screen it buys nothing and costs a 200ms height interpolation on
-   the longest DOM in the app, plus a scroll correction on every frame of it —
+   moving; off screen it buys nothing and costs a track interpolation on the
+   longest DOM in the app, plus a scroll correction on every frame of it —
    which is what an end-of-turn reasoning collapse used to spend. Direct child
    only: the activity rail nests spoilers (a step's raw payload), and those keep
    their own animation because the reader opens them by hand. */
@@ -956,6 +982,11 @@
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
+  /* The scroll engine holds a pressed disclosure still for as long as the panel
+     moves; with no motion there is nothing to hold for. */
+  :root {
+    --collapse-dur: 0ms;
+  }
   /* The composer's travelling line is the one animation here that cannot be
      collapsed to its end state: frozen, it is a dash welded to one edge of the
      box, which says nothing and looks like a rendering fault. It carries no
@@ -1054,9 +1085,9 @@
   [data-print="hide"] {
     display: none !important;
   }
-  /* Whatever the reader had OPEN prints in full: un-clip the panel and let its
-     height go back to auto, since on screen it carries the measured pixel height
-     and `overflow: hidden` from the reveal transition.
+  /* Whatever the reader had OPEN prints in full: drop the panel's reveal grid
+     (a `display: block` panel ignores its track) and un-clip its wrapper — the
+     `*` rule above already sets `overflow: visible` on it.
      A CLOSED panel can't be forced open from CSS — Base UI unmounts it, so there
      is no element to un-hide (`keepMounted` would fix that by parking every
      collapsed rail and every raw tool payload in the DOM forever, which is a bad
@@ -1066,6 +1097,7 @@
   [data-slot="collapsible-content"] {
     display: block !important;
     height: auto !important;
+    opacity: 1 !important;
     overflow: visible !important;
     visibility: visible !important;
   }

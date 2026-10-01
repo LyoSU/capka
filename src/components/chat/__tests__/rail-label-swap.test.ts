@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
  * the status row's label already does, rather than snapping. But the live label
  * also changes TEXT every second while the stopwatch ticks, and fading on each tick
  * would flicker under the reader's eye. So the fade is keyed on the phase, never on
- * the label text.
+ * the label text. And only a CHANGE fades: a header that mounts already in its
+ * final phase (a turn loaded from history) renders still.
  */
 const MESSAGE = "src/components/chat/message.tsx";
 
@@ -16,7 +17,8 @@ describe("rail label swap", () => {
   const group = message.slice(message.indexOf("function ActivityGroup"), message.indexOf("function MemoryNotice"));
 
   it("fades the label in on a phase change, keyed on the phase", () => {
-    expect(group).toMatch(/<span key=\{labelPhase\}[^>]*fade-in/);
+    expect(group).toMatch(/<span key=\{labelPhase\}[^>]*\$\{swap\}/);
+    expect(group).toMatch(/const swap = labelPhase !== mounted\.phase \? "animate-step-in /);
   });
 
   it("the phase does not move with the ticking duration", () => {
@@ -28,6 +30,6 @@ describe("rail label swap", () => {
 
   it("the action count fades in when it appears at the end of the turn", () => {
     const count = group.slice(group.indexOf("{countLabel && ("), group.indexOf("</span>", group.indexOf("{countLabel && (")));
-    expect(count).toMatch(/fade-in/);
+    expect(count).toMatch(/\$\{swap\}/);
   });
 });

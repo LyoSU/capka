@@ -32,7 +32,11 @@ describe("rail rhythm", () => {
     expect(rule.slice(0, rule.indexOf("}"))).toMatch(/transform-origin:\s*top/);
     // Hung from the glyph in StepRow — the one place the line exists.
     const step = message.slice(message.indexOf("function StepRow"), message.indexOf("function ActivityRail"));
-    expect(step).toMatch(/connect && !open && <span[^>]*animate-rail-grow/);
+    expect(step).toMatch(/connect && \([\s\S]{0,80}<span[\s\S]{0,80}animate-rail-grow/);
+    // Faded, not unmounted, while the row's panel is open: dropping it in the frame
+    // the panel starts to grow was a hard cut inside a moving disclosure.
+    expect(step).toMatch(/transition-opacity \$\{open \? "opacity-0" : ""\}/);
+    expect(step).not.toMatch(/connect && !open/);
   });
 
   it("rows enter with fade-up and a stagger index computed against what was already mounted", () => {
@@ -50,5 +54,41 @@ describe("rail rhythm", () => {
     // shared entrance with its cascade index doing the settling.
     const tail = message.slice(message.indexOf("{!isStreaming && (() => {"));
     expect(tail).toMatch(/animate-fade-up/);
+  });
+});
+
+describe("timeline reveal and history", () => {
+  const css = readFileSync(CSS, "utf8");
+  const message = readFileSync(MESSAGE, "utf8");
+  const collapsible = readFileSync("src/components/ui/collapsible.tsx", "utf8");
+
+  it("every disclosure uses one grid-rows reveal on --collapse-dur, nothing measured", () => {
+    const rule = css.slice(css.indexOf('[data-slot="collapsible-content"],\n.reveal {'));
+    const body = rule.slice(0, rule.indexOf("}"));
+    expect(body).toMatch(/grid-template-rows:\s*1fr/);
+    expect(body).toMatch(/grid-template-rows var\(--collapse-dur\) var\(--ease-strong\)/);
+    expect(body).toMatch(/opacity var\(--collapse-dur\)/);
+    expect(css).toMatch(/\[data-ending-style\],\s*\.reveal\[data-shut\] \{\s*grid-template-rows:\s*0fr;\s*opacity:\s*0;/);
+    expect(css).not.toMatch(/height:\s*var\(--collapsible-panel-height\)/);
+    // The track needs one shrinkable child; the wrapper supplies it.
+    expect(collapsible).toMatch(/data-slot="collapsible-clip"/);
+    // Reduced motion: the scroll engine's hold collapses with the motion.
+    const rm = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(rm.slice(0, rm.indexOf("::view-transition-old"))).toMatch(/--collapse-dur:\s*0ms/);
+  });
+
+  it("rows already present when a rail mounts inside an open group render still", () => {
+    const rail = message.slice(message.indexOf("function ActivityRail"), message.indexOf("function ActivityGroup"));
+    expect(rail).toMatch(/const \[still\] = useState\(!!quiet && items\.length \+ writes\.length > 1\)/);
+    expect(rail).toMatch(/still && base === 0 \? -1/);
+    const reasoning = message.slice(message.indexOf("function ReasoningRow"), message.indexOf("function StepGlyph"));
+    expect(reasoning).toMatch(/i < 0 \? "py-1\.5" : "animate-fade-up/);
+  });
+
+  it("a step finishing on screen crossfades its spinner into the glyph", () => {
+    const glyph = message.slice(message.indexOf("function StepGlyph"), message.indexOf("function StepRow"));
+    expect(glyph).toMatch(/step-glyph-out/);
+    expect(glyph).toMatch(/onTransitionEnd/);
+    expect(css).toMatch(/\.step-glyph-out \{\s*opacity: 0;\s*transition: opacity 150ms/);
   });
 });

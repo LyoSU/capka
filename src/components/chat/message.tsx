@@ -1045,12 +1045,13 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
 function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreaming?: boolean; stagger?: number }) {
   // Kept from the mount, not re-read: the rail's `mountedBefore` moves under every
   // later render, and a running animation whose delay changes snaps its progress.
+  // A negative step means "already on screen": rendered still, no entrance.
   const [i] = useState(stagger ?? 0);
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
-    <div className="animate-fade-up py-1.5" style={{ "--i": i } as React.CSSProperties}>
+    <div className={i < 0 ? "py-1.5" : "animate-fade-up py-1.5"} style={{ "--i": i } as React.CSSProperties}>
       {/* A thought reads as prose in the answer's column, unboxed, but one step
           down in size and ink: at the answer's own size and colour a long thought
           read AS the answer, and the reader could not tell where the reply began.
@@ -1069,19 +1070,36 @@ function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreamin
  *  a connected app (MCP), or the spinner while the step runs. Inline, never
  *  ringed — a circle around every icon is a frame the row does not need. */
 function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
-  if (state === "running") return <span className="spinner-ring size-3.5 animate-spin rounded-full" />;
-  if (d.category === "mcp" && d.brand?.color) {
-    return (
-      <span
-        className="animate-step-in grid size-4 place-items-center rounded-sm text-xs font-bold leading-none text-white"
-        style={{ backgroundColor: d.brand.color }}
-      >
-        {d.brand.letter}
-      </span>
-    );
-  }
+  const running = state === "running";
+  // A step that finishes ON SCREEN crossfades: the spinner stays mounted under the
+  // incoming glyph for its 150ms fade-out and unmounts on transitionend, inside the
+  // fixed 20px glyph box so nothing beside it moves. A step that mounts finished
+  // (history, a spoiler opened later) never had a spinner and gets its glyph still.
+  const [live] = useState(running);
+  const [spinner, setSpinner] = useState(running);
+  if (running && !spinner) setSpinner(true);
+  const fade = live ? "animate-step-in " : "";
   const Icon = d.Icon;
-  return <Icon className="animate-step-in size-4" />;
+  return (
+    <>
+      {spinner && (
+        <span
+          className={`spinner-ring absolute size-3.5 animate-spin rounded-full ${running ? "" : "step-glyph-out"}`}
+          onTransitionEnd={running ? undefined : () => setSpinner(false)}
+        />
+      )}
+      {running ? null : d.category === "mcp" && d.brand?.color ? (
+        <span
+          className={`${fade}grid size-4 place-items-center rounded-sm text-xs font-bold leading-none text-white`}
+          style={{ backgroundColor: d.brand.color }}
+        >
+          {d.brand.letter}
+        </span>
+      ) : (
+        <Icon className={`${fade}size-4`} />
+      )}
+    </>
+  );
 }
 
 /** One step: a small glyph, the intent label, and the literal thing acted on
@@ -1140,7 +1158,7 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
 
   const row = (
     <div
-      className={`animate-fade-up group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
+      className={`${i < 0 ? "" : "animate-fade-up "}group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
         isError ? "text-destructive" : "text-muted-foreground has-[button:hover]:text-foreground"
       }`}
       style={{ "--i": i } as React.CSSProperties}
@@ -1168,11 +1186,20 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
         {/* The hairline to the next step, hung from this glyph so it exists only
             between two actions and never trails off after the last one. Its
             height is exactly the gap between two glyph boxes (row min-h-8, py-1),
-            so it is dropped while the row is open: the payload panel sits in that
-            gap then, and a stub of line pointing into a panel read as a cut. */}
-        {connect && !open && <span aria-hidden className="animate-rail-grow absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
+            so it fades out while the row is open: the payload panel sits in that
+            gap then, and a stub of line pointing into a panel read as a cut. A fade,
+            not an unmount — removing it in the same frame the panel starts to grow
+            was the one hard cut in an otherwise moving disclosure. */}
+        {connect && (
+          <span
+            aria-hidden
+            className={`${i < 0 ? "" : "animate-rail-grow "}absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border transition-opacity ${open ? "opacity-0" : ""}`}
+          />
+        )}
       </span>
-      <span className="pointer-events-none relative z-10 min-w-0 truncate text-sm leading-snug">
+      {/* The running step's label carries the shimmer — the one place on the rail
+          that says "this, right now"; reduced motion freezes it legible. */}
+      <span className={`pointer-events-none relative z-10 min-w-0 truncate text-sm leading-snug ${isRunning ? "text-shimmer" : ""}`}>
         {label}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
@@ -1198,21 +1225,23 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
     </div>
   );
 
-  if (!expandable) return row;
-
   return (
     // Controlled, because the chevron's rotation now has to be driven from React:
     // it is a SIBLING of the trigger, not a descendant, so the old
     // `[&[data-panel-open]_.chevron]` descendant selector can no longer reach it.
+    // The same tree whether or not the step is expandable yet: a running step
+    // becomes expandable the moment it returns, and a branch that returned the bare
+    // row before remounted it then — replaying its entrance and dropping the
+    // spinner's crossfade on every completed step.
     <Collapsible
-      open={open}
+      open={open && expandable}
       onOpenChange={(next, details) => {
         setOpen(next);
         anchorDisclosure(details);
       }}
     >
       <div className="group/step">{row}</div>
-      <CollapsibleContent>
+      {expandable && <CollapsibleContent>
         {/* Sent, then returned, in that order — the order they happened in. */}
         <div className="mb-2 ml-[30px] mt-1 space-y-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
           {inv && <Invocation inv={inv} />}
@@ -1224,7 +1253,7 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
             <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
           )}
         </div>
-      </CollapsibleContent>
+      </CollapsibleContent>}
     </Collapsible>
   );
 }
@@ -1248,13 +1277,13 @@ function SteerRow({ text, connect, stagger }: { text: string; connect?: boolean;
   const [i] = useState(stagger ?? 0);
   const t = useTranslations("chat.message");
   return (
-    <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
+    <div className={`${i < 0 ? "" : "animate-fade-up "}relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground`} style={{ "--i": i } as React.CSSProperties}>
       <span className="flex size-5 shrink-0 items-center justify-center">
-        <CornerDownRight className="animate-step-in size-4" />
+        <CornerDownRight className="size-4" />
       </span>
       {/* Same hairline geometry as MemoryRow — hung from the row, since this text
           wraps — so a steer between two steps keeps the rail one continuous line. */}
-      {connect && <span aria-hidden className="absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
+      {connect && <span aria-hidden className={`${i < 0 ? "" : "animate-rail-grow "}absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border`} />}
       <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-sm leading-snug">
         <span className="shrink-0">{t("steer")}</span>
         <span className="min-w-0 text-foreground [overflow-wrap:anywhere]">{text}</span>
@@ -1270,11 +1299,17 @@ type ActivityItem =
   /** Something the user said WHILE this was running — see SteerRow. */
   | { kind: "steer"; id: string; text: string };
 
+// Rows are memoized: a streamed delta rebuilds the item list, but every part except
+// the one that changed keeps its identity (use-background-chat maps parts
+// immutably), so only the row being written re-renders.
+const MemoStepRow = memo(StepRow);
+const MemoReasoningRow = memo(ReasoningRow);
+
 /** Renders an interleaved run of reasoning + tool calls the way the run actually
  *  went: thoughts as prose, actions as small glyph rows between them, consecutive
  *  actions joined by a hairline. No container and no cap — the group header is
  *  the frame. */
-function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdmin, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; onUndone?: (id: string) => void; isStreaming?: boolean; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean }) {
+function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdmin, sandboxPending, quiet }: { items: ActivityItem[]; writes?: TurnWrite[]; onUndone?: (id: string) => void; isStreaming?: boolean; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean; quiet?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
   // How many rows were on screen at the previous commit. Rows above that count are
   // new in THIS commit and cascade from zero; rows at or below it are not new and
@@ -1284,21 +1319,30 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdm
   // baseline.
   const mountedBefore = useRef(0);
   const base = mountedBefore.current;
+  // Rows that were already there when this rail first rendered inside a group that
+  // mounted OPEN — a live turn rejoined after a reload or a chat switch — are
+  // history, not arrivals: they render still (step -1) instead of cascading in. A
+  // fresh live turn mounts its rail with one row, which does fade in; a spoiler the
+  // reader opens is not `quiet` and cascades.
+  const [still] = useState(!!quiet && items.length + writes.length > 1);
+  const step = (i: number) => (still && base === 0 ? -1 : staggerIndex(i, base));
   useIsomorphicLayoutEffect(() => {
     mountedBefore.current = items.length + writes.length;
   });
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
-      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} stagger={staggerIndex(i, base)} />
+      // Only the rail's last row can still be receiving text; an earlier thought is
+      // finished, so it skips the live-markdown path (and its per-word fade).
+      ? <MemoReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming && i === items.length - 1} stagger={step(i)} />
       : it.kind === "steer"
-      ? <SteerRow key={it.id} text={it.text} connect={items[i + 1]?.kind === "tool"} stagger={staggerIndex(i, base)} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} isAdmin={isAdmin} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={staggerIndex(i, base)} />,
+      ? <SteerRow key={it.id} text={it.text} connect={items[i + 1]?.kind === "tool"} stagger={step(i)} />
+      : <MemoStepRow key={it.part.toolCallId} part={it.part} chatId={chatId} isAdmin={isAdmin} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={step(i)} />,
   );
   // What the turn wrote to memory closes the rail: it is the one action of the turn
   // that outlives it, so it is listed last, after the steps that produced it, and
   // joined to them by the same hairline.
   const memoryRows = writes.map((w, j) => (
-    <MemoryRow key={w.id} item={w} connect={j < writes.length - 1} stagger={staggerIndex(items.length + j, base)} onUndone={onUndone} />
+    <MemoryRow key={w.id} item={w} connect={j < writes.length - 1} stagger={step(items.length + j)} onUndone={onUndone} />
   ));
   // Why the longest pause in the product gets a footnote and not a node: the
   // container is built FOR the step above — the first tool call that needs it —
@@ -1342,6 +1386,10 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
   const timed = timing != null;
   const { measuredMs, startedMsAgo } = timing ?? {};
   const [open, setOpen] = useState(streaming);
+  // True only for the rail mounted by this group's own first render (see
+  // ActivityRail's `quiet`); a rail mounted by a later open is the reader's.
+  const firstRender = useRef(true);
+  useEffect(() => { firstRender.current = false; }, []);
   // Whether the automatic collapse below should animate. An animation nobody can
   // see is not smoothness — it is 200ms of height interpolation, the most expensive
   // property there is, on the longest DOM in the app, plus a scroll correction on
@@ -1419,6 +1467,11 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
   // text: the live label also changes every second as the stopwatch ticks, and a
   // fade on each tick would flicker under the reader's eye.
   const labelPhase = `${streaming}:${timed}:${hasReasoning}`;
+  // What the header looked like when it mounted. Only a CHANGE from that fades: a
+  // finished turn loaded from history renders its header still, while a live turn
+  // ending on screen crossfades "12s" into "Worked for 14s · 3 actions".
+  const [mounted] = useState({ phase: labelPhase, writes: shown.length > 0 });
+  const swap = labelPhase !== mounted.phase ? "animate-step-in " : "";
 
   return (
     <Collapsible
@@ -1442,9 +1495,9 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
           same fact stated a second time. `tabular-nums` keeps the ticking duration
           from reflowing the row a digit at a time. */}
       <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-180">
-        <span key={labelPhase} className="animate-in fade-in duration-200 min-w-0 truncate tabular-nums">{label}</span>
+        <span key={labelPhase} className={`${swap}min-w-0 truncate tabular-nums`}>{label}</span>
         {countLabel && (
-          <span className="animate-in fade-in duration-200 shrink-0 text-muted-foreground tabular-nums">· {countLabel}</span>
+          <span className={`${swap}shrink-0 text-muted-foreground tabular-nums`}>· {countLabel}</span>
         )}
         {/* The visible half of "additive, visible, undoable": a turn that wrote memory
             says so in its own header, collapsed or not. The glyph is the same bookmark
@@ -1453,7 +1506,7 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
             glyph and the count stay — a third clause in this row is what pushed the
             duration into an ellipsis — while the sentence stays for a screen reader. */}
         {shown.length > 0 && (
-          <span className="animate-in fade-in duration-200 inline-flex shrink-0 items-center gap-1 tabular-nums">
+          <span className={`${mounted.writes ? "" : "animate-step-in "}inline-flex shrink-0 items-center gap-1 tabular-nums`}>
             <span className="sr-only">{t("memoryCount", { count: shown.length })}</span>
             <span aria-hidden className="text-muted-foreground/70">·</span>
             <BookMarked aria-hidden className="size-3.5 text-brand" />
@@ -1463,11 +1516,11 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
             </span>
           </span>
         )}
-        <ChevronDown className="chevron size-4 shrink-0 opacity-60 transition-transform group-hover/act:opacity-100" />
+        <ChevronDown className="chevron size-4 shrink-0 opacity-60 transition-[opacity,transform] duration-200 group-hover/act:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
-          <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} isAdmin={isAdmin} sandboxPending={sandboxPending} />
+          <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} isAdmin={isAdmin} sandboxPending={sandboxPending} quiet={firstRender.current} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -1540,16 +1593,16 @@ function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; conn
     // wrap on a phone; the glyph stays on the first line and Undo trails the last word,
     // dropping to the next line when it must instead of forcing the row wider than the
     // screen.
-    <div className="animate-fade-up relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground" style={{ "--i": i } as React.CSSProperties}>
+    <div className={`${i < 0 ? "" : "animate-fade-up "}relative flex min-h-8 max-w-full items-start gap-2.5 py-1.5 text-muted-foreground`} style={{ "--i": i } as React.CSSProperties}>
       <span className="flex size-5 shrink-0 items-center justify-center text-brand">
-        <BookMarked className="animate-step-in size-4" />
+        <BookMarked className="size-4" />
       </span>
       {/* Hung from the ROW, not the glyph as on a StepRow: this row can be three lines
           tall, and a fixed 16px stub under the glyph left a gap before the next glyph.
           Starts where the glyph box ends (6px padding + 20px box) and overshoots the
           row's edge by the same 4px a StepRow's stub does, so the two kinds of row draw
           one continuous line. */}
-      {connect && <span aria-hidden className="animate-rail-grow absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
+      {connect && <span aria-hidden className={`${i < 0 ? "" : "animate-rail-grow "}absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border`} />}
       <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-sm leading-snug">
         {/* A sensitive statement is not printed here. The memory page has a reveal
             control and the shoulder-surfing argument that justifies one; a chat
@@ -2357,18 +2410,15 @@ function MessageDetails({
             >
               <span>{t("more")}</span>
               <ChevronDown
-                className="size-3.5 transition-transform duration-300 ease-strong"
+                className="size-3.5 transition-transform duration-200"
                 style={{ transform: more ? "rotate(180deg)" : undefined }}
                 aria-hidden="true"
               />
             </button>
             {/* Grows out of the row (0fr → 1fr), the app's one spoiler grammar; the
                 closed half is `inert` so its text is neither read nor tabbed into. */}
-            <div
-              className="grid transition-[grid-template-rows,opacity] duration-300 ease-strong"
-              style={{ gridTemplateRows: more ? "1fr" : "0fr", opacity: more ? 1 : 0 }}
-            >
-              <div className="overflow-hidden" inert={!more}>
+            <div className="reveal" data-shut={more ? undefined : ""}>
+              <div inert={!more}>
                 <div className="space-y-1.5 pt-1.5">
                   {/* Why one typed message can cost several calls — the counts are the
                       answer; what each pass SPENT stays in the admin rows below. */}

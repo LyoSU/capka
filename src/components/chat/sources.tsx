@@ -134,7 +134,7 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
         </span>
         <span>{t("count", { n: rows.length })}</span>
         <ChevronDown
-          className="size-3 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+          className="size-3 transition-transform duration-200"
           style={{ transform: open ? "rotate(180deg)" : undefined }}
           aria-hidden="true"
         />
@@ -143,11 +143,8 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
       {/* Opens by growing out of the row (0fr → 1fr) instead of appearing, the same
           grammar as every spoiler here; no height is measured. `inert` keeps the
           closed list's links out of the tab order and off the accessibility tree. */}
-      <div
-        className="grid transition-[grid-template-rows,opacity] duration-300 [transition-timing-function:var(--ease-strong)]"
-        style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}
-      >
-        <div className="overflow-hidden" inert={!open}>
+      <div className="reveal" data-shut={open ? undefined : ""}>
+        <div inert={!open}>
           {/* The hairline is a box-shadow drawn OUTSIDE the box, and the wrapper above
               clips to its own edge — without the 1px margins the outline survived only
               on the top edge, where the gap left it room. */}
