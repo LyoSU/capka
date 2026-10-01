@@ -425,6 +425,8 @@ describe("mergeUserRuns", () => {
   });
 
   it("sends Google one user turn with the words and the context apart", async () => {
+    // Control: unfolded, the package sends the run as two user turns of its own.
+    expect(consecutiveUsers((await wire("google", turn2())).contents)).toBe(1);
     const body = await wire("google", mergeUserRuns(turn2(), "google"));
     expect(body.contents.map((c) => c.role)).toEqual(["user", "model", "user"]);
     expect(body.contents.at(-1)!.parts.map((p) => p.text).join("")).toBe(`and now?\n\n${CONTEXT}`);
