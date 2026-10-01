@@ -11,9 +11,9 @@ import { Button } from "@/components/ui/button";
 
 /**
  * Landing spot for an account an admin has suspended. The dashboard layout parks
- * suspended users here; if the admin reactivates them, a refresh (or fresh
- * sign-in) lands them back in the app. Calm and jargon-free per the audience:
- * no error code, just what happened and who to ask.
+ * suspended users here; if the admin reactivates them, they sign in
+ * again (reactivation ends every session) and land back in the app. Calm and
+ * jargon-free per the audience: no error code, just what happened and who to ask.
  */
 export default function SuspendedPage() {
   const router = useRouter();

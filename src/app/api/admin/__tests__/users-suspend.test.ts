@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sessions } from "@/lib/db/schema";
+import { sessions, linkCodes } from "@/lib/db/schema";
 
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
@@ -59,18 +59,20 @@ describe("admin user suspend / reactivate / tier lifecycle", () => {
     expect(res.status).toBe(200);
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.txDelete).toHaveBeenCalledWith(sessions);
-    expect(mocks.txDeleteWhere).toHaveBeenCalledOnce();
+    expect(mocks.txDelete).toHaveBeenCalledWith(linkCodes);
+    expect(mocks.txDeleteWhere).toHaveBeenCalledTimes(2);
     expect(mocks.audit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user.suspend", targetKey: "user-1", detail: expect.objectContaining({ status: "suspended" }) }),
     );
   });
 
-  it("reactivates: flips to active WITHOUT revoking sessions", async () => {
+  it("reactivates: flips to active AND drops sessions and link codes created while suspended", async () => {
     mocks.txSelect.mockReturnValue(selectChain([{ status: "suspended" }]));
     mocks.txUpdate.mockReturnValue(updateChain([{ ...row, status: "active" }]));
     const res = await put({ userId: "user-1", status: "active" });
     expect(res.status).toBe(200);
-    expect(mocks.txDelete).not.toHaveBeenCalled();
+    expect(mocks.txDelete).toHaveBeenCalledWith(sessions);
+    expect(mocks.txDelete).toHaveBeenCalledWith(linkCodes);
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "user.reactivate" }));
   });
 
@@ -79,6 +81,7 @@ describe("admin user suspend / reactivate / tier lifecycle", () => {
     mocks.txUpdate.mockReturnValue(updateChain([{ ...row, status: "active" }]));
     const res = await put({ userId: "user-1", status: "active" });
     expect(res.status).toBe(200);
+    expect(mocks.txDelete).not.toHaveBeenCalled();
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "user.status_change" }));
   });
 

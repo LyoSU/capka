@@ -1,7 +1,7 @@
 import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { requireAdmin, apiHandler, type Role } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sessions, users, usage, tiers, chats, messages, capabilityPolicies, telegramLinks } from "@/lib/db/schema";
+import { sessions, users, usage, tiers, chats, messages, capabilityPolicies, telegramLinks, linkCodes } from "@/lib/db/schema";
 import { audit } from "@/lib/governance/audit";
 import { getLimitStatus } from "@/lib/billing/limits";
 import { purgeUserSpaces } from "@/lib/vault/spaces";
@@ -157,7 +157,11 @@ export const PUT = apiHandler(async (req: Request) => {
   // Lifecycle: approve/reactivate (active), send back to the approval queue
   // (pending), or revoke access (suspended). Any non-active status revokes the
   // user's live sessions in the SAME transaction as the flip, so a still-valid
-  // cookie can't outlive the change. Reactivating does NOT revoke sessions.
+  // cookie can't outlive the change. Reactivating a SUSPENDED account does too:
+  // nothing blocks a suspended account from signing in, so any session it holds
+  // was created during the suspension. Approving a pending signup keeps its
+  // sessions (only the owner can hold one; the signup itself created it). Pending
+  // Telegram link codes go with them on every suspend and reactivation.
   if (status) {
     if (!["active", "pending", "suspended"].includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
     const result = await db.transaction(async (tx) => {
@@ -168,8 +172,9 @@ export const PUT = apiHandler(async (req: Request) => {
       if (!before) return null;
       const [row] = await tx.update(users).set({ status }).where(eq(users.id, userId)).returning();
       if (!row) return null;
-      if (status !== "active") {
+      if (status !== "active" || before.status === "suspended") {
         await tx.delete(sessions).where(eq(sessions.userId, userId));
+        await tx.delete(linkCodes).where(eq(linkCodes.userId, userId));
       }
       return { row, prior: before.status };
     });

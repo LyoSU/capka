@@ -53,7 +53,7 @@ describe("admin user status changes", () => {
     expect(response.status).toBe(200);
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.remove).toHaveBeenCalledWith(sessions);
-    expect(mocks.removeWhere).toHaveBeenCalledOnce();
+    expect(mocks.removeWhere).toHaveBeenCalledTimes(2);
   });
 
   it("keeps sessions when an account is activated", async () => {

@@ -949,6 +949,13 @@ async function linkAccount(ctx: Context, code: string): Promise<void> {
     return;
   }
 
+  // A code minted before the account was suspended must not link it afterwards.
+  const [owner] = await db.select({ status: users.status }).from(users).where(eq(users.id, lc.userId)).limit(1);
+  if (owner?.status !== "active") {
+    await reply(ctx, "accountNotActive");
+    return;
+  }
+
   // This Telegram id may already be linked (re-running /link). The unique
   // constraint on telegram_user_id would otherwise throw with no reply —
   // re-point the existing link to the new account instead.
