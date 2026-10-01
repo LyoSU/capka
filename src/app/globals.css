@@ -749,6 +749,22 @@
 }
 .animate-pulse-fast { animation: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 
+/* A document tile's blank page while its first page renders (seconds, on a cold
+   LibreOffice): one faint band crossing the paper — "being drawn", not "stuck".
+   No band at all under reduced motion; the type glyph on the page says enough. */
+@keyframes paper-sheen {
+  from { background-position: 150% 0; }
+  to   { background-position: -50% 0; }
+}
+.paper-sheen {
+  background-image: linear-gradient(100deg, transparent 35%, color-mix(in oklch, var(--muted) 80%, transparent) 50%, transparent 65%);
+  background-size: 200% 100%;
+  animation: paper-sheen 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .paper-sheen { background-image: none; }
+}
+
 /* A smooth "comet" spinner: a conic gradient fading from transparent to the
    current text colour, masked into a thin ring. Premium-feeling alternative to a
    segmented spinner; inherits colour via currentColor and spins via animate-spin. */

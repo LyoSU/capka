@@ -602,7 +602,7 @@
       "failed": "failed",
       "stepFailed": "This step couldn't be completed.",
       "technicalDetails": "Technical details",
-      "artifacts": "{count, plural, one {Artifact} other {# Artifacts}}",
+      "artifacts": "Files · {count}",
       "steps": "{count, plural, one {# step} other {# steps}}",
       "more": "+{count} more",
       "continueTurn": "Continue",

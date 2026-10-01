@@ -94,7 +94,7 @@ export function AttachmentTray({
                 <button
                   type="button"
                   onClick={() => onRetry(af.id)}
-                  className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
+                  className="absolute inset-0 z-[1] grid place-items-center rounded-lg bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
                   aria-label={t("retryUpload", { name: af.name })}
                 >
                   <RotateCw className="size-5" />
@@ -104,7 +104,7 @@ export function AttachmentTray({
           ) : (
             <>
               {removeButton(af)}
-              <div aria-hidden className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-background/55">
+              <div aria-hidden className="absolute inset-0 z-[1] grid place-items-center rounded-lg bg-background/55">
                 <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
             </>

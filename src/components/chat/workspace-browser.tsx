@@ -446,6 +446,7 @@ export function WorkspaceBrowser({
       <FileTile
         key={entry.path}
         name={entry.name}
+        folder
         className="w-full"
         onClick={() => setPath(entry.path)}
         thumb={<div className={cn("flex h-full w-full items-center justify-center", bg)}><Icon className={cn("h-7 w-7", color)} /></div>}
@@ -465,6 +466,7 @@ export function WorkspaceBrowser({
         key={entry.path}
         file={fileFor(entry.path, entry.name)}
         viewable={viewable}
+        size={entry.size}
         className="w-full"
         overlay={s
           ? tileBadge(
@@ -501,9 +503,10 @@ export function WorkspaceBrowser({
   // A real grid, so tiles line up flush at both widths this browser lives at (the
   // 320px chat panel and the project hub's full-width Files tab) instead of the
   // ragged right edge flex-wrap left. The tiles are told to fill their track
-  // (`className="w-full"`); their default is the fixed square the wrapping rows
-  // in chat history and the composer still want.
-  const gridCols = "grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2";
+  // (`className="w-full"`); their default is the fixed-width card the wrapping
+  // rows in chat history and the composer still want.
+  // Never fewer than two per row, so the 320px panel is not one tall column.
+  const gridCols = "grid grid-cols-[repeat(auto-fill,minmax(min(148px,calc(50%-4px)),1fr))] gap-2";
 
   const gridBody = (
     <div className="px-3">
@@ -747,10 +750,7 @@ export function WorkspaceBrowser({
             {view === "grid" ? (
               <div className={gridCols}>
                 {Array.from({ length: 6 }, (_, i) => (
-                  <div key={i} className="space-y-1">
-                    <Skeleton className="aspect-square w-full rounded-xl" />
-                    <Skeleton className="mx-auto h-2 w-3/4" />
-                  </div>
+                  <Skeleton key={i} className="h-[124px] w-full rounded-lg" />
                 ))}
               </div>
             ) : (

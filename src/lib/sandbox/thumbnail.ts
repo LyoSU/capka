@@ -12,7 +12,10 @@ export function workspaceRelative(path: string): string | null {
 /** One rendered thumbnail per file version: the same path edited later (new
  *  mtime or size) is a new key, so a stale picture is never served for it. */
 export function thumbnailKey(sessionKey: string, path: string, modifiedAt: string | null, size: number): string {
-  return createHash("sha256").update(`${sessionKey}\0${path}\0${modifiedAt ?? ""}\0${size}`).digest("hex").slice(0, 32);
+  // `v2`: the rendering changed (2× resolution, top-of-page crop), so pictures
+  // cached under the old scheme are not served for it. Bump it again whenever
+  // THUMBNAIL_SCRIPT draws something different.
+  return createHash("sha256").update(`v2\0${sessionKey}\0${path}\0${modifiedAt ?? ""}\0${size}`).digest("hex").slice(0, 32);
 }
 
 /** Runs inside the sandbox as the sandbox user, with the path and key in the
@@ -40,13 +43,21 @@ if [ ! -s "$out" ]; then
       HOME="$d" timeout 40 /usr/bin/soffice -env:UserInstallation="file://$d/profile" --headless --norestore \
         --convert-to pdf --outdir "$w" "$w/in.$ext" >/dev/null 2>&1 || exit 8
     fi
+    # 640px wide: about twice the width a tile draws it at, so it is sharp on a
+    # retina screen. Only the top of the page is kept (640x480) — the tile shows
+    # the top of a document, and the rest would be bytes nobody sees.
     case "$ext" in
-      # A sheet prints small in a corner of an empty page: render larger, cut the
-      # margins away and scale back, so the tile shows cells rather than paper.
+      # A sheet prints small in a corner of an empty page: render the page 1400px
+      # wide, cut the margins away, then fit the used range to the width — but
+      # zoom at most 2x (pad to 700px first), so three columns do not turn into
+      # three giant cells.
       xlsx|xls|ods)
-        timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to 1400 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9
-        timeout 15 convert "$w/t.png" -trim +repage -bordercolor white -border 24 -resize '480x480>' "$w/t.png" >/dev/null 2>&1 || exit 9 ;;
-      *) timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to 480 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9 ;;
+        timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to-x 1400 -scale-to-y -1 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9
+        timeout 15 convert "$w/t.png" -trim +repage -bordercolor white -border 16 "$w/t.png" >/dev/null 2>&1 || exit 9
+        tw=$(identify -format %w "$w/t.png") && th=$(identify -format %h "$w/t.png") || exit 9
+        timeout 15 convert "$w/t.png" -background white -gravity NorthWest -extent "$((tw > 700 ? tw : 700))x$th" \
+          -resize 640x -crop 640x480+0+0 +repage "$w/t.png" >/dev/null 2>&1 || exit 9 ;;
+      *) timeout 15 pdftoppm -png -f 1 -l 1 -singlefile -scale-to-x 640 -scale-to-y -1 -W 640 -H 480 "$w/in.pdf" "$w/t" >/dev/null 2>&1 || exit 9 ;;
     esac
     mv "$w/t.png" "$out" || exit 6
     ls -1t "$d"/*.png 2>/dev/null | tail -n +201 | xargs -r rm -f

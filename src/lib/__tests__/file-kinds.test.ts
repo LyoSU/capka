@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { previewKind, fileKind, extOf } from "../file-kinds";
+import { previewKind, fileKind, extOf, splitFileName } from "../file-kinds";
 
 describe("extOf", () => {
   it("lowercases the extension and drops the dot", () => {
@@ -71,5 +71,23 @@ describe("fileKind", () => {
       expect(k.badge).not.toContain("dark:");
       expect(k.badge.startsWith("fill-")).toBe(true);
     }
+  });
+});
+
+describe("splitFileName", () => {
+  it("keeps the extension and the end of the stem in the tail", () => {
+    expect(splitFileName("продажі_за_квартал.xlsx")).toEqual({ head: "продажі_за_кварт", tail: "ал.xlsx" });
+    expect(splitFileName("звіт.docx")).toEqual({ head: "зв", tail: "іт.docx" });
+  });
+  it("loses nothing: head + tail is the name", () => {
+    for (const n of ["a.pdf", "x", ".env", "Makefile", "archive.tar.gz", "weird.extension_too_long"]) {
+      const { head, tail } = splitFileName(n);
+      expect(head + tail).toBe(n);
+    }
+  });
+  it("treats a dotfile or an over-long suffix as no extension", () => {
+    expect(splitFileName(".bashrc")).toEqual({ head: ".ba", tail: "shrc" });
+    expect(splitFileName("notes.extension_too_long").tail).toBe("long");
+    expect(splitFileName("ab")).toEqual({ head: "", tail: "ab" });
   });
 });

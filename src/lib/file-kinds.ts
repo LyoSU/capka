@@ -99,6 +99,16 @@ export function thumbnailable(name: string): boolean {
   return THUMB_EXTS.has(extOf(name));
 }
 
+/** A filename cut in two for middle truncation: the head takes the CSS ellipsis,
+ *  the tail (last two characters of the stem plus the extension) always shows, so
+ *  a long "продажі_за_квартал.xlsx" reads "продажі_з…ал.xlsx", never "продажі_за_к…". */
+export function splitFileName(name: string): { head: string; tail: string } {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : "";
+  const cut = Math.max(0, name.length - ext.length - (ext ? 2 : 4));
+  return { head: name.slice(0, cut), tail: name.slice(cut) };
+}
+
 /** Textual `application/*` types that are really plain text (read in the viewer). */
 function isTextualMime(type: string): boolean {
   return (

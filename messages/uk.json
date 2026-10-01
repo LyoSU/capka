@@ -602,7 +602,7 @@
       "failed": "помилка",
       "stepFailed": "Не вдалося виконати цей крок.",
       "technicalDetails": "Технічні деталі",
-      "artifacts": "{count, plural, one {# артефакт} few {# артефакти} many {# артефактів} other {# артефакту}}",
+      "artifacts": "Файли · {count}",
       "steps": "{count, plural, one {# крок} few {# кроки} many {# кроків} other {# кроку}}",
       "more": "Ще {count}",
       "continueTurn": "Продовжити",

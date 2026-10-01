@@ -893,9 +893,10 @@ function TextContent({ text, isStreaming, chatId, touched, sources, editStats }:
 function EditStatMeta({ stat }: { stat?: EditStat }) {
   if (!stat || (stat.added === 0 && stat.removed === 0)) return null;
   return (
-    <span className="mt-0.5 flex justify-center gap-1.5 font-mono text-xs leading-none tabular-nums">
+    <span className="font-mono">
+      {" · "}
       <span className="text-success">+{stat.added}</span>
-      {stat.removed > 0 && <span className="text-destructive">−{stat.removed}</span>}
+      {stat.removed > 0 && <span className="text-destructive"> −{stat.removed}</span>}
     </span>
   );
 }
@@ -924,9 +925,9 @@ function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
         <span>{tw("alsoChanged", { count: paths.length })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1.5 flex flex-wrap gap-3">
+        <div className="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(min(148px,calc(50%-6px)),1fr))] gap-3">
           {paths.map((p) => (
-            <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
+            <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} className="w-full" />
           ))}
         </div>
       </CollapsibleContent>
@@ -1003,7 +1004,8 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-3">
+      {/* A grid, not a wrap: cards line up flush, and a phone gets two per row. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(148px,calc(50%-6px)),1fr))] gap-3">
         {paths.map((p, i) => (
           // Staggered pop, capped at four steps: the delay exists to make the row
           // read as arriving rather than blinking, and past ~240ms the last tile
@@ -1015,6 +1017,7 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
               viewable={viewable}
               verify
               live={live}
+              className="w-full"
               meta={<EditStatMeta stat={stats?.get(editKey(p))} />}
             />
           </div>

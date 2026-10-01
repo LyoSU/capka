@@ -17,6 +17,7 @@ All notable changes to Capka are documented here. Format follows
 - One type scale (12/14/16/18px with paired line heights) and whole-pixel corner radii (6/8/12/16px) across the UI; transitions default to 140ms on the app's own easing.
 - The user's message bubble is a tinted surface, the composer has a stronger edge, the bubble and composer use the answer's 16px text, and the answer column now lines up with the composer.
 - The step timeline moves as one: disclosures open on one 300ms grid-rows reveal, a finished step crossfades its spinner into its icon, the running step's label shimmers, and turns reloaded from history render without entrance animations.
+- File tiles are landscape cards (page peeking out of a well, type glyph, middle-truncated name, size or type) everywhere, document thumbnails render at 2× resolution, and the turn's file list is headed "Files · N".
 
 ### Fixed
 - The sidebar logo is visible in dark mode, and small captions no longer use faded text below WCAG AA contrast.

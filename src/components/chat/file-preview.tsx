@@ -20,7 +20,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
-import { extOf, fileKind, previewKind, thumbnailable } from "@/lib/file-kinds";
+import { extOf, fileKind, previewKind, splitFileName, thumbnailable } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
 import { applyGesture, swipeVerdict, tapZoomTarget, wheelZoomFactor, TAP_SLOP_PX, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
@@ -1384,60 +1384,78 @@ function CopyButton({ text }: { text: string }) {
 // ── File tiles (shared everywhere) ────────────────────────────────────────────
 
 /**
- * A square file tile: a thumbnail with the filename captioned beneath, the way
- * Finder/macOS and chat apps show attachments. One layout shared by the
- * composer, chat history, and the AI's delivered files, so a file looks the same
- * everywhere. Compact and wrap-friendly (vs. full-width rows that push the
- * composer off-screen). The thumb is a slot — callers pass a sandbox FileThumb
- * or a local object-URL preview (for files not yet uploaded).
+ * A file card: a fixed-height well with the file's picture, and a caption row
+ * beneath it (type glyph, name, one muted line) inside the same card — the
+ * Drive / Quick Look shape. One layout shared by the composer, chat history, the
+ * AI's delivered files and the files panel, so a file looks the same everywhere.
+ * The thumb is a slot — callers pass a sandbox FileThumb or a local object-URL
+ * preview (for files not yet uploaded).
  */
 export function FileTile({
-  thumb, name, onClick, href, download, overlay, meta, className,
+  thumb, name, folder, size, onClick, href, download, overlay, meta, className,
 }: {
   thumb: React.ReactNode;
   name: string;
+  /** Captions a folder as a folder (its glyph and "Folder" line). */
+  folder?: boolean;
+  /** Bytes, when known, for the muted line under the name. */
+  size?: number;
   onClick?: () => void;
   href?: string;
   download?: string;
-  /** One short line under the name (the `+N −M` of a written file). Part of the
-   *  control, so it is announced with the tile. */
+  /** Appended to the muted line under the name (the `+N −M` of a written file).
+   *  Part of the control, so it is announced with the tile. */
   meta?: React.ReactNode;
   /** Corner action over the thumbnail (e.g. a remove button in the composer).
    *  Stays OUTSIDE the tile's own control — it is usually a button itself, and a
    *  button inside a button is invalid and unreachable by keyboard. */
   overlay?: React.ReactNode;
-  /** Outer width. Defaults to the fixed square the wrapping rows want; a grid
+  /** Outer width. Defaults to the fixed card the wrapping rows want; a grid
    *  passes `w-full` so the track decides instead. */
   className?: string;
 }) {
+  const t = useTranslations("chat.preview");
+  const { Icon, labelKey } = fileKind(name, folder);
+  const { head, tail } = splitFileName(name);
   // The filename lives INSIDE the control, which is what gives the control its
-  // accessible name. It used to be a sibling <p>, and every thumbnail is either
-  // `alt=""` or `aria-hidden` — so a grid of files announced as "button, button,
-  // button", and a text file was worse still: its thumbnail renders the first 600
-  // characters of the file, and that became the button's name. Naming it here also
-  // makes the whole tile the hit target, the way Finder and Drive behave.
+  // accessible name — every thumbnail is `alt=""` or `aria-hidden`. It is said
+  // once, whole, from the sr-only copy: the visible one is two spans for the
+  // middle ellipsis and could be read as two words.
   const body = (
     <>
-      <span className="block aspect-square w-full overflow-hidden rounded-xl bg-muted/40 ring-1 ring-border/60 transition group-hover/tile:ring-primary/40">
-        {thumb}
+      <span className="relative block h-[76px] w-full overflow-hidden bg-muted">{thumb}</span>
+      <span className="flex items-center gap-2 px-2.5 py-1.5">
+        <Icon aria-hidden className={cn("size-4 shrink-0", folder ? "text-muted-foreground" : tintOf(name))} />
+        <span className="min-w-0 flex-1">
+          <span className="sr-only">{name}</span>
+          {/* Middle truncation: the head takes the ellipsis and the extension
+              always shows, so `report_v1.docx` and `report_v2.docx` differ. */}
+          <span aria-hidden className="flex text-sm leading-5 text-foreground">
+            <span className="truncate">{head}</span>
+            <span className="shrink-0 whitespace-pre">{tail}</span>
+          </span>
+          <span className="block truncate text-xs leading-4 text-muted-foreground tabular-nums">
+            {/* The size when a listing gave it, else what the file is — never
+                both, which does not fit a two-across panel. */}
+            {size !== undefined ? formatSize(size) : t(`kind.${labelKey}`)}
+            {meta}
+          </span>
+        </span>
       </span>
-      {/* Two lines, not one: the assistant writes descriptive filenames, and a
-          single truncated line turned `job_architect_toolkit.py` and
-          `job_architecture.db` into the same unreadable stub. */}
-      <span className="mt-1 line-clamp-2 break-words text-center text-xs leading-tight text-muted-foreground">
-        {name}
-      </span>
-      {meta}
     </>
   );
-  const control = "flex w-full flex-col rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+  const control = cn(
+    "flex w-full flex-col overflow-hidden rounded-lg bg-card text-left shadow-hairline outline-none",
+    "transition-[translate,scale,box-shadow] duration-140 ease-strong focus-visible:ring-2 focus-visible:ring-ring",
+    (href || onClick) && "cursor-pointer hover:-translate-y-px hover:shadow-raised active:scale-[0.98]",
+  );
 
   return (
-    <div className={cn("group/tile relative", className ?? "w-[88px] shrink-0")}>
+    <div className={cn("group/tile relative", className ?? "w-[168px] shrink-0")}>
       {href ? (
         <a href={href} download={download} title={name} className={control}>{body}</a>
       ) : onClick ? (
-        <button type="button" onClick={onClick} title={name} className={cn(control, "cursor-pointer")}>{body}</button>
+        <button type="button" onClick={onClick} title={name} className={control}>{body}</button>
       ) : (
         <span className={control}>{body}</span>
       )}
@@ -1446,13 +1464,24 @@ export function FileTile({
   );
 }
 
+/** The caption glyph's colour: by type only, so a row of files sorts itself at a
+ *  glance — sheets green, documents blue, PDFs red, decks orange, the rest muted. */
+function tintOf(name: string): string {
+  const ext = extOf(name);
+  if (["xlsx", "xls", "ods", "csv", "tsv"].includes(ext)) return "text-emerald-600 dark:text-emerald-400";
+  if (["docx", "doc", "odt", "rtf"].includes(ext)) return "text-blue-600 dark:text-blue-400";
+  if (ext === "pdf") return "text-red-600 dark:text-red-400";
+  if (["pptx", "ppt", "odp", "key"].includes(ext)) return "text-orange-600 dark:text-orange-400";
+  return "text-muted-foreground";
+}
+
 /**
  * A sandbox-backed file tile: real thumbnail, Quick Look on click (paging
  * through `viewable`), download fallback for non-previewable kinds. For files
  * addressable on the controller by chatId + path.
  */
 export function SandboxFileTile({
-  file, viewable, overlay, meta, verify, live, className,
+  file, viewable, overlay, meta, size, verify, live, className,
 }: {
   file: PreviewFile;
   /** The set to page through with ←/→. Need not contain `file` — see below. */
@@ -1460,6 +1489,8 @@ export function SandboxFileTile({
   overlay?: React.ReactNode;
   /** Forwarded to FileTile: the line under the name. */
   meta?: React.ReactNode;
+  /** Forwarded to FileTile: bytes, when the caller has a listing. */
+  size?: number;
   /** Forwarded to FileTile: `w-full` inside a grid, otherwise the fixed square. */
   className?: string;
   /** Probe existence and grey the tile out if the file isn't there — for the
@@ -1497,6 +1528,7 @@ export function SandboxFileTile({
     <FileTile
       thumb={<FileThumb file={file} className="h-full w-full" />}
       name={file.name}
+      size={size}
       overlay={overlay}
       meta={meta}
       className={className}
@@ -1546,14 +1578,22 @@ function giveThumbSlot() {
 }
 
 /** First page of a document as its tile, asked for only once the tile is near
- *  the viewport. The typed sheet shows until the picture has loaded and stays if
- *  it never does. */
+ *  the viewport. Drawn as a sheet of paper peeking out of the well — fit to the
+ *  page width, top of the page, the bottom fading into the well — so it reads as
+ *  "a document", not as text to squint at. A sheet shows its top-left cells with
+ *  the right edge fading too; a deck shows its whole first slide. Until the
+ *  picture lands (a cold LibreOffice takes seconds) the paper is blank with the
+ *  type glyph on it and a slow sheen; if it never lands, the glyph stays. */
 function DocThumb({ file, className }: { file: PreviewFile; className?: string }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const holding = useRef(false);
   const [src, setSrc] = useState<string | null>(null);
   const [shown, setShown] = useState<"loading" | "ok" | "failed">("loading");
   const url = `/api/sandbox/files/thumbnail?${fileQuery(file)}&path=${encodeURIComponent(file.path)}`;
+  const ext = extOf(file.name);
+  const slide = ["pptx", "ppt", "odp"].includes(ext);
+  const sheet = ["xlsx", "xls", "ods"].includes(ext);
+  const { Icon } = fileKind(file.name);
 
   const release = useCallback(() => {
     if (!holding.current) return;
@@ -1587,20 +1627,34 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
 
   return (
     <div ref={boxRef} className={cn("relative overflow-hidden", className)}>
-      <BinaryFileThumb name={file.name} className="h-full w-full" />
-      {src && shown !== "failed" && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={src}
-          alt=""
-          onLoad={() => { release(); setShown("ok"); }}
-          onError={() => { release(); setShown("failed"); }}
-          className={cn(
-            "absolute inset-0 h-full w-full bg-white object-cover object-top motion-safe:transition-opacity motion-safe:duration-300",
-            shown === "ok" ? "opacity-100" : "opacity-0",
-          )}
-        />
-      )}
+      <div
+        className={cn(
+          "absolute overflow-hidden bg-card ring-1 ring-black/10 shadow-[0_1px_3px_oklch(0_0_0/0.08)] dark:ring-white/10",
+          // A slide is a whole object, centred; a page is cut by the well's floor.
+          slide ? "inset-x-0 top-2.5 mx-auto aspect-video h-[56px] rounded-[4px]" : "inset-x-2.5 top-2.5 -bottom-px rounded-t-[4px]",
+          // A sheet goes on to the right as well: its edge fades into the well.
+          sheet && "[mask-image:linear-gradient(to_right,#000_80%,transparent)]",
+          shown === "loading" && "paper-sheen",
+        )}
+      >
+        <Icon aria-hidden className={cn("absolute left-1/2 size-6 -translate-x-1/2 opacity-60", slide ? "top-1/2 -translate-y-1/2" : "top-4", tintOf(file.name))} />
+        {src && shown !== "failed" && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt=""
+            onLoad={() => { release(); setShown("ok"); }}
+            onError={() => { release(); setShown("failed"); }}
+            className={cn(
+              "absolute inset-0 h-full w-full bg-white transition-opacity duration-200 ease-out dark:brightness-[.92]",
+              slide ? "object-contain" : sheet ? "object-cover object-left-top" : "object-cover object-top",
+              shown === "ok" ? "opacity-100" : "opacity-0",
+            )}
+          />
+        )}
+      </div>
+      {/* The floor of the well: the page slides under it rather than ending. */}
+      {!slide && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-muted to-transparent" />}
     </div>
   );
 }
