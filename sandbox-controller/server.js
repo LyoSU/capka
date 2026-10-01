@@ -694,8 +694,9 @@ const server = createServer(async (req, res) => {
       if (method === "GET") {
         const depth = Math.min(20, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
         const limit = Math.min(20000, Math.max(1, parseInt(url.searchParams.get("limit") || "1000", 10) || 1000));
-        const { entries, truncated } = await workspace.sharedList(r.userId, url.searchParams.get("path") || ".", depth, limit);
-        return jsonRes(res, 200, { entries, truncated });
+        // `missing` passes through for the same reason as the workspace listing above.
+        const { entries, truncated, missing } = await workspace.sharedList(r.userId, url.searchParams.get("path") || ".", depth, limit);
+        return jsonRes(res, 200, { entries, truncated, missing });
       }
 
       const filePath = url.searchParams.get("path");

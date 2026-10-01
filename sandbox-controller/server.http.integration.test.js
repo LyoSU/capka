@@ -361,4 +361,15 @@ d("controller HTTP API (lifecycle)", () => {
     expect(await list("gone")).toMatchObject({ entries: [], truncated: false, missing: true });
     expect((await list("sub")).missing).toBe(false);
   });
+
+  it("says so when a listed shared folder does not exist, too", async () => {
+    await new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID }).ensure("u4", "w4");
+    const shared = createHmac("sha256", SECRET).update("u4|_shared:v1").digest("hex");
+    const list = async (path) => {
+      const q = new URLSearchParams({ path, depth: "20", token: shared });
+      return (await fetch(`${base}/users/u4/shared/files?${q}`, { headers: { Authorization: `Bearer ${SECRET}` } })).json();
+    };
+    expect(await list("gone")).toMatchObject({ entries: [], truncated: false, missing: true });
+    expect((await list(".")).missing).toBe(false);
+  });
 });
