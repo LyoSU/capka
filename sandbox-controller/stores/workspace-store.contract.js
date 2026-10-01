@@ -41,7 +41,8 @@ export function runWorkspaceStoreContract(makeStore) {
       await store.ensure("u1", "s1");
       await store.write("u1", "s1", "a.txt", Buffer.from("x"));
       await store.remove("u1", "s1");
-      await expect(store.list("u1", "s1", ".")).resolves.toEqual({ entries: [], truncated: false });
+      // Empty, and flagged as not there at all rather than as emptied (folder sync).
+      await expect(store.list("u1", "s1", ".")).resolves.toEqual({ entries: [], truncated: false, missing: true });
     });
 
     it("delete() removes a single file, leaving the rest", async () => {

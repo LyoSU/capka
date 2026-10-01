@@ -46,13 +46,12 @@ export class LocalFsStore {
     const key = `${full}:${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
     const cached = this.#hashCache.get(key);
     if (cached !== undefined) return cached;
-    const hash = await hashFile(full).catch(() => undefined);
-    if (hash !== undefined) {
-      if (this.#hashCache.size >= this.#HASH_CACHE_MAX) {
-        this.#hashCache.delete(this.#hashCache.keys().next().value); // evict oldest
-      }
-      this.#hashCache.set(key, hash);
+    // A read failure propagates: the listing decides whether it hides a file.
+    const hash = await hashFile(full);
+    if (this.#hashCache.size >= this.#HASH_CACHE_MAX) {
+      this.#hashCache.delete(this.#hashCache.keys().next().value); // evict oldest
     }
+    this.#hashCache.set(key, hash);
     return hash;
   }
 
@@ -93,8 +92,10 @@ export class LocalFsStore {
    *  against symlink-cycle recursion), OR a directory or entry could not be read for
    *  a reason that does not prove it is gone (EACCES, EIO, EMFILE…). Folder sync MUST
    *  refuse a truncated tree: treating the unseen files as absent would drive a
-   *  destructive local delete. With `withHash`, each file entry also carries a
-   *  content SHA-256 (`hash`). */
+   *  destructive local delete. A file whose content cannot be hashed counts as
+   *  unread too. `missing` is true when the requested directory itself does not
+   *  exist: that is an empty listing, but not evidence that its files were deleted.
+   *  With `withHash`, each file entry also carries a content SHA-256 (`hash`). */
   async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000, opts = {}) {
     return this.#listAt(this.#wsPath(userId, sessionId), relPath, depth, limit, opts);
   }
@@ -111,6 +112,7 @@ export class LocalFsStore {
     const deep = depth > 1; // multi-level walk → a dir left un-descended means incomplete
     const entries = [];
     let truncated = false;
+    let missing = false;
     // A path that vanished, stopped being a directory, loops, or escaped the workspace
     // (safeRealPath's refusals carry no code) is honestly absent from the listing. Any
     // other failure hides what is there, so the listing must say it is incomplete.
@@ -133,7 +135,11 @@ export class LocalFsStore {
         unseen(err);
         continue;
       }
-      const names = (await readdir(dirPath).catch((err) => { unseen(err); return []; })).sort();
+      const names = (await readdir(dirPath).catch((err) => {
+        if (q === 0 && (err?.code === "ENOENT" || err?.code === "ENOTDIR")) missing = true;
+        unseen(err);
+        return [];
+      })).sort();
       for (const name of names) {
         if (entries.length >= limit) { truncated = true; break scan; }
         try {
@@ -159,7 +165,7 @@ export class LocalFsStore {
         } catch (err) { unseen(err); }
       }
     }
-    return { entries, truncated };
+    return { entries, truncated, missing };
   }
 
   async read(userId, sessionId, relPath) {

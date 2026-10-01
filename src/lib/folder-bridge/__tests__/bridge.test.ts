@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolveConflictName, leaseRenewMs, uploadBatch, serverTree, LEASE_GONE } from "../bridge";
-import { conflictName, planSync } from "../plan";
+import { conflictName, planSync, planDirs } from "../plan";
 import { chatTarget } from "@/lib/workspace-target";
 
 /**
@@ -101,6 +101,41 @@ describe("serverTree — an incomplete listing never becomes a plan", () => {
     vi.stubGlobal("fetch", listing(false));
     const tree = await serverTree(chatTarget("c1"), "docs");
     expect(Object.keys(tree.files)).toEqual(["a.txt"]);
+    expect(tree.missing).toBe(false);
+  });
+});
+
+// A workspace copy that is not there at all (the idle-workspace reaper removed the
+// workspace, or the folder was never uploaded) lists as empty. Against the stored
+// ancestor, empty reads as "every file was deleted on the server".
+describe("a missing workspace copy never reads as every file deleted", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const entry = { mtime: 0, size: 1, hash: "ha" };
+  const local = { "a.txt": entry, "sub/b.txt": entry };
+
+  it("is reported by serverTree, apart from an empty folder", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ entries: [], truncated: false, missing: true })));
+    expect((await serverTree(chatTarget("c1"), "docs")).missing).toBe(true);
+    // An older controller sends no flag: that stays an ordinary listing.
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ entries: [], truncated: false })));
+    expect((await serverTree(chatTarget("c1"), "docs")).missing).toBe(false);
+  });
+
+  it("is planned against no ancestor, which deletes nothing and puts the copy back", () => {
+    // The hazard: the stored ancestor plus an empty server is a delete of everything.
+    expect(planSync(local, {}, local).deleteLocal.sort()).toEqual(["a.txt", "sub/b.txt"]);
+    const union = planSync(local, {}, {});
+    expect(union.deleteLocal).toEqual([]);
+    expect(union.upload.sort()).toEqual(["a.txt", "sub/b.txt"]);
+    expect(planDirs(["sub"], [], [], union.upload).deleteLocal).toEqual([]);
+  });
+
+  it("is what runSync plans files and folders against when the copy is missing", () => {
+    const src = readFileSync("src/lib/folder-bridge/bridge.ts", "utf8");
+    const runSync = src.slice(src.indexOf("async function runSync("));
+    expect(runSync).toContain("const ancestor = missing ? { files: {}, dirs: [] } : { files: base, dirs: dbase };");
+    expect(runSync).toContain("planSync(local, remote, ancestor.files,");
+    expect(runSync).toContain("planDirs(localDirs, remoteDirs, ancestor.dirs,");
   });
 });
 

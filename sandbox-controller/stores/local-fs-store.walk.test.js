@@ -3,12 +3,21 @@ import { rm, mkdir, writeFile, symlink } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 
 // A queued subdirectory must be able to change between the moment the walk enqueues
 // it and the moment it dequeues it — that window is what a sandbox process races.
 // Hooking `stat` lets the test mutate the tree at exactly that point instead of hoping
 // an unsynchronised `rm` lands there. Its own file: the module mock is file-wide.
-const hook = vi.hoisted(() => ({ onStat: null, onReaddir: null }));
+const hook = vi.hoisted(() => ({ onStat: null, onReaddir: null, onRead: null }));
+vi.mock("node:fs", async (importOriginal) => {
+  const orig = await importOriginal();
+  return {
+    ...orig,
+    // The content hash streams the file; a hook here fails that read alone.
+    createReadStream: (p, o) => hook.onRead?.(String(p)) ?? orig.createReadStream(p, o),
+  };
+});
 vi.mock("node:fs/promises", async (importOriginal) => {
   const orig = await importOriginal();
   return {
@@ -89,6 +98,43 @@ describe("LocalFsStore.list walk", () => {
       expect((await store.list("u1", "s1", ".", depth, 100)).truncated).toBe(false);
     } finally {
       hook.onReaddir = null;
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("flags the listing incomplete when a file's content cannot be hashed", async () => {
+    const { store, dataRoot } = await tree();
+    try {
+      // A stream that fails as an unreadable file's does, once it is read.
+      const failing = (code) => new Readable({ read() { this.destroy(fail(code)); } });
+      hook.onRead = (p) => (p.endsWith("/b.txt") ? failing("EACCES") : undefined);
+      const unread = await store.list("u1", "s1", ".", 3, 100, { withHash: true });
+      expect(unread.truncated).toBe(true);
+      expect(unread.entries.find((e) => e.path === "a/x.txt")?.hash).toMatch(/^[0-9a-f]{64}$/);
+      // Gone between its stat and its read: an honest omission, not a gap.
+      hook.onRead = (p) => (p.endsWith("/b.txt") ? failing("ENOENT") : undefined);
+      const gone = await store.list("u1", "s1", ".", 3, 100, { withHash: true });
+      expect(gone.truncated).toBe(false);
+      expect(gone.entries.map((e) => e.path)).not.toContain("b.txt");
+    } finally {
+      hook.onRead = null;
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  // A folder that is not there lists as empty, and an empty listing against a stored
+  // manifest reads as "every file was deleted on the server". The flag tells them apart.
+  it("reports a requested directory that does not exist as missing, not as empty", async () => {
+    const { store, dataRoot } = await tree();
+    try {
+      expect(await store.list("u1", "s1", "gone", 20, 100, { withHash: true })).toEqual({ entries: [], truncated: false, missing: true });
+      expect((await store.list("u1", "s1", "a", 20, 100)).missing).toBe(false);
+      // A file where the directory should be is no directory either.
+      expect((await store.list("u1", "s1", "b.txt", 20, 100)).missing).toBe(true);
+      // The whole workspace gone (the idle-workspace reaper removed it).
+      await rm(join(dataRoot, "u1"), { recursive: true, force: true });
+      expect((await store.list("u1", "s1", "a", 20, 100)).missing).toBe(true);
+    } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }
   });

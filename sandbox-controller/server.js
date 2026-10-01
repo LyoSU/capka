@@ -652,8 +652,10 @@ const server = createServer(async (req, res) => {
       // hash=1 (folder sync) makes each file entry carry a content SHA-256 so the
       // bridge can detect a same-length edit; the file browser omits it (cheaper).
       const withHash = url.searchParams.get("hash") === "1";
-      const { entries, truncated } = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth, limit, { withHash });
-      return jsonRes(res, 200, { entries, truncated });
+      // `missing`: the requested folder is not there at all — folder sync must not
+      // read that as every file in it having been deleted.
+      const { entries, truncated, missing } = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth, limit, { withHash });
+      return jsonRes(res, 200, { entries, truncated, missing });
     }
 
     // DELETE /sessions/:id/files?path=  — remove one file (composer attachment

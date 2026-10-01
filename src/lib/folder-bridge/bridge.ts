@@ -85,7 +85,7 @@ const lastLocal = new Map<string, HashedManifest>();
 // flags `truncated` if even this isn't enough, which aborts the sync (see below).
 const SYNC_LIST_LIMIT = 15000;
 
-export async function serverTree(target: WorkspaceTarget, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
+export async function serverTree(target: WorkspaceTarget, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[]; missing: boolean }> {
   // hash=1 makes each file carry a content SHA-256 so plan.ts compares by content,
   // not by size — a same-length edit on the server must still count as a change.
   const res = await fetch(`/api/sandbox/files?${targetQuery(target)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}&hash=1`);
@@ -93,9 +93,10 @@ export async function serverTree(target: WorkspaceTarget, name: string): Promise
   // destructive local delete of every synced file on a transient 403/500. Abort the
   // sync instead (base is left untouched, so the next sync retries cleanly).
   if (!res.ok) throw new Error(`Could not read the workspace (HTTP ${res.status}).`);
-  const { entries, truncated } = (await res.json()) as {
+  const { entries, truncated, missing } = (await res.json()) as {
     entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null; hash?: string }[];
     truncated?: boolean;
+    missing?: boolean;
   };
   // A truncated tree is an INCOMPLETE server view (entry cap, a subtree past the
   // depth limit, or a directory the controller could not read); treating the unseen
@@ -113,7 +114,7 @@ export async function serverTree(target: WorkspaceTarget, name: string): Promise
     else if (oversized(e.size)) excluded.push(rel); // track: absence ≠ delete (see planSync)
     else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size, hash: e.hash };
   }
-  return { files, dirs, excluded };
+  return { files, dirs, excluded, missing: missing === true };
 }
 
 /** Bounded-parallel map — runs `fn` over `items` with at most `limit` in flight.
@@ -459,21 +460,27 @@ export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress
   onProgress?.({ phase: "scanning", done: 0, total: 0 });
   const { hashed: local, skipped, excluded: localExcluded } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
-  const { files: remote, dirs: remoteDirs, excluded: remoteExcluded } = await serverTree(target, folder.name);
+  const { files: remote, dirs: remoteDirs, excluded: remoteExcluded, missing } = await serverTree(target, folder.name);
+  // No workspace copy at all — a fresh chat, the agent removed the whole folder, or
+  // the idle-workspace reaper (WORKSPACE_TTL_MS) deleted the workspace — is no
+  // evidence that its files were deleted one by one. Against the stored ancestor it
+  // would read exactly that and delete every local copy, so merge against no ancestor
+  // instead: a safe union, which deletes nothing and puts the copy back.
+  const ancestor = missing ? { files: {}, dirs: [] } : { files: base, dirs: dbase };
   // Paths skipped (oversized) on either side: their absence from a manifest is a
   // "didn't look", not a delete. The planner leaves them untouched entirely.
   const excluded = new Set([...localExcluded, ...remoteExcluded]);
   // One timestamp for the plan, so the conflict-copy names the executor resolves
   // below step from the same stamp the planner proposed.
   const plannedAt = Date.now();
-  const plan = planSync(local, remote, base, excluded, plannedAt);
+  const plan = planSync(local, remote, ancestor.files, excluded, plannedAt);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
   // A directory holding any file this run writes must survive on both sides (D5).
   // The proposed copy names are enough here: a copy always sits in the directory of
   // the file it belongs to, and resolving the name never moves it.
-  const dirPlan = planDirs(localDirs, remoteDirs, dbase, [...plan.upload, ...plan.download, ...localWins, ...remoteWins, ...plan.conflictCopies.map((c) => c.keepAs)]);
+  const dirPlan = planDirs(localDirs, remoteDirs, ancestor.dirs, [...plan.upload, ...plan.download, ...localWins, ...remoteWins, ...plan.conflictCopies.map((c) => c.keepAs)]);
 
   // Keep the losing version of every conflict BEFORE anything overwrites it. The
   // losing bytes are read from the side they still live on and written to the

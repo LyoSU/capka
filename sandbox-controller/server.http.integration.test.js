@@ -349,4 +349,15 @@ d("controller HTTP API (lifecycle)", () => {
     expect(paths).toContain("a.txt");
     expect(paths).toContain("sub/b.txt"); // nested via depth, no container involved
   });
+
+  it("says so when the listed folder does not exist, instead of only returning nothing", async () => {
+    const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
+    await ws.ensure("u3", "w3");
+    const list = async (path) => {
+      const q = new URLSearchParams({ path, depth: "20", hash: "1", userId: "u3", token: token("u3", "w3") });
+      return (await fetch(`${base}/sessions/w3/files?${q}`, { headers: { Authorization: `Bearer ${SECRET}` } })).json();
+    };
+    expect(await list("gone")).toMatchObject({ entries: [], truncated: false, missing: true });
+    expect((await list("sub")).missing).toBe(false);
+  });
 });
