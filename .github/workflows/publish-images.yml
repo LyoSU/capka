@@ -33,6 +33,11 @@ on:
 # halves of one channel, so two overlapping runs (a re-run of an older tag, two
 # releases pushed minutes apart) could finish in opposite orders and leave the
 # channel pointing at different releases — or roll it backwards. Queue instead.
+#
+# GitHub keeps only ONE pending run per group: a tag pushed while one run is in
+# progress (the gate alone can wait up to 90 minutes for CI) and another is
+# already waiting cancels the waiting one. Re-run a cancelled tag's run once the
+# queue clears — the gate's newest-release check makes a late run safe.
 concurrency:
   group: publish-images
   cancel-in-progress: false
@@ -76,6 +81,10 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
+          # The default shell is `bash -e` without pipefail: a failed `gh api` below
+          # would leave an empty list, mark nothing newest, and the run would end
+          # green having moved no channel. Fail instead, so it can be re-run.
+          set -o pipefail
           if [ "$REF_TYPE" != tag ] || ! [[ "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
             printf '%s=false\n' plain newest newest_major newest_minor >> "$GITHUB_OUTPUT"
             exit 0
@@ -83,6 +92,7 @@ jobs:
           echo "plain=true" >> "$GITHUB_OUTPUT"
           releases="$(gh api "repos/$REPO/git/matching-refs/tags/v" --paginate --jq '.[].ref | ltrimstr("refs/tags/")' \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+          grep -qxF "$REF_NAME" <<< "$releases" || { echo "::error::Could not list the release tags (no $REF_NAME among them). Re-run this workflow."; exit 1; }
           # Is this tag the newest release whose name starts with $2?
           newest() { [ "$(awk -v p="$2" 'index($0, p) == 1' <<< "$releases" | tail -n1)" = "$REF_NAME" ] && echo "$1=true" || echo "$1=false"; }
           newest newest "v" >> "$GITHUB_OUTPUT"
@@ -125,7 +135,10 @@ jobs:
                && { [ "$count" -gt 0 ] || [ "$SECONDS" -gt 300 ]; }; then
               if [ -z "$dispatched" ]; then
                 echo "No CI run that can finish for $SHA; starting CI on $REF_NAME."
-                gh workflow run ci.yml --repo "$REPO" --ref "$REF_NAME" || { sleep 30; continue; }
+                # Not retried: a dispatch that errored may still have started a run,
+                # and a second one would cancel it and read as a cancelled CI below.
+                gh workflow run ci.yml --repo "$REPO" --ref "$REF_NAME" \
+                  || { echo "::error::Could not start CI on $REF_NAME. $rerun"; exit 1; }
                 dispatched="$count"
               elif [ "$count" -gt "$dispatched" ]; then
                 echo "::error::The CI run started for $SHA was cancelled. $rerun"
@@ -402,7 +415,8 @@ jobs:
           **Full changelog:** https://github.com/${REPO}/blob/master/CHANGELOG.md"
           # Idempotent and forgiving of a pre-created draft: if a release already
           # exists for this tag (e.g. an operator staged notes as a draft), publish
-          # it as latest; otherwise create it fresh from the CHANGELOG slice.
+          # it with this tag's channel flags; otherwise create it fresh from the
+          # CHANGELOG slice.
           if [ "$NEWEST" = true ]; then channel=(--latest)
           elif [ "$PLAIN" = true ]; then channel=(--latest=false)
           else channel=(--prerelease --latest=false); fi
