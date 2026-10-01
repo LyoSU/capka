@@ -45,57 +45,92 @@ jobs:
   # Publish only a commit CI already passed: cutting the tag is the deploy, so a
   # red commit must stop here, before any image or channel moves. Waits (bounded)
   # for a CI run still in progress — the release commit and its tag are usually
-  # pushed together — and refuses when CI failed, was cancelled, or never ran on a
-  # push of this exact commit. Re-run CI for the commit, then re-run this workflow.
+  # pushed together — and refuses when CI failed.
   #
-  # Also decides the channel: only a plain vX.Y.Z moves `latest`, `stable` and the
-  # GitHub Release marked latest. A prerelease tag (v1.0.0-rc.1) publishes its own
-  # image tag and nothing else, so nobody following a channel is moved onto it.
+  # A push to master runs CI only on the TIP of that push, and a newer push cancels
+  # the run in progress, so the release commit often never gets a finished push run
+  # (in a busy repo another commit lands on top of it within minutes). When there is
+  # no run for it, or only cancelled ones, the gate starts CI on the tag itself
+  # (workflow_dispatch, head_sha = the tag commit) once, and waits for that.
+  #
+  # Also decides the channels. A prerelease tag (v1.0.0-rc.1) publishes only its
+  # own image tag. A plain vX.Y.Z moves each moving tag it is the newest release
+  # of: vX.Y, vX, and — only as the newest release overall — `latest`, `stable`
+  # and the GitHub Release marked latest. So a maintenance release on an older
+  # line, or a re-run of an old tag, never rolls a channel backwards.
   gate:
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      contents: read
+      actions: write
     outputs:
       plain: ${{ steps.channel.outputs.plain }}
+      newest: ${{ steps.channel.outputs.newest }}
+      newest_major: ${{ steps.channel.outputs.newest_major }}
+      newest_minor: ${{ steps.channel.outputs.newest_minor }}
     steps:
       - id: channel
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
-          if [ "$REF_TYPE" = tag ] && [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "plain=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "plain=false" >> "$GITHUB_OUTPUT"
+          if [ "$REF_TYPE" != tag ] || ! [[ "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            printf '%s=false\n' plain newest newest_major newest_minor >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "plain=true" >> "$GITHUB_OUTPUT"
+          releases="$(gh api "repos/$REPO/git/matching-refs/tags/v" --paginate --jq '.[].ref | ltrimstr("refs/tags/")' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+          # Is this tag the newest release whose name starts with $2?
+          newest() { [ "$(awk -v p="$2" 'index($0, p) == 1' <<< "$releases" | tail -n1)" = "$REF_NAME" ] && echo "$1=true" || echo "$1=false"; }
+          newest newest "v" >> "$GITHUB_OUTPUT"
+          newest newest_major "v${BASH_REMATCH[1]}." >> "$GITHUB_OUTPUT"
+          newest newest_minor "v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}." >> "$GITHUB_OUTPUT"
 
       - name: Require green CI for this commit
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           deadline=$((SECONDS + 90 * 60))
+          dispatched=
+          rerun="Re-run CI on this commit (Actions → CI → Run workflow → $REF_NAME, or \`gh workflow run ci.yml --ref $REF_NAME\`), then re-run this workflow."
           while :; do
-            runs="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=50" \
-              --jq '[.workflow_runs[] | {status, conclusion}]')"
+            if [ "$SECONDS" -gt "$deadline" ]; then
+              echo "::error::CI for $SHA did not finish within 90 minutes. $rerun"
+              exit 1
+            fi
+            # A transient API error must not fail the release: retry until the deadline.
+            runs="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=50" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch") | {status, conclusion}]')" \
+              || { sleep 30; continue; }
             if jq -e 'any(.[]; .conclusion == "success")' <<< "$runs" > /dev/null; then
               echo "CI passed for $SHA."
               exit 0
             fi
-            if jq -e 'length > 0 and all(.[]; .status == "completed")' <<< "$runs" > /dev/null; then
-              echo "::error::CI did not pass for $SHA ($(jq -c 'map(.conclusion)' <<< "$runs")). Fix or re-run CI for this commit, then re-run this workflow."
+            if jq -e 'any(.[]; .status == "completed" and .conclusion != "cancelled")' <<< "$runs" > /dev/null; then
+              echo "::error::CI did not pass for $SHA ($(jq -c 'map(.conclusion)' <<< "$runs")). Fix it, or if it was a flake: $rerun"
               exit 1
             fi
-            # No run at all after a few minutes: this commit was never pushed to
-            # master (a PR run tests a merge commit, not this one), so none is coming.
-            if jq -e 'length == 0' <<< "$runs" > /dev/null && [ "$SECONDS" -gt 600 ]; then
-              echo "::error::No CI run exists for $SHA. Push the commit to master so CI runs, then re-run this workflow."
-              exit 1
-            fi
-            if [ "$SECONDS" -gt "$deadline" ]; then
-              echo "::error::CI for $SHA did not finish within 90 minutes."
-              exit 1
+            # No run that can still finish: none at all a few minutes after the push
+            # (this commit was not the tip of a push to master), or only cancelled
+            # ones (master moved on mid-run). Start one on the tag, once; refuse if
+            # that one is cancelled too.
+            count="$(jq length <<< "$runs")"
+            if jq -e 'all(.[]; .status == "completed")' <<< "$runs" > /dev/null \
+               && { [ "$count" -gt 0 ] || [ "$SECONDS" -gt 300 ]; }; then
+              if [ -z "$dispatched" ]; then
+                echo "No CI run that can finish for $SHA; starting CI on $REF_NAME."
+                gh workflow run ci.yml --repo "$REPO" --ref "$REF_NAME" || { sleep 30; continue; }
+                dispatched="$count"
+              elif [ "$count" -gt "$dispatched" ]; then
+                echo "::error::The CI run started for $SHA was cancelled. $rerun"
+                exit 1
+              fi
             fi
             sleep 30
           done
@@ -251,15 +286,17 @@ jobs:
       # {{version}} pattern strips it, which would make the scripts' `:v0.1.0`
       # pull 404 and fall back to a local build.
       #
-      # vX.Y and vX are moving tags for pinning a line: CAPKA_VERSION=v1 follows
-      # every 1.x release and never a 2.0. metadata-action skips both for a
-      # prerelease (and vX for a 0.x version), so those get only their own tag.
+      # vX.Y and vX are moving image tags for pinning a line: CAPKA_VERSION=v1
+      # pulls every 1.x release and never a 2.0. That pins the IMAGES only — it is
+      # coherent with a compose file from the same major, not with one from
+      # `stable` or `master`. metadata-action skips both for a prerelease (and vX
+      # for a 0.x version); the gate skips each one this tag is not the newest of.
       #
       # `latest` means "the newest RELEASE", and every pull-only deployment that
-      # sets no CAPKA_VERSION resolves to it — so only a push of a plain vX.Y.Z tag
-      # may move it. A manual workflow_dispatch (any branch, any commit) publishes a
-      # `sha-` tag instead: still pullable for debugging, but it cannot make every
-      # `:latest` stack jump to an unreleased build.
+      # sets no CAPKA_VERSION resolves to it — so only a push of the newest plain
+      # vX.Y.Z tag may move it. A manual workflow_dispatch publishes a `sha-` tag
+      # instead (still gated on green CI for that commit): pullable for debugging,
+      # but it cannot make every `:latest` stack jump to an unreleased build.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -270,9 +307,9 @@ jobs:
           flavor: latest=false
           tags: |
             type=semver,pattern=v{{version}},enable=${{ github.event_name == 'push' }}
-            type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
-            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && needs.gate.outputs.plain == 'true' }}
+            type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' && needs.gate.outputs.newest_minor == 'true' }}
+            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' && needs.gate.outputs.newest_major == 'true' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && needs.gate.outputs.newest == 'true' }}
             type=sha,format=long,prefix=sha-,enable=${{ github.event_name != 'push' }}
 
       # Stitch the per-arch digests into one manifest list per tag. jq builds the
@@ -303,7 +340,7 @@ jobs:
   stable:
     runs-on: ubuntu-latest
     needs: [gate, merge]
-    if: github.event_name == 'push' && needs.gate.outputs.plain == 'true'
+    if: github.event_name == 'push' && needs.gate.outputs.newest == 'true'
     permissions:
       contents: write
     steps:
@@ -330,13 +367,14 @@ jobs:
     # Also needs `stable`: a Release announcing a version whose deploy channel
     # never moved would send everyone tracking `stable` to update to code they
     # cannot get. If the branch push fails, no Release is published either. A
-    # prerelease skips `stable` by design and is published as a prerelease, which
-    # /releases/latest (the in-app update banner) never returns.
+    # release that is not the newest skips `stable` by design and is published
+    # without the latest mark (a prerelease also as a prerelease), so
+    # /releases/latest (the in-app update banner) never returns it.
     needs: [gate, merge, stable]
     if: >-
       ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       && needs.merge.result == 'success'
-      && (needs.stable.result == 'success' || (needs.stable.result == 'skipped' && needs.gate.outputs.plain == 'false')) }}
+      && (needs.stable.result == 'success' || (needs.stable.result == 'skipped' && needs.gate.outputs.newest == 'false')) }}
     permissions:
       contents: write
     steps:
@@ -349,6 +387,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
           PLAIN: ${{ needs.gate.outputs.plain }}
+          NEWEST: ${{ needs.gate.outputs.newest }}
         run: |
           version="${TAG#v}"
           # Slice this version's section out of CHANGELOG: from its `## [x.y.z]`
@@ -364,7 +403,9 @@ jobs:
           # Idempotent and forgiving of a pre-created draft: if a release already
           # exists for this tag (e.g. an operator staged notes as a draft), publish
           # it as latest; otherwise create it fresh from the CHANGELOG slice.
-          if [ "$PLAIN" = true ]; then channel=(--latest); else channel=(--prerelease --latest=false); fi
+          if [ "$NEWEST" = true ]; then channel=(--latest)
+          elif [ "$PLAIN" = true ]; then channel=(--latest=false)
+          else channel=(--prerelease --latest=false); fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$REPO" --draft=false "${channel[@]}" --title "Capka $TAG 🐾" --notes "$notes"
           else

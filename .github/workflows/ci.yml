@@ -3,10 +3,15 @@ name: CI
 # Gate every push to master and every PR on the same checks a maintainer runs
 # locally: typecheck, lint, unit tests, and a production build. Database-backed
 # integration tests run separately against an ephemeral PostgreSQL service.
+#
+# workflow_dispatch runs it on any ref — publish-images.yml starts it on a release
+# tag whose commit never got a finished push run (not the tip of its push, or
+# cancelled by a newer one), since a release publishes only a commit CI passed.
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 # A newer push to the same ref cancels the in-progress run — don't burn minutes
 # on stale commits.
@@ -130,7 +135,9 @@ jobs:
 
   # Whether this change can affect the sandbox image: the heavy one (~4.5 GB, the
   # slowest build by far), so it is built only when something it is made of moved.
+  # A dispatched run has no change to diff and builds it unconditionally.
   sandbox-changes:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -156,7 +163,7 @@ jobs:
   # from the repository's 10 GB budget.
   sandbox-image:
     needs: sandbox-changes
-    if: needs.sandbox-changes.outputs.sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.sandbox-changes.outputs.sandbox == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
