@@ -676,6 +676,8 @@
       "regenerate": "Regenerate",
       "edit": "Edit",
       "reasoning": "Reasoning",
+      "showReasoning": "Show the full reasoning",
+      "hideReasoning": "Show less of the reasoning",
       "steer": "You added",
       "compacted": "Context compressed",
       "imageUnavailable": "Image unavailable",

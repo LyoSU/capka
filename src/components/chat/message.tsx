@@ -1048,25 +1048,80 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
  *  Streamdown types an `h1` at `text-3xl`, which would set a thought bigger than
  *  the answer it precedes. No `chatId`: /workspace chips belong to the answer,
  *  where a file mention is something to act on, not to a thought about one. */
-function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreaming?: boolean; stagger?: number }) {
+function ReasoningRow({ text, isStreaming, live, stagger }: { text: string; isStreaming?: boolean; live?: boolean; stagger?: number }) {
   // Kept from the mount, not re-read: the rail's `mountedBefore` moves under every
   // later render, and a running animation whose delay changes snaps its progress.
   // A negative step means "already on screen": rendered still, no entrance.
   const [i] = useState(stagger ?? 0);
+  const t = useTranslations("chat.message");
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
+  // While the turn runs, a thought is a TICKER: a three-line window onto its newest
+  // words, following them as they arrive. Streamed in full, a model's thinking
+  // (often English, often paraphrasing our own instructions back) was the loudest
+  // thing on screen and pushed the plan and the answer down a line at a time. The
+  // window caps that growth at three lines and fades its top edge so cut-off text
+  // reads as "earlier", not as a clipping fault. A press opens it to the full text
+  // on the app's reveal timing; once the turn ends the row is plain prose again
+  // (the group around it folds away as before, and reopened history reads in full).
+  const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  const [full, setFull] = useState(0);
+  const body = useRef<HTMLDivElement>(null);
+  // The window follows the newest words without scrolling anything: it is a
+  // bottom-anchored flex column, so text past three lines overflows UPWARD and is
+  // clipped. No scroll position to keep, nothing to animate under reduced motion,
+  // and nothing here competes with the transcript's scroll engine. Measured only to
+  // know whether there is more than fits (the fade and the press need it) and how
+  // tall the full text is for the reveal.
+  useIsomorphicLayoutEffect(() => {
+    const el = body.current;
+    if (!el || !live) return;
+    const h = el.offsetHeight;
+    setFull(h);
+    setOverflow(h > (el.parentElement?.clientHeight ?? h) + 1);
+  }, [clean, live, open]);
+  const ticker = !!live;
   return (
     <div className={i < 0 ? "py-1.5" : "animate-fade-up py-1.5"} style={{ "--i": i } as React.CSSProperties}>
-      {/* A thought reads as prose in the answer's column, unboxed, but one step
-          down in size and ink: at the answer's own size and colour a long thought
-          read AS the answer, and the reader could not tell where the reply began.
-          No icon, no pulse: the running step carries the one spinner. */}
-      {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
-          mechanically slanted — the same reason blockquotes dropped italic in
-          globals.css. */}
-      <div className="reasoning-prose min-w-0 text-sm text-muted-foreground">
-        <Markdown isStreaming={isStreaming}>{clean}</Markdown>
+      <div className="relative">
+        {/* The press target lies UNDER the text, as in StepRow: the thought is
+            markdown and may hold its own buttons (a code block's copy), which
+            cannot sit inside a <button>. While shut the text above is inert, so a
+            press anywhere on the window lands here. */}
+        {ticker && overflow && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? t("hideReasoning") : t("showReasoning")}
+            onClick={() => setOpen((o) => !o)}
+            className="absolute -inset-x-2 inset-y-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        )}
+        {/* A thought reads as prose in the answer's column, unboxed, but one step
+            down in size and ink: at the answer's own size and colour a long thought
+            read AS the answer, and the reader could not tell where the reply began.
+            No icon, no pulse: the running step carries the one spinner. */}
+        {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
+            mechanically slanted — the same reason blockquotes dropped italic in
+            globals.css. */}
+        <div
+          // The ticker rewrites itself many times a second; a screen reader should
+          // not narrate every word of it. The step labels announce progress.
+          aria-live={ticker ? "off" : undefined}
+          className={[
+            "reasoning-prose min-w-0 text-sm text-muted-foreground",
+            ticker && "relative z-10 flex flex-col justify-end overflow-hidden",
+            ticker && !open && "pointer-events-none max-h-[3lh]",
+            ticker && !open && overflow && "[mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)]",
+          ].filter(Boolean).join(" ")}
+          style={ticker ? { maxHeight: open && full ? full : undefined, transition: "max-height var(--collapse-dur) var(--ease-strong)" } : undefined}
+        >
+          <div ref={body} className="min-w-0 shrink-0">
+            <Markdown isStreaming={isStreaming}>{clean}</Markdown>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1339,7 +1394,9 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdm
     it.kind === "reasoning"
       // Only the rail's last row can still be receiving text; an earlier thought is
       // finished, so it skips the live-markdown path (and its per-word fade).
-      ? <MemoReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming && i === items.length - 1} stagger={step(i)} />
+      // Every thought of a running turn is a ticker (its tail, three lines), not only
+      // the one being written: a finished thought shown in full mid-turn is just as loud.
+      ? <MemoReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming && i === items.length - 1} live={isStreaming} stagger={step(i)} />
       : it.kind === "steer"
       ? <SteerRow key={it.id} text={it.text} connect={items[i + 1]?.kind === "tool"} stagger={step(i)} />
       : <MemoStepRow key={it.part.toolCallId} part={it.part} chatId={chatId} isAdmin={isAdmin} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={step(i)} />,
