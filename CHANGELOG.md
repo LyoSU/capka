@@ -14,7 +14,7 @@ All notable changes to Capka are documented here. Format follows
 - The platform's V8 heap is now 75% of `PLATFORM_MEM_LIMIT` (3 GB at the default 4g) instead of a fixed 3 GB, so lowering the limit on a small box needs no `NODE_OPTIONS` override. Building the image locally needs `node:22-alpine` ≥ 22.21 (`docker pull node:22-alpine`).
 - A browser tab reconnecting mid-stream backs its full-chat reloads off from 250 ms to 2 s instead of re-fetching every 250 ms.
 - Forking a chat reads only the copied path instead of every message in the chat.
-- The KaTeX stylesheet now loads only when a reply contains a formula, so chats without math download about 24 KB less CSS.
+- The KaTeX stylesheet (24 KB, 4 KB gzipped) now loads only when a reply contains a formula instead of on every chat page.
 - Tool approvals and answers to agent questions now count against the per-user chat rate limit (429 `RATE_LIMITED`), and the card says when the rate or spending limit refused it.
 - When a chat that was emergency-trimmed fails to compact, the platform log has a `warn` line "compaction failed after an emergency trim" with `taskId`, `chatId` and `userId`; the other compaction failure lines carry `emergencyTrimmed`.
 - `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
