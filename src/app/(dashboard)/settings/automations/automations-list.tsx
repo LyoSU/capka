@@ -131,9 +131,10 @@ export default function AutomationsList() {
         router.push(`/chat/${body.chatId}`);
         return;
       }
-      // 409 means the previous run is still working or waiting on an answer —
-      // that's a state to explain, not an error to apologize for.
-      toast.error(res.status === 409 ? t("runBusy") : t("runFailed"));
+      // 409 means the previous run is still working or waiting on an answer, 429
+      // that the user is over their spending limit — states to explain, not errors
+      // to apologize for.
+      toast.error(res.status === 409 ? t("runBusy") : res.status === 429 ? t("runBudget") : t("runFailed"));
     } catch {
       toast.error(t("runFailed"));
     } finally {

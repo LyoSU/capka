@@ -1722,6 +1722,7 @@
       "runAria": "Run “{name}” now",
       "runStarted": "Run started",
       "runBusy": "The previous run is still going — try again shortly",
+      "runBudget": "You've reached your spending limit, so this can't run right now",
       "runFailed": "Could not start the run",
       "autoPausedHint": "Stopped after three failed runs in a row. Check the last run, fix the instruction, then switch it back on.",
       "create": "Create",

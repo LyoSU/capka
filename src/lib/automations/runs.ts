@@ -9,6 +9,7 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { getTranslator } from "@/lib/i18n/translator";
+import { BudgetExceededError } from "@/lib/errors";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { log } from "@/lib/log";
 
@@ -170,7 +171,9 @@ function quoteEvent(rawBody: string): string {
  * "condition" (the row's `run_when` sentence did not hold). None touches the
  * failure streak and none disables the automation. Every one of them stamps
  * `last_skip`, so a skip is always visible with its reason rather than only
- * counted.
+ * counted. The exception is "budget" (the owner is over their spending limit):
+ * it DOES count toward the failure streak — see the budget gate below. A manual
+ * run throws BudgetExceededError instead, so the person who pressed it is told.
  */
 export async function fireAutomation(
   a: AutomationRow,
@@ -190,7 +193,7 @@ export async function fireAutomation(
      *  NOT bypassed: it protects the conversation, not the budget. */
     manual?: boolean;
   } = {},
-): Promise<{ fired: boolean; chatId?: string; reason?: "busy" | "daily_limit" | "condition"; note?: string }> {
+): Promise<{ fired: boolean; chatId?: string; reason?: "busy" | "daily_limit" | "condition" | "budget"; note?: string }> {
   const single = a.threadMode === "single";
   const today = localDayOf(a.trigger as AutomationTrigger);
   // The ceiling this firing actually runs under: the owner's when they set one,
@@ -232,16 +235,25 @@ export async function fireAutomation(
   // point that skipped it — an over-limit user's schedule kept drawing on the
   // shared key and was only noticed after the fact, per turn, by the reconciler.
   // Reserved BEFORE anything is written so a refusal leaves no orphan chat.
+  //
+  // The locale is read here, alongside the model, so nothing that can throw sits
+  // between the reservation and the transaction that owns its release.
   const taskId = nanoid();
-  const { isShared, modelId, provider, configId } = await resolveUserModelInfo(a.userId, a.model ?? undefined);
+  const [{ isShared, modelId, provider, configId }, [user]] = await Promise.all([
+    resolveUserModelInfo(a.userId, a.model ?? undefined),
+    db.select({ locale: users.locale }).from(users).where(eq(users.id, a.userId)),
+  ]);
   const reservation = await reserveBudget({ userId: a.userId, taskId, onSharedKey: isShared, modelId, provider, configId });
   if (!reservation.allowed) {
-    // A refusal is a run that did not happen, so it counts toward the same streak
-    // a broken automation does: three of them disable it and tell the user, rather
-    // than re-attempting every hour until the window rolls over.
     log.info("automation skipped: budget exhausted", { automationId: a.id, window: reservation.window });
+    // A person pressing Run now is told plainly (429), and a test click does not
+    // count toward the auto-disable.
+    if (opts.manual) throw new BudgetExceededError(reservation.window ?? "m1");
+    // An unattended refusal is a run that did not happen, so it counts toward the
+    // same streak a broken automation does: three of them disable it and tell the
+    // user, rather than re-attempting every hour until the window rolls over.
     await recordAutomationOutcome(a.id, "failed", "budget_exhausted");
-    return { fired: false };
+    return { fired: false, reason: "budget" };
   }
 
   // The condition gate, LAST of the three refusals and deliberately so. It is the
@@ -273,7 +285,6 @@ export async function fireAutomation(
     }
   }
 
-  const [user] = await db.select({ locale: users.locale }).from(users).where(eq(users.id, a.userId));
   const locale = user?.locale ?? "en";
 
   // A webhook body is data from whoever holds the URL — the one input to this
