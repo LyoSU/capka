@@ -400,7 +400,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
 
     const row = await storedRow(chat);
     expect(row.status).toBe("failed");
-    // Its own category, not `unknown`: "try again" can never work once the project is gone.
+    // Its own category, not `unknown`: this task cannot run against a gone project.
     expect(row.errorCategory).toBe("project_deleted");
     expect(row.error).toMatch(/new chat/i);
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
