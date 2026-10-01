@@ -8,7 +8,7 @@ import { haptic } from "@/lib/haptics";
 import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
 import { formatSize } from "@/lib/constants";
 import type { StepTranslator } from "@/lib/chat/steps";
-import { INTERRUPTED_TOOL_RESULT } from "@/lib/chat/tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNDECIDED_APPROVAL_REASON } from "@/lib/chat/tool-results";
 
 type RequiredAction = { kind: string; url?: string; label: string; description?: string };
 
@@ -597,7 +597,8 @@ export function ApprovalCard({
           <Loader2 className="size-3.5 animate-spin" />{gated ? ta("running") : t("applying")}
         </div>
       )}
-      {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={gated ? ta("declined") : t("declined")} />}
+      {/* A card the chat moved past was never decided, so it must not read as declined. */}
+      {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={approval.reason === UNDECIDED_APPROVAL_REASON ? ta("notDecided") : gated ? ta("declined") : t("declined")} />}
       {!awaiting && state === "output-available" && !failed && (
         <>
           {oo?.summary && <div className="mt-2 text-sm text-muted-foreground">{oo.summary}</div>}

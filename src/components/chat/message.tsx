@@ -1568,7 +1568,7 @@ function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; conn
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
 
-function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void | Promise<boolean | void> }) {
+export function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, calm, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; calm?: boolean; onContinue?: (text: string) => void | Promise<boolean | void> }) {
   const t = useTranslations("chat.tool");
   const anchorDisclosure = useDisclosureAnchor();
   // One-shot: the click sends a real user turn, and until that turn's message
@@ -1593,7 +1593,7 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
             warning tone and an ellipsis — cut off mid-sentence, not broken — and
             keeps a border, because the amber surface is too light to read as a
             disc against the card on its own. */}
-        {partial ? (
+        {partial || calm ? (
           <span
             aria-hidden
             className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full border border-warning-border bg-warning-surface text-warning-text"
@@ -2806,6 +2806,9 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             // Every one of these means "the reply stops mid-way but stands" — the
             // notice offers Continue instead of the retry advice a real failure gets.
             partial={PARTIAL_ERROR_CATEGORIES.has(metadata.errorCategory ?? "")}
+            // A deleted project is not a failure to redo: nothing to retry until the
+            // deletion finishes, then a new message just works.
+            calm={metadata.errorCategory === "project_deleted"}
             onContinue={onContinue}
           />
         )}
@@ -2831,7 +2834,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                 <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
               )}
               {copyText && <CopyButton text={copyText} />}
-              {onRegenerate && metadata?.regenerable !== false && (
+              {onRegenerate && metadata?.regenerable !== false && metadata?.errorCategory !== "project_deleted" && (
                 <Hint label={t("regenerate")}>
                   <button
                     type="button"

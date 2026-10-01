@@ -758,6 +758,7 @@
       "decline": "Don't allow",
       "running": "Running…",
       "declined": "Not allowed",
+      "notDecided": "Not decided, the chat moved on",
       "notRun": "Didn't run — the assistant couldn't continue.",
       "notRunStopped": "Didn't run — the reply was stopped first.",
       "notRunUnavailable": "Didn't run — this tool wasn't available at the time.",

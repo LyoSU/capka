@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { toUIMessages } from "@/lib/chat/presenter";
 import type { StoredPart } from "@/lib/chat/contracts";
-import { isApprovalPart } from "../message";
+import { isApprovalPart, ErrorNotice } from "../message";
+import { UNDECIDED_APPROVAL_REASON } from "@/lib/chat/tool-results";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -155,5 +156,46 @@ describe("AskCard — an answer its turn never went on from", () => {
   it("says so from the message's status, which a reload keeps", () => {
     expect(render(true)).toContain(en.chat.ask.stopped.replaceAll("'", "&#x27;"));
     expect(render(false)).not.toContain("couldn&#x27;t continue");
+  });
+});
+
+/** A card the chat moved past without a decision is settled, but the user never declined it. */
+describe("ApprovalCard — moved past without a decision", () => {
+  const render = (toolName: string, reason?: string) =>
+    // eslint-disable-next-line react/no-children-prop
+    renderToStaticMarkup(createElement(NextIntlClientProvider, {
+      locale: "en", messages: en,
+      children: createElement(ApprovalCard, {
+        messageId: "m1", toolCallId: "c1", toolName, input: {},
+        state: "output-denied", approval: { id: "a1", approved: false, reason } as { id: string; approved?: boolean },
+      }),
+    }));
+
+  it("says no decision was made, for a manage card and a gated tool card", () => {
+    for (const tool of ["manage", "mcp__gmail__send"]) {
+      const html = render(tool, UNDECIDED_APPROVAL_REASON);
+      expect(html, tool).toContain("Not decided");
+      expect(html, tool).not.toContain(en.chat.manage.declined);
+      expect(html, tool).not.toContain(en.chat.approval.declined);
+    }
+  });
+
+  it("a real decline still reads as declined", () => {
+    expect(render("manage")).toContain(en.chat.manage.declined);
+    expect(render("mcp__gmail__send")).toContain(en.chat.approval.declined);
+  });
+});
+
+describe("ErrorNotice — project_deleted", () => {
+  const render = (calm: boolean) =>
+    // eslint-disable-next-line react/no-children-prop
+    renderToStaticMarkup(createElement(NextIntlClientProvider, {
+      locale: "en", messages: en,
+      children: createElement(ErrorNotice, { message: "Project deleted", calm }),
+    }));
+
+  it("reads as a calm notice, not the red failure badge", () => {
+    expect(render(true)).not.toContain("bg-destructive");
+    expect(render(false)).toContain("bg-destructive");
   });
 });
