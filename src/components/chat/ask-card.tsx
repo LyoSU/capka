@@ -162,8 +162,9 @@ export function AskCard({
             {onLastPage ? (
               <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>
                 {/* The spinner lives INSIDE the button that caused it, not beside the
-                    row: one locus of feedback for one action. */}
-                {submitting && <Loader2 className="animate-spin" aria-hidden="true" />}
+                    row: one locus of feedback for one action. A question that is no
+                    longer current has nothing left in progress, so no spinner. */}
+                {submitting && note !== "gone" && <Loader2 className="animate-spin" aria-hidden="true" />}
                 {t("submit")}
               </Button>
             ) : (
