@@ -25,9 +25,11 @@ container only ever bind-mounts the requesting user's own paths — so the share
 bind mount, not by uid).
 
 The controller reaches the Docker daemon through a **socket-proxy** that exposes
-the container and exec endpoints, image inspect/pull (`IMAGES=1`, so the
-controller can re-pull a pruned sandbox image) and read-only `GET /info`
-(`INFO=1`, for the gVisor runtime probe). Build, network, volume and swarm
+the container and exec endpoints, the image endpoints (`IMAGES=1`) and read-only
+`GET /info` (`INFO=1`, for the gVisor runtime probe). The controller only inspects
+and pulls the sandbox image (to re-pull it after a prune), but the proxy cannot
+narrow `IMAGES=1` by method: with `POST=1` it allows every `/images` endpoint,
+including load, tag, push, delete and prune. Build, network, volume and swarm
 endpoints are denied, and the raw host socket is never mounted into the
 controller itself. The platform never touches the Docker socket directly.
 
