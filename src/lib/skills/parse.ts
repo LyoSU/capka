@@ -4,6 +4,10 @@ import { ParsedSkill, SkillParseError } from "./types";
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 const MAX_DESC = 1024;
+// The YAML parse is synchronous on the one process that also serves every chat,
+// and a crafted block can cost it superlinear CPU. Real frontmatter is a name and
+// a description; bound the block before handing it to the parser at all.
+const MAX_FRONTMATTER = 64 * 1024;
 
 /**
  * gray-matter's YAML parser is strict: an unquoted colon in a scalar value
@@ -29,6 +33,14 @@ function sanitizeFrontmatter(raw: string): string {
 }
 
 export function parseSkillMarkdown(raw: string): ParsedSkill {
+  if (/^\uFEFF?---/.test(raw)) {
+    // gray-matter takes the whole file as frontmatter when the block never closes.
+    const end = raw.indexOf("\n---");
+    if ((end === -1 ? raw.length : end) > MAX_FRONTMATTER) {
+      throw new SkillParseError(`SKILL.md frontmatter exceeds ${MAX_FRONTMATTER / 1024} KB`);
+    }
+  }
+
   let parsed: matter.GrayMatterFile<string>;
   try {
     parsed = matter(raw);

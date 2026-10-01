@@ -40,4 +40,12 @@ describe("parseSkillMarkdown", () => {
     const long = "a".repeat(1025);
     expect(() => parseSkillMarkdown(md(`name: x\ndescription: ${long}`))).toThrow(SkillParseError);
   });
+
+  it("refuses oversized frontmatter before parsing it, closed or not", () => {
+    const notes = `notes: ${"a".repeat(64 * 1024)}`;
+    expect(() => parseSkillMarkdown(md(`name: x\n${notes}`))).toThrow(/frontmatter exceeds/);
+    expect(() => parseSkillMarkdown(`---\nname: x\n${notes}\n`)).toThrow(/frontmatter exceeds/);
+    // Only the frontmatter is bounded: a long body still parses.
+    expect(parseSkillMarkdown(md(`name: x`, "b".repeat(128 * 1024))).name).toBe("x");
+  });
 });

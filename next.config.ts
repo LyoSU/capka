@@ -15,6 +15,10 @@ const BASE_CSP = "object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Nothing renders next/image, yet the /_next/image optimizer endpoint is on by
+  // default and decodes whatever local path it is handed (three advisories in
+  // 16.3.x alone). Unoptimized makes the endpoint a 404 before any decode.
+  images: { unoptimized: true },
   // React's <ViewTransition> — the crossfade on route navigation instead of a
   // hard cut — needed an `experimental.viewTransition` opt-in through 16.2;
   // 16.3 made it stable and removed the flag, so it is on with nothing to
