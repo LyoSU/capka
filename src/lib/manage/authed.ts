@@ -172,7 +172,7 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   // A declined call gets only its decision, as any declined call does: a result
   // here would take a gated call out of its "declined" card into the activity rail.
   if (failure && d.approved) {
-    parts.push({ type: "tool-result", id: call.id, name: call.name, output: { status: "error", code: "NOT_RUN", error: `Not run. ${failure.userMessage}` } });
+    parts.push({ type: "tool-result", id: call.id, name: call.name, output: { status: "error", code: "NOT_RUN", reason: failure.category, error: `Not run. ${failure.userMessage}` } });
   }
   if (!("failure" in model)) {
     const { isShared, modelId, provider, configId } = model;

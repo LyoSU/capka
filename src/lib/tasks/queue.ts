@@ -4,7 +4,7 @@ import { realtime } from "@/lib/realtime";
 import { releaseHold } from "@/lib/billing/limits";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
-import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR } from "@/lib/errors/friendly";
+import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR, type LLMErrorCategory } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 
 /**
@@ -469,17 +469,30 @@ export async function cancelQueuedTurn(input: {
 }
 
 /**
+ * Why an approved call was not run, stored as `reason` on its NOT_RUN result beside
+ * the model-facing `error`, so the card can say it in the reader's own words:
+ * - `tool_unavailable`: the tool was gone when the call was due (its connector did
+ *   not connect, or the tool was removed or turned off);
+ * - `rule_changed`: the tool no longer asks for approval, so the approval no longer
+ *   applies and the call was dropped;
+ * - `stopped`: the turn was stopped before the call ran;
+ * - otherwise the category of the failure that ended the turn before it got there
+ *   (`model_unavailable`, …), which `errors.llm.*` already words for the reader.
+ */
+export type NotRunReason = "tool_unavailable" | "rule_changed" | "stopped" | LLMErrorCategory;
+
+/**
  * Give each approved call without a result the one a call that will never run gets
  * (approveManageForUser stores the same). Without it the card spins on "Applying…"
  * forever and every later turn sends the model a call with no result, which
  * providers reject. A declined call keeps its decision alone, as it always does.
  * Mutates `parts` and returns it.
  */
-export function sealUnrunApprovals(parts: StoredPart[], error: string): StoredPart[] {
+export function sealUnrunApprovals(parts: StoredPart[], reason: NotRunReason, error: string): StoredPart[] {
   const settled = new Set(parts.flatMap((p) => (p.type === "tool-result" || p.type === "tool-error" ? [p.id] : [])));
   for (const p of [...parts]) {
     if (p.type === "tool-call" && p.approval?.approved === true && !settled.has(p.id)) {
-      parts.push({ type: "tool-result", id: p.id, name: p.name, output: { status: "error", code: "NOT_RUN", error } });
+      parts.push({ type: "tool-result", id: p.id, name: p.name, output: { status: "error", code: "NOT_RUN", reason, error } });
     }
   }
   return parts;
@@ -498,7 +511,7 @@ export async function settleCancelledContinuation(messageId: string, tx: QueueTx
      WHERE id = ${messageId} AND metadata->>'status' IN ('awaiting_approval', 'awaiting_answer')`);
   const meta = (rows as { metadata: MessageMeta }[])[0]?.metadata;
   if (!meta) return;
-  const parts = sealUnrunApprovals([...(meta.parts ?? [])], "Not run. The turn was stopped before this approved call ran.");
+  const parts = sealUnrunApprovals([...(meta.parts ?? [])], "stopped", "Not run. The turn was stopped before this approved call ran.");
   await tx.execute(sql`
     UPDATE messages SET metadata = ${JSON.stringify({ ...meta, status: "cancelled", parts })}::jsonb
      WHERE id = ${messageId} AND metadata = ${JSON.stringify(meta)}::jsonb`);

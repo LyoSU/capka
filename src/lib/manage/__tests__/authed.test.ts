@@ -176,7 +176,7 @@ describe("approveManageForUser — atomic single-use approval", () => {
     const next = { id: "u2", role: "user", content: "hello again", metadata: null, createdAt: null, platform: null };
     const [reply] = toUIMessages([settled]);
     // Not "approval-responded" with approved=true — that state is the card's endless spinner.
-    expect(reply.parts[0]).toMatchObject({ state: "output-available", approval: { approved: true }, output: { status: "error", code: "NOT_RUN" } });
+    expect(reply.parts[0]).toMatchObject({ state: "output-available", approval: { approved: true }, output: { status: "error", code: "NOT_RUN", reason: "model_unavailable" } });
     // The next send's history carries the call WITH its result (the same shape as an
     // approved call that ran), not a bare tool call ahead of the user's message.
     const model = await convertToModelMessages(toUIMessages([settled, next]) as unknown as UIMessage[]);

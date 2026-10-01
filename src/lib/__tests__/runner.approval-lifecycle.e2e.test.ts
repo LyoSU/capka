@@ -121,7 +121,7 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "aplc-user";
 const C = "aplc-chat";
 
-type Part = { type: string; id?: string; name?: string; output?: { code?: string; error?: string }; approval?: unknown };
+type Part = { type: string; id?: string; name?: string; output?: { code?: string; reason?: string; error?: string }; approval?: unknown };
 
 /** A suspended row whose one gated call now carries the user's decision. */
 async function seedSuspended(chat: string, call: { name: string; approved: boolean }, meta: Record<string, unknown> = {}) {
@@ -203,9 +203,9 @@ run("runAgentTask: an approval continuation always settles its row", () => {
   // The SDK re-checks an approved call and denies it when its tool is missing from the
   // toolset (a connector that failed to connect for this run) or no longer gated.
   it.each([
-    ["gone", "gone_tool", /not available/],
-    ["ungated", "read_row", /no longer asks for approval/],
-  ])("stores a result for an approved call whose tool is %s", async (kind, name, why) => {
+    ["gone", "gone_tool", /not available/, "tool_unavailable"],
+    ["ungated", "read_row", /no longer asks for approval/, "rule_changed"],
+  ])("stores a result for an approved call whose tool is %s", async (kind, name, why, reason) => {
     const chat = `${C}-${kind}`;
     await seedSuspended(chat, { name, approved: true });
 
@@ -214,7 +214,8 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("completed");
     const [result] = resultFor(row.parts, "c2");
-    expect(result.output).toMatchObject({ code: "NOT_RUN", error: expect.stringMatching(why) });
+    // The model reads `error`; `reason` is what the card can say it with.
+    expect(result.output).toMatchObject({ code: "NOT_RUN", reason, error: expect.stringMatching(why) });
     expect(writes).toEqual([]);
     // The approval stays on the call, so the card keeps it and reads "didn't run".
     expect(row.parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
@@ -334,6 +335,8 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toBeTruthy();
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+    // Why it did not run is why the turn failed.
+    expect(resultFor(row.parts, "c2")[0].output?.reason).toBe(row.errorCategory);
     expect(row.parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
     const { rows } = await pool.query(`SELECT id FROM messages WHERE chat_id=$1 ORDER BY id`, [chat]);
     expect(rows.map((r) => r.id)).toEqual([`${chat}-a1`, `${chat}-u1`]);
@@ -416,9 +419,9 @@ run("runAgentTask: an approval continuation always settles its row", () => {
 
   // Stop pressed while the continuation was still queued, and a worker claimed it anyway.
   it.each([
-    ["approved", true, ["NOT_RUN"]],
-    ["declined", false, []],
-  ])("settles a %s row whose continuation was cancelled before it ran", async (kind, approved, codes) => {
+    ["approved", true, ["NOT_RUN"], ["stopped"]],
+    ["declined", false, [], []],
+  ])("settles a %s row whose continuation was cancelled before it ran", async (kind, approved, codes, reasons) => {
     const chat = `${C}-cancel-${kind}`;
     await seedSuspended(chat, { name: "save_row", approved });
 
@@ -428,6 +431,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(row.status).toBe("cancelled");
     // A declined call keeps its decision alone, so its card still reads "declined".
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.reason)).toEqual(reasons);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
   }, 30_000);
@@ -447,6 +451,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("failed");
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+    expect(resultFor(row.parts, "c2")[0].output?.reason).toBe(row.errorCategory);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
   }, 30_000);
@@ -454,9 +459,9 @@ run("runAgentTask: an approval continuation always settles its row", () => {
   // The same Stop, with the row removed before any worker saw it. An answered ask
   // already has its result, so only its status moves.
   it.each([
-    ["approval", ["NOT_RUN"]],
-    ["ask", [undefined]],
-  ])("settles the row when a queued %s continuation is removed", async (kind, codes) => {
+    ["approval", ["NOT_RUN"], ["stopped"]],
+    ["ask", [undefined], [undefined]],
+  ])("settles the row when a queued %s continuation is removed", async (kind, codes, reasons) => {
     const chat = `${C}-dequeue-${kind}`;
     await seedSuspended(chat, { name: "save_row", approved: true }, kind === "ask" ? {
       status: "awaiting_answer",
@@ -475,6 +480,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("cancelled");
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.reason)).toEqual(reasons);
     expect((await pool.query(`SELECT id FROM tasks WHERE id=$1`, [`${chat}-task`])).rows).toEqual([]);
   }, 30_000);
 

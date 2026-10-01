@@ -12,7 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath, replyText } from "@/lib/chat/tree";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation, type NotRunReason } from "@/lib/tasks/queue";
 import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
@@ -1758,7 +1758,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // A declined call already has its decision and is left alone.
             const call = parts.find((p) => p.type === "tool-call" && p.id === event.toolCallId);
             if (call?.type !== "tool-call" || call.approval?.approved !== true) break;
-            const output = { status: "error", code: "NOT_RUN", error: event.toolName in rawTools
+            const present = event.toolName in rawTools;
+            const reason: NotRunReason = present ? "rule_changed" : "tool_unavailable";
+            const output = { status: "error", code: "NOT_RUN", reason, error: present
               ? "Not run. This tool no longer asks for approval, so the approved call was not run. Call it again if it is still needed."
               : "Not run. This tool was not available when the approved call was due to run." };
             await flushBuffers();
@@ -2899,7 +2901,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // A continuation that failed before its stream started (prepareRun threw: its
     // project was deleted, say) ran none of the calls the user approved.
     if (resumeMessageId && !streamStarted) {
-      sealUnrunApprovals(parts, `Not run. ${failure?.userMessage ?? "The turn was stopped before this approved call ran."}`);
+      sealUnrunApprovals(parts, failure?.category ?? "stopped", `Not run. ${failure?.userMessage ?? "The turn was stopped before this approved call ran."}`);
     }
     // A continuation's first half, kept: its steers, files and sources. Not its (i)
     // figures as they were: under this run's model they would read as the whole turn.
