@@ -4,10 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type CodeHighlighterPlugin, type Components, type PluginConfig, type UrlTransform } from "streamdown";
 import "streamdown/styles.css";
-// KaTeX ships its own stylesheet (fonts + layout). Without it the math plugin
-// renders raw, unstyled spans instead of typeset formulas — Streamdown does not
-// bundle it, so import it here where the math plugin is wired in.
-import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents, LiveContext } from "./workspace-path";
 import { remarkCitations } from "@/lib/chat/citations";
 import { remarkDollarMathGuard } from "@/lib/chat/dollar-math";
@@ -75,7 +71,14 @@ const LOADERS = {
   // `singleDollarTextMath: false`, so `$x = 1$` rendered as literal LaTeX while
   // only `$$…$$` typeset. Models write the single-dollar form constantly. The
   // price ambiguity it opens is closed on the tree by remarkDollarMathGuard.
-  math: () => import("@streamdown/math").then((m) => m.createMathPlugin({ singleDollarTextMath: true })),
+  //
+  // KaTeX's stylesheet rides in the same load: without it the plugin renders raw,
+  // unstyled spans, and Streamdown does not bundle it. Imported statically it was
+  // render-blocking CSS on every chat, math or not. The plugin is only handed to
+  // Streamdown once both have landed, so no formula paints unstyled.
+  math: () =>
+    Promise.all([import("@streamdown/math"), import("katex/dist/katex.min.css")])
+      .then(([m]) => m.createMathPlugin({ singleDollarTextMath: true })),
   mermaid: () => import("@streamdown/mermaid").then((m) => m.mermaid),
 };
 type PluginName = keyof typeof LOADERS;
