@@ -63,6 +63,9 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
   let misses = 0; // reloads in a row that left the gap open
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+  // Replies a reload was asked for with nothing held (a truncated payload), until
+  // one starts. Held events name their reply themselves; these would not.
+  const owed = new Set<string>();
 
   const drain = () => {
     const { apply: replay, keep } = planGapDrain(buffer, cursors);
@@ -78,13 +81,16 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
       }
       if (typeof event.seq === "number") cursors.set(event.messageId, event.seq);
     }
-    if (buffer.length === 0) { misses = 0; return; }
+    // A reload asked for while this one was in flight may want content it predates.
+    if (buffer.length === 0) { misses = 0; if (owed.size) reconcile(); return; }
     misses += 1;
     reconcile();
   };
 
-  /** Pull a fresh snapshot, then replay whatever it doesn't already cover. */
-  const reconcile = () => {
+  /** Pull a fresh snapshot, then replay whatever it doesn't already cover.
+   *  `messageId` is the reply that needs it, when nothing held names it. */
+  const reconcile = (messageId?: string) => {
+    if (messageId !== undefined) owed.add(messageId);
     if (disposed || reloading || retryTimer) return;
     const spacing = Math.min(RECONCILE_MAX_MS, minIntervalMs * 2 ** Math.max(0, misses - 1));
     const wait = spacing - (now() - lastReloadAt);
@@ -93,6 +99,7 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
       return;
     }
     reloading = true;
+    owed.clear();
     void reload().finally(() => {
       reloading = false;
       lastReloadAt = now();
@@ -113,10 +120,12 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
      *  onto the finished message, duplicating text the reload already brought back. */
     drop(messageId: string) {
       buffer = buffer.filter((e) => e.messageId !== messageId);
+      owed.delete(messageId);
       // Nothing left to recover, so the backoff this gap earned goes with it: left
       // standing, the next gap would wait out a stale retry and start from a long
-      // spacing instead of reloading at once.
-      if (buffer.length === 0) {
+      // spacing instead of reloading at once. Unless the retry is still owed to
+      // another reply: cancelling it would lose the reload that reply asked for.
+      if (buffer.length === 0 && owed.size === 0) {
         misses = 0;
         if (retryTimer) clearTimeout(retryTimer);
         retryTimer = null;
@@ -127,6 +136,7 @@ export function createStreamRecovery<E extends { messageId: string; seq?: number
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
       buffer = [];
+      owed.clear();
     },
     /** Test/diagnostic view of what's still held. */
     get held() { return buffer.length; },

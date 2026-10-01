@@ -669,7 +669,7 @@ export function useBackgroundChat({
         // themselves until a snapshot covers the hole. (Big tool results are
         // already capped server-side, so this is a rare safety net.)
         if ((data as { _truncated?: boolean })._truncated) {
-          recovery.reconcile();
+          recovery.reconcile((data as { messageId?: string }).messageId ?? "");
           return;
         }
 

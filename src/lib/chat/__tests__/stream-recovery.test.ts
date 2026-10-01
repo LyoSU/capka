@@ -238,6 +238,41 @@ describe("createStreamRecovery", () => {
     expect(reloads).toBe(5);
   });
 
+  it("a reply's finish does not cancel a reload another reply asked for", async () => {
+    // A truncated payload holds nothing; it only asks for a reload, which the retry
+    // spacing may put off. Another reply finishing in that window must not cancel it.
+    let reloads = 0;
+    const recovery = createStreamRecovery<Ev>({ reload: async () => { reloads += 1; }, apply: () => true, cursors: new Map() });
+
+    recovery.reconcile("m2");
+    await vi.advanceTimersByTimeAsync(10);
+    recovery.reconcile("m2");                    // inside the spacing: put off
+    recovery.drop("m1");                         // another reply's task:finish
+    await vi.advanceTimersByTimeAsync(300);
+    expect(reloads).toBe(2);
+
+    recovery.reconcile("m2");                    // control: its own finish does cancel it
+    recovery.drop("m2");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(reloads).toBe(2);
+  });
+
+  it("reloads again for a truncated payload that arrived while a reload was in flight", async () => {
+    // That reload's snapshot may predate the payload, so it cannot stand in for it.
+    let reloads = 0;
+    const recovery = createStreamRecovery<Ev>({
+      reload: () => { reloads += 1; return new Promise<void>((r) => setTimeout(r, 100)); },
+      apply: () => true,
+      cursors: new Map(),
+    });
+
+    recovery.reconcile("m1");
+    await vi.advanceTimersByTimeAsync(50);
+    recovery.reconcile("m1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(reloads).toBe(2);
+  });
+
   it("bounds what it holds when the reload is wedged", async () => {
     const cursors = new Map<string, number>([["m1", 0]]);
     const recovery = createStreamRecovery<Ev>({
