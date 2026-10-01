@@ -27,6 +27,7 @@ All notable changes to Capka are documented here. Format follows
 - Non-admin users no longer see raw tool errors or connector parameters in a step's details; a failed step says "This step couldn't be completed" and only opens itself for admins.
 - A web search run through an MCP connector (e.g. SearXNG) reads "Searched the web for …"; an `_mcp`/`-mcp` suffix is dropped from connector names, and unknown tools read "Used a tool" (the tool id is shown to admins).
 - Settings row labels are 14px medium again (not 16px); deleting a file and an automation's "nothing new" exit have their own localized step labels; durations keep number and unit together in Ukrainian and drop seconds past ten minutes.
+- A page load makes one `GET /api/models` per model source instead of one per mounted model picker (previously ~8 requests, each a provider catalog load).
 - Opening a brand-new chat no longer logs a 404 from `POST /api/chats/<id>/read`; the route answers 204 whether or not the chat row exists yet.
 - Citation numbers in a reply and its sources footer now count from 1 per reply instead of showing branch-wide numbers, and `[[2]]`/`\[[2]\]` markers no longer leave stray brackets.
 - Reasoning on the step rail is set smaller and muted so it no longer reads as the answer, and the run header always says "Worked for …".

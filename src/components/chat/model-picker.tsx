@@ -297,6 +297,37 @@ interface ModelsState {
 // instead of flashing a spinner and re-probing the provider each time.
 const CLIENT_MODELS_TTL_MS = 5 * 60_000;
 const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] }>();
+/** One `/api/models` request per key at a time. Several pickers mount together
+ *  (composer, settings, a dialog) and each used to fire its own request before any
+ *  of them had filled the cache — eight GETs per page load, each a provider
+ *  catalog load on the server. Bound: an entry lives only while its request is in
+ *  flight and is removed when it settles. A forced refresh (`nonce`) starts its own
+ *  request rather than joining an older one, and later callers join that. */
+const inflightModels = new Map<string, Promise<{ ok: boolean; data: ModelsResponse }>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ModelsResponse = any;
+
+export function fetchModelsShared(key: string, source: Source, force = false): Promise<{ ok: boolean; data: ModelsResponse }> {
+  const joined = force ? undefined : inflightModels.get(key);
+  if (joined) return joined;
+  const p = (async () => {
+    const res =
+      source.mode === "credentials"
+        ? await fetch("/api/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider: source.provider, apiKey: source.apiKey, baseUrl: source.baseUrl }),
+          })
+        : source.mode === "config"
+          ? await fetch(`/api/models?configId=${encodeURIComponent(source.configId)}`)
+          : await fetch("/api/models");
+    return { ok: res.ok, data: res.ok ? await res.json() : { models: [] } };
+  })().finally(() => {
+    if (inflightModels.get(key) === p) inflightModels.delete(key);
+  });
+  inflightModels.set(key, p);
+  return p;
+}
 
 function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, nonce = 0): ModelsState {
   const [state, setState] = useState<ModelsState>({
@@ -338,21 +369,14 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, 
       setState((s) => ({ ...s, loading: true, error: null, needsKey: false, syncing: false }));
     }
 
+    // Only the first attempt of a forced refresh skips joining; its retries are
+    // ordinary reloads and may share a request with any other picker's.
+    let force = nonce > 0;
     const load = async () => {
       try {
-        let res: Response;
-        if (source.mode === "credentials") {
-          res = await fetch("/api/models", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ provider: source.provider, apiKey: source.apiKey, baseUrl: source.baseUrl }),
-          });
-        } else if (source.mode === "config") {
-          res = await fetch(`/api/models?configId=${encodeURIComponent(source.configId)}`);
-        } else {
-          res = await fetch("/api/models");
-        }
-        const data = res.ok ? await res.json() : { models: [] };
+        const res = await fetchModelsShared(key, source, force);
+        force = false;
+        const data = res.data;
         if (cancelled) return;
         const recent: string[] = Array.isArray(data.recent) ? data.recent : [];
         if (res.ok && Array.isArray(data.models) && data.models.length > 0) {
