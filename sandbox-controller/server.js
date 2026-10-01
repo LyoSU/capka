@@ -1085,7 +1085,7 @@ async function boot() {
 // HTTP app can be exercised over real sockets against a throwaway Postgres + a
 // fake backend (see server.http.integration.test.js). Inert in production. `store` is the
 // real PostgresSessionStore bound to DATABASE_URL.
-export { server, store, idleSweep };
+export { server, store, idleSweep, overQuotaScan };
 export function __setTestState(s = {}) {
   if (s.workspace !== undefined) workspace = s.workspace;
   if (s.backend !== undefined) backend = s.backend;
