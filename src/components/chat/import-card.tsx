@@ -53,7 +53,7 @@ export function ImportCard({
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">
               <SourceGlyph source={detected.source} size={18} className="mt-0.5 shrink-0" />
-              <span className="min-w-0 flex-1 text-sm text-foreground/90">{t("offer", { service })}</span>
+              <span className="min-w-0 flex-1 text-sm text-foreground">{t("offer", { service })}</span>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={onDismiss}>
@@ -108,7 +108,7 @@ export function ImportCard({
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 text-sm text-foreground/90">{errorText(t, state.code, service)}</span>
+              <span className="min-w-0 flex-1 text-sm text-foreground">{errorText(t, state.code, service)}</span>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={onDismiss}>

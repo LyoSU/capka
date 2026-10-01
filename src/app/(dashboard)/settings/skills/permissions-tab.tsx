@@ -152,7 +152,7 @@ export function PermissionsTab() {
         <>
           <SettingsNote icon={ShieldCheck}>
             <p className="font-medium">{t("bannerTitle")}</p>
-            <p className="text-[13px] text-muted-foreground">{t("bannerBody")}</p>
+            <p className="text-sm text-muted-foreground">{t("bannerBody")}</p>
           </SettingsNote>
 
           <SettingsSection title={t("configuredTitle")}>
@@ -286,7 +286,7 @@ function DefaultsGroup({ title, items, t, onOpen }: { title: string; items: InvI
   if (items.length === 0) return null;
   return (
     <div className="space-y-2">
-      <p className="text-[13px] font-medium text-muted-foreground">{title} · {items.length}</p>
+      <p className="text-sm font-medium text-muted-foreground">{title} · {items.length}</p>
       <SettingsGroup>
       {page.visible.map((i) => (
         <CapabilityRow
@@ -348,7 +348,7 @@ function CapabilityDrawer({
         <section className="space-y-3 py-5">
           <div className="space-y-1">
             <h3 className="text-sm font-semibold tracking-tight">{t("globalRule")}</h3>
-            <p className="text-[13px] text-muted-foreground">{t("globalRuleHint")}</p>
+            <p className="text-sm text-muted-foreground">{t("globalRuleHint")}</p>
           </div>
           <EffectControl value={globalEffect} onChange={onSetGlobal} t={t} label={t("globalRule")} />
         </section>
@@ -376,11 +376,11 @@ function CapabilityDrawer({
         <section className="space-y-3 py-5">
           <h3 className="text-sm font-semibold tracking-tight">{t("history")}</h3>
           {history.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">{t("noHistory")}</p>
+            <p className="text-sm text-muted-foreground">{t("noHistory")}</p>
           ) : (
             <ul className="divide-y">
               {history.map((h) => (
-                <li key={h.id} className="flex items-baseline justify-between gap-3 py-2 text-[13px]">
+                <li key={h.id} className="flex items-baseline justify-between gap-3 py-2 text-sm">
                   <span className="min-w-0 truncate">
                     {t(h.action === "policy.set" ? "histSet" : "histClear", { effect: t(`effect.${(h.detail.effect as Effect) ?? "allow"}`), scope: t(`scope.${(h.detail.scope as PolicyScope) ?? "system"}`) })}
                     {(h.actorName || h.actorEmail) && <span className="text-muted-foreground"> · {h.actorName || h.actorEmail}</span>}
@@ -412,7 +412,7 @@ function ExceptionSection({
   return (
     <section className="space-y-3 py-5">
       <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      {rows.length === 0 && <p className="text-[13px] text-muted-foreground">{t("noExceptions")}</p>}
+      {rows.length === 0 && <p className="text-sm text-muted-foreground">{t("noExceptions")}</p>}
       {rows.length > 0 && (
         <ul className="divide-y border-y">
           {rows.map((r) => (
@@ -507,7 +507,7 @@ function CheckAccess({
     <section className="space-y-3 py-5">
       <div className="space-y-1">
         <h3 className="text-sm font-semibold tracking-tight">{t("checkAccess")}</h3>
-        <p className="text-[13px] text-muted-foreground">{t("checkAccessHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("checkAccessHint")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Select value={userId} onValueChange={(v) => { setUserId(v as string); setProjectId(null); }} items={memberItems}>

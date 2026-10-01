@@ -26,7 +26,7 @@ import { authErrorKey } from "@/lib/auth/client-error";
 const STEPS = SETUP_STEPS;
 
 const INPUT_CLASS =
-  "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px] focus-visible:border-ring focus-visible:bg-card";
+  "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-base focus-visible:border-ring focus-visible:bg-card";
 
 /** Minimal 2-step progress: a pair of bars that fill as the admin advances. */
 function StepBars({ current, label }: { current: number; label: string }) {
@@ -301,7 +301,7 @@ export function SetupWizard({
                     <li>{t("blocked.step2")}</li>
                     <li>{t("blocked.step3")}</li>
                   </ol>
-                  <p className="text-xs leading-relaxed text-muted-foreground/80 text-pretty">{t("blocked.hint")}</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground text-pretty">{t("blocked.hint")}</p>
                 </div>
               )}
 
@@ -365,7 +365,7 @@ export function SetupWizard({
                       <p className="text-xs leading-snug text-muted-foreground">{t("account.setupTokenHint")}</p>
                     </div>
                   )}
-                  <Button type="submit" className="h-11 w-full rounded-xl text-[15px]" disabled={loading}>
+                  <Button type="submit" className="h-11 w-full rounded-xl text-base" disabled={loading}>
                     {loading ? t("account.submitting") : t("account.submit")}
                   </Button>
                 </form>
@@ -391,7 +391,7 @@ export function SetupWizard({
                         })
                       )}
                     >
-                      <SelectTrigger id="provider" className="h-11 w-full rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px]">
+                      <SelectTrigger id="provider" className="h-11 w-full rounded-xl border-transparent bg-muted/60 px-3.5 text-base">
                         <SelectValue />
                       </SelectTrigger>
               <SelectContent>
@@ -405,7 +405,7 @@ export function SetupWizard({
                           <span className="flex flex-wrap items-center gap-1.5 font-medium">
                             {p.label}
                             {p.recommended && (
-                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("provider.recommended")}</span>
+                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">{t("provider.recommended")}</span>
                             )}
                           </span>
                           <span className="text-xs leading-snug text-muted-foreground">{p.blurb}</span>
@@ -480,7 +480,7 @@ export function SetupWizard({
                         {t("back")}
                       </Button>
                     )}
-                    <Button type="submit" className="h-11 flex-1 rounded-xl text-[15px]" disabled={loading}>
+                    <Button type="submit" className="h-11 flex-1 rounded-xl text-base" disabled={loading}>
                       {loading ? t("provider.submitting") : t("provider.submit")}
                     </Button>
                   </div>

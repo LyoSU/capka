@@ -94,7 +94,7 @@ export function FolderChips({ folders }: { folders: FolderSync }) {
                 type="button"
                 onClick={() => folders.remove(f.id)}
                 aria-label={t("disconnect")}
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-hover hover:text-foreground"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
               >
                 <X className="size-3.5" />
               </button>

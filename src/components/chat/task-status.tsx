@@ -122,7 +122,7 @@ export function TaskStatus({
   // 15px muted label at the same inset — so the live status reads as the rail's
   // next step still being written, not as a second kind of indicator.
   return (
-    <div role="status" aria-live="polite" className="relative flex min-h-8 animate-in items-center gap-2.5 py-1 text-[15px] leading-snug text-muted-foreground fade-in duration-300">
+    <div role="status" aria-live="polite" className="relative flex min-h-8 animate-in items-center gap-2.5 py-1 text-sm leading-snug text-muted-foreground fade-in duration-300">
       {/* The last piece of the rail's connecting line, drawn from THIS side of the
           seam. The row is deliberately not a node inside the activity spoiler: it
           is mounted once, in one place, so it never remounts and flickers as the

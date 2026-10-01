@@ -85,7 +85,7 @@ export function JumpPill({
         // best at 36px, and a 36px tap target is under the 44px floor every mobile
         // guideline sets. The pseudo-element grows the hit area without growing the
         // object — the standard way to keep those two independent.
-        className={`relative inline-flex items-center gap-1.5 rounded-full bg-card text-sm text-foreground shadow-raised ring-1 ring-border/60 transition-[opacity,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-out)] before:absolute before:left-1/2 before:top-1/2 before:size-11 before:-translate-x-1/2 before:-translate-y-1/2 before:content-[''] [@media(hover:hover)]:hover:ring-border ${
+        className={`relative inline-flex items-center gap-1.5 rounded-full bg-card text-sm text-foreground shadow-raised ring-1 ring-border/60 transition-[opacity,transform,box-shadow] duration-200 ease-out before:absolute before:left-1/2 before:top-1/2 before:size-11 before:-translate-x-1/2 before:-translate-y-1/2 before:content-[''] [@media(hover:hover)]:hover:ring-border ${
           isNew ? "h-9 px-3.5" : "size-9 justify-center"
         } ${show ? "pointer-events-auto scale-100 opacity-100" : "translate-y-0.5 scale-90 opacity-0"}`}
       >

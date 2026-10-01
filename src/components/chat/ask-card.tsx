@@ -327,7 +327,7 @@ function ChoiceGlider({ row, active }: { row: React.RefObject<HTMLDivElement | n
   return (
     <span
       aria-hidden
-      className="animate-pop-in pointer-events-none absolute rounded-full bg-primary transition-[left,top,width,height] duration-200 [transition-timing-function:var(--ease-strong)]"
+      className="animate-pop-in pointer-events-none absolute rounded-full bg-primary transition-[left,top,width,height] duration-200 ease-strong"
       style={box}
     />
   );

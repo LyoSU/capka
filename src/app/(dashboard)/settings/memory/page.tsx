@@ -117,7 +117,7 @@ function ProjectMemory({ scopes, archiveExpiresAt, onOpen, onChanged }: {
             {/* One level below a section title, and above rows that share its size: the
                 project's name is a label over a list, not a heading competing with
                 "Projects" above it. */}
-            <h4 className="text-[13px] font-medium text-muted-foreground">{scope.projectName}</h4>
+            <h4 className="text-sm font-medium text-muted-foreground">{scope.projectName}</h4>
             <MemoryConflicts conflicts={scope.conflicts} onChanged={onChanged} />
             <TopicRows topics={scope.topics} onOpen={onOpen} />
             <MemoryUnfiled facts={scope.unfiled} total={scope.unfiledTotal} onChanged={onChanged} />

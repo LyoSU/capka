@@ -109,7 +109,7 @@ export function MessageEditor({
           // as on a desktop: the box never eats more than a third of the screen.
           // `dvh`, never `vh` — mobile Safari's `vh` ignores the browser chrome,
           // so a third of `vh` is more than a third of what the user can see.
-          className="max-h-[33dvh] w-full resize-none bg-transparent px-4 py-3 text-base focus:outline-none md:text-[15px]"
+          className="max-h-[33dvh] w-full resize-none bg-transparent px-4 py-3 text-base focus:outline-none"
         />
       </div>
 

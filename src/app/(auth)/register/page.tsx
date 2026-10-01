@@ -165,7 +165,7 @@ export default function RegisterPage() {
             {error}
           </p>
         )}
-        <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-[15px]">
+        <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-base">
           {loading ? t("register.submitting") : t("register.submit")}
         </Button>
       </form>

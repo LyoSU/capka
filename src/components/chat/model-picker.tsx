@@ -142,7 +142,7 @@ function PriceMeter({ model }: { model: ModelInfo }) {
   // that read as "cheapest/unknown". Render the word, tinted like the meter.
   if (isFreeModel(model)) {
     return (
-      <span className="shrink-0 text-[11px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
+      <span className="shrink-0 text-xs font-medium text-emerald-600 dark:text-emerald-400">
         {t("price.free")}
       </span>
     );
@@ -153,7 +153,7 @@ function PriceMeter({ model }: { model: ModelInfo }) {
   if (tier === 0) {
     return (
       <Hint label={t("price.unknown")}>
-        <span className="inline-flex w-[3ch] shrink-0 justify-end text-muted-foreground/60 leading-none" aria-label={t("price.unknown")}>—</span>
+        <span className="inline-flex w-[3ch] shrink-0 justify-end text-muted-foreground" aria-label={t("price.unknown")}>—</span>
       </Hint>
     );
   }
@@ -167,7 +167,7 @@ function PriceMeter({ model }: { model: ModelInfo }) {
   })}`;
   return (
     <Hint label={title}>
-      <span className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none">
+      <span className="inline-flex shrink-0 items-center font-medium tabular-nums">
         {[0, 1, 2].map((i) =>
           i < filled ? (
             <span key={i} className="text-emerald-500">$</span>
@@ -259,7 +259,7 @@ function FilterBar({
 function ConnChip({ icon, label }: { icon?: string | null; label?: string | null }) {
   if (!label) return null;
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/80">
+    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
       <BrandIcon slug={icon} size={11} />
       <span className="hidden max-w-24 truncate sm:inline">{label}</span>
     </span>
@@ -832,7 +832,7 @@ function ModelList({
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <BrandIcon slug={paneHeading.icon} size={15} />
           <span className="text-sm font-medium">{paneHeading.group}</span>
-          <span className="text-[10px] text-muted-foreground tabular-nums">{paneHeading.models.length}</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{paneHeading.models.length}</span>
         </div>
       )}
       <div className="flex items-center gap-2 border-b px-3 py-2.5">
@@ -863,7 +863,7 @@ function ModelList({
           aria-label={t("search")}
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        {searching && <span className="text-[10px] text-muted-foreground tabular-nums">{visible.length}</span>}
+        {searching && <span className="text-xs text-muted-foreground tabular-nums">{visible.length}</span>}
         <Hint label={t("filter.title")}>
           <button
             type="button"
@@ -875,7 +875,7 @@ function ModelList({
           >
             <SlidersHorizontal className="size-3.5" />
             {filters.size > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground tabular-nums">
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium leading-none text-primary-foreground tabular-nums">
                 {filters.size}
               </span>
             )}
@@ -908,7 +908,7 @@ function ModelList({
                     than the last sync) is still usable — typing its FULL id offers
                     it as a custom option. Nudge that, since a bare word can't be
                     resolved to one. */}
-                <span className="text-muted-foreground/70">{t("noneFoundHint")}</span>
+                <span className="text-muted-foreground">{t("noneFoundHint")}</span>
               </span>
             ) : (
               t("noneAvailable")
@@ -921,8 +921,8 @@ function ModelList({
             {showHeaders && (
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border">
                 <BrandIcon slug={icon} size={12} />
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
-                <span className="text-[10px] text-muted-foreground tabular-nums">{groupModels.length}</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{groupModels.length}</span>
               </div>
             )}
 
@@ -974,14 +974,14 @@ function ModelList({
                         rather than in the right-hand meta cluster, which reveals on
                         hover — a badge you have to hover to see announces nothing. */}
                     {model.isNew && (
-                      <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide text-foreground">
+                      <span className="shrink-0 rounded-full bg-brand-soft px-1.5 text-xs font-medium tracking-wide text-foreground">
                         {t("newBadge")}
                       </span>
                     )}
                     {folded && (
                       <span
                         data-variants
-                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
                       >
                         {t("variants", { count: row.variants.length })}
                         <ChevronDown className={`size-3 transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} aria-hidden="true" />
@@ -994,7 +994,7 @@ function ModelList({
                         whether or not caps show. */}
                     <span className="ml-auto flex shrink-0 items-center gap-3">
                       <span
-                        className={`flex items-center gap-2 text-[11px] text-muted-foreground transition-opacity duration-150 group-hover/row:opacity-100 ${
+                        className={`flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-150 group-hover/row:opacity-100 ${
                           isActive ? "opacity-100" : "opacity-60"
                         }`}
                       >
@@ -1005,7 +1005,7 @@ function ModelList({
                       </span>
                       {showConnChip && <ConnChip icon={model.configIcon} label={model.configLabel} />}
                       {isCurrent && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("active")}</span>
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">{t("active")}</span>
                       )}
                       <PriceMeter model={model} />
                     </span>
@@ -1026,7 +1026,7 @@ function ModelList({
             className="flex w-full flex-wrap items-baseline gap-x-1.5 border-t border-border px-3 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
           >
             <span className="font-medium">{showAux ? t("aux.hide") : t("aux.more", { count: hiddenAux })}</span>
-            {!showAux && <span className="text-muted-foreground/70">{t("aux.hint")}</span>}
+            {!showAux && <span className="text-muted-foreground">{t("aux.hint")}</span>}
           </button>
         )}
       </div>
@@ -1451,7 +1451,7 @@ export function ModelPicker({
           // CHROME sitting under a 15px text field, and at the field's own size
           // they competed with the words being typed. The name keeps `font-medium`
           // (below) so the step down in size is not also a step down in weight.
-          className={`flex h-9 min-w-0 items-center text-[13px] transition-micro hover:text-foreground ${
+          className={`flex h-9 min-w-0 items-center text-sm transition-micro hover:text-foreground ${
             compact ? "gap-1 px-1.5" : "gap-2.5 px-3"
           }`}
         >
@@ -1485,13 +1485,13 @@ export function ModelPicker({
                 <span className="size-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
               {currentModel && currentModel.context > 0 && (
-                <Hint label={t("context")}><span className="rounded bg-muted px-1 py-px text-[12px] leading-4 text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
+                <Hint label={t("context")}><span className="rounded bg-muted px-1 py-px text-xs leading-4 text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
               )}
               {/* Shared-key chip: shown when the whole offering is the shared key,
                   or (in a mixed own+shared picker) when the SELECTED model runs on
                   a shared connection. */}
               {(state.isShared || currentModel?.configShared) && (
-                <Hint label={t("sharedTooltip")}><span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline">{t("shared")}</span></Hint>
+                <Hint label={t("sharedTooltip")}><span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground hidden sm:inline">{t("shared")}</span></Hint>
               )}
             </span>
           )}

@@ -91,7 +91,7 @@ function WorkspacePathChip({ rel, chatId }: { rel: string; chatId: string }) {
   if (missing) {
     return (
       <Hint label={tw("notCreated")}>
-        <span className={cn(cls, "cursor-default border-dashed text-muted-foreground/70 line-through opacity-70 hover:border-border hover:bg-hover")}>
+        <span className={cn(cls, "cursor-default border-dashed text-muted-foreground line-through opacity-70 hover:border-border hover:bg-hover")}>
           {inner}
         </span>
       </Hint>

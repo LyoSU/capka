@@ -613,12 +613,12 @@ function TopicRow({ topic, onOpen }: { topic: TopicView; onOpen: () => void }) {
         {topic.preview.text ? (
           <Statement
             value={topic.preview}
-            className="block truncate text-[13px] text-muted-foreground"
+            className="block truncate text-sm text-muted-foreground"
             control={false}
             as="span"
           />
         ) : topic.factsTotal ? (
-          <span className="block truncate text-[13px] text-muted-foreground">
+          <span className="block truncate text-sm text-muted-foreground">
             {t("previewFactCount", { count: topic.factsTotal })}
           </span>
         ) : (
@@ -791,7 +791,7 @@ export function MemoryTopicDetail({
       <button
         type="button"
         onClick={onBack}
-        className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <ChevronLeft aria-hidden className="size-3.5" />
         {t("detailBack")}
@@ -812,7 +812,7 @@ export function MemoryTopicDetail({
 
       {topic.body.text ? (
         reveal.shown ? (
-          <div className="text-[15px] leading-relaxed">
+          <div className="text-base leading-relaxed">
             <Markdown>{topic.body.text}</Markdown>
           </div>
         ) : (
@@ -821,7 +821,7 @@ export function MemoryTopicDetail({
           <button
             type="button"
             onClick={reveal.toggle}
-            className="rounded-md text-[13px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-md text-sm text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {t("reveal")}
             <span className="sr-only"> — {t("sensitiveBlurred")}</span>
@@ -836,7 +836,7 @@ export function MemoryTopicDetail({
             aria-expanded={factsOpen}
             aria-controls={panelId}
             onClick={() => setFactsOpen((v) => !v)}
-            className="-mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="-mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronRight
               aria-hidden

@@ -343,7 +343,7 @@ export function ChatInput({
               // arrangement had `resize()` collapse the textarea to height 0 each
               // keystroke, which clamped the wrapper's scrollTop to 0 and jumped
               // long text back to the top on every character.
-              className="w-full resize-none max-h-52 overflow-y-hidden scrollbar-thin bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
+              className="w-full resize-none max-h-52 overflow-y-hidden scrollbar-thin bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60"
             />
             {/* Overlay placeholder instead of the native one: a textarea's own
                 placeholder wraps to a second line on a narrow screen and can't be
@@ -351,7 +351,7 @@ export function ChatInput({
             {!value && (
               <span
                 aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 truncate pr-2 text-base leading-relaxed text-muted-foreground md:text-[15px]"
+                className="pointer-events-none absolute inset-x-0 top-0 truncate pr-2 text-base leading-relaxed text-muted-foreground"
               >
                 {dictation.listening
                   ? t(dictation.phase === "hearing" ? "dictation.listening" : "dictation.starting")

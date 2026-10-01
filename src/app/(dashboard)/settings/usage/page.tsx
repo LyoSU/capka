@@ -386,7 +386,7 @@ export default function UsagePage() {
               <details className="group rounded-xl border">
                 <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                   {t("technicalDetails")}
-                  <span className="text-xs text-muted-foreground/70 group-open:hidden">{t("tokensSummary", { tokens: compact(totalTok) })}</span>
+                  <span className="text-xs text-muted-foreground group-open:hidden">{t("tokensSummary", { tokens: compact(totalTok) })}</span>
                 </summary>
                 <div className="grid grid-cols-3 gap-3 border-t p-3">
                   <Stat label={t("totalTokens")} value={compact(totalTok)} sub={t("tokenSplit", { input: compact(promptTok), output: compact(outTok) })} />
@@ -561,7 +561,7 @@ function FiltersControl({
         <SlidersHorizontal className="size-3.5" />
         {t("filters")}
         {activeCount > 0 && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground tabular-nums">
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium text-primary-foreground tabular-nums">
             {activeCount}
           </span>
         )}
@@ -690,7 +690,7 @@ function AttentionBlock({
         <AlertTriangle className="size-3.5" />
         {t("attn.title")}
       </div>
-      <ul className="space-y-1 text-sm text-foreground/90">
+      <ul className="space-y-1 text-sm text-foreground">
         {triggers.map((a, i) => (
           <li key={i}>{sentence(a)}</li>
         ))}
@@ -755,7 +755,7 @@ function Trend({
   // For cost, more spend is "bad"; for neutral counts, just hint direction.
   const color = tone === "cost" ? (up ? "text-destructive-text" : "text-success") : "text-muted-foreground";
   return (
-    <span className={cn("flex items-center gap-0.5 text-[11px] font-medium tabular-nums", color)} title={t("vsPrevious")}>
+    <span className={cn("flex items-center gap-0.5 text-xs font-medium tabular-nums", color)} title={t("vsPrevious")}>
       <Icon className="size-3" />
       {pct(Math.abs(change))}
     </span>
@@ -837,7 +837,7 @@ function Breakdown({
                 // Dimmed but always present, rather than appearing on hover: an
                 // action nobody can see until they happen to point at it is an
                 // action most people never find (and no action at all on touch).
-                className="flex shrink-0 items-center px-2.5 text-muted-foreground/40 transition-colors hover:text-foreground focus-visible:text-foreground"
+                className="flex shrink-0 items-center px-2.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground"
               >
                 <ArrowUpRight className="size-4" />
               </Link>
@@ -946,7 +946,7 @@ function DailyChart({
             <span className="ml-1.5 text-muted-foreground">{dateFmt.format(new Date(active.day))}</span>
           </ChartTooltip>
         )}
-        <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+        <div className="mt-1.5 flex justify-between text-xs text-muted-foreground">
           <span>{dateFmt.format(new Date(buckets[0].day))}</span>
           <span>{t("avgLine", { cost: money(dailyAvg) })}</span>
           <span>{dateFmt.format(new Date(buckets[buckets.length - 1].day))}</span>

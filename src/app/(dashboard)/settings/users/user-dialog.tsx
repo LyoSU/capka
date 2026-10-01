@@ -177,7 +177,7 @@ export function UserDialog({
         <DialogHeader className="gap-1 border-b px-6 py-4 pr-14">
           <DialogTitle className="truncate">{shown.name || shown.email}</DialogTitle>
           <DialogDescription className="truncate">{shown.email}</DialogDescription>
-          <p className="truncate text-[13px] text-muted-foreground">{meta}</p>
+          <p className="truncate text-sm text-muted-foreground">{meta}</p>
         </DialogHeader>
 
         {/* scrollbar-gutter keeps the reserved track out of the numbers on the
@@ -258,7 +258,7 @@ export function UserDialog({
             </div>
 
             {exceptions.length === 0 ? (
-              <p className="pt-2 text-[13px] text-muted-foreground">{t("noExceptions")}</p>
+              <p className="pt-2 text-sm text-muted-foreground">{t("noExceptions")}</p>
             ) : (
               <ul className="divide-y border-t">
                 {exceptions.map((ex) => {
@@ -358,7 +358,7 @@ export function UserDialog({
                   <>
                     <ul className="divide-y">
                       {detail.sessions.map((s) => (
-                        <li key={s.id} className="py-2.5 text-[13px]">
+                        <li key={s.id} className="py-2.5 text-sm">
                           <div className="flex justify-between gap-2">
                             <span className="text-muted-foreground">{t("sessionSeen", { when: relTime(locale, s.updatedAt) })}</span>
                             <span className="tabular-nums text-muted-foreground">{shortDate(locale, s.createdAt)}</span>
@@ -375,10 +375,10 @@ export function UserDialog({
 
                 {audit.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-[13px] font-medium text-muted-foreground">{t("historyTitle")}</p>
+                    <p className="text-sm font-medium text-muted-foreground">{t("historyTitle")}</p>
                     <ul className="divide-y">
                       {audit.slice(0, 8).map((e) => (
-                        <li key={e.id} className="flex justify-between gap-3 py-2 text-[13px]">
+                        <li key={e.id} className="flex justify-between gap-3 py-2 text-sm">
                           <span className="min-w-0 truncate">{historyLabel(e.action, e.detail, t)}{e.actorName ? ` — ${e.actorName}` : ""}</span>
                           <span className="shrink-0 tabular-nums text-muted-foreground">{shortDate(locale, e.createdAt)}</span>
                         </li>

@@ -103,7 +103,7 @@ export function MasterKeyBanner() {
             {copied ? tc("copied") : tc("copy")}
           </Button>
         </div>
-        <p className="text-[13px] text-muted-foreground">{t("restartHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("restartHint")}</p>
       </div>,
     );
   }
@@ -127,7 +127,7 @@ export function MasterKeyBanner() {
   // "all is well" looks like a state and not like a footnote.
   return section(
     <SettingsGroup>
-      <div className="flex items-center gap-2.5 py-4 text-[15px]">
+      <div className="flex items-center gap-2.5 py-4 text-base">
         <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
         {t("secureClean")}
       </div>

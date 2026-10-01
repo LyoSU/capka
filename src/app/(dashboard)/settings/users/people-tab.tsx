@@ -140,7 +140,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
           <div className="flex items-center gap-2 text-sm font-medium">
             <Clock className="size-4 text-warning-text" />
             {t("pendingTitle")}
-            <Badge variant="secondary" className="text-[10px]">{pending.length}</Badge>
+            <Badge variant="secondary" className="text-xs">{pending.length}</Badge>
           </div>
           <div className="overflow-hidden rounded-xl border border-warning-border bg-warning-surface/40 divide-y divide-warning-border/50">
             {pending.map((u) => (
@@ -219,7 +219,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
               <div className="flex min-w-0 items-center gap-2.5">
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
-                  <p className="truncate text-[15px]">{user.name || user.email}</p>
+                  <p className="truncate text-base">{user.name || user.email}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {user.email}
                     {user.lastActivityAt ? ` · ${t("activePrefix", { when: relTime(locale, user.lastActivityAt) })}` : ""}
@@ -228,7 +228,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
               </div>
               {/* access */}
               <div className="hidden items-center gap-1.5 sm:flex">
-                <Badge variant={cfg.variant} className="text-[10px]">{t(`roles.${user.role}`)}</Badge>
+                <Badge variant={cfg.variant} className="text-xs">{t(`roles.${user.role}`)}</Badge>
                 {user.exceptionsCount > 0 && (
                   <span className="text-xs text-muted-foreground">{t("exceptionsChip", { count: user.exceptionsCount })}</span>
                 )}
@@ -254,7 +254,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
               <div>
                 <Badge
                   variant={user.status === "active" ? "outline" : user.status === "suspended" ? "destructive" : "secondary"}
-                  className="text-[10px]"
+                  className="text-xs"
                 >
                   {t(`statuses.${user.status}`)}
                 </Badge>
@@ -267,7 +267,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
 
       <ShowMore shown={activePage.visible.length} total={activePage.total} onMore={activePage.more} />
 
-      <p className="text-[13px] leading-relaxed text-muted-foreground">{t("spendHint")}</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">{t("spendHint")}</p>
 
       <UserDialog
         user={openUser}

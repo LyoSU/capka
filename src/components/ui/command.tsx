@@ -158,7 +158,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-md px-3 text-[15px] outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-5 data-selected:[&_svg]:text-foreground",
+        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none transition-colors duration-100 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-hover-strong data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-5 data-selected:[&_svg]:text-foreground",
         className
       )}
       {...props}
@@ -176,7 +176,7 @@ function CommandKbd({ className, ...props }: React.ComponentProps<"kbd">) {
     <kbd
       data-slot="command-kbd"
       className={cn(
-        "inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-border bg-background px-1.5 font-sans text-[11px] leading-none text-muted-foreground",
+        "inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-border bg-background px-1.5 font-sans text-xs leading-none text-muted-foreground",
         className
       )}
       {...props}

@@ -295,7 +295,7 @@ export default function InstalledPlugins() {
                   {p.version && <span className="text-xs text-muted-foreground">v{p.version}</span>}
                   {p.commitSha && (
                     <Hint label={p.commitDate ? `${p.commitSha} · ${new Date(p.commitDate).toLocaleString()}` : p.commitSha}>
-                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-muted-foreground">
                         #{p.commitSha.slice(0, 7)}
                       </code>
                     </Hint>
@@ -526,11 +526,11 @@ function FileList({ label, paths, t }: { label: string; paths: string[]; t: Retu
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <ul className="space-y-0.5">
         {shown.map((p) => (
-          <li key={p} className="break-all font-mono text-[11px] text-muted-foreground">{p}</li>
+          <li key={p} className="break-all font-mono text-xs text-muted-foreground">{p}</li>
         ))}
       </ul>
       {paths.length > shown.length && (
-        <p className="text-[11px] text-muted-foreground">{t("diffMore", { count: paths.length - shown.length })}</p>
+        <p className="text-xs text-muted-foreground">{t("diffMore", { count: paths.length - shown.length })}</p>
       )}
     </div>
   );

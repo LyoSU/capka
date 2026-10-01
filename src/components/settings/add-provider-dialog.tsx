@@ -184,7 +184,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                       <ProviderGlyph slug={p.iconSlug} size={16} className="shrink-0 text-muted-foreground" />
                       <span className="font-medium">{p.label}</span>
                       {p.recommended && (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
                           {t("recommended")}
                         </span>
                       )}

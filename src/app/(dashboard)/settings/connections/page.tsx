@@ -366,7 +366,7 @@ export default function ConnectionsPage() {
                     className="w-32 text-right tabular-nums"
                     {...attrs}
                   />
-                  <span className="text-[13px] text-muted-foreground">{unit}</span>
+                  <span className="text-sm text-muted-foreground">{unit}</span>
                   {s.dirty && (
                     <Button size="sm" onClick={save} className="animate-step-in ml-auto">{tc("save")}</Button>
                   )}

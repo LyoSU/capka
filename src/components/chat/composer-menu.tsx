@@ -84,7 +84,7 @@ export function ComposerMenu({
     else if (r === "failed") toast(t("reconnectFailed"));
   };
 
-  const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[15px] leading-5 text-foreground transition-colors hover:bg-hover disabled:opacity-60";
+  const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm leading-5 text-foreground transition-colors hover:bg-hover disabled:opacity-60";
   const icon = "size-5 shrink-0 text-muted-foreground";
 
   return (
@@ -125,7 +125,7 @@ export function ComposerMenu({
                         )}
                       </button>
                     )}
-                    <button type="button" onClick={() => folders.remove(f.id)} aria-label={t("disconnect")} className="text-muted-foreground/70 transition-colors hover:text-foreground">
+                    <button type="button" onClick={() => folders.remove(f.id)} aria-label={t("disconnect")} className="text-muted-foreground transition-colors hover:text-foreground">
                       <X className="size-3.5" />
                     </button>
                   </div>
@@ -155,7 +155,7 @@ export function ComposerMenu({
                     <span className="text-amber-600 dark:text-amber-500">{t("reconnectNeeded", { n: folders.needReconnect.length })}</span>
                   ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) }) : ""}
                   {folders.conflicts > 0 && <span className="text-warning-text"> · {t("conflicts", { n: folders.conflicts })}</span>}
-                  {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground/70">{t("skipped", { n: folders.skipped })}</span>}
+                  {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground">{t("skipped", { n: folders.skipped })}</span>}
                 </div>
               )}
             </>
@@ -181,7 +181,7 @@ export function ComposerMenu({
                 // created, so don't offer a zip link to a path that doesn't exist.
                 <div className="px-3 pt-1 text-xs text-muted-foreground">{t("nothingImported")}</div>
               ))}
-              <div className="px-3 pt-1 text-xs text-muted-foreground/70">{t("unsupportedBrowser")}</div>
+              <div className="px-3 pt-1 text-xs text-muted-foreground">{t("unsupportedBrowser")}</div>
             </>
           )
         )}

@@ -98,7 +98,7 @@ export function UsageLimitCard() {
         })}
       </div>
 
-      <p className="text-[13px] leading-relaxed text-muted-foreground">{t("hint")}</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">{t("hint")}</p>
     </section>
   );
 }

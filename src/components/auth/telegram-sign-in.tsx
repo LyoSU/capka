@@ -50,7 +50,7 @@ export function TelegramSignIn({ enabled, callbackURL = "/chat" }: { enabled: bo
       type="button"
       onClick={start}
       disabled={loading}
-      className="h-11 w-full rounded-xl bg-[#229ED9] text-[15px] text-white hover:bg-[#1c8dc2]"
+      className="h-11 w-full rounded-xl bg-[#229ED9] text-base text-white hover:bg-[#1c8dc2]"
     >
       {loading ? <Loader2 className="animate-spin" /> : <TelegramGlyph />}
       {t("telegram.signIn")}

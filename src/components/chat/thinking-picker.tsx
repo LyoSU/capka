@@ -91,12 +91,12 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
         <span id={labelId} className="text-sm text-muted-foreground">
           {t("label")}
         </span>
-        <span className={`text-sm font-medium transition-colors ${atMax ? "text-foreground" : "text-foreground/80"}`}>
+        <span className={`text-sm font-medium transition-colors ${atMax ? "text-foreground" : "text-muted-foreground"}`}>
           {t(`amount.${current}`)}
         </span>
       </div>
 
-      <div className="mt-3 flex items-center justify-between text-[11px] leading-none text-muted-foreground">
+      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
         <span>{t("faster")}</span>
         <span>{t("smarter")}</span>
       </div>
@@ -114,7 +114,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
             this palette is deliberately calm and a saturated gradient here would
             read as another product. */}
         <div
-          className={`absolute left-0 top-1/2 h-7 -translate-y-1/2 rounded-full transition-[width,background-color] duration-200 ease-[var(--ease-out)] motion-reduce:transition-none ${
+          className={`absolute left-0 top-1/2 h-7 -translate-y-1/2 rounded-full transition-[width,background-color] duration-200 ease-out motion-reduce:transition-none ${
             atMax ? "bg-foreground/20" : "bg-foreground/10"
           }`}
           style={{ width: fillTo(index) }}
@@ -137,7 +137,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
             position. */}
         <span
           aria-hidden
-          className="pointer-events-none absolute top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 rounded-full bg-card shadow-btn transition-[left,transform] duration-200 ease-[var(--ease-out)] group-active/track:scale-95 motion-reduce:transition-none"
+          className="pointer-events-none absolute top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 rounded-full bg-card shadow-btn transition-[left,transform] duration-200 ease-out group-active/track:scale-95 motion-reduce:transition-none"
           style={{ left: centre(index) }}
         />
         <input
@@ -189,7 +189,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
           disabled={disabled}
           aria-label={`${t("label")}: ${t(`amount.${current}`)}`}
           // 13px to match the model pill it sits beside — see the note there.
-          className="flex h-9 items-center gap-1.5 rounded-full px-2 text-[13px] font-medium text-muted-foreground transition-micro hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
+          className="flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-muted-foreground transition-micro hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
         >
           {/* The glyph carries the meaning at a glance: bars that grow with depth.
               aria-hidden — the trigger's own label already says it in words. */}

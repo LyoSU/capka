@@ -334,14 +334,14 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
                   target="_blank"
                   rel="noopener noreferrer"
                   title={r.description ?? r.uri}
-                  className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-link transition-colors hover:border-primary/40"
+                  className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs text-link transition-colors hover:border-primary/40"
                 >
                   <span className="truncate">{r.name}</span>
                 </a>
               ) : (
                 // A non-web URI (file://, a custom scheme) is an identifier the
                 // reader can quote, not a place a browser can go — no dead link.
-                <span title={r.description ?? r.uri} className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                <span title={r.description ?? r.uri} className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                   <span className="truncate">{r.name}</span>
                 </span>
               )}
@@ -476,7 +476,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
       {/* A failed command is a fact worth one calm sentence, not a red flood:
           exit code 1 is routine (grep with no match), so the surface below
           stays neutral and only this line carries the signal. */}
-      {exitCode !== null && <p className="mb-1 text-[11px] text-destructive">{t("exitCode", { code: exitCode })}</p>}
+      {exitCode !== null && <p className="mb-1 text-xs text-destructive">{t("exitCode", { code: exitCode })}</p>}
       {/* A quiet tinted surface, nothing more. It used to carry a 2px left rule,
           but an edge butted against a rounded corner reads as a printing defect,
           not a device — the label above already says "this came back", and the
@@ -495,7 +495,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         <pre
           tabIndex={0}
           className={`max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
-            mono || pretty ? "font-mono text-[11px] text-muted-foreground" : "font-sans text-sm text-foreground"
+            mono || pretty ? "font-mono text-xs text-muted-foreground" : "font-sans text-sm text-foreground"
           }`}
         >
           {preBody}
@@ -533,7 +533,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
           <thead>
             <tr>
               {shown[0].fields.map((f) => (
-                <th key={f.label} className="whitespace-nowrap px-2 py-1 text-left text-[11px] font-medium text-muted-foreground">
+                <th key={f.label} className="whitespace-nowrap px-2 py-1 text-left text-xs font-medium text-muted-foreground">
                   {f.label}
                 </th>
               ))}
@@ -558,7 +558,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
           </tbody>
         </table>
         {records.length > shown.length && (
-          <p className="mt-2 text-[11px] text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
         )}
       </div>
     );
@@ -582,12 +582,12 @@ function RecordList({ records }: { records: TextRecord[] }) {
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] font-medium leading-snug text-link [overflow-wrap:anywhere] underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current"
+                  className="text-sm font-medium leading-snug text-link [overflow-wrap:anywhere] underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current"
                 >
                   {head.value}
                 </a>
               ) : (
-                <div className="text-[13px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]">{head.value}</div>
+                <div className="text-sm font-medium leading-snug text-foreground [overflow-wrap:anywhere]">{head.value}</div>
               )}
               {body.map((f, j) => (
                 <p key={j} className="mt-0.5 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
@@ -596,7 +596,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
                 </p>
               ))}
               {meta.length > 0 && (
-                <p className="mt-0.5 text-[11px] text-muted-foreground/80 [overflow-wrap:anywhere]">
+                <p className="mt-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                   {meta.map((f, j) => (
                     <span key={j}>
                       {j > 0 && " · "}
@@ -618,7 +618,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
         })}
       </ol>
       {records.length > shown.length && (
-        <p className="mt-2 text-[11px] text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
       )}
     </div>
   );
@@ -631,7 +631,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
 function TruncationNotice({ shown, total, showAll, onToggle }: { shown: number; total: number; showAll: boolean; onToggle: () => void }) {
   const t = useTranslations("chat.tool");
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
       {!showAll && <span>{t("truncated", { shown, total })}</span>}
       <button
         type="button"
@@ -672,10 +672,10 @@ function fence(text: string, lang: string): string {
 function DiffPane({ label, text, tone }: { label: string; text: string; tone: "before" | "after" }) {
   return (
     <div className={tone === "before" ? "bg-destructive/10" : "bg-success/10"}>
-      <div className="px-2.5 pt-1.5 text-[11px] font-medium text-muted-foreground">{label}</div>
+      <div className="px-2.5 pt-1.5 text-xs font-medium text-muted-foreground">{label}</div>
       <pre
         tabIndex={0}
-        className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+        className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2 font-mono text-xs leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
       >
         {/* A replacement that DELETES text leaves this side genuinely empty, which
             is the honest thing to show; the space only keeps the pane's height so
@@ -749,11 +749,11 @@ function Invocation({ inv }: { inv: StepInvocation }) {
 function FieldsGrid({ fields }: { fields: StepField[] }) {
   const t = useTranslations("chat.tool");
   return (
-    <dl className="grid grid-cols-[fit-content(10rem)_1fr] gap-x-4 gap-y-1 text-[13px]">
+    <dl className="grid grid-cols-[fit-content(10rem)_1fr] gap-x-4 gap-y-1 text-sm">
       {fields.map((f, i) => (
         <Fragment key={i}>
           <dt className="truncate text-muted-foreground">{f.label}</dt>
-          <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
+          <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-xs leading-relaxed text-muted-foreground" : "text-foreground"}`}>
             {f.url ? (
               <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current">
                 {f.value}
@@ -798,7 +798,7 @@ function TechDetails({ json }: { json: string }) {
             <div className="absolute right-1 top-1"><CopyButton text={json} /></div>
             <pre
               tabIndex={0}
-              className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+              className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-2.5 py-1.5 font-mono text-xs leading-relaxed text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
             >
               {body}
             </pre>
@@ -830,7 +830,7 @@ function StepFileChip({ path, name, chatId }: { path: string; name: string; chat
       onClick={() => open([file], 0)}
       title={t("openFile", { name })}
       aria-label={t("openFile", { name })}
-      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-[13px] underline decoration-border-strong underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm underline decoration-border-strong underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
     >
       <FileThumb file={file} className="size-4 shrink-0 overflow-hidden rounded-sm" />
       <span className="truncate">{name}</span>
@@ -852,7 +852,7 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
           {/* bg-background inverts against the panel's muted/50 so the number is
               findable when matching a [N] chip back to its source; the min-width
               keeps one- and two-digit rows left-aligned. */}
-          <span className="min-w-[1.5rem] shrink-0 rounded-full border border-border bg-background px-1 text-center text-[11px] font-medium tabular-nums text-muted-foreground">{s.n}</span>
+          <span className="min-w-[1.5rem] shrink-0 rounded-full border border-border bg-background px-1 text-center text-xs font-medium tabular-nums text-muted-foreground">{s.n}</span>
           <span className="min-w-0">
             <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-current">{s.title}</a>
             {hostOf(s.url) && <span className="ml-1.5 text-xs text-muted-foreground">{hostOf(s.url)}</span>}
@@ -890,7 +890,7 @@ function TextContent({ text, isStreaming, chatId, touched, sources, editStats }:
 function EditStatMeta({ stat }: { stat?: EditStat }) {
   if (!stat || (stat.added === 0 && stat.removed === 0)) return null;
   return (
-    <span className="mt-0.5 flex justify-center gap-1.5 font-mono text-[10px] leading-none tabular-nums">
+    <span className="mt-0.5 flex justify-center gap-1.5 font-mono text-xs leading-none tabular-nums">
       <span className="text-success">+{stat.added}</span>
       {stat.removed > 0 && <span className="text-destructive">−{stat.removed}</span>}
     </span>
@@ -1073,7 +1073,7 @@ function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error"
   if (d.category === "mcp" && d.brand?.color) {
     return (
       <span
-        className="animate-step-in grid size-4 place-items-center rounded-sm text-[10px] font-bold leading-none text-white"
+        className="animate-step-in grid size-4 place-items-center rounded-sm text-xs font-bold leading-none text-white"
         style={{ backgroundColor: d.brand.color }}
       >
         {d.brand.letter}
@@ -1172,7 +1172,7 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
             gap then, and a stub of line pointing into a panel read as a cut. */}
         {connect && !open && <span aria-hidden className="animate-rail-grow absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-border" />}
       </span>
-      <span className="pointer-events-none relative z-10 min-w-0 truncate text-[15px] leading-snug">
+      <span className="pointer-events-none relative z-10 min-w-0 truncate text-sm leading-snug">
         {label}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
@@ -1182,7 +1182,7 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
           When we know WHICH file it is, it gets a thumbnail and opens the file. */}
       {fileChip ??
         ((d.detail ?? (isAdmin ? d.adminDetail : undefined)) && (
-          <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-[13px]">
+          <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-sm">
             {d.detail ?? d.adminDetail}
           </span>
         ))}
@@ -1255,7 +1255,7 @@ function SteerRow({ text, connect, stagger }: { text: string; connect?: boolean;
       {/* Same hairline geometry as MemoryRow — hung from the row, since this text
           wraps — so a steer between two steps keeps the rail one continuous line. */}
       {connect && <span aria-hidden className="absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
-      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-[15px] leading-snug">
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-sm leading-snug">
         <span className="shrink-0">{t("steer")}</span>
         <span className="min-w-0 text-foreground [overflow-wrap:anywhere]">{text}</span>
       </span>
@@ -1441,10 +1441,10 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
           shows a spinning node on the running step, so a pulsing header is the
           same fact stated a second time. `tabular-nums` keeps the ticking duration
           from reflowing the row a digit at a time. */}
-      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-[15px] text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-180">
+      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-180">
         <span key={labelPhase} className="animate-in fade-in duration-200 min-w-0 truncate tabular-nums">{label}</span>
         {countLabel && (
-          <span className="animate-in fade-in duration-200 shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
+          <span className="animate-in fade-in duration-200 shrink-0 text-muted-foreground tabular-nums">· {countLabel}</span>
         )}
         {/* The visible half of "additive, visible, undoable": a turn that wrote memory
             says so in its own header, collapsed or not. The glyph is the same bookmark
@@ -1550,7 +1550,7 @@ function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; conn
           row's edge by the same 4px a StepRow's stub does, so the two kinds of row draw
           one continuous line. */}
       {connect && <span aria-hidden className="animate-rail-grow absolute -bottom-2.5 left-2.5 top-[26px] w-px -translate-x-1/2 bg-border" />}
-      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-[15px] leading-snug">
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 text-sm leading-snug">
         {/* A sensitive statement is not printed here. The memory page has a reveal
             control and the shoulder-surfing argument that justifies one; a chat
             transcript scrolls past on its own and has neither, so the row names the
@@ -1566,7 +1566,7 @@ function MemoryRow({ item, connect, stagger, onUndone }: { item: TurnWrite; conn
           type="button"
           onClick={undo}
           disabled={busy}
-          className="shrink-0 rounded-md text-[13px] underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 motion-reduce:transition-none"
+          className="shrink-0 rounded-md text-sm underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 motion-reduce:transition-none"
         >
           {t("undo")}
         </button>
@@ -1662,7 +1662,7 @@ export function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, c
             {/* Same code treatment as the step chip and the answer's inline code
                 — read-only machine text is one thing throughout, and none of it
                 is a field to type in. */}
-            <pre className="mt-1.5 ml-[30px] max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-[11px] text-muted-foreground">
+            <pre className="mt-1.5 ml-[30px] max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-xs text-muted-foreground">
               {detail}
             </pre>
           </CollapsibleContent>
@@ -1892,7 +1892,7 @@ export function QueuedBubble({
             At 55% it read beautifully and scored 4.1:1, which is a fail. */}
         <div className="flex min-w-0 flex-col items-end opacity-65 transition-opacity duration-200 group-hover/queued:opacity-90 group-focus-within/queued:opacity-90">
           {hasFiles && <MessageAttachments chatId={chatId} files={refs} />}
-          <div className="inline-block max-w-full rounded-2xl bg-card px-5 py-3 text-[15px] text-card-foreground">
+          <div className="inline-block max-w-full rounded-2xl bg-muted px-5 py-3 text-base leading-relaxed text-foreground">
             {/* The clamp lives on the INNER box: `line-clamp` sets
                 `display:-webkit-box`, which would override the bubble's
                 `inline-block` and stretch it to the full column width instead
@@ -2093,7 +2093,7 @@ function UserBubble({
           {/* When the turn is files-only, the thumbnails are the content — skip the
               empty "…" bubble. */}
           {(text || !hasFiles) && (
-            <div className="chat-prose chat-prose-flush inline-block max-w-full break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-left text-[15px] shadow-panel">
+            <div className="chat-prose chat-prose-flush inline-block max-w-full break-words rounded-2xl bg-muted text-foreground px-5 py-3 text-left text-base leading-relaxed">
               {/* The same renderer as a reply, so what the person typed in Markdown
                   (a list, **bold**, a fence) reads the way they meant it. Hard breaks
                   keep their Enter as a new line — see withHardBreaks. */}
@@ -2357,7 +2357,7 @@ function MessageDetails({
             >
               <span>{t("more")}</span>
               <ChevronDown
-                className="size-3.5 transition-transform duration-300 [transition-timing-function:var(--ease-strong)]"
+                className="size-3.5 transition-transform duration-300 ease-strong"
                 style={{ transform: more ? "rotate(180deg)" : undefined }}
                 aria-hidden="true"
               />
@@ -2365,7 +2365,7 @@ function MessageDetails({
             {/* Grows out of the row (0fr → 1fr), the app's one spoiler grammar; the
                 closed half is `inert` so its text is neither read nor tabbed into. */}
             <div
-              className="grid transition-[grid-template-rows,opacity] duration-300 [transition-timing-function:var(--ease-strong)]"
+              className="grid transition-[grid-template-rows,opacity] duration-300 ease-strong"
               style={{ gridTemplateRows: more ? "1fr" : "0fr", opacity: more ? 1 : 0 }}
             >
               <div className="overflow-hidden" inert={!more}>
@@ -2503,7 +2503,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   const t = useTranslations("chat.message");
   const anchorDisclosure = useDisclosureAnchor();
   return (
-    <Collapsible className="my-4 px-2" onOpenChange={(_, d) => anchorDisclosure(d)}>
+    <Collapsible className="my-4 px-4 md:px-6" onOpenChange={(_, d) => anchorDisclosure(d)}>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <div className="h-px flex-1 bg-border" />
         <CollapsibleTrigger className="flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors hover:bg-hover">
@@ -2540,7 +2540,7 @@ function QuietRow({ reason, children }: { reason: string; children: ReactNode })
         className="mx-4 my-2 flex w-[calc(100%-2rem)] items-baseline gap-2 rounded-md text-left text-xs text-muted-foreground transition-colors hover:text-foreground md:mx-6 md:w-[calc(100%-3rem)]"
       >
         <BellOff className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-        <span className="shrink-0 text-foreground/70">{t("quiet.title")}</span>
+        <span className="shrink-0 text-muted-foreground">{t("quiet.title")}</span>
         <span className="min-w-0 flex-1 truncate">{reason}</span>
       </CollapsibleTrigger>
       {/* The whole turn — steps, files, the one-line reply, the (i) popover — exactly
@@ -2749,12 +2749,12 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   }
 
   return (
-    // `--table-bleed` is this element's own horizontal padding plus the list's
-    // (px-2 in chat-panel) — the full distance from an answer's text to the
-    // screen edge. A markdown table's scroll strip pulls itself out by exactly
+    // `--table-bleed` is this element's own horizontal padding — the list in
+    // chat-panel has none, so it is the full distance from an answer's text to
+    // the screen edge. A markdown table's scroll strip pulls itself out by exactly
     // that (globals.css) so it runs edge to edge on a phone. Zeroed from md up,
     // where the column is centred and that margin is deliberate empty space.
-    <div className="group/msg px-4 md:px-6 py-4 [--table-bleed:1.5rem] md:[--table-bleed:0px]">
+    <div className="group/msg px-4 md:px-6 py-4 [--table-bleed:1rem] md:[--table-bleed:0px]">
       <CitationOrdinals.Provider value={ordinals}>
       <div className="max-w-none">
         {groups.length > 0 ? (

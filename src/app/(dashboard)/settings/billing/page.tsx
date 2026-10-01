@@ -149,7 +149,7 @@ export default function BillingPage() {
                   className="pl-6"
                 />
               </div>
-              <p className="text-[13px] text-muted-foreground">{t("budget.hint")}</p>
+              <p className="text-sm text-muted-foreground">{t("budget.hint")}</p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {([
@@ -174,7 +174,7 @@ export default function BillingPage() {
                 </div>
               ))}
             </div>
-            <p className="text-[13px] text-muted-foreground">{t("limits.hint")}</p>
+            <p className="text-sm text-muted-foreground">{t("limits.hint")}</p>
             {limitsDirty && (
               <div className="flex justify-end">
                 <Button size="sm" onClick={saveLimits} disabled={savingLimits} className="animate-step-in">

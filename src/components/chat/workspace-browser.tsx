@@ -371,7 +371,7 @@ export function WorkspaceBrowser({
         </button>
         {isSyncedFolder(entry) && (
           <Hint label={t("syncedFolder")}>
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
               {syncingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {syncingNow && folderSync?.progress && folderSync.progress.total > 0
                 ? `${folderSync.progress.done}/${folderSync.progress.total}`
@@ -397,12 +397,12 @@ export function WorkspaceBrowser({
           <FileThumb file={file} className="h-9 w-9 shrink-0 rounded-lg" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
-              <span className="min-w-0 truncate text-sm text-foreground/90">{entry.name}</span>
+              <span className="min-w-0 truncate text-sm text-foreground">{entry.name}</span>
               {statusIcon(entry)}
             </span>
             {/* No extension here — the thumbnail to the left already carries it on
                 its badge, and printing it twice in one row reads as noise. */}
-            <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+            <span className="block truncate text-xs tabular-nums text-muted-foreground">
               {formatSize(entry.size)}
               {entry.modifiedAt ? ` · ${t("modified", { ago: ago(entry.modifiedAt) })}` : ""}
             </span>
@@ -484,13 +484,13 @@ export function WorkspaceBrowser({
   const listBody = (
     <div className="space-y-0.5 px-3">
       {folders.length > 0 && grouped === "1" && (
-        <p className="px-1 pb-0.5 pt-2 text-[11px] font-semibold text-muted-foreground">{t("groupFolders")}</p>
+        <p className="px-1 pb-0.5 pt-2 text-xs font-semibold text-muted-foreground">{t("groupFolders")}</p>
       )}
       {folders.map(folderRow)}
       {fileGroups.map((g) => (
         <div key={g.category} className="space-y-0.5">
           {grouped === "1" && (
-            <p className="px-1 pb-0.5 pt-2 text-[11px] font-semibold text-muted-foreground">{groupLabel(g.category)}</p>
+            <p className="px-1 pb-0.5 pt-2 text-xs font-semibold text-muted-foreground">{groupLabel(g.category)}</p>
           )}
           {g.files.map(fileRow)}
         </div>
@@ -510,7 +510,7 @@ export function WorkspaceBrowser({
       {folders.length > 0 && (
         <div>
           {grouped === "1" && (
-            <p className="px-1 pb-1 pt-1 text-[11px] font-semibold text-muted-foreground">{t("groupFolders")}</p>
+            <p className="px-1 pb-1 pt-1 text-xs font-semibold text-muted-foreground">{t("groupFolders")}</p>
           )}
           <div className={gridCols}>{folders.map(folderTile)}</div>
         </div>
@@ -518,7 +518,7 @@ export function WorkspaceBrowser({
       {fileGroups.map((g) => (
         <div key={g.category} className="mt-2">
           {grouped === "1" && (
-            <p className="px-1 pb-1 pt-1 text-[11px] font-semibold text-muted-foreground">{groupLabel(g.category)}</p>
+            <p className="px-1 pb-1 pt-1 text-xs font-semibold text-muted-foreground">{groupLabel(g.category)}</p>
           )}
           <div className={gridCols}>{g.files.map(fileTile)}</div>
         </div>
@@ -579,7 +579,7 @@ export function WorkspaceBrowser({
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{shared ? t("sharedTitle") : t("title")}</span>
           {entryCount > 0 && (
-            <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">{entryCount}</span>
+            <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">{entryCount}</span>
           )}
         </h3>
         {/* `sr-only`, not `hidden`, and a real `htmlFor` pairing. A `<label>` is
@@ -632,7 +632,7 @@ export function WorkspaceBrowser({
         <DropdownMenu>
           <DropdownMenuTrigger
             disabled={fileCount === 0}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[popup-open]:bg-accent data-[popup-open]:text-foreground"
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[popup-open]:bg-accent data-[popup-open]:text-foreground"
           >
             <ArrowDownUp className="h-3.5 w-3.5" />
             {sortLabel}
@@ -687,7 +687,7 @@ export function WorkspaceBrowser({
             <FolderSymlink className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm">{t("sharedTitle")}</span>
-              <span className="block truncate text-[11px] text-muted-foreground">{t("sharedHint")}</span>
+              <span className="block truncate text-xs text-muted-foreground">{t("sharedHint")}</span>
             </span>
             <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />
           </button>
@@ -696,7 +696,7 @@ export function WorkspaceBrowser({
           <button
             type="button"
             onClick={() => enterScope("workspace")}
-            className="mx-1 mb-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            className="mx-1 mb-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
           >
             <ChevronLeft className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
             <span className="truncate">{t("backToFiles")}</span>
@@ -707,7 +707,7 @@ export function WorkspaceBrowser({
           // The whole trail, not just "back": inside a nested folder the user needs
           // to see where they are and jump out in one step. A named <nav>, so the
           // row announces as a path rather than as a handful of loose buttons.
-          <nav aria-label={t("breadcrumb")} className="mx-3 mb-1 flex min-w-0 items-center gap-0.5 overflow-hidden text-[11px] text-muted-foreground">
+          <nav aria-label={t("breadcrumb")} className="mx-3 mb-1 flex min-w-0 items-center gap-0.5 overflow-hidden text-xs text-muted-foreground">
             <button type="button" onClick={() => setPath(".")} className="shrink-0 rounded px-1 py-0.5 hover:bg-hover hover:text-foreground">
               {t("root")}
             </button>

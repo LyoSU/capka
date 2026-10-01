@@ -21,7 +21,7 @@ describe("gliding highlight — chat navigator", () => {
     const gliders = nav.match(/aria-hidden[^>]*transition-\[top,height/g) ?? nav.match(/transition-\[top,height[^>]*aria-hidden/g) ?? [];
     expect(gliders).toHaveLength(1);
     expect(nav).toMatch(/transition-\[top,height[^"]*\]/);
-    expect(nav).toMatch(/--ease-strong/);
+    expect(nav).toMatch(/\bease-strong\b/);
   });
 
   it("follows the pointer and keyboard focus alike, and rows carry no hover fill of their own", () => {

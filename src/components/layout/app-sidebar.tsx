@@ -369,7 +369,7 @@ function ProjectCluster({
           // lighter drops under the 4.5:1 AA floor (/55 measures 4.11:1 on the
           // light sidebar). The hierarchy comes from size and indentation instead.
           className={cn(
-            "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium",
+            "flex h-6 items-center gap-1.5 rounded-md px-2 text-xs font-medium",
             "text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground",
             "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
           )}
@@ -925,7 +925,7 @@ export function AppSidebar() {
                 onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
                 className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
               >
-                <span className="flex size-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
+                <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground" aria-label="Capka">
                   <ClawMark className="size-3.5" />
                 </span>
               </button>

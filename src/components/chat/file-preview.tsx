@@ -1424,7 +1424,7 @@ export function FileTile({
       {/* Two lines, not one: the assistant writes descriptive filenames, and a
           single truncated line turned `job_architect_toolkit.py` and
           `job_architecture.db` into the same unreadable stub. */}
-      <span className="mt-1 line-clamp-2 break-words text-center text-[11px] leading-tight text-muted-foreground">
+      <span className="mt-1 line-clamp-2 break-words text-center text-xs leading-tight text-muted-foreground">
         {name}
       </span>
       {meta}

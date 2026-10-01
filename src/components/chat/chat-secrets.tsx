@@ -133,7 +133,7 @@ export function ChatSecrets({
                   onClick={() => remove(s.name)}
                   disabled={busy}
                   aria-label={t("remove", { name: s.name })}
-                  className="text-muted-foreground/70 transition-colors hover:text-foreground disabled:opacity-50"
+                  className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
                 >
                   <X className="size-3.5" />
                 </button>

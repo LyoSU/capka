@@ -92,16 +92,16 @@ export function ConnectionRow({
             <ProviderGlyph slug={c.iconSlug || meta?.iconSlug} size={16} className="shrink-0 text-muted-foreground" />
             <span className="truncate text-sm font-medium">{name}</span>
             {c.label?.trim() && (
-              <span className="shrink-0 text-[10px] text-muted-foreground">{providerLabel(c.provider)}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{providerLabel(c.provider)}</span>
             )}
             {isDefault && (
-              <Badge className="shrink-0 text-[10px]">{t("default")}</Badge>
+              <Badge className="shrink-0 text-xs">{t("default")}</Badge>
             )}
             {isAdmin && c.shared && (
-              <Badge variant="secondary" className="shrink-0 text-[10px]">{t("shared")}</Badge>
+              <Badge variant="secondary" className="shrink-0 text-xs">{t("shared")}</Badge>
             )}
             {!c.isActive && (
-              <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">{t("disabled")}</Badge>
+              <Badge variant="outline" className="shrink-0 text-xs text-muted-foreground">{t("disabled")}</Badge>
             )}
             <span className="ml-auto hidden truncate text-xs text-muted-foreground sm:inline">
               {c.defaultModel ? prettyName(c.defaultModel) : t("noModel")}

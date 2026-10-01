@@ -24,7 +24,7 @@ function Monogram({ host, className = "" }: { host: string; className?: string }
   return (
     <span
       aria-hidden
-      className={`flex size-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-[10px] font-semibold uppercase leading-none text-muted-foreground ${className}`}
+      className={`flex size-4 shrink-0 items-center justify-center rounded-full bg-border/70 text-xs font-semibold uppercase leading-none text-muted-foreground ${className}`}
     >
       {letter ?? <Globe className="size-2.5" />}
     </span>
@@ -81,7 +81,7 @@ export function CitationChip({ n: raw, source }: { n: number; source: NumberedSo
             // Raised into the superscript band but kept in the line (a true
             // `super` detaches the pill from the punctuation after it); the
             // side margins are what keep a [1, 9] group two distinct pills.
-            className={`${NUMBER_PILL} citation-chip mx-[0.15em] h-[1.125rem] min-w-[1.125rem] cursor-pointer px-[5px] text-[11px] align-[0.18em] no-underline transition-colors hover:bg-primary hover:text-primary-foreground hover:ring-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring`}
+            className={`${NUMBER_PILL} citation-chip mx-[0.15em] h-[1.125rem] min-w-[1.125rem] cursor-pointer px-[5px] text-xs align-[0.18em] no-underline transition-colors hover:bg-primary hover:text-primary-foreground hover:ring-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring`}
           >
             {n}
           </a>
@@ -89,7 +89,7 @@ export function CitationChip({ n: raw, source }: { n: number; source: NumberedSo
       />
       <TooltipContent className="flex max-w-64 flex-col items-start gap-1 px-3 py-2">
         <span className="line-clamp-2 text-left font-medium">{source.title}</span>
-        <span className="flex items-center gap-1 text-[11px] text-background/70">
+        <span className="flex items-center gap-1 text-xs text-background/70">
           {host}
           {source.date && <span>· {source.date}</span>}
         </span>
@@ -168,8 +168,8 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
                     <Monogram host={host ?? ""} />
                     <span className="min-w-0 flex-1 truncate text-foreground">{s.title}</span>
                     {/* The same ordinal the chips in the text show (CitationOrdinals). */}
-                    <span className={`${NUMBER_PILL} h-4 min-w-4 shrink-0 bg-background px-1 text-[10px]`}>{i + 1}</span>
-                    <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground sm:inline">{host ?? s.url}</span>
+                    <span className={`${NUMBER_PILL} h-4 min-w-4 shrink-0 bg-background px-1 text-xs`}>{i + 1}</span>
+                    <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">{host ?? s.url}</span>
                   </a>
                 </li>
               );

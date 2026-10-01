@@ -9,7 +9,7 @@ const REPO_URL = "https://github.com/LyoSU/capka";
 
 /** Shared field styling for auth/setup forms — filled, rounded, calm. */
 export const AUTH_FIELD =
-  "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px] focus-visible:border-ring focus-visible:bg-card";
+  "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-base focus-visible:border-ring focus-visible:bg-card";
 
 /**
  * The first-run / sign-in chrome: a calm claw monogram far behind, an opaque

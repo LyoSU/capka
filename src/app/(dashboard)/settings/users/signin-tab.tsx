@@ -160,7 +160,7 @@ export function SignInTab() {
                 <div className="space-y-1.5">
                   <Label>{t("telegram.redirectUri")}</Label>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded-lg bg-muted px-3 py-2 font-mono text-[13px]">{redirectUri}</code>
+                    <code className="flex-1 truncate rounded-lg bg-muted px-3 py-2 font-mono text-sm">{redirectUri}</code>
                     <Button
                       variant="outline"
                       size="icon"
@@ -172,13 +172,13 @@ export function SignInTab() {
                     </Button>
                     <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
                   </div>
-                  <p className="text-[13px] text-muted-foreground">{t("telegram.redirectHint")}</p>
+                  <p className="text-sm text-muted-foreground">{t("telegram.redirectHint")}</p>
                 </div>
                 {/* Sits with the two fields it saves, and only once they differ from
                     what's stored — so nothing on this tab is silently unsaved. */}
                 {credentialsDirty && (
                   <div className="flex items-center justify-end gap-3">
-                    <p className="text-[13px] text-warning-text">{t("unsavedCredentials")}</p>
+                    <p className="text-sm text-warning-text">{t("unsavedCredentials")}</p>
                     <Button size="sm" onClick={save} disabled={saving} className="animate-step-in">
                       {saving && <Loader2 className="animate-spin" />}{t("save")}
                     </Button>

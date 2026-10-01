@@ -71,7 +71,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
             It follows the same admin split as the (i) popover on a message. */}
         <div className="mt-0.5 text-muted-foreground">{t("contextHint")}</div>
         {isAdmin && (
-          <div className="mt-1 whitespace-nowrap text-muted-foreground/80 tabular-nums">
+          <div className="mt-1 whitespace-nowrap text-muted-foreground tabular-nums">
             {t("contextTokens", { used: fmtTokens(used), total: fmtTokens(limit) })}
           </div>
         )}

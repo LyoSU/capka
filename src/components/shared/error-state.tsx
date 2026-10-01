@@ -66,7 +66,7 @@ export function ErrorState({ error, retry }: ErrorStateProps) {
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2.5 font-mono text-[11px] text-muted-foreground">
+            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2.5 font-mono text-xs text-muted-foreground">
               {detail}
             </pre>
           </CollapsibleContent>

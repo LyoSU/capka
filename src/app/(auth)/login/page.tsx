@@ -137,7 +137,7 @@ export default function LoginPage() {
             {error}
           </p>
         )}
-        <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-[15px]">
+        <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-base">
           {loading ? t("login.submitting") : t("login.submit")}
         </Button>
       </form>

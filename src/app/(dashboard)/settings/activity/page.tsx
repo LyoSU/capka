@@ -186,14 +186,14 @@ export default function ActivityPage() {
                         <Icon className="size-3.5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[15px]">
+                        <p className="text-base">
                           {actionLabel(e.action)}
                           {target ? <span className="font-medium"> {target}</span> : null}
                           {cs.map((c) => (
                             <span key={c} className="ml-1.5 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{c}</span>
                           ))}
                         </p>
-                        <p className="mt-0.5 flex items-center text-[13px] text-muted-foreground">
+                        <p className="mt-0.5 flex items-center text-sm text-muted-foreground">
                           <span className="truncate">{actor}</span>
                           <Dot className="size-3 shrink-0" />
                           <Hint label={fullTime(e.createdAt)}>

@@ -55,7 +55,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             // A standalone chip, not a row in the clipped list below — so this is
             // the one that keeps the project's `active:scale` press.
             aria-pressed={ty === type}
-            className={`rounded-full border px-3 py-1.5 text-[13px] transition-micro active:scale-[0.97] ${
+            className={`rounded-full border px-3 py-1.5 text-sm transition-micro active:scale-[0.97] ${
               ty === type
                 ? "border-transparent bg-foreground text-background"
                 : "border-transparent text-muted-foreground hover:bg-hover"
@@ -84,7 +84,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             // Darkens rather than shrinks, the same press rule as the recent-chats
             // rows: a full-width row is wide enough that a scale reads as the whole
             // list flinching, not as one control being pressed.
-            className="group/sg animate-step-in flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[15px] leading-5 transition-colors hover:bg-hover active:bg-hover-strong"
+            className="group/sg animate-step-in flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm leading-5 transition-colors hover:bg-hover active:bg-hover-strong"
           >
             <ActionIcon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
             <span className="flex-1">{t(`${type}.${a}.label`)}</span>

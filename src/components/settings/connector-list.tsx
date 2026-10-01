@@ -105,7 +105,7 @@ function HealthLine({ h, loading, t }: { h?: Health; loading: boolean; t: Return
     <span className="flex flex-col gap-0.5 text-xs text-destructive">
       <span className="flex items-center gap-1"><XCircle className="size-3" />{t("health.unreachable")}</span>
       {h.detail && (
-        <code className="block max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-destructive/5 px-1.5 py-1 font-mono text-[11px] leading-snug text-destructive/80">
+        <code className="block max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-destructive/5 px-1.5 py-1 font-mono text-xs leading-snug text-destructive/80">
           {h.detail}
         </code>
       )}

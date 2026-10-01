@@ -91,13 +91,13 @@
        icon-only square on the same rungs: size-6 / size-8 / size-9 / size-10
 
      List rows — menu item, select item, command item, action-sheet row
-       40px tall (py-2.5 + text-[15px]/leading-5), gap-3, px-3, rounded-md,
+       40px tall (py-2.5 + text-sm/leading-5), gap-3, px-3, rounded-md,
        svg size-5. A trailing check/chevron sits at size-4.
        Group label: px-3 py-1.5 text-xs. Rule: my-1.5 h-px, inset to the
        surface padding (no negative margin).
 
      Navigation rows — sidebar chat list, project rows, settings nav
-       36px (h-9), gap-2, px-3, rounded-md, text-[15px], svg size-4.
+       36px (h-9), gap-2, px-3, rounded-md, text-sm, svg size-4.
        A DELIBERATE second rung, not drift. A menu is eight transient rows read
        once; a nav is thirty rows scrolled and scanned all day, and it owns a
        fixed-width column that never gets more room. Four pixels a row is one
@@ -159,16 +159,18 @@
        boxless on the page (settings groups)     -mx-3 + px-3, so the hover
                                                  fill bleeds past the text
 
-     Type ladder — 10 / 11 / 12 / 13 / 14 / 15 / 16px, nothing between
-       text-[10px]  numeric chips inside a pill (counters, badges) — never prose
-       text-[11px]  meta and captions
-       text-xs      secondary text, group labels, key caps
-       text-[13px]  dense secondary text and inline code
-       text-sm      the default for controls and body copy in dense areas
-       text-[15px]  list rows and anything a person reads at length
-       text-base    input value text on touch (md:text-sm above it)
-       Half-steps (11.5, 12.5, 13.5px) are not steps; they read as a rendering
-       accident next to the real ones.
+     Type ladder — four steps, each with its own line height (Tailwind's stock
+     pairs), and nothing between them
+       text-xs    12/16  the floor: meta, captions, counters, badges, key caps
+       text-sm    14/20  controls, menus, rows, the step rail, dense copy
+       text-base  16/24  anything read at length: the answer (16/26 via
+                         leading-relaxed), the user's bubble, the composer,
+                         settings row labels
+       text-lg    18/28  headings inside a surface
+       No arbitrary `text-[Npx]`. 10/11px clipped Cyrillic once a `leading-none`
+       pinned the line to the glyph size, and 13/15px half-steps only read as a
+       rendering accident next to the real ones. `leading-none` belongs on a
+       fixed-size pill, never on text that can wrap.
 
      Off the ladder on purpose: the tooltip (rounded-md, px-2.5 py-1.5,
      text-xs) is a passing hint, not a surface; the badge is a label, not a
@@ -176,28 +178,37 @@
      (h-11/rounded-xl, card rounded-4xl) because they are single-column,
      one-task pages.
      ─────────────────────────────────────────────────────────────────────── */
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* Whole pixels. These used to be multiples of `--radius` (0.7rem), which put
+     every corner on a fraction — 8.96, 11.2, 20.16px — and two concentric boxes
+     never quite lined up. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
+}
+
+/* Motion defaults. Not `inline`: these are real theme variables, so `ease-out` /
+   `ease-strong` exist as utilities and every bare `transition` /
+   `transition-colors` (hundreds of call sites) runs on the app's micro curve
+   instead of Tailwind's stock cubic-bezier(.4,0,.2,1) at 150ms.
+   `--ease-out` is the ENTRANCE curve: it overshoots hard, which reads as
+   intentional on a one-shot reveal and as rubbery on a hover that fires hundreds
+   of times. `--ease-strong` is the tighter one for micro-interactions (hover,
+   press, colour and small transform changes at ~140ms). Two curves, split by
+   role — never more. */
+@theme {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --default-transition-duration: 140ms;
+  --default-transition-timing-function: var(--ease-strong);
 }
 
 :root {
   color-scheme: light;
-  /* One strong ease-out for every entrance/exit in the app. A single token, not
-     a curve copy-pasted per keyframe — so the app's motion stays in one voice
-     and there's one place to retune it. Deliberately punchier than CSS's built-in
-     `ease-out`, which is too weak to read as intentional. */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  /* The second, tighter curve — for micro-interactions only (hover, press,
-     colour and small transform changes at ~140ms). `--ease-out` above is the
-     *entrance* curve: it overshoots hard, which reads as intentional on a
-     one-shot reveal but as rubbery on a hover that fires hundreds of times.
-     Two curves, split by role — never more. */
-  --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  /* `--ease-out` / `--ease-strong` live in the `@theme` block above. */
   /* How long anything that appears at the END of an assistant turn waits before
      it does. The end of a turn is the busiest instant in the app: the reasoning
      spoiler collapses, the label rewrites itself from "Thinking…" to "Reasoned
@@ -370,7 +381,7 @@
   --chart-3: oklch(0.398 0.07 227.39);
   --chart-4: oklch(0.828 0.189 84.43);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.7rem;
+  --radius: 12px;
 
   /* --- Elevation ---------------------------------------------------------
      Each rung carries its own 1px edge as the shadow's first layer, so a
@@ -389,7 +400,9 @@
   /* The composer's rung. One tight contact layer plus a wide soft one, so the
      one surface the user types into visibly floats off the page instead of
      sitting on it as a slightly whiter rectangle. */
-  --elev-raised: 0 0 0 1px var(--border), 0 1px 2px oklch(0.24 0.008 85 / 0.05),
+  /* Its edge is `--border-strong`, not `--border`: a white composer on a
+     near-white page is 1.03:1 by fill, so the edge is what has to find it. */
+  --elev-raised: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0.24 0.008 85 / 0.05),
     0 8px 24px oklch(0.24 0.008 85 / 0.08);
   /* Two shadow layers, and the stronger edge. An overlay is the only rung that
      covers OTHER CONTENT, so unlike a card it needs a near "contact" shadow: a

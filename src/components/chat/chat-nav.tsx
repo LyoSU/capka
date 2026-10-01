@@ -141,7 +141,7 @@ export function ChatNav({
             spans exactly a row. */}
         <span
           aria-hidden
-          className={`pointer-events-none absolute left-2 right-2 rounded-lg transition-[top,height,background-color,opacity] duration-200 [transition-timing-function:var(--ease-strong)] ${
+          className={`pointer-events-none absolute left-2 right-2 rounded-lg transition-[top,height,background-color,opacity] duration-200 ease-strong ${
             hot != null && hot !== activeIndex ? "bg-hover" : "bg-hover-strong"
           } ${glide ? "opacity-100" : "opacity-0"}`}
           style={glide ? { top: glide.top, height: glide.height } : undefined}
@@ -170,7 +170,7 @@ export function ChatNav({
                   started at a different x — a ragged left edge in a list whose
                   whole job is to be scanned down. The glider marks the active row;
                   the text weight says it again. */}
-              <span className={`truncate text-[13px] ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+              <span className={`truncate text-sm ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                 {it.text || "…"}
               </span>
             </button>
