@@ -5,38 +5,35 @@ const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 const MAX_DESC = 1024;
 // The YAML parse is synchronous on the one process that also serves every chat,
-// and a crafted block can cost it superlinear CPU. Real frontmatter is a name and
-// a description; bound the block before handing it to the parser at all.
-const MAX_FRONTMATTER = 64 * 1024;
-// YAML aliases share nodes, so a block under the byte cap can still expand into a
-// huge value once it is stored as jsonb. Bound what the parse returns as well.
-const MAX_EXPANDED = 256 * 1024;
-const MAX_DEPTH = 32;
+// and gray-matter's own comment-stripping regex is quadratic in blank lines (60 KB
+// of them block it for about 2 s). Real frontmatter is a name and a description;
+// bound the block before handing it to the parser at all.
+const MAX_FRONTMATTER = 8 * 1024;
 
 // gray-matter picks its engine from the opening line, and `---js` selects one that
-// evals the block in this process. Passing options also keeps gray-matter's
-// module-level cache, which never evicts, out of the picture.
+// evals the block in this process. The language check in parseSkillMarkdown refuses
+// it first; this keeps the engine inert should anything get past. Passing options at
+// all also keeps gray-matter's module-level cache, which never evicts, out of it.
 const MATTER_OPTS = {
   engines: {
     javascript: () => {
       throw new SkillParseError("SKILL.md frontmatter must be YAML");
     },
   },
-  // Without an excerpt function, gray-matter reads `excerpt_separator` from the
-  // parsed data and stringifies it inside matter(), so an alias array there would
-  // expand before assertBounded ever sees it. Nothing here uses the excerpt.
+  // Nothing here uses the excerpt; without a function gray-matter reads
+  // `excerpt_separator` out of the parsed data and stringifies it.
   excerpt: () => "",
+  // Passed through to js-yaml. Anchors and aliases share nodes, and js-yaml joins an
+  // aliased array used as a mapping key into one string while it parses, so a block
+  // under the byte cap could still build a huge value. Real SKILL.md frontmatter
+  // never needs them: refuse the first anchor, before any alias can use it. Fails
+  // closed if a js-yaml upgrade ever renames the map.
+  listener: (_event: string, state: { anchorMap?: object }) => {
+    if (!state.anchorMap || Object.keys(state.anchorMap).length) {
+      throw new SkillParseError("SKILL.md frontmatter can't use YAML anchors or aliases");
+    }
+  },
 };
-
-function assertBounded(value: unknown, budget: { left: number }, depth: number): void {
-  budget.left -= typeof value === "string" ? value.length + 1 : 1;
-  if (budget.left < 0 || depth > MAX_DEPTH) {
-    throw new SkillParseError("SKILL.md frontmatter is too large once expanded");
-  }
-  if (value && typeof value === "object") {
-    for (const child of Object.values(value)) assertBounded(child, budget, depth + 1);
-  }
-}
 
 /**
  * gray-matter's YAML parser is strict: an unquoted colon in a scalar value
@@ -63,7 +60,14 @@ function sanitizeFrontmatter(raw: string): string {
 }
 
 export function parseSkillMarkdown(raw: string): ParsedSkill {
-  if (/^\uFEFF?---/.test(raw)) {
+  const opening = /^﻿?---([^\r\n]*)/.exec(raw);
+  if (opening) {
+    // gray-matter reads the rest of the opening line as the block's language; a
+    // fourth dash means the file has no frontmatter at all.
+    const lang = opening[1].trim().toLowerCase();
+    if (lang && !lang.startsWith("-") && lang !== "yaml" && lang !== "yml") {
+      throw new SkillParseError("SKILL.md frontmatter must be YAML");
+    }
     // gray-matter takes the whole file as frontmatter when the block never closes.
     const end = raw.indexOf("\n---");
     if ((end === -1 ? raw.length : end) > MAX_FRONTMATTER) {
@@ -73,13 +77,21 @@ export function parseSkillMarkdown(raw: string): ParsedSkill {
 
   let parsed: matter.GrayMatterFile<string>;
   try {
-    parsed = matter(raw, MATTER_OPTS);
-  } catch {
-    parsed = matter(sanitizeFrontmatter(raw), MATTER_OPTS);
+    try {
+      parsed = matter(raw, MATTER_OPTS);
+    } catch (e) {
+      // Only a YAML syntax error is worth the colon-quoting retry.
+      if ((e as Error)?.name !== "YAMLException") throw e;
+      parsed = matter(sanitizeFrontmatter(raw), MATTER_OPTS);
+    }
+  } catch (e) {
+    if (e instanceof SkillParseError) throw e;
+    // Callers show a SkillParseError as a calm refusal; anything else would surface raw.
+    const reason = (e as Error)?.name === "YAMLException" ? `: ${String((e as Error).message).split("\n")[0]}` : "";
+    throw new SkillParseError(`SKILL.md frontmatter is not valid YAML${reason}`);
   }
 
   const data = (parsed.data ?? {}) as Record<string, unknown>;
-  assertBounded(data, { left: MAX_EXPANDED }, 0);
   const name = data.name;
   if (typeof name !== "string" || !NAME_RE.test(name) || name.length > MAX_NAME) {
     throw new SkillParseError(

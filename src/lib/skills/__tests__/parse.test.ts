@@ -47,7 +47,7 @@ describe("parseSkillMarkdown", () => {
   });
 
   it("refuses oversized frontmatter before parsing it, closed or not", () => {
-    const notes = `notes: ${"a".repeat(64 * 1024)}`;
+    const notes = `notes: ${"a".repeat(8 * 1024)}`;
     expect(() => parseSkillMarkdown(md(`name: x\n${notes}`))).toThrow(/frontmatter exceeds/);
     expect(() => parseSkillMarkdown(`---\nname: x\n${notes}\n`)).toThrow(/frontmatter exceeds/);
     // Only the frontmatter is bounded: a long body still parses.
@@ -64,23 +64,39 @@ describe("parseSkillMarkdown", () => {
     expect(g.__skillProbe).toBeUndefined();
   });
 
-  it("refuses frontmatter whose aliases expand past the bound", () => {
+  it("refuses YAML anchors and aliases before they can expand", () => {
+    const anchorsRefused = /can't use YAML anchors or aliases/;
     // 8 levels of 10-way aliases: about 400 bytes in, 10^8 nodes out.
     const levels = [`a0: &a0 [${Array(10).fill("x").join(", ")}]`];
     for (let i = 1; i < 8; i++) levels.push(`a${i}: &a${i} [${Array(10).fill(`*a${i - 1}`).join(", ")}]`);
-    expect(() => parseSkillMarkdown(md(`name: x\n${levels.join("\n")}`))).toThrow(/too large once expanded/);
-    // A long scalar repeated by alias, still under the byte cap.
-    const long = `s: &s ${"a".repeat(30_000)}\nr: [${Array(10).fill("*s").join(", ")}]`;
-    expect(() => parseSkillMarkdown(md(`name: x\n${long}`))).toThrow(/too large once expanded/);
+    expect(() => parseSkillMarkdown(md(`name: x\n${levels.join("\n")}`))).toThrow(anchorsRefused);
+    // js-yaml joins an aliased array used as a mapping key into one string while it parses.
+    const key = `s: &s ${"a".repeat(1000)}\na: &a [${Array(500).fill("*s").join(", ")}]\nk:\n  *a : 1`;
+    const started = performance.now();
+    expect(() => parseSkillMarkdown(md(`name: x\n${key}`))).toThrow(anchorsRefused);
+    expect(performance.now() - started).toBeLessThan(500);
+    // gray-matter would stringify this key's value inside matter() itself.
+    expect(() => parseSkillMarkdown(md(`name: x\nsep: &e [a, b]\nexcerpt_separator: *e`))).toThrow(anchorsRefused);
+    // Even an anchor nothing refers to.
+    expect(() => parseSkillMarkdown(md(`name: x\nversion: &v 1`))).toThrow(anchorsRefused);
   });
 
-  it("bounds an alias array under excerpt_separator before gray-matter expands it", () => {
-    // gray-matter would join this key's value into one string inside matter() itself.
-    const levels = [`a0: &a0 [${Array(10).fill("x").join(", ")}]`];
-    for (let i = 1; i < 9; i++) levels.push(`a${i}: &a${i} [${Array(10).fill(`*a${i - 1}`).join(", ")}]`);
-    const raw = md(`name: x\n${levels.join("\n")}\nexcerpt_separator: *a8`);
+  it("refuses any frontmatter language but YAML, as a parse error", () => {
+    for (const tag of ["toml", "coffee", "__proto__", "constructor", "toString", "json"]) {
+      expect(() => parseSkillMarkdown(`---${tag}\nname: x\n---\nbody`), tag).toThrow(SkillParseError);
+    }
+    expect(parseSkillMarkdown(`---yaml\nname: x\n---\nbody`).name).toBe("x");
+    expect(parseSkillMarkdown(`--- YML\nname: x\n---\nbody`).name).toBe("x");
+  });
+
+  it("reports broken YAML as a parse error, not a raw exception", () => {
+    expect(() => parseSkillMarkdown(md(`name: x\nlist: [a, b`))).toThrow(SkillParseError);
+    expect(() => parseSkillMarkdown(md(`name: x\nfn: !!js/function "function () {}"`))).toThrow(SkillParseError);
+  });
+
+  it("parses a block of blank lines under the cap quickly", () => {
     const started = performance.now();
-    expect(() => parseSkillMarkdown(raw)).toThrow(/too large once expanded/);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(() => parseSkillMarkdown(`---\n${"\n".repeat(8000)}name: x\n---\nbody`)).not.toThrow();
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
