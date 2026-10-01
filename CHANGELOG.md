@@ -6,11 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Production boot logs a `[config] PUBLIC_URL` warning when `PUBLIC_URL` is unset or not https (session cookies lose the Secure flag and origins follow request headers); `BETTER_AUTH_URL` alone is only a partial fallback.
+- `docs/DEPLOY.md` has a Backup & restore section: a complete backup is `.env` (with `CAPKA_MASTER_KEY`), a database dump and all of `./data` except `./data/backups`. On a new host copy `./data` only after `restore.sh`, and raise `WORKSPACE_TTL_MS` before the first start when the dump is older than 30 days.
+
 ### Changed
 - `POST /api/chat` no longer takes the client's `messages` array (context is built from the stored conversation) and refuses a `userMessage` over 100,000 characters (`MESSAGE_TOO_LONG`). Browser tabs left open across the upgrade need a reload before Regenerate works.
 - `GET /api/chat` accepts `messageId` and returns only that turn onward; a finished turn now fetches its own rows instead of the whole conversation.
-- Mid-stream reply snapshots are written every 1–5 s depending on reply size (5 s from about 320 KB) and no longer rewrite `messages.content`, which is written once when the reply finishes (full-text search sees a streaming reply's text only then; a Markdown export taken mid-stream still includes it). Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
-- Changing workspace files, memories or attachments between turns no longer invalidates the prompt cache for the conversation history, and Anthropic chats keep the history cached after a long tool-using turn.
+- Mid-stream reply snapshots are written every 1–5 s depending on reply size (5 s from about 320 KB) and no longer rewrite `messages.content`, which is written once when the reply finishes (full-text search sees a streaming reply's text only then; a Markdown export taken mid-stream still includes it); tool events now share at most one snapshot a second, identical snapshots are skipped, and the `task finished` log line reports `snapshotWrites`/`snapshotBytes`. Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
+- Changing workspace files, memories or attachments between turns no longer invalidates the prompt cache for the conversation history, and Anthropic chats keep the history cached after a long tool-using turn and after an approved tool call.
 - The platform's V8 heap is now 75% of `PLATFORM_MEM_LIMIT` (3 GB at the default 4g) instead of a fixed 3 GB, so lowering the limit on a small box needs no `NODE_OPTIONS` override. Building the image locally needs `node:22-alpine` ≥ 22.21 (`docker pull node:22-alpine`).
 - A browser tab reconnecting mid-stream backs its full-chat reloads off from 250 ms to 2 s instead of re-fetching every 250 ms.
 - Forking a chat reads only the copied path instead of every message in the chat.
@@ -18,6 +22,14 @@ All notable changes to Capka are documented here. Format follows
 - Tool approvals and answers to agent questions now count against the per-user chat rate limit (429 `RATE_LIMITED`), and the card says when the rate or spending limit refused it.
 - When a chat that was emergency-trimmed fails to compact, the platform log has a `warn` line "compaction failed after an emergency trim" with `taskId`, `chatId` and `userId`; the other compaction failure lines carry `emergencyTrimmed`.
 - `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
+
+- Release images are published only for a commit whose CI passed (the publish gate starts CI on the tag when none finished; CI can also be run by hand) and gain `vX.Y` and, from 1.0, `vX` tags; `latest`, `stable`, `vX`, `vX.Y` and the latest GitHub Release move only for the newest plain release of their line, and a prerelease publishes only its own tag. After 1.0, pull-only deployments can set `CAPKA_VERSION=v1` (with compose from a v1.x tag) to follow 1.x without taking 2.0.
+- `scripts/update.sh` stays on the installed major and refuses a prerelease unless run as `sudo CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh` or `sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=<tag> ./scripts/update.sh`. Upgrade with `update.sh`, not by re-running `install.sh`, which takes the newest tag of any major, prereleases included.
+- `scripts/restore.sh` refuses a cut-short dump, stops `platform`, `sandbox-controller` and `pg-backup`, replaces the database in one transaction and leaves the stack stopped; `backup.sh` and the backup sidecar write 0600 dumps through a temp file and prune only after a good dump (never with `RETENTION_DAYS` 0 or empty). To roll back an upgrade run `restore.sh`, then `CAPKA_BRANCH=v<previous> ./scripts/update.sh`; a host still on the v0.42.0 checkout must copy the new `scripts/restore.sh` in first.
+- sandbox-controller's built-in defaults now match compose (`SANDBOX_MEMORY_MB` 1024, `MAX_SESSIONS_PER_USER` 2, `GC_GRACE_MS` 7 days); a controller run without compose was on 512 / 5 / 1 hour, and `.env.example` now shows these values.
+- Cleared tool calls in long chats replay shorter placeholders, so every later turn sends fewer tokens.
+- Next.js 16.3.8 and in-range dependency bumps clear every critical and high `npm audit` advisory; the unused `/_next/image` optimizer is off (`images.unoptimized`) and SKILL.md frontmatter over 64 KB is refused. Pull or rebuild the images.
+- `SECURITY.md` now says production starts without `CAPKA_MASTER_KEY` (sign-in and stored keys fail), lists the socket-proxy's full image-API access, the private-range SSRF default and that dumps carry a DB-stored master key, and names the current Settings pages.
 
 ### Fixed
 - Dictation no longer stops when the speaker pauses to think: Chrome reports a few seconds of silence as an error, and one of those (or a single `network` blip, which Chrome also emits on silence) no longer ends the session.
@@ -47,15 +59,32 @@ All notable changes to Capka are documented here. Format follows
 - A shared-key budget hold stranded by a crash before its turn was queued is released after an hour instead of reducing the user's budget for the rest of the window; a Telegram attachment whose download never finishes is dropped after 10 minutes so the message still goes through.
 - In a very large workspace the agent's workspace overview keeps the shallowest files instead of whatever the walk reached first, and one unreadable subfolder no longer fails the whole listing. Redeploy `sandbox-controller`.
 - Folder sync no longer deletes local copies of files when the workspace listing hits a read error (e.g. `EACCES`, `EIO`) on a directory or file (the sync stops with an error instead), or when the workspace copy is missing (e.g. reaped after `WORKSPACE_TTL_MS`), which now re-uploads the folder without deleting anything even if that re-upload is cut short. Redeploy both `sandbox-controller` and `platform`.
-- Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s and the LISTEN connection is pinged every 30 s, so live chat updates recover within about a minute of a silently dropped database connection instead of about 2 hours.
-- A deleted workspace file no longer stays clickable for the rest of the session (its existence check expires after 30 s); the in-memory list of pending Telegram usernames is now bounded.
+- Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s and the LISTEN connection is pinged every 30 s, so live chat updates recover within about a minute of a silently dropped database connection instead of about 2 hours; a reply that finishes no longer cancels the catch-up reload another reply's oversized update asked for.
+- A deleted workspace file no longer stays clickable for the rest of the session (its existence check expires after 30 s, and chips on screen recheck after a turn that ran a command or a delete), and a chip greyed out as missing turns clickable again once a later turn writes the file; the in-memory list of pending Telegram usernames is now bounded.
 - The memory page shows a topic's newest 200 facts when it has more than 200, instead of an arbitrary 200.
+
+- `MAX_WORKSPACE_MB`, `MAX_FILE_MB`, `MAX_SHARED_MB`, `MAX_UPLOAD_MB`, `SANDBOX_TMP_MB`, `SANDBOX_EXEC_TIMEOUT_MS` and `HOST_DATA_ROOT` set in `.env` now reach the sandbox-controller, which refuses to boot on a non-numeric value; check `.env` before upgrading. Keep `MAX_WORKSPACE_MB` above 0: 0 refuses every upload and workspace copy rather than turning the check off.
+- A chat whose approval or question card was left unanswered while the conversation went on (e.g. a Telegram message typed instead of a tap, or a queued follow-up) no longer fails every later turn or blocks the web composer: the card settles as declined or skipped and open tabs reload into it; stored chats heal on their next read.
+- An approved step that runs longer than `STREAM_IDLE_SECONDS` is no longer taken for a stalled model and run twice, and an approved call that never runs no longer leaves the stall watchdog paused until the task deadline.
+- A long chat still compacts when the user replies or steers before the summary is ready, and an edit from a tab that missed that compaction lands under the summary instead of beside it; a chat whose history the emergency trim cut now compacts (in split passes if the summary request is itself too long) instead of overflowing every turn, and a retried reply that hits a second limit recovers instead of failing.
+- A resumed reply lists files its approved step wrote under "Also changed" (twelve at most for the turn); a failed one no longer shows only the first half's cost and reasoning time, a stopped one shows both halves, and an approval card whose continuation's worker crashed reads as interrupted instead of waiting forever.
+- An approval card says why an approved step did not run (the reply was stopped first, the tool was unavailable, or it no longer needs permission) and shows a step that threw as failed rather than interrupted; an answered question whose reply could not continue still says so after a reload.
+- A turn or approval whose chat's project was deleted now ends with its own `project_deleted` message (the step did not run; the chat can go on without the project's files once the deletion finishes) instead of "try again".
+- A folder that could not be created (or a failed one-shot import) says it couldn't be added instead of "will retry", one that attached but failed its first sync still says it will retry, and a folder picked from the assistant's card joins the chat's sync without a reload.
+- Running an automation over its owner's spending limit returns 429 `BUDGET_EXCEEDED` instead of "the previous run is still going" and no longer counts toward auto-disable; an unattended firing refused for budget reports reason `budget`, webhook included.
+- Telegram replies when a chat's model no longer resolves (pick another with `/model`) instead of staying silent, no longer shows raw error text, and tells a Telegram user whose reserved address belongs to another account to ask the administrator instead of "isn't set up yet".
+- Boot and settings messages about `CAPKA_MASTER_KEY` now say whether a missing key falls back to a DB-stored one or makes sign-in and stored keys fail, and where a mismatched key's original can be restored from.
 
 ### Security
 - MCP connector health checks are cached per user, so one user's OAuth "ok" or "unauthorized" is no longer shown to others.
 - A stored user role other than `admin`, `user` or `viewer` now gets read-only `viewer` access instead of `user`.
 - `POST /api/chat` refuses a `userMessageId` that belongs to another chat's message (409), and client-supplied conversation text can no longer stand in for what the user typed.
 - Attached file names, workspace paths and memory facts can no longer close the turn-context wrapper or add their own lines to the agent's instructions, and a tool argument quoted in the platform's restart recovery note can no longer pose as the turn context.
+- `tg<id>@telegram.local` addresses are now reserved on every sign-up path, and the Telegram bot no longer attaches a Telegram user to an existing account on that address that has its own sign-in. Releases up to v0.42.0 reserved them only partly: run the read-only check under Operator checks in `SECURITY.md`.
+- Suspended and pending accounts can no longer resume a turn from Telegram approval or question buttons or a typed answer, and viewers can no longer start turns from Telegram; viewers can still answer the cards their own automations stop on.
+
+### Removed
+- The Telegram link button in Settings, which could never succeed for an email/password account; link with the bot's `/link` code instead.
 
 ## [0.42.0] - 2026-09-11
 
