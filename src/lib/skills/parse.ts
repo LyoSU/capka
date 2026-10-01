@@ -54,7 +54,8 @@ function sanitizeFrontmatter(raw: string): string {
       return `${key} "${v.replace(/"/g, '\\"')}"`;
     })
     .join("\n");
-  return raw.replace(m[1], fixed);
+  // A replacer function: a string replacement would expand `$&` and friends in a value.
+  return raw.replace(m[1], () => fixed);
 }
 
 export function parseSkillMarkdown(raw: string): ParsedSkill {

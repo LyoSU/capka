@@ -25,6 +25,11 @@ describe("parseSkillMarkdown", () => {
     expect(r.description).toContain("Use when");
   });
 
+  it("keeps $-patterns literal when it re-quotes a colon value", () => {
+    const r = parseSkillMarkdown(md("name: x\ndescription: Use when: a $& b $` c $' d"));
+    expect(r.description).toBe("Use when: a $& b $` c $' d");
+  });
+
   it("rejects a missing or invalid name", () => {
     expect(() => parseSkillMarkdown(md(`description: no name`))).toThrow(SkillParseError);
     expect(() => parseSkillMarkdown(md(`name: Has Spaces\ndescription: y`))).toThrow(SkillParseError);
