@@ -1,4 +1,4 @@
-import { convertToModelMessages, generateText, type ModelMessage, type LanguageModel } from "ai";
+import { convertToModelMessages, generateText, type ModelMessage, type LanguageModel, type UserModelMessage } from "ai";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import type { ConsumedSteer, StoredPart } from "@/lib/chat/contracts";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
@@ -6,7 +6,8 @@ import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { AUX_TIMEOUT_MS } from "./aux";
 import { buildModelContext } from "./build";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
-import { foldReasoningIntoText, pruneTurnToolTraffic } from "./step-control";
+import { estimatePromptTokens, foldReasoningIntoText, pruneTurnToolTraffic } from "./step-control";
+import { SUMMARY_HEADING } from "./compaction";
 import { isContextOverflowError, isReasoningEchoRejectedError } from "@/lib/errors/friendly";
 import { log, type Logger } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
@@ -130,13 +131,17 @@ export function compactionInput(history: ModelMessage[], reply: ModelMessage[], 
  * reply over a history with no reasoning never does — but this request echoes the
  * reply's own reasoning.
  *
- * An overflow gets one retry with every tool body cleared and all reasoning dropped.
- * The request can outgrow the prompt `shouldCompact` measured: the final step's own
- * output was never in it, and a provider may count the output budget against the
- * window too. Tool bodies are what the instruction discards anyway, and reasoning is
- * the model's scratch, not the conversation. It never drops a turn: the checkpoint
- * replaces everything before it, so a turn left out of the input is gone for every
- * later one. Still too long, it fails like any other error.
+ * An overflow, on the first try or on that retry, gets one retry with every tool body
+ * cleared and all reasoning dropped. The request can outgrow the prompt `shouldCompact`
+ * measured: the final step's own output was never in it, a provider may count the
+ * output budget against the window too, and after an emergency trim it is the whole
+ * history the trimmed turn could not send. Tool bodies are what the instruction
+ * discards anyway, and reasoning is the model's scratch, not the conversation. It
+ * never drops a turn: the checkpoint replaces everything before it, so a turn left out
+ * of the input is gone for every later one. Still too long, the conversation is split
+ * at the user turn nearest its middle and summarized in two passes, the first half's
+ * summary opening the second, twice over at most: seven requests from the shed one on.
+ * A single message larger than the window still fails like any other error.
  */
 export async function compactConversation(
   model: LanguageModel,
@@ -150,31 +155,59 @@ export async function compactConversation(
 ): Promise<{ text: string; trust: boolean } | null> {
   // Own root trace, like the other aux calls — compaction is fire-and-forget and
   // can outlive the turn that triggered it (see auxGenerate).
-  const run = (msgs: ModelMessage[]) => withoutParentContext(() => generateText({
-    model,
-    messages: msgs,
-    providerOptions: providerOptions as never,
-    // Same deadline as the other fire-and-forget aux calls: a hung provider
-    // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
-    abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
-    experimental_telemetry: telemetryFor("capka.aux.compaction"),
-  }));
-  const messages = buildCompactionMessages(systemMessages, modelMessages);
-  try {
-    const { text, usage } = await run(messages).catch((e) => {
-      if (isReasoningEchoRejectedError(e)) return run(foldReasoningIntoText(messages));
-      if (!isContextOverflowError(e)) throw e;
-      const bare = messages.flatMap((m): ModelMessage[] => {
-        if (m.role !== "assistant" || typeof m.content === "string") return [m];
-        const content = m.content.filter((p) => p.type !== "reasoning");
-        return content.length ? [{ ...m, content }] : [];
-      });
-      // Cut at the instruction, the last message: every tool body ahead of it goes.
-      return run(pruneTurnToolTraffic(bare, bare.length - 1));
-    });
+  const run = async (msgs: ModelMessage[]) => {
+    const { text, usage } = await withoutParentContext(() => generateText({
+      model,
+      messages: msgs,
+      providerOptions: providerOptions as never,
+      // Same deadline as the other fire-and-forget aux calls: a hung provider
+      // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
+      abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
+      experimental_telemetry: telemetryFor("capka.aux.compaction"),
+    }));
+    // Every pass is billed, each half of a split included.
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);
-    const summary = text.trim();
+    return text.trim();
+  };
+  // The conversation alone, split in two past an overflow (see above).
+  const fold = async (conv: ModelMessage[], depth: number): Promise<string> => {
+    try {
+      return await run(buildCompactionMessages(systemMessages, conv));
+    } catch (e) {
+      if (!isContextOverflowError(e) || depth >= 2) throw e;
+      // The user turn nearest the middle by size; the tail must open on a user turn.
+      const half = estimatePromptTokens(conv) / 2;
+      let cut = 0;
+      let gap = Infinity;
+      let before = 0;
+      for (const [i, m] of conv.entries()) {
+        if (i > 0 && m.role === "user" && Math.abs(before - half) < gap) [cut, gap] = [i, Math.abs(before - half)];
+        before += estimatePromptTokens([m]);
+      }
+      if (!cut) throw e;
+      const head = await fold(conv.slice(0, cut), depth + 1);
+      if (!head) throw e;
+      const [first, ...rest] = conv.slice(cut) as [UserModelMessage, ...ModelMessage[]];
+      const content = typeof first.content === "string" ? [{ type: "text" as const, text: first.content }] : first.content;
+      return fold([{ ...first, content: [{ type: "text", text: `${SUMMARY_HEADING}\n${head}` }, ...content] }, ...rest], depth + 1);
+    }
+  };
+  const shed = (e: unknown) => {
+    if (!isContextOverflowError(e)) throw e;
+    const bare = buildCompactionMessages([], modelMessages).flatMap((m): ModelMessage[] => {
+      if (m.role !== "assistant" || typeof m.content === "string") return [m];
+      const content = m.content.filter((p) => p.type !== "reasoning");
+      return content.length ? [{ ...m, content }] : [];
+    });
+    // Cut at the instruction, the last message: every tool body ahead of it goes. It
+    // carries no reasoning, so it cannot trip the echo rejection.
+    return fold(pruneTurnToolTraffic(bare, bare.length - 1).slice(0, -1), 0);
+  };
+  const messages = buildCompactionMessages(systemMessages, modelMessages);
+  try {
+    const summary = await run(messages).catch((e) =>
+      isReasoningEchoRejectedError(e) ? run(foldReasoningIntoText(messages)).catch(shed) : shed(e));
     return summary.length > 0 ? { text: summary, trust: sourceTrust } : null;
   } catch (e) {
     logger.error("compaction failed", { err: String(e) });

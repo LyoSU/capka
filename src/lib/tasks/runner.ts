@@ -2741,7 +2741,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // what that does and does not buy from the cache). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
-    if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
+    // An emergency trim compacts however small the trimmed prompt measured: the
+    // overflow already proved the untrimmed history is over the window.
+    if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && (budget.shouldCompact || emergencyTrimmed)) {
       // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
       // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above
       // and is not in scope here. It is already the fold over exactly those rows plus
@@ -2774,7 +2776,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // view: that retry cut `modelMessages` to the recent turns, and the checkpoint
           // replaces EVERY turn before it, so a summary of the trimmed view would leave
           // the rest with no summary at all. If the whole no longer fits, compactConversation
-          // fails and no checkpoint is written. (The rebuild re-sends no native files.)
+          // summarizes it in halves, and past that no checkpoint is written. (The rebuild
+          // re-sends no native files: their bytes only ever ride the current turn's user
+          // message, and every later turn knows the file only through the reply and its
+          // reference, so the summary loses nothing those turns would have had.
+          // Re-injecting them would add image tokens to the one request that is already
+          // over the window.)
           let history = modelMessages;
           if (resumeMessageId || emergencyTrimmed) {
             history = await convertToModelMessages(sealOrphanToolCalls(

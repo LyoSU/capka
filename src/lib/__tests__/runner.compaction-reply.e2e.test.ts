@@ -353,6 +353,15 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     expect(text).toContain(REPLY);
   }, 30_000);
 
+  it("after an emergency trim, compacts even though the trimmed prompt measured small", async () => {
+    const chat = `${CX}-trim-small`;
+    await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "Our supplier is Kestrel Ltd." }]);
+    // Without a checkpoint the next turn sends the same history, overflows and trims again.
+    script.push("overflow", answer(Math.ceil(limit * 0.3)));
+    const msgs = await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` });
+    expect(JSON.stringify(msgs)).toContain("Kestrel");
+  }, 30_000);
+
   describe("a summary that lands after the chat moved on", () => {
     afterEach(() => { summarize = undefined; });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 import { buildCompactionMessages, compactConversation, compactionInput, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
 import { buildResumeMessages } from "@/lib/tasks/resume";
@@ -6,6 +6,7 @@ import { armPruneBoundary, estimatePromptTokens, pruneTurnToolTraffic } from "@/
 import { contextManagementOptions, toolClearTrigger } from "@/lib/chat/context/provider-edits";
 import { DEFAULT_CONTEXT_LENGTH, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { CLEARED_TOOL_OUTPUT } from "@/lib/chat/context/tool-clearing";
+import { SUMMARY_HEADING } from "@/lib/chat/context/compaction";
 import type { StoredPart } from "@/lib/chat/contracts";
 import type { ModelMessage } from "ai";
 
@@ -228,6 +229,79 @@ describe("compactConversation", () => {
       const model = new MockLanguageModelV3({ doGenerate: async () => { throw overflow(); } });
       expect(await compactConversation(model, [], input, false)).toBeNull();
       expect(model.doGenerateCalls).toHaveLength(2);
+    });
+
+    it("sheds after an echo rejection whose folded retry overflows", async () => {
+      // The fold keeps the reasoning as text, so the retry it buys is the larger one.
+      const errors = [new Error("Invalid request: reasoning_content is not supported"), overflow()];
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          const e = errors.shift();
+          if (e) throw e;
+          return generated("summary");
+        },
+      });
+      expect(await compactConversation(model, [], input, false)).toEqual({ text: "summary", trust: false });
+      expect(model.doGenerateCalls).toHaveLength(3);
+      const shed = JSON.stringify(model.doGenerateCalls[2].prompt);
+      expect(shed).not.toContain('"type":"reasoning"');
+      expect(shed).not.toContain("Long scratch.");
+      expect(shed).not.toContain(body);
+      expect(shed).toContain(CLEARED_TOOL_OUTPUT);
+      expect(shed).toContain("The ledger balances.");
+    });
+  });
+
+  describe("past an overflow the shed retry cannot fix", () => {
+    // Four turns, each with a marker only it carries. Any request over the window is
+    // rejected; the whole conversation is over it, either half is not.
+    const window = 9_000;
+    const turns: ModelMessage[] = Array.from({ length: 4 }, (_, i): ModelMessage[] => [
+      { role: "user", content: `Question ${i}: marker-${i}` },
+      { role: "assistant", content: [{ type: "text", text: `Answer ${i}: ${"a".repeat(2_500)}` }] },
+    ]).flat();
+    const fitting = () => {
+      const ok: string[] = [];
+      const model = new MockLanguageModelV3({
+        doGenerate: async ({ prompt }) => {
+          const text = JSON.stringify(prompt);
+          if (text.length > window) throw new Error("prompt is too long");
+          ok.push(text);
+          return generated(`recap ${ok.length}`);
+        },
+      });
+      return { model, ok };
+    };
+
+    it("summarizes it in two halves, the first half's summary opening the second", async () => {
+      const { model, ok } = fitting();
+      const onUsage = vi.fn();
+      // Control: the whole really is over the window.
+      expect(JSON.stringify(turns).length).toBeGreaterThan(window);
+      expect(await compactConversation(model, [], turns, false, onUsage)).toEqual({ text: "recap 2", trust: false });
+      expect(ok).toHaveLength(2);
+      const tail = model.doGenerateCalls.at(-1)!.prompt[0];
+      expect(tail.role).toBe("user");
+      expect((tail.content as { text: string }[])[0].text.startsWith(`${SUMMARY_HEADING}\nrecap 1`)).toBe(true);
+      // Never dropped: every turn went into exactly one pass that succeeded.
+      for (let i = 0; i < 4; i++) expect(ok.filter((t) => t.includes(`marker-${i}`))).toHaveLength(1);
+      expect(model.doGenerateCalls.length).toBeLessThanOrEqual(7);
+      // Each pass is billed, not only the last.
+      expect(onUsage).toHaveBeenCalledTimes(ok.length);
+    });
+
+    it("gives up on a single message larger than the window, billing the pass it made", async () => {
+      const { model, ok } = fitting();
+      const onUsage = vi.fn();
+      const huge: ModelMessage[] = [
+        ...turns.slice(0, 2),
+        { role: "user", content: `Paste: ${"p".repeat(window)}` },
+        { role: "assistant", content: [{ type: "text", text: "Noted." }] },
+      ];
+      expect(await compactConversation(model, [], huge, false, onUsage)).toBeNull();
+      expect(model.doGenerateCalls.length).toBeLessThanOrEqual(7);
+      expect(ok).toHaveLength(1);
+      expect(onUsage).toHaveBeenCalledTimes(1);
     });
   });
 });
