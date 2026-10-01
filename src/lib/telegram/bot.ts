@@ -1,12 +1,12 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { PoolClient } from "pg";
 import { nanoid } from "nanoid";
-import { eq, and, ne, desc, isNotNull, getTableColumns } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, getTableColumns, sql } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import { enqueueTask, requestCancel, cancelQueuedTurn, settleMovedPast, ORPHAN_HOLD_AGE_MS } from "@/lib/tasks/queue";
+import { enqueueTask, requestCancel, cancelQueuedTurn, settleMovedPast, ORPHAN_HOLD_AGE_MS, type QueueTx } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, isAppError } from "@/lib/errors";
@@ -309,8 +309,8 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // have been created generically (/new, or a file-only first turn), so update
   // the title while it's still the placeholder rather than only at creation.
   const needsTitle = (!chat.title || chat.title === "Telegram Chat") && Boolean(text.trim());
-  await db.transaction(async (tx) => {
-    await tx.insert(messages).values({
+  const save = async (exec: QueueTx) => {
+    await exec.insert(messages).values({
       id: tgUserId,
       chatId: chat.id,
       parentId: chat.activeLeafId ?? null,
@@ -323,15 +323,25 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
       // a file sent from the web chat.
       metadata: attachedFiles.length ? { attachedFiles } : null,
     });
-    await tx.update(chats).set({
+    await exec.update(chats).set({
       activeLeafId: tgUserId,
       updatedAt: new Date(),
       ...(needsTitle ? { title: text.slice(0, 100) } : {}),
     }).where(eq(chats.id, chat.id));
-    // Typing instead of tapping the card the reply is waiting on goes past it: the
-    // card is settled with this message, never left live behind it.
-    if (chat.activeLeafId) await settleMovedPast(chat.activeLeafId, tx);
-  });
+  };
+  // Typing instead of tapping the card the reply is waiting on goes past it: the
+  // card is settled with this message, never left live behind it. Only then: an
+  // ordinary message stays the two plain statements it always was. A reply that
+  // reached its card after the chat was read is settled by the turn that goes past it.
+  const leaf = chat.activeLeafId;
+  if (leaf && (chat.leafStatus === "awaiting_approval" || chat.leafStatus === "awaiting_answer")) {
+    await db.transaction(async (tx) => {
+      await save(tx);
+      await settleMovedPast(leaf, tx);
+    });
+  } else {
+    await save(db);
+  }
   await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
     // Answer the message we just added; the runner rebuilds the branch above it.
@@ -682,6 +692,14 @@ async function lastUsedModel(userId: string): Promise<string | null> {
   return row?.model ?? null;
 }
 
+// A chat row, plus the status of its leaf in the same statement: a message chained
+// onto a leaf still waiting on a card settles that card.
+const chatWithLeaf = {
+  ...getTableColumns(chats),
+  // Spelled out: drizzle leaves columns unqualified in a one-table select.
+  leafStatus: sql<string | null>`(SELECT metadata->>'status' FROM messages WHERE id = chats.active_leaf_id)`,
+};
+
 /**
  * Resolve the chat Telegram messages belong to: the link's pinned active chat
  * if it still exists, otherwise a fresh dedicated chat that we then pin.
@@ -692,7 +710,7 @@ async function resolveActiveChat(
 ) {
   if (link.activeChatId) {
     const [c] = await db
-      .select()
+      .select(chatWithLeaf)
       .from(chats)
       .where(and(eq(chats.id, link.activeChatId), eq(chats.userId, link.userId)))
       .limit(1);
@@ -710,7 +728,7 @@ async function resolveActiveChat(
       .for("update");
     if (locked?.activeChatId) {
       const [existing] = await tx
-        .select()
+        .select(chatWithLeaf)
         .from(chats)
         .where(and(eq(chats.id, locked.activeChatId), eq(chats.userId, link.userId)))
         .limit(1);
@@ -719,7 +737,7 @@ async function resolveActiveChat(
     const id = nanoid();
     await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat", source: "telegram", model: await lastUsedModel(link.userId) });
     await tx.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
-    const [created] = await tx.select().from(chats).where(eq(chats.id, id)).limit(1);
+    const [created] = await tx.select(chatWithLeaf).from(chats).where(eq(chats.id, id)).limit(1);
     return created;
   });
 }

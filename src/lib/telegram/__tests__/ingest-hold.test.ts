@@ -49,8 +49,8 @@ vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: vi.fn(async () => {}) }
 // link (joined to its account's status and role), the pinned chat, and the "is
 // another turn running" probe.
 const state: { messageInsert?: Error; runningProbe?: Error; role: string } = { role: "user" };
-const chatRow: { id: string; userId: string; title: string; model: null; projectId: null; activeLeafId: string | null } =
-  { id: "chat1", userId: "u1", title: "Hi", model: null, projectId: null, activeLeafId: null };
+const chatRow: { id: string; userId: string; title: string; model: null; projectId: null; activeLeafId: string | null; leafStatus: string | null } =
+  { id: "chat1", userId: "u1", title: "Hi", model: null, projectId: null, activeLeafId: null, leafStatus: null };
 // Every write the message makes, in order, with the handle it went through.
 const writes: { what: string; via: unknown }[] = [];
 const rowsFor = (table: unknown) => {
@@ -101,6 +101,7 @@ const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 beforeEach(() => {
   writes.length = 0;
   chatRow.activeLeafId = null;
+  chatRow.leafStatus = null;
   settleMovedPast.mockReset().mockImplementation(async (_id: string, tx: unknown) => {
     writes.push({ what: "settle", via: (tx as { name?: string } | undefined)?.name });
   });
@@ -204,12 +205,24 @@ describe("telegram ingest budget hold", () => {
   // card kept the web composer blocked and fed every later turn a call with no result.
   it("settles the card its chat's leaf still waits on, in the same transaction as the message", async () => {
     chatRow.activeLeafId = "a1";
+    chatRow.leafStatus = "awaiting_approval";
     await send();
     expect(settleMovedPast).toHaveBeenCalledOnce();
     expect(settleMovedPast.mock.calls[0][0]).toBe("a1");
     expect(writes).toEqual([
       { what: "insert", via: "tx" }, { what: "update", via: "tx" }, { what: "settle", via: "tx" },
     ]);
+    expect(enqueueTask.mock.calls[0][0].payload.replyParentId).not.toBe("a1");
+  });
+
+  // The common case pays for no transaction and no extra read: the leaf's status came
+  // with the chat row.
+  it("chains onto a leaf that waits on nothing with plain writes and settles nothing", async () => {
+    chatRow.activeLeafId = "a1";
+    chatRow.leafStatus = "completed";
+    await send();
+    expect(settleMovedPast).not.toHaveBeenCalled();
+    expect(writes).toEqual([{ what: "insert", via: "db" }, { what: "update", via: "db" }]);
     expect(enqueueTask.mock.calls[0][0].payload.replyParentId).not.toBe("a1");
   });
 
