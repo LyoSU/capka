@@ -26,7 +26,7 @@
 #   ACME_EMAIL    ACME account email (enables the ZeroSSL cert fallback)
 #   CAPKA_DIR     install location           (default: /opt/capka)
 #   CAPKA_REPO    git remote                 (default: https://github.com/LyoSU/capka.git)
-#   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master;
+#   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master if none exists yet;
 #                 `stable` tracks the newest release as a branch. A development
 #                 branch needs CAPKA_BUILD=1 — images exist for releases only.)
 #   CAPKA_VERSION image tag to pull          (default: matches the installed ref)
@@ -254,7 +254,9 @@ resolve_version() {
   if [ -z "$CAPKA_BRANCH_EXPLICIT" ] && [ -z "$CAPKA_VERSION" ]; then
     # Plain vX.Y.Z only: a prerelease (vX.Y.Z-rc.N) is a test build, never the
     # default. Same rule as scripts/update.sh.
-    releases=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
+    lsfail=""
+    raw=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null) || lsfail=1
+    releases=$(printf '%s\n' "$raw" \
       | awk -F/ '{ print $NF }' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V || true)
     latest=$(printf '%s\n' "$releases" | tail -n1)
     # Re-running over an install stays on its major, like update.sh; a new major
@@ -288,6 +290,8 @@ resolve_version() {
       info "Newest release is $latest — installing it (set CAPKA_BRANCH=master CAPKA_BUILD=1 for the development tip)."
       CAPKA_BRANCH="$latest"
       CAPKA_VERSION="$latest"
+    elif [ -n "$lsfail" ]; then
+      err "Could not list the releases of $CAPKA_REPO (check the network and CAPKA_REPO). Nothing was installed."
     else
       info "No tagged release yet — installing the development tip (master + :latest images)."
     fi
