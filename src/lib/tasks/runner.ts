@@ -58,6 +58,7 @@ import { PLAN_TOOL, planSchema, type PlanStep } from "@/lib/chat/plan";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
+import { pseudoToolCallNames } from "@/lib/chat/pseudo-tool-call";
 
 const errMsg = (e: unknown) => errorText(e);
 
@@ -2248,6 +2249,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         model: modelId, provider, steps: stepCount,
       });
     }
+    // Gemini sometimes writes a function call out as text (`call:default_api:update_plan{…}`)
+    // instead of making it: nothing ran, and display strips the line. Logged only, to
+    // measure how often — the turn is not treated any differently.
+    const leaked = pseudoToolCallNames(
+      parts.slice(suspendedParts).map((p) => (p.type === "text" || p.type === "reasoning" ? p.text : "")).join("\n"),
+      (name) => name in tools,
+    );
+    if (leaked.length) tlog.warn("model wrote a tool call as text instead of calling it", { model: modelId, provider, tools: leaked });
+
     // The model ran its tools and then ended cleanly without writing a single word of
     // reply (seen with Gemini after a search step). The retry above does not catch it —
     // a tool call counts as content there — so the turn used to persist as "completed":

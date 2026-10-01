@@ -23,6 +23,7 @@ import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifac
 import { editStatsFromParts, editKey, type EditStat } from "@/lib/chat/edit-stats";
 import { displayModelName } from "@/lib/providers/registry";
 import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
+import { stripPseudoToolCalls, isKnownToolName } from "@/lib/chat/pseudo-tool-call";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
@@ -2720,7 +2721,8 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
       continue;
     }
     if (part.type === "text") {
-      const text = (part as { text: string }).text;
+      // A tool call the model wrote out as text instead of making — see pseudo-tool-call.ts.
+      const text = stripPseudoToolCalls((part as { text: string }).text, isKnownToolName);
       // The same asymmetry the reasoning branch below documents, one part type
       // over: a model that has nothing to say between two tool calls still emits
       // a text part, and a bare "\n\n" is truthy. The block built for it draws a
