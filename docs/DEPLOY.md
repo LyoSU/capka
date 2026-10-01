@@ -268,6 +268,12 @@ directly from the internet — the proxy still reaches it via localhost:
   set `PLATFORM_PORT` to the port your proxy targets, and point the proxy at
   `http://localhost:<port>`. See the nginx example below.
 
+In production, set `PUBLIC_URL` to the https:// address users open (`up.sh` sets
+it from `DOMAIN`). Without it, session cookies are issued without the Secure
+flag and the sign-in origin is taken from each request's Host / X-Forwarded-Host
+header; with an http:// value only the Secure flag is lost. The platform logs a
+`[config] PUBLIC_URL` warning at boot in either case.
+
 ### Example: host nginx
 
 For a self-managed nginx in front of the loopback-published platform:

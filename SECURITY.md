@@ -11,7 +11,8 @@ undisclosed vulnerabilities. We aim to acknowledge within 72 hours.
 Untrusted code runs in per-session containers locked down by a tested builder
 (`sandbox-controller/sandbox-spec.js`): never privileged, `no-new-privileges`,
 **all capabilities dropped** (only `CHOWN`/`SETUID`/`SETGID` added back for the
-boot sequence), memory / CPU / PID limits, and **no network until egress is explicitly enabled**
+boot sequence, plus `NET_ADMIN`/`NET_RAW` for the firewall setup when egress is
+on), memory / CPU / PID limits, and **no network until egress is explicitly enabled**
 (see "Network egress from sandboxes" below). The
 container starts as root just long enough for its entrypoint to chown the
 bind-mounted workspace, then **drops to the unprivileged `1000:1000` user**;
@@ -56,7 +57,7 @@ but all of them are real and worth knowing before you flip the switch:
 
 | Cost | What it means in practice |
 |---|---|
-| Host setup, Linux only | Root install plus a Docker restart. The script also enables `userns-remap`, which shifts container uids on the host — a multi-tenant requirement, not an optional extra. |
+| Host setup, Linux only | Root install plus a Docker restart. The script also enables `userns-remap`, which shifts container uids on the host — a multi-tenant requirement, not an optional extra. On a host that already runs Capka, back up first ([Backup & restore](docs/DEPLOY.md#backup--restore)): Docker then keeps containers, images and volumes in a separate storage root, so the database seems to vanish until you restore it, and files under `./data` keep owners the remapped containers may not be allowed to write. |
 | Speed | Syscalls are serviced in user space, so syscall-heavy work (many small file operations, spawning processes) is slower; CPU-bound work much less so. |
 | Resource budget | gVisor's own processes are charged to the sandbox's `SANDBOX_PIDS_LIMIT` and to the same memory cgroup as the workload. gVisor's stub processes are a high-water mark that is never reclaimed, so a long agent session spends the PID budget permanently and exhausting it kills the sandbox outright — hence the 1024 default; under ~128, image and document rendering dies with a misleading `Cannot allocate memory`. |
 | Egress plumbing | Under gVisor the in-container firewall needs `CAP_NET_RAW` and the legacy iptables backend. `install-gvisor.sh` registers the runtime with `--net-raw=true` for exactly this reason; if you ever register `runsc` by hand, keep that flag or **every** sandbox dies at startup the moment egress is on. |
@@ -84,7 +85,7 @@ export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
 # Point the socket-proxy bind at the rootless socket (the default is the rootful
 # path, so this line is REQUIRED for rootless — otherwise sandboxes can't start):
 echo "DOCKER_SOCKET=/run/user/$(id -u)/docker.sock" >> .env
-npm run up   # the stack now drives a rootless daemon; an escape lands unprivileged
+sh scripts/up.sh   # the stack now drives a rootless daemon; an escape lands unprivileged
 ```
 
 ## Hardening posture by deployment
@@ -105,9 +106,10 @@ internet only when *both* allow it:
    regardless of any in-app setting). The shipped `docker-compose.yml` defaults it
    to `true` so an admin can turn egress on from the UI without editing `.env` and
    redeploying — it raises the ceiling, it does not by itself grant egress.
-2. **`sandbox_network`** — the org-wide default (Settings), which is **`none` out
-   of the box**. This is what makes a fresh deployment effectively **no-outbound by
-   default** even though the kill-switch above ships open.
+2. **`sandbox_network`** — the org-wide default (Settings → Security → Network,
+   "Let code reach the internet"), which is **`none` out of the box**. This is
+   what makes a fresh deployment effectively **no-outbound by default** even
+   though the kill-switch above ships open.
 
 So the default posture is: no egress until an admin explicitly enables it in-app.
 For untrusted / multi-tenant hosts, set `SANDBOX_ALLOW_NETWORK=false` to hard-forbid
@@ -257,7 +259,8 @@ marketplace sources as you would any dependency: install from repos you trust.
 
 - `CAPKA_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
   database, so a DB leak alone cannot decrypt them. 64 hex chars. In production the
-  app is **fail-closed**: with no `CAPKA_MASTER_KEY` it refuses to start rather than
+  app is **fail-closed**: with no `CAPKA_MASTER_KEY` it still starts, but every
+  sign-in and every use of a stored key fails (the boot log says so) rather than
   fall back to a DB-stored key. Set `ALLOW_DB_MASTER_KEY=true` to knowingly accept
   the insecure fallback (dev/testing). With a DB-stored key, every database dump
   — including each backup — also contains the key that decrypts it.
