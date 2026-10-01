@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { safeFilename, contentDisposition } from "@/lib/download-filename";
+import { messageText } from "@/lib/chat/tree";
 
 export const GET = apiHandler(async (req, { params }) => {
   const { userId } = await requireActive();
@@ -36,7 +37,8 @@ export const GET = apiHandler(async (req, { params }) => {
         ? new Date(msg.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
         : "";
       const label = msg.role === "user" ? "You" : "Assistant";
-      lines.push(`### ${label}${ts ? ` — ${ts}` : ""}`, "", msg.content, "");
+      // Through messageText: a reply still streaming has its text only in its parts.
+      lines.push(`### ${label}${ts ? ` — ${ts}` : ""}`, "", messageText(msg), "");
     }
     return new Response(lines.join("\n"), {
       headers: {
@@ -48,7 +50,7 @@ export const GET = apiHandler(async (req, { params }) => {
 
   return Response.json({
     chat: { id: chat.id, title: chat.title, model: chat.model, createdAt: chat.createdAt, updatedAt: chat.updatedAt },
-    messages: rows.map((m) => ({ id: m.id, role: m.role, content: m.content, platform: m.platform, metadata: m.metadata, createdAt: m.createdAt })),
+    messages: rows.map((m) => ({ id: m.id, role: m.role, content: messageText(m), platform: m.platform, metadata: m.metadata, createdAt: m.createdAt })),
   }, {
     headers: { "Content-Disposition": disposition("json") },
   });
