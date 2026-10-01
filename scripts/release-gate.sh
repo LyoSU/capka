@@ -142,7 +142,8 @@ PY
 echo "== 3. ARCHIVE_RELEASED_ON is within 7 days of today =="
 # The memory page states a literal deadline for the retired review queue. The constant is
 # the day the code was written; if the tag slips it promises a nearer deadline than the
-# thirty days it advertises, and past that date it states one in the past.
+# thirty days it advertises, and past that date it states one in the past. A value the last
+# release already shipped passes as is: that deadline has been published.
 if out=$(python3 - <<'PY'
 import datetime, re, sys
 src = open("src/lib/vault/memory-page.ts", encoding="utf-8").read()
@@ -150,6 +151,13 @@ m = re.search(r'ARCHIVE_RELEASED_ON\s*=\s*"(\d{4}-\d{2}-\d{2})"', src)
 if not m:
     print("constant not found in src/lib/vault/memory-page.ts"); sys.exit(1)
 stamped = datetime.date.fromisoformat(m.group(1))
+# Once a release has shipped this value, the date on the page is a promise already made;
+# re-stamping it would quietly move that deadline for everyone who read it.
+import subprocess
+last = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--exclude", "*-*"], capture_output=True, text=True).stdout.strip()
+shipped = last and subprocess.run(["git", "show", f"{last}:src/lib/vault/memory-page.ts"], capture_output=True, text=True).stdout
+if shipped and re.search(r'ARCHIVE_RELEASED_ON\s*=\s*"' + m.group(1) + '"', shipped):
+    print(f"stamped {stamped}, already shipped in {last}: the deadline stands"); sys.exit(0)
 drift = abs((datetime.date.today() - stamped).days)
 print(f"stamped {stamped}, {drift} day(s) from today")
 if drift > 7:
