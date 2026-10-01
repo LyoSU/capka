@@ -49,8 +49,10 @@ export function ComposerMenu({
     setBusy(true); setErr("");
     const r = await folders.connect();
     if (!r.ok) {
+      // Not syncFailed's "will retry": a folder whose row was never created has
+      // nothing retrying it.
       if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, size: formatSize(r.tooLarge.bytes), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      else setErr(t("syncFailed"));
+      else setErr(t("attachFailed"));
     }
     setBusy(false);
     if (r.ok) setOpen(false);
@@ -64,10 +66,11 @@ export function ComposerMenu({
       if (r) setImported(r);
     } catch (e) {
       // Same ceiling as live sync — surface the same localized "too large" message.
+      // Anything else: nothing retries a one-shot import.
       if (e instanceof Error && e.name === "FolderTooLargeError") {
         const m = e as Error & { count?: number; bytes?: number };
         setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      } else setErr(t("syncFailed"));
+      } else setErr(t("attachFailed"));
     }
     setBusy(false);
   };

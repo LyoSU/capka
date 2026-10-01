@@ -163,7 +163,7 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
       if (e instanceof Error && e.name === "FolderTooLargeError") {
         const m = e as Error & { count?: number; bytes?: number };
         setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      } else setErr(t("syncFailed"));
+      } else setErr(t("attachFailed"));
     } finally {
       setBusy(false);
     }
