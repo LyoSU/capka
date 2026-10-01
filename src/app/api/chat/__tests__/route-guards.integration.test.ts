@@ -6,12 +6,13 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "route-guards-test-user";
 const OTHER = "route-guards-other-user";
 
-const { requireRole, resolveUserModelInfo, reserveBudget, releaseHold, enqueueTask } = vi.hoisted(() => ({
+const { requireRole, resolveUserModelInfo, reserveBudget, releaseHold, enqueueTask, publishTaskEvent } = vi.hoisted(() => ({
   requireRole: vi.fn(),
   resolveUserModelInfo: vi.fn(),
   reserveBudget: vi.fn(),
   releaseHold: vi.fn(),
   enqueueTask: vi.fn(),
+  publishTaskEvent: vi.fn(),
 }));
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
@@ -25,6 +26,7 @@ vi.mock("@/lib/tasks/queue", async (importOriginal) => ({
   enqueueTask,
 }));
 vi.mock("@/lib/rate-limit", () => ({ take: () => ({ ok: true }) }));
+vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent }));
 
 import { pool } from "@/lib/db";
 import { POST } from "@/app/api/chat/route";
@@ -79,6 +81,7 @@ run("POST /api/chat guards against the real tables", () => {
     reserveBudget.mockReset().mockResolvedValue({ allowed: true });
     releaseHold.mockReset().mockResolvedValue(undefined);
     enqueueTask.mockReset().mockResolvedValue({ id: "t1", created: true });
+    publishTaskEvent.mockReset().mockResolvedValue(undefined);
   });
 
   it("refuses a message id that is already another chat's row, and moves nothing", async () => {
@@ -112,6 +115,8 @@ run("POST /api/chat guards against the real tables", () => {
     expect(await q(`SELECT count(*)::int AS n FROM messages WHERE id = 'rg-u2'`, [])).toEqual([{ n: 1 }]);
     expect(await leafOf("rg-mine")).toBe("rg-u2");
     expect(enqueueTask.mock.calls.map((c) => c[0].payload.replyParentId)).toEqual(["rg-u2", "rg-u2"]);
+    // Nothing on the path changed but the leaf: no tab is told to reload.
+    expect(publishTaskEvent).not.toHaveBeenCalled();
   });
 
   it("refuses an empty send to a new chat without writing the chat", async () => {
@@ -173,6 +178,8 @@ run("POST /api/chat guards against the real tables", () => {
     expect(metadata).toMatchObject({ status: "completed", parts: [{ id: "c1", approval: { id: "ap1", approved: false } }] });
     expect(await leafOf("rg-mine")).toBe("rg-u3");
     expect(enqueueTask.mock.calls[0][0].payload.replyParentId).toBe("rg-u3");
+    // Open tabs still hold the reply with its card live; they reload into the settled one.
+    expect(publishTaskEvent).toHaveBeenCalledWith(U, { type: "new_message", chatId: "rg-mine" });
   });
 
   it("leaves the card waiting when the message it would have gone past is refused", async () => {
@@ -187,6 +194,7 @@ run("POST /api/chat guards against the real tables", () => {
     const [{ metadata }] = await q(`SELECT metadata FROM messages WHERE id = 'rg-a3'`, []);
     expect(metadata.status).toBe("awaiting_answer");
     expect(await leafOf("rg-mine")).toBe("rg-a3");
+    expect(publishTaskEvent).not.toHaveBeenCalled();
   });
 
   it("still regenerates a reply to a user message", async () => {

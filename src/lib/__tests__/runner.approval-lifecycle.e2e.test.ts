@@ -101,6 +101,19 @@ vi.mock("@/lib/tasks/queue", async (importOriginal) => {
     },
   };
 });
+// Every event published, passed through, so a test can tell whether open tabs were told
+// to reload.
+const published: { type: string; chatId?: string }[] = [];
+vi.mock("@/lib/tasks/events", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tasks/events")>();
+  return {
+    ...actual,
+    publishTaskEvent: (...args: Parameters<typeof actual.publishTaskEvent>) => {
+      published.push(args[1]);
+      return actual.publishTaskEvent(...args);
+    },
+  };
+});
 // A workspace to list, so the turn context is on these prompts. A test that needs a
 // file this turn wrote adds it here, stamped with the moment it is listed.
 const written: string[] = [];
@@ -539,6 +552,8 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("completed");
     expect(row.parts.find((p) => p.id === "c2")?.approval).toEqual({ id: "ap1", approved: false, reason: UNDECIDED_APPROVAL_REASON });
+    // Open tabs still show the card live; this turn's finish re-reads only its own rows.
+    expect(published.filter((e) => e.type === "new_message" && e.chatId === chat)).toHaveLength(1);
   }, 30_000);
 
   // The SDK runs an approval only when its response is the LAST message it is handed.

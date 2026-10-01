@@ -809,11 +809,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // a follow-up queued while it ran, or a chat that moved on before admission
       // settled such cards — so nobody will decide it now. Settled like any admission
       // past it. Best-effort: the history below already reads it that way.
+      let wentPast = false;
       for (const n of own) {
         const status = (n.metadata as MessageMeta | null)?.status;
         if (status !== "awaiting_approval" && status !== "awaiting_answer") continue;
+        wentPast = true;
         await settleMovedPast(n.id).catch((e) => tlog.warn("could not settle a waiting reply this turn goes past", { messageId: n.id, err: String(e) }));
       }
+      // Open tabs still show that card live, and this turn's finish re-reads only its own
+      // rows: have them reload.
+      if (wentPast) void publishTaskEvent(userId, { type: "new_message", chatId }).catch(() => {});
       // Collect from the FULL path, not the compaction-collapsed model view:
       // the transcript still renders every old message, so uniqueness has to
       // hold against everything the user can see.

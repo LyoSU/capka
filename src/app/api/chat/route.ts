@@ -9,6 +9,7 @@ import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, isAppError } from "@/lib/errors";
 import { enqueueTask, settleMovedPast, type QueueTx } from "@/lib/tasks/queue";
+import { publishTaskEvent } from "@/lib/tasks/events";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
@@ -281,6 +282,9 @@ export const POST = apiHandler(async (req: Request) => {
         })
       : await save(db);
     if (!saved) return Response.json({ error: "Message id already in use.", code: "MESSAGE_ID_IN_USE" }, { status: 409 });
+    // Every open tab, this one included, still holds that reply with a live card, and
+    // a finished turn re-reads only its own rows: reload them, as a Telegram message does.
+    if (parentWaits) void publishTaskEvent(userId, { type: "new_message", chatId }).catch(() => {});
     replyParentId = newUserId;
   } else if (existingChat) {
     // A regenerate. `updatedAt` is bumped unconditionally, not only when a setting
