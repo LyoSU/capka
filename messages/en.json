@@ -758,6 +758,9 @@
       "running": "Running…",
       "declined": "Not allowed",
       "notRun": "Didn't run — the assistant couldn't continue.",
+      "notRunStopped": "Didn't run — the reply was stopped first.",
+      "notRunUnavailable": "Didn't run — this tool wasn't available at the time.",
+      "notRunRuleChanged": "Didn't run — this no longer needs your permission, so the request was dropped.",
       "stopped": "Your choice was saved, but the assistant couldn't continue.",
       "busy": "This chat is still finishing another message — try again in a moment."
     },

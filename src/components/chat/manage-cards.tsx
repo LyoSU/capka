@@ -8,6 +8,7 @@ import { haptic } from "@/lib/haptics";
 import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
 import { formatSize } from "@/lib/constants";
 import type { StepTranslator } from "@/lib/chat/steps";
+import { INTERRUPTED_TOOL_RESULT } from "@/lib/chat/tool-results";
 
 type RequiredAction = { kind: string; url?: string; label: string; description?: string };
 
@@ -18,6 +19,8 @@ type ManageOutput = {
   render?: string;
   summary?: string;
   code?: string;
+  /** Why a NOT_RUN result never ran (NotRunReason). */
+  reason?: string;
   /** Opaque handle to a server-staged change (confirm). Applying it needs the
    *  session/callback — the model never holds anything replayable. */
   pendingId?: string;
@@ -424,11 +427,16 @@ export function readDecisionReply(
   return { landed: false, retry: true, note: body.outcome === "busy" ? "busy" : null };
 }
 
+/** The card's line for each `reason` a NOT_RUN result carries. */
+const NOT_RUN_COPY: Record<string, "notRunStopped" | "notRunUnavailable" | "notRunRuleChanged"> = {
+  stopped: "notRunStopped", tool_unavailable: "notRunUnavailable", rule_changed: "notRunRuleChanged",
+};
+
 export function ApprovalCard({
-  messageId, toolCallId, toolName, input, state, approval, output, onSend,
+  messageId, toolCallId, toolName, input, state, approval, output, errorText, onSend,
 }: {
   messageId: string; toolCallId: string; toolName: string; input: unknown; state: string;
-  approval?: { id: string; approved?: boolean; reason?: string }; output?: unknown; onSend?: (text: string) => void;
+  approval?: { id: string; approved?: boolean; reason?: string }; output?: unknown; errorText?: string; onSend?: (text: string) => void;
 }) {
   const t = useTranslations("chat.manage");
   const ta = useTranslations("chat.approval");
@@ -593,10 +601,16 @@ export function ApprovalCard({
           )}
         </>
       )}
-      {/* An output-error is a call that ended with no result at all: cut off by Stop or a
-          failed turn (sealed as interrupted), or the rare throw. The change may already
-          have landed, so it must not read as a plain "try again". */}
-      {!awaiting && failed && <Outcome kind="error" text={state === "output-error" ? t("interrupted") : oo?.code === "NOT_RUN" ? ta("notRun") : oo?.summary || t("applyError")} />}
+      {/* An output-error is a call cut off by Stop or a failed turn (sealed as
+          interrupted: the change may already have landed, so not a plain "try
+          again"), or the rare throw, which ended on its own error. A NOT_RUN result
+          says why the call never ran when it knows; a failed turn's own notice
+          already says why the turn could not continue. */}
+      {!awaiting && failed && <Outcome kind="error" text={
+        state === "output-error" ? (errorText && errorText !== INTERRUPTED_TOOL_RESULT ? t("applyError") : t("interrupted"))
+        : oo?.code === "NOT_RUN" ? ta(NOT_RUN_COPY[oo.reason ?? ""] ?? "notRun")
+        : oo?.summary || t("applyError")
+      } />}
     </CardShell>
   );
 }

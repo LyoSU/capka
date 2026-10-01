@@ -2753,7 +2753,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               );
             }
             if (g.kind === "approval") {
-              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} toolName={getToolName(g.part)} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
+              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} toolName={getToolName(g.part)} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} errorText={g.part.errorText} onSend={onSend} />;
             }
             if (g.kind === "ask") {
               // An `elicit:` toolCallId marks a block-and-poll MCP elicitation — the

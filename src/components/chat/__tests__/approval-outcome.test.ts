@@ -88,8 +88,11 @@ describe("ApprovalCard — an approved change that ended with no result", () => 
       children: createElement(ApprovalCard, {
         messageId: "m1", toolCallId: "c1", toolName: "manage", input: part.input,
         state: part.state as string, approval: part.approval as { id: string; approved?: boolean }, output: part.output,
+        errorText: part.errorText as string | undefined,
       }),
     }));
+  // The markup escapes an apostrophe.
+  const esc = (text: string) => text.replaceAll("'", "&#x27;");
   const reply = (status: string, result?: StoredPart) => {
     const parts = [
       { type: "tool-call", id: "c1", name: "manage", input: { action: "set", key: "locale" }, approval: { id: "a1", approved: true } },
@@ -105,6 +108,23 @@ describe("ApprovalCard — an approved change that ended with no result", () => 
       expect(html, status).toContain(en.chat.manage.interrupted);
       expect(html, status).not.toContain(en.chat.manage.applyError);
     }
+  });
+
+  it("a change that threw is not mistaken for one cut off part-way", () => {
+    const html = render(reply("completed", { type: "tool-error", id: "c1", name: "manage", error: "connector refused" } as StoredPart));
+    expect(html).toContain(esc(en.chat.manage.applyError));
+    expect(html).not.toContain(en.chat.manage.interrupted);
+  });
+
+  it("says why an approved change never ran", () => {
+    const notRun = (reason?: string) => render(reply("completed", { type: "tool-result", id: "c1", name: "manage",
+      output: { status: "error", code: "NOT_RUN", ...(reason ? { reason } : {}), error: "Not run." } } as StoredPart));
+    expect(notRun("stopped")).toContain(esc(en.chat.approval.notRunStopped));
+    expect(notRun("tool_unavailable")).toContain(esc(en.chat.approval.notRunUnavailable));
+    expect(notRun("rule_changed")).toContain(esc(en.chat.approval.notRunRuleChanged));
+    // A failed turn's own notice says why it could not continue; so does an older row.
+    expect(notRun("model_unavailable")).toContain(esc(en.chat.approval.notRun));
+    expect(notRun()).toContain(esc(en.chat.approval.notRun));
   });
 
   it("a change that returned its own error still shows that error", () => {
