@@ -18,14 +18,21 @@ vi.hoisted(() => { process.env.STREAM_IDLE_SECONDS = "3"; });
  */
 const prompts: WireMsg[][] = [];
 // What the next provider call answers: text ("Done." unless given), a new gated call
-// (a second round), or a call that runs without asking.
-const replies: ("text" | "gated" | "read" | { text: string })[] = [];
+// (a second round), a call that runs without asking, or nothing at all until aborted.
+const replies: ("text" | "gated" | "read" | "hang" | { text: string })[] = [];
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
       doStream: async (opts) => {
         prompts.push(opts.prompt as WireMsg[]);
         const next = replies.shift();
+        if (next === "hang") {
+          return {
+            stream: new ReadableStream({
+              start: (c) => opts.abortSignal?.addEventListener("abort", () => c.error(opts.abortSignal?.reason)),
+            }),
+          };
+        }
         const call = next === "gated" ? { id: "c9", name: "save_row" } : next === "read" ? { id: "c8", name: "read_row" } : null;
         return {
           stream: simulateReadableStream({
@@ -65,6 +72,8 @@ vi.mock("@/lib/sandbox/tools", () => ({
           return "saved";
         },
       }),
+      // Gated with no local execute, so the SDK never runs an approved call to it.
+      stage_row: tool({ inputSchema: z.object({ row: z.string() }), needsApproval: true }),
       // Asks for no approval (any more): the SDK drops an approval for it too.
       read_row: tool({
         inputSchema: z.object({ row: z.string() }),
@@ -296,6 +305,21 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(writes).toEqual([{ row: "final" }]);
     expect(resultFor((await storedRow(chat)).parts, "c2").map((r) => r.output)).toEqual(["saved"]);
     expect(prompts).toHaveLength(1);
+  }, 30_000);
+
+  // That pause ends on the call's result, error or denial, and an approved call the
+  // SDK never runs has none of them: the pause held for the whole attempt, so a model
+  // that then went silent was never caught and the turn hung to the task deadline.
+  it("still catches a stalled model after an approved call that never ran", async () => {
+    const chat = `${C}-unrun`;
+    await seedSuspended(chat, { name: "stage_row", approved: true });
+    replies.push("hang");
+
+    expect(await continueApproval(chat)).toBe("completed");
+
+    // Control: the first attempt was the stalled one, and the retry answered.
+    expect(prompts).toHaveLength(2);
+    expect((await storedRow(chat)).status).toBe("completed");
   }, 30_000);
 
   // The first half's files were found in its own tool windows, which the

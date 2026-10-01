@@ -1053,6 +1053,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       tlog.warn("provider.stall", { model: modelId, attempt: recoveries, idleMs: STREAM_IDLE_MS });
       attemptAc.abort();
     });
+    // The pauses an attempt holds for the approved calls the SDK runs ahead of step
+    // 0 (see consume), and whether that run is still going on the current stream.
+    let approvedHeld = 0;
+    let approvedAhead = false;
 
     // Set once a backend 400s on echoed `reasoning_content` (see
     // retryOnCapabilityError). Hoisted above makeStream because prepareStep reads
@@ -1099,6 +1103,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         useReasoning ? (reasoning as Record<string, Record<string, unknown>>) : undefined,
         ctxMgmt as Record<string, Record<string, unknown>> | undefined,
       );
+      approvedAhead = true;
       return streamText({
         model,
         // prepareStep forces a text answer after FORCE_TEXT_AFTER_STEPS so a long
@@ -1123,6 +1128,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // (and any unknown tool) is left to fail, so the model sees its own mistake.
               experimental_repairToolCall: repairToolCall as never,
               prepareStep: async ({ stepNumber, messages }) => {
+                // Step 0 starts only once the approved calls run ahead of it are
+                // done, and one the SDK never ran (no local execute) streams nothing
+                // that would end its pause: release them all here, or a model that
+                // then hangs is never caught.
+                if (stepNumber === 0) {
+                  approvedAhead = false;
+                  for (; approvedHeld > 0; approvedHeld--) watchdog.exitTool();
+                }
                 const base = reasoningStripped ? foldReasoningIntoText(messages) : messages;
                 // STEER: instructions the user added while this turn was already
                 // running. One cheap read of the task row per step; `steersRead` is
@@ -1562,8 +1575,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // An approved call the SDK runs ahead of the first step streams no `tool-call`,
       // so the pause that event starts for any other call starts here: an approved
       // write running past the window read as a hung model, and the retry ran it
-      // again. Its result, error or denial ends the pause.
-      pendingApproved().forEach(() => watchdog.enterTool());
+      // again. Its result, error or denial ends the pause, and step 0 starting ends
+      // whatever is left (see prepareStep). Not taken once step 0 has begun: those
+      // calls are done.
+      approvedHeld = approvedAhead ? pendingApproved().length : 0;
+      for (let i = 0; i < approvedHeld; i++) watchdog.enterTool();
       try {
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
