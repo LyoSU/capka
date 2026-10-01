@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { convertToModelMessages, jsonSchema, streamText, tool, type ModelMessage } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { toUIMessages } from "../presenter";
-import { INTERRUPTED_TOOL_RESULT, sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNANSWERED_ASK_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls } from "../tool-results";
 import type { MessageMeta, StoredPart } from "../contracts";
 
 // Anthropic and OpenAI reject a tool call with no result, so an approval that
@@ -132,6 +132,33 @@ describe("approval history reaches the provider with a result for every call", (
     }
     expect(at("awaiting_approval")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
     expect(at("running")).toMatchObject({ state: "approval-responded", approval: { approved: true } });
+  });
+
+  // Telegram chains a new message onto a reply whose card is still waiting, and so
+  // does a follow-up queued while that reply ran. Left bare, the call broke every
+  // later turn in the chat with AI_MissingToolResultsError.
+  const undecided = { ...call, approval: { id: "ap1" } } as StoredPart;
+
+  it("an undecided approval the chat moved past is sealed as declined, and the model reads why", async () => {
+    const waiting = row("a1", "assistant", { status: "awaiting_approval", parts: [undecided] });
+    const { prompt, results, executed } = await providerPrompt([ask, waiting, later]);
+    expect(prompt.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user"]);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "c1", output: { type: "error-text", value: UNDECIDED_APPROVAL_REASON } })]);
+    expect(executed).toBe(false);
+  });
+
+  it("an unanswered ask the chat moved past reads as unanswered, not interrupted", async () => {
+    const question: StoredPart = { type: "tool-call", id: "q1", name: "ask", input: {}, answer: { form: { fields: [{ id: "row", label: "Which row?", kind: "text" }] } } };
+    const waiting = row("a1", "assistant", { status: "awaiting_answer", parts: [question] });
+    const { results } = await providerPrompt([ask, waiting, later]);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "q1", output: { type: "error-text", value: UNANSWERED_ASK_RESULT } })]);
+  });
+
+  it("an undecided approval on the last message stays a live request", () => {
+    const ui = toUIMessages([ask, row("a1", "assistant", { status: "awaiting_approval", parts: [undecided] })]);
+    sealOrphanToolCalls(ui);
+    expect(ui[1].parts[0]).toMatchObject({ state: "approval-requested", approval: { id: "ap1" } });
+    expect((ui[1].parts[0] as { approval: { approved?: boolean } }).approval.approved).toBeUndefined();
   });
 
   it("the transcript keeps the declined card as it is — the seal is for model history only", () => {

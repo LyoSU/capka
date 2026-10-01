@@ -18,8 +18,9 @@
  * leave an empty assistant message — its own SDK error). Mutates in place and
  * returns the same array.
  *
- * A declined approval gets the same treatment for the same reason, and so does
- * an approved one that nothing will run any more (see below).
+ * A declined approval gets the same treatment for the same reason, and so do an
+ * approved one that nothing will run any more and an undecided one the chat moved
+ * past (see below).
  *
  * Only ever apply this to HISTORY being fed to the model — never to a live,
  * streaming turn, where an `input-available` tool call legitimately means
@@ -31,6 +32,10 @@ const ORPHAN_STATES = new Set(["input-streaming", "input-available"]);
  *  presenter so the model-feed seal and the transcript display agree on wording. */
 export const INTERRUPTED_TOOL_RESULT =
   "The previous turn was interrupted before this tool finished, so it has no result.";
+/** What the model reads for an `ask` nobody answered — it was never interrupted. */
+export const UNANSWERED_ASK_RESULT = "The user did not answer this question.";
+/** The decline an approval the chat moved past without a decision is sealed with. */
+export const UNDECIDED_APPROVAL_REASON = "The user moved on without deciding, so this did not run.";
 
 export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] }>(messages: T[]): T[] {
   for (const [i, m] of messages.entries()) {
@@ -44,7 +49,16 @@ export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] 
         type === "dynamic-tool" || (typeof type === "string" && type.startsWith("tool-"));
       if (isToolPart && ORPHAN_STATES.has(part.state as string)) {
         part.state = "output-error";
-        if (part.errorText == null) part.errorText = INTERRUPTED_TOOL_RESULT;
+        if (part.errorText == null) part.errorText = part.askForm ? UNANSWERED_ASK_RESULT : INTERRUPTED_TOOL_RESULT;
+      }
+      // An approval still waiting on a decision is a bare call: the SDK emits its
+      // request and nothing answers it. That is right only while it is the LAST
+      // message (the user can still decide); once the chat moved past it, nobody
+      // will, and every later turn would be rejected. Sealed as declined — it did not
+      // run, and the model reads why.
+      if (isToolPart && part.state === "approval-requested" && i < messages.length - 1) {
+        part.state = "output-denied";
+        part.approval = { ...(part.approval as object), approved: false, reason: UNDECIDED_APPROVAL_REASON };
       }
       // A declined approval is stored as its decision alone — nothing ever writes
       // it a result, and the web card needs it that way to read "declined". The

@@ -173,12 +173,17 @@ run("upgrade from the last release", () => {
     expect(denial).toBeDefined();
   });
 
-  // KNOWN OPEN BUG, inherited from v0.42.0: an approval card left undecided while the
-  // chat moved on stays a bare tool call, and every later turn in that chat dies with
-  // AI_MissingToolResultsError. Fixed separately; drop `.fails` once sealOrphanToolCalls
-  // (or the enqueue path) settles such a card.
-  it.fails("pairs an undecided approval the chat moved past", async () => {
-    expect(unpairedCalls(await history("up-c3"))).toEqual([]);
+  // Inherited from v0.42.0: an approval card left undecided while the chat moved on
+  // stayed a bare tool call, and every later turn in that chat died with
+  // AI_MissingToolResultsError. Such a row heals at read time, as a decline.
+  it("pairs an undecided approval the chat moved past", async () => {
+    for (const keep of [undefined, 0]) {
+      const msgs = await history("up-c3", keep);
+      expect(unpairedCalls(msgs), `keep=${keep}`).toEqual([]);
+      const denial = msgs.flatMap((m) => (m.role === "tool" ? m.content : []))
+        .find((p) => p.type === "tool-result" && p.toolCallId === "call_c3_a");
+      expect(denial).toBeDefined();
+    }
   });
 
   it("reconcileZombies reaps the dead turn, keeps the live one and sweeps exactly the stale holds", async () => {

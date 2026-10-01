@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { INTERRUPTED_TOOL_RESULT, sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNANSWERED_ASK_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls } from "../tool-results";
 
 type Part = Record<string, unknown>;
 type Msg = { role: string; parts?: Part[] };
@@ -76,6 +76,27 @@ describe("sealOrphanToolCalls", () => {
     sealOrphanToolCalls(msgs);
     expect(msgs[0].parts![0]).toMatchObject({ state: "output-error", errorText: INTERRUPTED_TOOL_RESULT, approval: { approved: true } });
     expect(msgs[2].parts![0].state).toBe("approval-responded");
+  });
+
+  it("seals an undecided approval as declined once its message is no longer the last", () => {
+    const waiting = () => ({ type: "dynamic-tool", toolCallId: "c3", toolName: "manage", state: "approval-requested", approval: { id: "a3" } });
+    const msgs: Msg[] = [
+      { role: "assistant", parts: [waiting()] },
+      { role: "user", parts: [{ type: "text", text: "never mind" }] },
+      { role: "assistant", parts: [waiting()] },
+    ];
+    sealOrphanToolCalls(msgs);
+    expect(msgs[0].parts![0]).toMatchObject({ state: "output-denied", approval: { id: "a3", approved: false, reason: UNDECIDED_APPROVAL_REASON } });
+    expect(msgs[2].parts![0]).toEqual(waiting());
+  });
+
+  it("says an ask nobody answered was not answered rather than interrupted", () => {
+    const msgs: Msg[] = [
+      { role: "assistant", parts: [{ type: "dynamic-tool", toolCallId: "q", toolName: "ask", state: "input-available", askForm: { fields: [] } }] },
+      { role: "user", parts: [{ type: "text", text: "skip that" }] },
+    ];
+    sealOrphanToolCalls(msgs);
+    expect(msgs[0].parts![0]).toMatchObject({ state: "output-error", errorText: UNANSWERED_ASK_RESULT });
   });
 
   it("ignores user messages and non-tool parts", () => {
