@@ -79,7 +79,13 @@ export async function refusal(res: Response, t: ReturnType<typeof useTranslation
 
 /** Apply a `task:reset`: the runner threw its partial reply away, so drop it from our
  *  copy too — all but the first `keep` parts, the suspended half a continuation loaded,
- *  which the retry keeps and does not stream again. */
+ *  which the retry keeps and does not stream again.
+ *
+ *  `keep` counts that half as the presenter draws it, and slicing by count is sound
+ *  because our copy of it is that drawing in that order: the suspended turn's
+ *  task:finish reloads it (refreshTurn), a page opened mid-continuation loads it from
+ *  the snapshot, and the continuation only appends past it. runner.approval-effects.e2e
+ *  pins the count against that drawing. */
 export function resetReply<M extends { id: string; parts: unknown[] }>(msgs: M[], reset: { messageId: string; keep?: number }): M[] {
   const idx = msgs.findIndex((m) => m.id === reset.messageId);
   if (idx === -1) return msgs;
