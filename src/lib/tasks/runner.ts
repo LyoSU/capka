@@ -267,6 +267,11 @@ export function snapshotIntervalMs(bytes: number): number {
   return Math.min(5000, Math.max(1000, bytes / 64));
 }
 
+/** The most a tool event (a call, a result, a step's end) waits for the snapshot
+ *  that covers it — the cadence's floor rather than its size-scaled wait, since a
+ *  long tool run publishes nothing after the call that would bring one sooner. */
+const TOOL_SAVE_MS = 1000;
+
 /**
  * The user's own latest message, which native attachments are put on and stripped
  * from. Not simply the last user-role message: the effect-ledger recovery note is
@@ -493,6 +498,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // making a hundred calls had no ceiling at all. Enforced by stopping (see the
   // toolChoice override in prepareStep), never by rewriting a result.
   let turnOutputChars = 0;
+  // What the mid-stream snapshots of this turn wrote (see saveSnapshot), for the
+  // "task finished" line: the figure that says whether row rewrites need a cheaper
+  // shape, measured on real traffic rather than modelled.
+  let snapshotBytes = 0;
+  let snapshotWrites = 0;
   let toolWindows: ToolWindow[] = [];
   // The windows of the calls a continuation's user approved, kept apart because a
   // restart keeps those calls' results (see discardPartial), so their files too.
@@ -881,7 +891,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Breakpoint budget (Anthropic max 4): stable + the previous turn's tail + this
     // + the moving step tail in prepareStep = 4 — don't add a fifth.
     const markCacheTail = (msgs: ModelMessage[]) => {
-      const last = msgs.at(-1);
+      // Not on an approval continuation's last message: that is the user's decision,
+      // a tool message of approval responses alone, which the SDK drops before the
+      // request (the approved call's result goes in its place), taking the mark with
+      // it. The call it answers is the last message the provider sees.
+      const last = msgs.findLast((m) => m.role !== "tool"
+        || !m.content.every((p) => p.type === "tool-approval-response" && !p.providerExecuted));
       if (last) last.providerOptions = { ...last.providerOptions, ...ephemeral };
       // The previous turn's tail too: the user message just before the last reply,
       // which that turn marked in this same position. It is the newest entry this
@@ -1463,6 +1478,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // snapshot (snapshotIntervalMs), and only ever called off a flush, so a quiet
     // tool run adds no writes.
     //
+    // Tool events owe a save too (`owe`), and were each written at once: a call, its
+    // result and the step's end were three full-row rewrites per step, the bulk of a
+    // tool-heavy turn's writes. Only a suspension, which ends the stream for a human
+    // to act on, still writes at once. The rest land within TOOL_SAVE_MS, so steps
+    // closer together than that share one write and a reconnecting client never
+    // holds a tool card longer than that. Nothing durable waits on them: an executed
+    // call is in the effect ledger (recordEffect) before its result is even saved.
+    //
     // `content` is NOT written here, only by the finishing write: it sits under
     // idx_messages_content_fts, so every mid-stream write of it re-TOASTed the whole
     // text, re-ran to_tsvector and ruled out a HOT update. Left out of the SET, no
@@ -1471,9 +1494,29 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // reconcileZombies rebuilds it when it fails a stranded row.
     let lastSaveAt = 0;
     let saveEveryMs = 1000;
-    const saveSnapshot = async (force = false) => {
-      if (!force && Date.now() - lastSaveAt < saveEveryMs) return;
-      lastSaveAt = Date.now();
+    let owed: "soon" | "now" | undefined;
+    let owedTimer: ReturnType<typeof setTimeout> | null = null;
+    // The last snapshot that LANDED. Set only once the write succeeds, so a failed one
+    // is retried by the next save instead of skipped.
+    let saved: { json: string; seq: number; steers: number } | undefined;
+    // Through the flush chain, so a tool event's save is ordered with the text
+    // flushes' instead of racing them onto the row.
+    const owe = (when: "soon" | "now") => {
+      if (when === "now") { owed = "now"; return flushBuffers(); }
+      owed ??= "soon";
+      // Promoted to "now" when it fires: a timer can wake a millisecond short of the
+      // interval, and a save it then declined would wait for the next event.
+      owedTimer ??= setTimeout(() => {
+        owedTimer = null;
+        // Caught here, not left to the next await: nothing awaits a timer's flush, and
+        // the unwritten save is retried by the next one (`saved` did not move).
+        if (owed) { owed = "now"; flushBuffers().catch((e) => tlog.warn("owed snapshot save failed", { error: errMsg(e) })); }
+      }, Math.max(0, lastSaveAt + TOOL_SAVE_MS - Date.now()));
+    };
+    const saveSnapshot = async () => {
+      if (owed !== "now" && Date.now() - lastSaveAt < saveEveryMs) return;
+      owed = undefined;
+      if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; }
       // Capture parts synchronously (a JSON round-trip, so a token appended
       // during the DB await can't mutate what we persist — and its length is the
       // snapshot size the next interval is scaled by).
@@ -1489,9 +1532,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // text, each one ++seq) and fold them into streamSeq, so those upcoming
       // deltas land at seq <= streamSeq and the client ignores them as covered.
       const partsJson = JSON.stringify(parts);
-      const snapParts = JSON.parse(partsJson) as typeof parts;
       const snapSeq = seq + (reasonBuf ? 1 : 0) + (textBuf ? 1 : 0);
+      // The row already holds exactly this, streamSeq included, so it already covers
+      // every event the write would: the step's end right after a tool result, most
+      // often, which changes nothing a snapshot carries.
+      if (saved && saved.json === partsJson && saved.seq === snapSeq && saved.steers === consumedSteers.length) return;
+      const snapParts = JSON.parse(partsJson) as typeof parts;
+      lastSaveAt = Date.now();
       saveEveryMs = snapshotIntervalMs(partsJson.length);
+      const steers = consumedSteers.length;
       await db.update(messages).set({
         // Steers ride INSIDE this object, never beside it: the update replaces the
         // row's whole metadata, so a separately-written steer would survive exactly
@@ -1500,6 +1549,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq,
           ...(consumedSteers.length ? { steers: [...consumedSteers] } : {}) },
       }).where(eq(messages.id, msgId));
+      saved = { json: partsJson, seq: snapSeq, steers };
+      snapshotBytes += partsJson.length;
+      snapshotWrites += 1;
     };
 
     // Discard the partial reply before a retry re-streams from scratch
@@ -1653,11 +1705,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-call", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, toolName: event.toolName, args: input, seq: ++seq,
             });
-            // Persist the call NOW (not just at finish-step): a tool can run for a
-            // long time, and a client reconnecting mid-execution must get a
+            // Persist the call while it runs, not only at finish-step: a tool can run
+            // for a long time, and a client reconnecting mid-execution must get a
             // snapshot that already includes this step, or it reconciles in a loop
-            // until the step ends. Tool events are rare, so a forced write is cheap.
-            await saveSnapshot(true);
+            // until the step ends. Within TOOL_SAVE_MS rather than at once, so a quick
+            // call shares the write its result owes.
+            owe("soon");
             if (event.toolName === "ask") {
               // No-execute tool → the SDK ends the run without a result. Mark the
               // call awaiting a human answer (mirrors tool-approval-request) so the
@@ -1673,7 +1726,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 type: "task:ask", taskId, chatId, messageId: msgId,
                 toolCallId: event.toolCallId, form, seq: ++seq,
               });
-              await saveSnapshot(true);
+              // At once: the stream ends here for a person to answer.
+              await owe("now");
               break;
             }
             // The model is now waiting on OUR tool — pause the stall watchdog so a
@@ -1705,7 +1759,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-approval", taskId, chatId, messageId: msgId,
               toolCallId: tc.toolCallId, approvalId: event.approvalId, seq: ++seq,
             });
-            await saveSnapshot(true);
+            // At once: the stream ends here for a person to decide.
+            await owe("now");
             break;
           }
           case "tool-result": {
@@ -1745,7 +1800,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // in ANOTHER task still sees it. Awaited, because a restart that begins
             // before the write lands starts blind — the one thing this prevents.
             await recordEffect({ messageId: msgId, toolCallId: event.toolCallId, taskId, name: event.toolName, input: event.input });
-            // The full output is in `parts` (saved to the DB at finish-step). Over
+            // The full output is in `parts` (saved with the snapshot it owes). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
             // event survives intact — the client backfills the body from the DB.
@@ -1754,7 +1809,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: fits ? output : undefined, seq: ++seq,
             });
-            await saveSnapshot(true); // keep the snapshot current with each step
+            owe("soon");
             break;
           }
           case "tool-error":
@@ -1783,7 +1838,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: { error: toolErr }, isError: true, seq: ++seq,
             });
-            await saveSnapshot(true); // keep the snapshot current with each step
+            owe("soon");
             break;
           case "tool-output-denied": {
             // The SDK re-checks each approved call before running it, and denies one
@@ -1807,7 +1862,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: output, seq: ++seq,
             });
-            await saveSnapshot(true);
+            owe("soon");
             break;
           }
           case "error":
@@ -1861,15 +1916,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               ac.abort();
               break;
             }
-            // Flush buffered text and force a snapshot (streamSeq + parts).
-            // force=true bypasses the ~1s throttle so each step boundary is
-            // durably persisted.
+            // Flush buffered text and owe a snapshot (streamSeq + parts), so each step
+            // boundary is persisted within TOOL_SAVE_MS whatever the reply's size.
             await flushBuffers();
-            await saveSnapshot(true);
+            owe("soon");
             break;
           }
         }
       }
+      // A save still owed lands with this last flush, not on a timer that could fire
+      // after the finishing write and put a `running` snapshot back over it. Not on a
+      // lost lease: the row is no longer this run's to write.
+      if (owed && !leaseLost) owed = "now";
       await flushBuffers();
       } catch (e) {
         // A stall aborts THIS attempt's signal. Depending on the SDK that ends the
@@ -1880,6 +1938,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         if (!(stalled && !ac.signal.aborted)) throw e;
       } finally {
         watchdog.stop();
+        // Nothing may write the row once the stream is over: a timer's flush landing
+        // after the finishing write would put a `running` snapshot back over it. What
+        // is still owed is dropped (the finishing write or the next attempt covers
+        // it), buffered deltas wait for the next flush, and one in flight finishes.
+        owed = undefined;
+        if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; }
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        await flushChain;
       }
     };
 
@@ -2543,6 +2609,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       messages: modelMessages.length,
       ...(recoveries ? { recoveries } : {}),
       ...(turnOutputChars ? { toolOutputChars: turnOutputChars } : {}),
+      ...(snapshotWrites ? { snapshotWrites, snapshotBytes } : {}),
     });
     // Same facts onto the turn span (the worker owns its lifecycle; we only report).
     // Cost is passed but NOT exported by default — the `usage` ledger is the money

@@ -94,7 +94,8 @@ unit("realtime LISTEN heartbeat", () => {
     await vi.advanceTimersByTimeAsync(10);
     const unsub = await subscribing;
     const [first] = opened.clients;
-    expect(first.queries).toContain('LISTEN "ch_user_hb"');
+    // Once: the connect LISTENs every registered channel, so subscribe adds none.
+    expect(first.queries).toEqual(['LISTEN "ch_user_hb"']);
 
     // A healthy connection answers every ping and is kept.
     await vi.advanceTimersByTimeAsync(60_000);

@@ -127,12 +127,16 @@ class Realtime {
     if (!this.chans.has(ch)) this.chans.set(ch, new Set());
     this.chans.get(ch)!.add(cb);
     try {
+      // With no connection yet, the one ensureSub opens LISTENs every channel in
+      // `chans`, this one included: `sub` is set the moment it connects, before that
+      // loop starts. A second LISTEN here would only be a wasted round-trip.
+      const listened = !this.sub;
       await this.ensureSub();
       // Quote the identifier: pg_notify() takes a case-SENSITIVE text channel,
       // but an unquoted `LISTEN ident` is folded to lowercase by Postgres. With a
       // mixed-case channel (user IDs contain uppercase) the two would never match
       // and no event would ever be delivered. Quoting preserves case on both sides.
-      await this.sub!.query(`LISTEN "${ch}"`);
+      if (!listened) await this.sub!.query(`LISTEN "${ch}"`);
     } catch (e) {
       // Roll the registration back: the caller sees the failure and never gets
       // an unsubscribe, so a callback left behind here would be a dead closure

@@ -322,7 +322,7 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
 
 /** List the per-user shared store (`/shared`). Addressed by userId — the shared
  *  store is not a session and `_global` stays refused as a session id. */
-export async function listSharedFiles(userId: string, path = ".", depth?: number, limit?: number): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
+export async function listSharedFiles(userId: string, path = ".", depth?: number, limit?: number): Promise<{ entries: FileEntry[]; truncated?: boolean; missing?: boolean; error?: string }> {
   const params = new URLSearchParams({ path, token: sharedToken(userId) });
   if (depth && depth > 1) params.set("depth", String(depth));
   if (limit && limit > 1) params.set("limit", String(limit));

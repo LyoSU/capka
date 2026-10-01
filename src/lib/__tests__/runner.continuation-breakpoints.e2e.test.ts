@@ -138,11 +138,10 @@ run("runAgentTask: an approval continuation's cache breakpoints, as Anthropic", 
     expect(prompts).toHaveLength(2);
     expect(JSON.stringify(prompts[0])).toContain("use the final row");
     for (const p of prompts) expectWireShape(p);
-    // Stable + this turn's user message, then the step tail. One short of a fresh
-    // turn's: the history ends on the reply being continued, so no earlier user
-    // message is the previous turn's tail, and the mark on the approval's own tail
-    // goes when the SDK swaps the approval for the call's result.
-    expect(prompts.map(breakpoints)).toEqual([2, 3]);
+    // Stable + this turn's user message + the approved call, then the step tail: a
+    // fresh turn's three. The tail mark sits on the call, not on the approval after
+    // it, which the SDK drops when it sends the call's result in its place.
+    expect(prompts.map(breakpoints)).toEqual([3, 4]);
   }, 30_000);
 
   it("stays within four on the overflow restart", async () => {
@@ -155,6 +154,6 @@ run("runAgentTask: an approval continuation's cache breakpoints, as Anthropic", 
     expect(prompts).toHaveLength(2);
     for (const p of prompts) expectWireShape(p);
     // The restart re-marks its rebuilt history, whose tail is now the call's result.
-    expect(prompts.map(breakpoints)).toEqual([2, 3]);
+    expect(prompts.map(breakpoints)).toEqual([3, 3]);
   }, 30_000);
 });
