@@ -1032,6 +1032,7 @@ async function findLink(telegramUserId: number) {
  *  - not a private DM / a bot  → no provisioning; points to the web sign-in
  *  - registration closed       → refusal
  *  - setup not finished        → refusal, points admin to the app
+ *  - id's reserved address is bound to another account → refusal, asks for the admin
  *  - pending / rejected        → the lifecycle reply (never reaches the engine)
  */
 async function ensureUser(ctx: Context): Promise<Awaited<ReturnType<typeof findLink>> | null> {
@@ -1050,8 +1051,14 @@ async function ensureUser(ctx: Context): Promise<Awaited<ReturnType<typeof findL
     const name = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null;
     const outcome = await provisionTelegramUser(tgId, { name, username: ctx.from?.username || null });
     if ("refused" in outcome) {
-      if (outcome.refused === "closed") await reply(ctx, "registrationClosed");
-      else await reply(ctx, "setupIncomplete", { button: openAppButton() });
+      // A Record, so a fourth refusal cannot fall into another one's reply. A conflict
+      // says nothing about the other account — only that this one cannot be connected.
+      const refusal: Record<typeof outcome.refused, () => Promise<void>> = {
+        closed: () => reply(ctx, "registrationClosed"),
+        conflict: () => reply(ctx, "accountConflict"),
+        setup_incomplete: () => reply(ctx, "setupIncomplete", { button: openAppButton() }),
+      };
+      await refusal[outcome.refused]();
       return null;
     }
     status = outcome.status;
