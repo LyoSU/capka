@@ -414,6 +414,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let runConfigId: string | undefined;
   let runShared = false;
   const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+  // That accumulator as the message stores it; undefined while nothing was billed.
+  const liveUsageMeta = (): MessageMeta["usage"] => liveUsage.input || liveUsage.output || liveUsage.cached || liveUsage.cacheWrite
+    ? {
+        input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached,
+        // Display-only splits — omitted when zero so old/simple turns stay clean.
+        ...(liveUsage.cacheWrite > 0 ? { cacheWrite: liveUsage.cacheWrite } : {}),
+        ...(liveUsage.reasoning > 0 ? { reasoning: liveUsage.reasoning } : {}),
+      }
+    : undefined;
   // What an approval continuation's FIRST half already billed. A continuation reuses
   // the suspended message's row, so this run is the second half of one logical turn
   // and the (i) popover has to show both — read off that row below, folded in at the
@@ -2150,14 +2159,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // is the TOTAL input incl. cached reads, so split it — non-cached at the
     // input rate, cached reads at the discounted rate (avoids double-counting).
     // Usage from the live accumulator (robust to cancel/abort), not result.totalUsage.
-    const usageMeta = liveUsage.input || liveUsage.output || liveUsage.cached || liveUsage.cacheWrite
-      ? {
-          input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached,
-          // Display-only splits — omitted when zero so old/simple turns stay clean.
-          ...(liveUsage.cacheWrite > 0 ? { cacheWrite: liveUsage.cacheWrite } : {}),
-          ...(liveUsage.reasoning > 0 ? { reasoning: liveUsage.reasoning } : {}),
-        }
-      : undefined;
+    const usageMeta = liveUsageMeta();
     // Cost, resolved universally with a clear source of truth:
     //   • the provider's REAL charge wins whenever the provider reported one
     //     (OpenRouter served this turn — `orServed`). That figure is authoritative
@@ -2899,11 +2901,33 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (resumeMessageId && !streamStarted) {
       sealUnrunApprovals(parts, `Not run. ${failure?.userMessage ?? "The turn was stopped before this approved call ran."}`);
     }
+    // A continuation's first half, kept: its steers, files and sources. Not its (i)
+    // figures as they were: under this run's model they would read as the whole turn.
+    // As on the success path, a failed turn owns the ErrorNotice and carries none,
+    // and a cancelled one still did real work, so it shows both halves folded (the
+    // ledger below bills this run alone, as it always has).
+    const kept: MessageMeta = { ...firstHalf };
+    for (const k of ["usage", "costUsd", "costSource", "durationMs", "llmCalls", "upstreamProvider", "generationId", "configId", "contextWindow", "contextTokens"] as const) delete kept[k];
+    let figures: MessageMeta = {};
+    if (status === "cancelled") {
+      const usage = liveUsageMeta();
+      const served = orLive.generationId != null || orLive.upstreamProvider != null;
+      const cost = served ? orLive.cost : usage && runModelId
+        ? (await costUsd(runModelId, { inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cached, cacheWriteTokens: usage.cacheWrite }).catch(() => null)) ?? undefined
+        : undefined;
+      const turn = foldTurnHalves({
+        usage, costUsd: cost, costSource: cost == null ? undefined : served ? "provider" : "catalog",
+        durationMs: Date.now() - startedAt, reasoningMs: (firstTextAt ?? Date.now()) - startedAt, llmCalls: stepCount || undefined,
+      }, firstHalf ?? {});
+      figures = {
+        ...turn,
+        ...(orLive.upstreamProvider ? { upstreamProvider: orLive.upstreamProvider } : {}),
+        ...(orLive.generationId ? { generationId: orLive.generationId, configId: runConfigId } : {}),
+      };
+    }
     const failureMeta: MessageMeta = {
-      // A continuation's first half, kept: its steers, files, sources and the figures
-      // it billed. Carried as they were, not folded with this run's, which this path
-      // never reports for any turn — so nothing is counted twice.
-      ...firstHalf,
+      ...kept,
+      ...figures,
       taskId, status, parts: parts.length > 0 ? parts : undefined,
       // Which model failed/was cancelled — without it, model-filtered analytics
       // would silently exclude every failed turn and understate failure rates.

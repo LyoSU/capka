@@ -66,9 +66,9 @@ vi.mock("@/lib/sandbox/tools", () => ({
   }),
 }));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
-// Set to make the turn's own finish write throw once (a dropped connection), which
-// sends a turn whose stream already ran down the failure path.
-let failNextCommit = false;
+// Set to make the turn's own finish write throw this once (a dropped connection, or
+// an abort), which sends a turn whose stream already ran down the failure path.
+let failNextCommit: Error | null = null;
 // Set to make the next settle of a cancelled continuation's row throw once.
 let failNextSettle = false;
 vi.mock("@/lib/tasks/queue", async (importOriginal) => {
@@ -84,8 +84,9 @@ vi.mock("@/lib/tasks/queue", async (importOriginal) => {
     },
     commitTurnOutcome: async (input: Parameters<typeof actual.commitTurnOutcome>[0]) => {
       if (failNextCommit) {
-        failNextCommit = false;
-        throw new Error("Connection terminated unexpectedly");
+        const e = failNextCommit;
+        failNextCommit = null;
+        throw e;
       }
       return actual.commitTurnOutcome(input);
     },
@@ -163,6 +164,16 @@ const FIRST_HALF = {
   costUsd: 0.01,
   durationMs: 1500,
 };
+
+/** A failed continuation keeps the first half's steers and files, but not its (i)
+ *  figures: shown under this run's model they read as the whole turn, and a failed
+ *  turn owns the ErrorNotice instead, as on the success path. */
+function expectFirstHalfKept(row: Record<string, unknown>) {
+  expect(row).toMatchObject({ steers: FIRST_HALF.steers, touchedFiles: FIRST_HALF.touchedFiles });
+  expect(row).not.toHaveProperty("usage");
+  expect(row).not.toHaveProperty("costUsd");
+  expect(row).not.toHaveProperty("durationMs");
+}
 
 const resultFor = (parts: Part[], id: string) => parts.filter((p) => p.type === "tool-result" && p.id === id);
 
@@ -329,26 +340,48 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
     // The failure is written over the first half, not instead of it.
-    expect(row).toMatchObject(FIRST_HALF);
+    expectFirstHalfKept(row);
   }, 30_000);
 
   // The same, after the approved call already ran and the reply was written.
   it("keeps the first half when the continuation fails after its stream started", async () => {
     const chat = `${C}-dropped`;
     await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
-    failNextCommit = true;
+    failNextCommit = new Error("Connection terminated unexpectedly");
 
     expect(await continueApproval(chat)).toBe("failed");
 
     const row = await storedRow(chat);
     expect(row.status).toBe("failed");
     expect(row.error).toBeTruthy();
-    expect(row).toMatchObject(FIRST_HALF);
+    expectFirstHalfKept(row);
     // Control: the stream had run — the call ran, kept its one result, and replied.
-    expect(failNextCommit).toBe(false);
+    expect(failNextCommit).toBe(null);
     expect(writes).toEqual([{ row: "final" }]);
     expect(resultFor(row.parts, "c2").map((r) => r.output)).toEqual(["saved"]);
     expect(prompts).toHaveLength(1);
+  }, 30_000);
+
+  // A cancel that reaches the failure path reports the whole turn, as the success path
+  // does: both halves folded, not the first half's figures under this run's model.
+  it("folds both halves' figures when the continuation is cancelled on the failure path", async () => {
+    const chat = `${C}-dropped-cancel`;
+    await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
+    failNextCommit = Object.assign(new Error("aborted"), { name: "AbortError" });
+
+    expect(await continueApproval(chat)).toBe("cancelled");
+
+    const row = await storedRow(chat);
+    expect(row.status).toBe("cancelled");
+    // Control: the stream ran and billed this run's 10 + 2 tokens over one call.
+    expect(failNextCommit).toBe(null);
+    expect(prompts).toHaveLength(1);
+    expect(row).toMatchObject({
+      steers: FIRST_HALF.steers, touchedFiles: FIRST_HALF.touchedFiles,
+      model: "mock-model", usage: { input: 110, output: 22, cached: 0 }, llmCalls: 1,
+    });
+    expect(row.durationMs).toBeGreaterThanOrEqual(FIRST_HALF.durationMs);
+    expect(row.costUsd).toBeGreaterThanOrEqual(FIRST_HALF.costUsd);
   }, 30_000);
 
   // The read of the suspended row is what failed. Its row exists, so nothing may be
@@ -376,7 +409,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     const row = await storedRow(chat);
     expect(row.status).toBe("failed");
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
-    expect(row).toMatchObject(FIRST_HALF);
+    expectFirstHalfKept(row);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
   }, 30_000);
