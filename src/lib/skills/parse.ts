@@ -22,6 +22,10 @@ const MATTER_OPTS = {
       throw new SkillParseError("SKILL.md frontmatter must be YAML");
     },
   },
+  // Without an excerpt function, gray-matter reads `excerpt_separator` from the
+  // parsed data and stringifies it inside matter(), so an alias array there would
+  // expand before assertBounded ever sees it. Nothing here uses the excerpt.
+  excerpt: () => "",
 };
 
 function assertBounded(value: unknown, budget: { left: number }, depth: number): void {

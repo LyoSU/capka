@@ -73,4 +73,14 @@ describe("parseSkillMarkdown", () => {
     const long = `s: &s ${"a".repeat(30_000)}\nr: [${Array(10).fill("*s").join(", ")}]`;
     expect(() => parseSkillMarkdown(md(`name: x\n${long}`))).toThrow(/too large once expanded/);
   });
+
+  it("bounds an alias array under excerpt_separator before gray-matter expands it", () => {
+    // gray-matter would join this key's value into one string inside matter() itself.
+    const levels = [`a0: &a0 [${Array(10).fill("x").join(", ")}]`];
+    for (let i = 1; i < 9; i++) levels.push(`a${i}: &a${i} [${Array(10).fill(`*a${i - 1}`).join(", ")}]`);
+    const raw = md(`name: x\n${levels.join("\n")}\nexcerpt_separator: *a8`);
+    const started = performance.now();
+    expect(() => parseSkillMarkdown(raw)).toThrow(/too large once expanded/);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
 });
