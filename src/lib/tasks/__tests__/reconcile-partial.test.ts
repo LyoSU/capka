@@ -61,6 +61,21 @@ describe("reconcileZombies", () => {
     expect(String(query.mock.calls[0][0])).toContain("message_effects");
   });
 
+  // `replyText` and `producedWork` trim with JavaScript's trim(); Postgres' btrim takes
+  // only what it is given. Every btrim in the statement has to be given that same set,
+  // or a stranded reply keeps an edge NBSP the runner's own text would have dropped.
+  it("trims text exactly as JavaScript's trim() does", async () => {
+    await reconcileZombies();
+    const sql = String(query.mock.calls[0][0]);
+    const sets = [...sql.matchAll(/E'((?:\\u[0-9a-f]{4})+)'/g)].map((m) => m[1]);
+    expect(sets.length).toBe([...sql.matchAll(/btrim\(/g)].length);
+    const js: number[] = [];
+    for (let c = 0; c <= 0xffff; c++) if (String.fromCharCode(c).trim() === "") js.push(c);
+    for (const set of sets) {
+      expect(set.match(/[0-9a-f]{4}/g)!.map((h) => parseInt(h, 16)).sort((a, b) => a - b)).toEqual(js);
+    }
+  });
+
   it("hands each reaped task its own verdict, so the live tab is told what the row says", async () => {
     query.mockResolvedValue({
       rows: [

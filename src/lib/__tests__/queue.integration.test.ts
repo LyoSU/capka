@@ -10,6 +10,8 @@ import {
   reconcileZombies,
   commitTurnOutcome,
 } from "../tasks/queue";
+import { replyText } from "../chat/tree";
+import type { StoredPart } from "../chat/contracts";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run queue.integration
 //
@@ -124,6 +126,28 @@ run("durable queue", () => {
       ]);
       const { rows } = await pool.query(`SELECT content, metadata->>'status' AS s FROM messages WHERE id = $1`, ["msg-qt-zomb-text"]);
       expect(rows[0]).toEqual({ content: "First.\n\nSecond.", s: "failed" });
+    });
+
+    // What the reconciler writes must be what the runner would have: replyText trims
+    // with JavaScript's trim(), which takes Unicode spaces too, not only ASCII ones.
+    it("trims the stranded text the way the runner's own replyText does", async () => {
+      const parts = [
+        { type: "text", text: "\u00a0First.\u3000" },
+        { type: "text", text: "\u2028\u00a0" },
+        { type: "text", text: "\ufeffSecond.\u202f" },
+      ];
+      await strand("qt-zomb-unicode", parts);
+      const { rows } = await pool.query(`SELECT content FROM messages WHERE id = $1`, ["msg-qt-zomb-unicode"]);
+      expect(rows[0].content).toBe(replyText(parts as StoredPart[]));
+      // Control: the runner's text really is the trimmed one.
+      expect(replyText(parts as StoredPart[])).toBe("First.\n\nSecond.");
+    });
+
+    // A part of nothing but Unicode spaces is no more work than an empty one.
+    it("does not call a turn that left only Unicode spaces 'partial work'", async () => {
+      await strand("qt-zomb-blank", [{ type: "text", text: "\u00a0\u3000" }]);
+      const { rows } = await pool.query(`SELECT metadata->>'errorCategory' AS c FROM messages WHERE id = $1`, ["msg-qt-zomb-blank"]);
+      expect(rows[0].c).toBe("interrupted");
     });
 
     it("rebuilds the text of a row whose task already failed, over what the column held", async () => {

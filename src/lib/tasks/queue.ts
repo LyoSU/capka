@@ -598,6 +598,11 @@ export const INTERRUPTED_MESSAGE = INTERRUPTED_ERROR.userMessage;
 /** Its partial twin: the crash landed on a turn that had already produced work. */
 export const INTERRUPTED_PARTIAL_MESSAGE = INTERRUPTED_PARTIAL_ERROR.userMessage;
 
+/** The characters JavaScript's `trim()` strips (ECMAScript WhiteSpace and
+ *  LineTerminator), as a Postgres literal: `btrim` with it drops exactly what the
+ *  TypeScript twins below drop, where its default takes only the ASCII space. */
+const TRIM_CHARS_SQL = String.raw`E'\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'`;
+
 /**
  * The SQL twin of `producedWork` (errors/friendly.ts): did this row leave the user
  * anything to keep? Finished text, a tool result, or a tool that ran and threw — a
@@ -625,7 +630,7 @@ const PRODUCED_WORK_SQL = `(EXISTS (
               -- BEFORE running it. Mirrors producedWork in errors/friendly.ts; the
               -- two are one definition in two languages and must move together.
               OR (p->>'type' = 'tool-error' AND p->>'invalid' IS DISTINCT FROM 'true')
-              OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', '')) <> ''))
+              OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', ''), ${TRIM_CHARS_SQL}) <> ''))
         OR EXISTS (
           SELECT 1 FROM message_effects me WHERE me.message_id = m.id))`;
 
@@ -637,19 +642,16 @@ const INTERRUPTED_METADATA_SQL = `CASE WHEN ${PRODUCED_WORK_SQL}
           END`;
 
 /**
- * `replyText` (chat/tree.ts) in SQL, near enough: a stranded reply's text, rebuilt
- * from its parts. Not exact — `btrim` strips only ASCII whitespace where `trim()` also
- * takes Unicode spaces, so a part keeps an edge NBSP or ideographic space, and a part
- * holding nothing else is joined in where `replyText` drops it.
+ * `replyText` (chat/tree.ts) in SQL: a stranded reply's text, rebuilt from its parts.
  * Mid-stream snapshots leave `content` to the finishing write, which a dead worker
  * never reaches, so failing the row is also what gives it the text that
  * search, export and a later fork read. A row without parts keeps its content.
  */
 const REPLY_TEXT_SQL = `CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
             THEN COALESCE((
-              SELECT string_agg(btrim(p->>'text', E' \\t\\n\\r\\f'), E'\\n\\n' ORDER BY i)
+              SELECT string_agg(btrim(p->>'text', ${TRIM_CHARS_SQL}), E'\\n\\n' ORDER BY i)
                 FROM jsonb_array_elements(m.metadata->'parts') WITH ORDINALITY AS e(p, i)
-               WHERE p->>'type' = 'text' AND btrim(p->>'text', E' \\t\\n\\r\\f') <> ''), '')
+               WHERE p->>'type' = 'text' AND btrim(p->>'text', ${TRIM_CHARS_SQL}) <> ''), '')
             ELSE m.content END`;
 
 /** How old a budget hold with no task row must be before reconcileZombies releases it.
