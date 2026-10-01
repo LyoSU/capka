@@ -307,10 +307,14 @@ sign in, or are linked to the bot, as anyone but the Telegram id in their addres
 
 ```bash
 docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
-SELECT u.id, u.email, u.role, u.status, u.created_at,
+SELECT u.id, u.name, u.email, u.role, u.status, u.created_at,
+       CASE WHEN EXISTS (SELECT 1 FROM account a WHERE a.user_id = u.id AND a.provider_id = 'telegram'
+                           AND 'tg' || a.account_id || '@telegram.local' = lower(btrim(u.email))) THEN 'shared'
+            WHEN EXISTS (SELECT 1 FROM account a WHERE a.user_id = u.id AND a.provider_id <> 'telegram') THEN 'squat'
+            ELSE 'moved' END AS kind,
        (SELECT string_agg(a.provider_id || ':' || a.account_id, ', ')
           FROM account a WHERE a.user_id = u.id) AS sign_in,
-       (SELECT string_agg(l.telegram_user_id::text, ', ')
+       (SELECT string_agg(l.telegram_user_id || coalesce(' @' || l.telegram_username, ''), ', ')
           FROM telegram_links l WHERE l.user_id = u.id) AS bot_link
 FROM "user" u
 WHERE lower(btrim(u.email)) LIKE '%@telegram.local'
@@ -323,25 +327,40 @@ SQL
 ```
 
 No rows is the expected result: a Telegram user's only sign-in is `telegram:<n>`, where
-`<n>` is the number in their own `tg<n>@telegram.local` address. Only that entry
-proves the row belongs to the address's owner. A `telegram:` entry with any other
-number is someone else's Telegram linked through a link code, not the owner.
+`<n>` is the number in their own `tg<n>@telegram.local` address. `kind` sorts the rows
+that do appear:
 
-A row without `telegram:<n>` for its own `<n>` in `sign_in` is a squat: in Settings →
-People (`/settings/users`) suspend that user, which signs them out everywhere, then
-remove them.
-
-A row with `telegram:<n>` for its own `<n>` is the real Telegram user's account, with
-their chats, that someone else can also sign in to; removing it deletes their data.
-Suspend it, delete every other sign-in and bot link, then reactivate it. If that
-removes their own bot link, their next message to the bot restores it:
+- **`squat`**: a sign-in other than Telegram (a password) and no `telegram:<n>` for its
+  own `<n>`. Someone else registered the address. In Settings → People
+  (`/settings/users`) suspend that user, which signs them out everywhere, then remove
+  them.
+- **`moved`**: only `telegram:` entries, or none, and none for its own `<n>`. Usually
+  the owner, who disconnected Telegram on the Settings page and linked another Telegram
+  account. A squat that linked its own Telegram and then removed its password looks the
+  same. Removing the row deletes its chats, so do not remove it on this result alone:
+  ask the person behind it (`name`, the Telegram account in `bot_link`) whether they
+  first signed in with Telegram `<n>`.
+- **`shared`**: the real Telegram user's account, with their chats, that someone else
+  can also sign in to; removing it deletes their data. Suspend it, then run the
+  statements below. They delete every other sign-in and bot link (if that removes the
+  owner's own bot link, their next message to the bot restores it), switch off the
+  account's automations and unshare its chats: a webhook URL or a share link the other
+  person created keeps working once the account is active again.
 
 ```bash
 docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
 DELETE FROM account WHERE user_id = '<id>' AND NOT (provider_id = 'telegram' AND account_id = '<n>');
 DELETE FROM telegram_links WHERE user_id = '<id>' AND telegram_user_id <> <n>;
+UPDATE automations SET enabled = false WHERE user_id = '<id>';
+UPDATE chats SET visibility = 'private', share_token = NULL WHERE user_id = '<id>' AND share_token IS NOT NULL;
 SQL
 ```
+
+Then reactivate it. Before their next chat the owner checks Settings → Extensions
+(skills and connectors), Memory and Providers (when shown) and removes anything they did not add: a
+connector receives the agent's tool calls with their data. They turn back on the
+automations they want, using "Replace the address" on a webhook automation, and
+re-share the chats they meant to share (each gets a new link).
 
 ## Known limitations & residual risks
 
