@@ -9,12 +9,13 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 - `POST /api/chat` no longer takes the client's `messages` array (context is built from the stored conversation) and refuses a `userMessage` over 100,000 characters (`MESSAGE_TOO_LONG`). Browser tabs left open across the upgrade need a reload before Regenerate works.
 - `GET /api/chat` accepts `messageId` and returns only that turn onward; a finished turn now fetches its own rows instead of the whole conversation.
-- Mid-stream reply snapshots are written every 1–5 s depending on reply size (5 s from about 320 KB), and unchanged `content` is no longer rewritten. Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
+- Mid-stream reply snapshots are written every 1–5 s depending on reply size (5 s from about 320 KB) and no longer rewrite `messages.content`, which is written once when the reply finishes (full-text search and Markdown export see a streaming reply's text only then). Migration 0079 drops the redundant `idx_messages_chat_id` index; it applies automatically at boot.
 - Changing workspace files, memories or attachments between turns no longer invalidates the prompt cache for the conversation history, and Anthropic chats keep the history cached after a long tool-using turn.
 - The platform's V8 heap is now 75% of `PLATFORM_MEM_LIMIT` (3 GB at the default 4g) instead of a fixed 3 GB, so lowering the limit on a small box needs no `NODE_OPTIONS` override. Building the image locally needs `node:22-alpine` ≥ 22.21 (`docker pull node:22-alpine`).
 - A browser tab reconnecting mid-stream backs its full-chat reloads off from 250 ms to 2 s instead of re-fetching every 250 ms.
 - Forking a chat reads only the copied path instead of every message in the chat.
 - Tool approvals and answers to agent questions now count against the per-user chat rate limit (429 `RATE_LIMITED`), and the card says when the rate or spending limit refused it.
+- When a chat that was emergency-trimmed fails to compact, the platform log has a `warn` line "compaction failed after an emergency trim" with `taskId`, `chatId` and `userId`; the other compaction failure lines carry `emergencyTrimmed`.
 - `README.md` and `docs/DEPLOY.md` now state that the platform port binds `0.0.0.0` unless `PLATFORM_BIND=127.0.0.1` is set, and that `SANDBOX_PIDS_LIMIT` defaults to 1024.
 
 ### Fixed
@@ -29,15 +30,21 @@ All notable changes to Capka are documented here. Format follows
 - Approving a tool call after the agent already used another tool in that turn now runs the approved call.
 - Approving a tool call or answering an agent question now checks the user's spending limit like a normal send; in Telegram an over-limit answer gets the limit notice and the question stays open.
 - Telegram sends no longer leak a pending budget hold when saving the message fails, and a turn whose finalize fails no longer bills its spend twice.
-- Chats whose active path exceeds about 65,000 messages, and the memory page of a very large memory space, open again instead of failing on Postgres' bind-parameter limit.
+- Chats whose active path exceeds about 65,000 messages, forking or importing a very long chat, the memory page of a very large memory space, and memory, automation and plugin lists for a user with very many of them no longer fail on Postgres' bind-parameter limit.
 - `POST /api/chat` refuses an empty send to a new chat (400); clearing the text of a files-only edit no longer turns it into a regenerate, and a reply in an imported chat that answers another reply no longer offers a Regenerate that can only fail.
-- Send refusals for an empty send, a reused message id or the flood guard now show in the user's language (`NOTHING_TO_SEND`, `MESSAGE_ID_IN_USE`, `RATE_LIMITED`), and a refused first send no longer leaves an empty chat behind.
-- A tool approved in chat no longer fails the turn after it ran when the continuation is retried (context-overflow trim, capability retry, stall or provider-error resume), and the stored reply keeps the approval card, earlier steps and approved result without sending the pre-approval part twice.
-- An approval or question left pending after an admin removes the chat's provider connection now settles as a failed turn with a "model unavailable" message instead of a card that spins forever and breaks later sends; Telegram chats get the notice too.
+- Send refusals for an empty send, a reused message id or the flood guard (`NOTHING_TO_SEND`, `MESSAGE_ID_IN_USE`, `RATE_LIMITED`), a deleted chat or project, a Telegram-only chat, an out-of-date page, an unusable model, an ended session, a pending, suspended or view-only account, or a server error now show in the user's language; an admin whose model can't be used is pointed at Settings → Providers, and a refused first send no longer leaves an empty chat behind.
+- A tool approved in chat no longer fails the turn after it ran when the continuation is retried (context-overflow trim, capability retry, stall or provider-error resume), and the stored reply keeps the approval card, earlier steps and approved result without sending the pre-approval part twice; the live view no longer blanks them until a reload, and an empty continuation reply is retried once.
+- An approval or question left pending after an admin removes the chat's provider connection now settles as a failed turn with a "model unavailable" message instead of a card that spins forever and breaks later sends; Telegram chats get the notice too, and web and Telegram say the answer was saved but the assistant couldn't continue instead of "Done".
+- Chats with a declined approval, or with an approved tool call that failed, never ran or whose continuation was cancelled, are no longer rejected by Anthropic and OpenAI on every later message; existing chats recover on their next message.
+- An approval card no longer spins on "Applying…" when its step can't run (connector unavailable, approval rule changed, the chat's project deleted, or its continuation stopped while queued); the step is recorded as not run.
+- An approved step cut off by Stop, the turn deadline or a lost worker is no longer reported as not run, and an approved settings change cut off mid-run asks the user to check before retrying.
+- A send whose provider connection URL is now refused (its host no longer resolves, or private provider URLs were blocked after it was saved) is refused as `MODEL_UNAVAILABLE` instead of a 500.
 - After a context-overflow restart or a rejected-attachment retry, files a user attached are re-sent with (or stripped from) the user's own message instead of the platform's recovery note.
 - Compaction after an emergency trim summarizes the untrimmed history instead of dropping the trimmed turns, retries once with tool outputs cleared when the summary request itself overflows, and a pruned long tool loop no longer makes the next turn re-send every cleared tool output.
 - Self-hosted OpenAI-compatible backends that require strictly alternating roles (e.g. vLLM with Gemma or Mistral) no longer reject sandbox turns with a 400, and Ollama and strict OpenAI-compatible backends (e.g. Groq) get the turn context as one string, apart from the user's words.
-- A shared-key budget hold stranded by a crash before its turn was queued is released after an hour instead of reducing the user's budget for the rest of the window.
+- A shared-key budget hold stranded by a crash before its turn was queued is released after an hour instead of reducing the user's budget for the rest of the window; a Telegram attachment whose download never finishes is dropped after 10 minutes so the message still goes through.
+- In a very large workspace the agent's workspace overview keeps the shallowest files instead of whatever the walk reached first, and one unreadable subfolder no longer fails the whole listing. Redeploy `sandbox-controller`.
+- Folder sync no longer deletes local copies of files when the workspace listing hits a read error (e.g. `EACCES`, `EIO`) on a directory; the sync stops with an error instead. Redeploy both `sandbox-controller` and `platform`.
 - Realtime (LISTEN/NOTIFY) connections probe an idle socket after 10 s, so a silently dropped database connection is detected within minutes instead of about 2 hours.
 - A deleted workspace file no longer stays clickable for the rest of the session (its existence check expires after 30 s); the in-memory list of pending Telegram usernames is now bounded.
 
@@ -45,7 +52,7 @@ All notable changes to Capka are documented here. Format follows
 - MCP connector health checks are cached per user, so one user's OAuth "ok" or "unauthorized" is no longer shown to others.
 - A stored user role other than `admin`, `user` or `viewer` now gets read-only `viewer` access instead of `user`.
 - `POST /api/chat` refuses a `userMessageId` that belongs to another chat's message (409), and client-supplied conversation text can no longer stand in for what the user typed.
-- Attached file names, workspace paths and memory facts can no longer close the turn-context wrapper or add their own lines to the agent's instructions.
+- Attached file names, workspace paths and memory facts can no longer close the turn-context wrapper or add their own lines to the agent's instructions, and a tool argument quoted in the platform's restart recovery note can no longer pose as the turn context.
 
 ## [0.42.0] - 2026-09-11
 
