@@ -2749,7 +2749,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit));
         })()
           .then(async (result) => {
-            if (!result) return;
+            if (!result) {
+              // compactConversation already logged why, without the chat: an emergency-trimmed
+              // turn that cannot compact leaves the chat near the window, so it keeps overflowing.
+              if (emergencyTrimmed) tlog.warn("compaction failed after an emergency trim — chat may stay near the context limit");
+              return;
+            }
             const summary = result.text;
             // Re-entrancy floor: if the summary itself would still trip the
             // compaction threshold, checkpointing it is pointless — the next turn
@@ -2759,7 +2764,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             const estSummaryTokens = Math.ceil(summary.length / 4);
             if (estSummaryTokens >= budget.effectiveLimit * COMPACT_THRESHOLD) {
               tlog.warn("compaction summary still over threshold — skipping checkpoint", {
-                estSummaryTokens, effectiveLimit: budget.effectiveLimit,
+                estSummaryTokens, effectiveLimit: budget.effectiveLimit, emergencyTrimmed,
               });
               return;
             }
@@ -2791,9 +2796,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             });
           })
           .catch((e) => {
-            tlog.error("compaction failed", { err: String(e) });
-            // An emergency-trimmed turn that cannot compact leaves the chat near the window, so it keeps overflowing.
-            if (emergencyTrimmed) tlog.warn("compaction failed after an emergency trim — chat may stay near the context limit", { chatId });
+            tlog.error("compaction failed", { err: String(e), emergencyTrimmed });
           }),
       );
     }

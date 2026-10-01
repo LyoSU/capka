@@ -9,7 +9,8 @@ import { ForbiddenError } from "@/lib/errors";
  *
  * What is pinned here is that the SAME two helpers stand in front of the call, and that
  * the reservation this route opens is always closed again — a hold with no task row is
- * reconciled by nothing, so a leaked one inflates the user's budget forever.
+ * only released by the orphan-hold sweep after its one-hour bound, so a leaked one inflates
+ * the user's budget until then.
  */
 const {
   requireWriter, requireOwned, loadActivePath, generateChatTitle,
