@@ -183,6 +183,26 @@ from**: `sudo sh scripts/up.sh`, or for a rollback see
 forward on boot. Restore with the stack's own `psql`, as the script does: dumps
 from current `pg_dump` start with `\restrict`, which older `psql` clients reject.
 
+`restore.sh` in v0.42.0 and earlier works differently: it restores over the live
+schema, accepts a cut-short dump and restarts the platform. On such a checkout
+swap in the current script first (it checks the dump itself). It finds the compose
+files relative to itself, so it must stay in `scripts/`; `update.sh` and the
+installer put the release's own copy back:
+
+```bash
+git fetch --depth 1 origin stable && git show FETCH_HEAD:scripts/restore.sh > scripts/restore.sh
+```
+
+**A dump older than `WORKSPACE_TTL_MS` (30 days) needs one more step before the
+first start.** The controller deletes a workspace, files included, once its
+`last_activity` in the database is older than `WORKSPACE_TTL_MS`. That value comes
+back with the dump (file times do not count) and the first sweep runs a minute
+after boot. So set `WORKSPACE_TTL_MS` in `.env` to at least the dump's age plus 30
+days (e.g. `15552000000`, 180 days), and lower it again, with a re-run of
+`sudo sh scripts/up.sh`, once people have worked in their chats; workspaces nobody
+touched are deleted then. `GC_GRACE_MS` only covers directories that have no row,
+so it does not help.
+
 ### Restoring on a new host
 
 ```bash
@@ -199,6 +219,10 @@ Copy `./data` back only after the restore, while `restore.sh` has the
 controller stopped: the controller deletes workspace directories that have no
 row in the database and have not changed for a week (`rsync -a` and `tar` keep
 the old times), and on the empty database no workspace has a row.
+
+A dump from v0.42.0 or earlier needs the `restore.sh` swap from [Restore](#restore)
+before the `restore.sh` line, and one older than 30 days the `WORKSPACE_TTL_MS`
+step there before the last `up.sh`.
 
 If the log shows `[security] CAPKA_MASTER_KEY does not match the key that
 encrypted the stored data`, the `.env` is not the one that belongs to the dump.
@@ -253,7 +277,9 @@ fi
 Check the marker first, as above: psql commits whatever a cut-short dump
 contains, after dropping the old schema. On a new server, copy the files into the
 controller's `/data` directory after the restore and before the redeploy, for the
-reason given in [Restoring on a new host](#restoring-on-a-new-host).
+reason given in [Restoring on a new host](#restoring-on-a-new-host). For a dump
+older than 30 days set `WORKSPACE_TTL_MS` in the resource's environment before that
+redeploy ([Restore](#restore)).
 
 ## Routing / TLS
 

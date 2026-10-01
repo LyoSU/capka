@@ -83,9 +83,10 @@ sudo CAPKA_BRANCH=v<previous> ./scripts/update.sh
 ```
 
 Do not `docker compose start`/`up` between the two steps: the newer image would
-migrate the restored database forward again. Run step 1 from the current
-checkout — older releases ship a `restore.sh` that restores over the live schema
-and restarts the platform itself.
+migrate the restored database forward again. Step 1 needs the `restore.sh` of a
+release newer than v0.42.0; v0.42.0 and earlier ship one that restores over the
+live schema and restarts the platform itself. On such a checkout swap the script
+in first ([Restore](DEPLOY.md#restore)).
 
 Anything written after the dump was taken is lost. Keep the pre-upgrade dump
 until the new version is verified.
