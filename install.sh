@@ -31,6 +31,7 @@
 #                 branch needs CAPKA_BUILD=1 — images exist for releases only.)
 #   CAPKA_VERSION image tag to pull          (default: matches the installed ref)
 #   CAPKA_BUILD=1 compile from source instead of pulling prebuilt images
+#   CAPKA_ALLOW_MAJOR=1  re-running over an install: allow moving to a newer major
 #
 # Re-running upgrades in place: it resets the checkout to the target ref (your
 # .env config is gitignored and preserved, but local edits to tracked files are
@@ -251,8 +252,24 @@ resolve_version() {
 
   # Nothing named at all: install the newest published release.
   if [ -z "$CAPKA_BRANCH_EXPLICIT" ] && [ -z "$CAPKA_VERSION" ]; then
-    latest=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
-      | awk -F/ '{ print $NF }' | sort -V | tail -n1)
+    # Plain vX.Y.Z only: a prerelease (vX.Y.Z-rc.N) is a test build, never the
+    # default. Same rule as scripts/update.sh.
+    releases=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
+      | awk -F/ '{ print $NF }' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V || true)
+    latest=$(printf '%s\n' "$releases" | tail -n1)
+    # Re-running over an install stays on its major, like update.sh; a new major
+    # needs CAPKA_ALLOW_MAJOR=1 (read its release notes first).
+    cur=$(git -C "$CAPKA_DIR" describe --tags --abbrev=0 2>/dev/null || true)
+    cur="${cur#v}"; cur="${cur%%.*}"
+    case "$cur" in ''|*[!0-9]*) ;; *)
+      if [ "${CAPKA_ALLOW_MAJOR:-}" != "1" ]; then
+        kept=$(printf '%s\n' "$releases" | grep -E "^v${cur}\." | tail -n1 || true)
+        if [ -n "$latest" ] && [ "$latest" != "$kept" ]; then
+          warn "$latest is a new major version. Staying on v$cur.x; to move, read its release notes, then re-run with CAPKA_ALLOW_MAJOR=1."
+        fi
+        latest="$kept"
+      fi
+    ;; esac
     if [ -n "$latest" ]; then
       info "Newest release is $latest — installing it (set CAPKA_BRANCH=master CAPKA_BUILD=1 for the development tip)."
       CAPKA_BRANCH="$latest"

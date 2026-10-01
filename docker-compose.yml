@@ -214,7 +214,7 @@ services:
       # install gVisor on the host (scripts/install-gvisor.sh) for the hardened,
       # fail-closed secure profile (untrusted/multi-tenant workloads).
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
-      # Controller auto-detects the daemon-host path backing ./data by inspecting
+      # Controller auto-detects the daemon-host path backing ./data/storage by inspecting
       # its own mount at boot, so bind mounts resolve regardless of launch cwd.
       # Set HOST_DATA_ROOT only to override.
       - HOST_DATA_ROOT=${HOST_DATA_ROOT:-}

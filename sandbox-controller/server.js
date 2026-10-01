@@ -121,6 +121,7 @@ const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MOUNT_ALLOW_ROOTS = (process.env.SANDBOX_MOUNT_ALLOW || "").split(":").filter(Boolean);
 const MAX_SESSIONS_PER_USER = posIntEnv("MAX_SESSIONS_PER_USER", 2);
 const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
+const WORKSPACE_LIMIT_BYTES = MAX_WORKSPACE_MB * 1024 * 1024; // 0 = no limit: every gate below skips it
 // Budget for the per-user SHARED store (`/shared`), counted separately from any
 // one workspace because it is shared BY all of them and outlives each. It was
 // counted by nothing at all: the workspace quota measures a single session dir,
@@ -263,7 +264,7 @@ const maintenanceTimers = new Set();
 // injected by tests via __setTestState). See workspace-quota.js for the why.
 const quota = createQuotaTracker({
   size: (userId, sessionId) => workspace.size(userId, sessionId),
-  limitBytes: MAX_WORKSPACE_MB * 1024 * 1024,
+  limitBytes: WORKSPACE_LIMIT_BYTES,
   ttlMs: QUOTA_CACHE_TTL_MS,
 });
 
@@ -806,7 +807,7 @@ const server = createServer(async (req, res) => {
       store.touch(destR.sessionId);
       try {
         const out = await workspace.copyInto(destR.userId, srcR.sessionId, destR.sessionId, subdir, {
-          limitBytes: MAX_WORKSPACE_MB * 1024 * 1024,
+          limitBytes: WORKSPACE_LIMIT_BYTES || undefined,
         });
         quota.forget(destR.sessionId); // size grew — next exec must re-measure
         log("workspace.copy", { from: srcR.sessionId, to: destR.sessionId });
@@ -844,8 +845,7 @@ const server = createServer(async (req, res) => {
       if (!file) return jsonRes(res, 400, { error: "No file in request" });
       const fileName = file.filename || "upload";
 
-      const currentSize = await workspace.size(r.userId, r.sessionId);
-      if (currentSize + file.data.length > MAX_WORKSPACE_MB * 1024 * 1024) {
+      if (WORKSPACE_LIMIT_BYTES > 0 && (await workspace.size(r.userId, r.sessionId)) + file.data.length > WORKSPACE_LIMIT_BYTES) {
         return jsonRes(res, 413, { error: `Workspace quota exceeded (max ${MAX_WORKSPACE_MB}MB)` });
       }
       const relPath = targetPath === "." ? fileName : `${targetPath}/${fileName}`;
@@ -947,8 +947,9 @@ async function flushAndGc() {
 // the same breaches, which dominated the controller's idle CPU and the logs.
 const overQuotaWarned = new Set();
 async function overQuotaScan() {
+  if (!(WORKSPACE_LIMIT_BYTES > 0)) return;
   try {
-    const limitBytes = MAX_WORKSPACE_MB * 1024 * 1024;
+    const limitBytes = WORKSPACE_LIMIT_BYTES;
     // Reclaim regenerable deps from idle, stopped, over-quota workspaces first, so
     // the warning below fires only for genuinely-stuck ones (full of real files).
     if (typeof workspace.pruneRegenerable === "function") {
