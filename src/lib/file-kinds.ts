@@ -90,6 +90,15 @@ export function extOf(name: string): string {
   return name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
 }
 
+/** Formats whose first page is worth showing as a tile instead of the typed sheet
+ *  (rendered in the sandbox by /api/sandbox/files/thumbnail): exactly what
+ *  LibreOffice opens and a person recognises by its first page. */
+const THUMB_EXTS = new Set(["pdf", "docx", "doc", "odt", "rtf", "pptx", "ppt", "odp", "xlsx", "xls", "ods"]);
+
+export function thumbnailable(name: string): boolean {
+  return THUMB_EXTS.has(extOf(name));
+}
+
 /** Textual `application/*` types that are really plain text (read in the viewer). */
 function isTextualMime(type: string): boolean {
   return (

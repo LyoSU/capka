@@ -20,7 +20,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
-import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
+import { extOf, fileKind, previewKind, thumbnailable } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
 import { applyGesture, swipeVerdict, tapZoomTarget, wheelZoomFactor, TAP_SLOP_PX, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
@@ -1516,6 +1516,9 @@ export function FileThumb({ file, className }: { file: PreviewFile; className?: 
   const kind = previewKind(file.name);
 
   if (kind === "image") return <ImageThumb file={file} className={className} />;
+  // Office documents and PDFs: their first page, rendered in the sandbox, over the
+  // typed sheet that stays as the fallback (no running sandbox, a failed render).
+  if (!file.shared && thumbnailable(file.name)) return <DocThumb key={file.path} file={file} className={className} />;
   // Everything that is not an image: the typed sheet with its extension on a
   // badge. A .csv used to get a different tile from a .xlsx sitting next to it
   // — the csv rendered the first 600 characters of itself at 4px, which at tile
@@ -1523,6 +1526,83 @@ export function FileThumb({ file, className }: { file: PreviewFile; className?: 
   // fetch it. Two files whose names differ and whose contents differ looked
   // like the same smudge; the sheet at least says CSV.
   return <BinaryFileThumb name={file.name} className={className} />;
+}
+
+// At most two page renders in flight from this page: each can hold a connection
+// for seconds while LibreOffice works, and HTTP/1.1 gives a page six in total.
+let thumbSlots = 2;
+const thumbWaiters: (() => void)[] = [];
+function takeThumbSlot(): Promise<void> {
+  if (thumbSlots > 0) {
+    thumbSlots--;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => thumbWaiters.push(resolve));
+}
+function giveThumbSlot() {
+  const next = thumbWaiters.shift();
+  if (next) next();
+  else thumbSlots++;
+}
+
+/** First page of a document as its tile, asked for only once the tile is near
+ *  the viewport. The typed sheet shows until the picture has loaded and stays if
+ *  it never does. */
+function DocThumb({ file, className }: { file: PreviewFile; className?: string }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const holding = useRef(false);
+  const [src, setSrc] = useState<string | null>(null);
+  const [shown, setShown] = useState<"loading" | "ok" | "failed">("loading");
+  const url = `/api/sandbox/files/thumbnail?${fileQuery(file)}&path=${encodeURIComponent(file.path)}`;
+
+  const release = useCallback(() => {
+    if (!holding.current) return;
+    holding.current = false;
+    giveThumbSlot();
+  }, []);
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    let cancelled = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        io.disconnect();
+        void takeThumbSlot().then(() => {
+          holding.current = true;
+          if (cancelled) release();
+          else setSrc(url);
+        });
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => {
+      cancelled = true;
+      io.disconnect();
+      release();
+    };
+  }, [url, release]);
+
+  return (
+    <div ref={boxRef} className={cn("relative overflow-hidden", className)}>
+      <BinaryFileThumb name={file.name} className="h-full w-full" />
+      {src && shown !== "failed" && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          onLoad={() => { release(); setShown("ok"); }}
+          onError={() => { release(); setShown("failed"); }}
+          className={cn(
+            "absolute inset-0 h-full w-full bg-white object-cover object-top motion-safe:transition-opacity motion-safe:duration-300",
+            shown === "ok" ? "opacity-100" : "opacity-0",
+          )}
+        />
+      )}
+    </div>
+  );
 }
 
 /** The thumbnail for a referenced file that isn't in the workspace — a muted

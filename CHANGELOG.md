@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 - The browser tab shows what the chats need: the title is prefixed ● (waiting on you), ⟳ (working) or ✓ (unread reply) with a count, the favicon gets a matching dot, and an installed app shows the count as its badge where the platform supports it.
 - An installed Capka app (Chromium/Android) appears in the system share sheet and in "Open with" for office files, PDFs, CSV and text: the files land staged in a new chat's composer, not sent. Reinstalling is not needed; browsers pick up the new `manifest.json` on their own.
+- File tiles for Word, Excel, PowerPoint, OpenDocument and PDF files show the first page, rendered in the chat's sandbox when one is already running (cached in its `/tmp`, never in the workspace); otherwise the typed icon stays.
 
 ### Changed
 - One type scale (12/14/16/18px with paired line heights) and whole-pixel corner radii (6/8/12/16px) across the UI; transitions default to 140ms on the app's own easing.
