@@ -353,6 +353,7 @@ d("controller HTTP API (lifecycle)", () => {
   it("says so when the listed folder does not exist, instead of only returning nothing", async () => {
     const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
     await ws.ensure("u3", "w3");
+    await ws.write("u3", "w3", "sub/b.txt", Buffer.from("y")); // own fixture: runs alone under -t
     const list = async (path) => {
       const q = new URLSearchParams({ path, depth: "20", hash: "1", userId: "u3", token: token("u3", "w3") });
       return (await fetch(`${base}/sessions/w3/files?${q}`, { headers: { Authorization: `Bearer ${SECRET}` } })).json();
