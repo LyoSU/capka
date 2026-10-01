@@ -216,17 +216,22 @@ else
 fi
 ```
 
-**A dump older than `WORKSPACE_TTL_MS` (30 days) needs one more step before the
-first start.** The controller deletes a workspace, files included, once its
-`last_activity` in the database is older than `WORKSPACE_TTL_MS`. That value comes
-back with the dump (file times do not count) and the first sweep runs a minute
-after boot. So set `WORKSPACE_TTL_MS` in `.env` to at least the dump's age plus 30
-days (e.g. `15552000000`, 180 days) and make the first start `sudo sh scripts/up.sh`:
-it recreates the controller with the new value, while the `docker compose ... start`
-line `restore.sh` prints keeps the old container and its 30 days. Lower it again,
-with another `sudo sh scripts/up.sh`, once people have worked in their chats;
-workspaces nobody touched are deleted then. `GC_GRACE_MS` only covers directories
-that have no row, so it does not help.
+**Before the first start after any restore, reset the workspace clocks.** The
+controller deletes a workspace, files included, once its `last_activity` in the
+database is older than `WORKSPACE_TTL_MS` (30 days), and the first sweep runs a
+minute after boot. That value comes back with the dump (file times do not count),
+so a workspace that had been idle 25 days when a 10-day-old dump was taken reads 35
+days and is deleted, even if it was used every day since. While the stack is still
+stopped:
+
+```bash
+sudo docker compose exec -T postgres psql -X -U Capka -d Capka \
+  -c 'UPDATE sandbox_sessions SET last_activity = (extract(epoch from now()) * 1000)::bigint'
+```
+
+Workspaces nobody uses afterwards are deleted 30 days later, as usual. If it reports
+that `sandbox_sessions` does not exist, the dump has no workspace rows to reset.
+`GC_GRACE_MS` only covers directories that have no row, so it does not help.
 
 ### Restoring on a new host
 
@@ -245,9 +250,9 @@ controller stopped: the controller deletes workspace directories that have no
 row in the database and have not changed for a week (`rsync -a` and `tar` keep
 the old times), and on the empty database no workspace has a row.
 
-A dump from v0.42.0 or earlier needs the `restore.sh` swap from [Restore](#restore)
-before the `restore.sh` line, and one older than 30 days the `WORKSPACE_TTL_MS`
-step there before the last `up.sh`.
+Every restore needs the workspace reset from [Restore](#restore) before the last
+`up.sh`, and a dump from v0.42.0 or earlier the `restore.sh` swap there before the
+`restore.sh` line.
 
 If the log shows `[security] CAPKA_MASTER_KEY does not match the key that
 encrypted the stored data`, the `.env` is not the one that belongs to the dump.
@@ -302,9 +307,13 @@ fi
 Check the marker first, as above: psql commits whatever a cut-short dump
 contains, after dropping the old schema. On a new server, copy the files into the
 controller's `/data` directory after the restore and before the redeploy, for the
-reason given in [Restoring on a new host](#restoring-on-a-new-host). For a dump
-older than 30 days set `WORKSPACE_TTL_MS` in the resource's environment before that
-redeploy ([Restore](#restore)).
+reason given in [Restoring on a new host](#restoring-on-a-new-host). Before the
+redeploy reset the workspace clocks, for the reason given in [Restore](#restore):
+
+```bash
+docker exec postgres-<uuid> psql -X -U Capka -d Capka \
+  -c 'UPDATE sandbox_sessions SET last_activity = (extract(epoch from now()) * 1000)::bigint'
+```
 
 ## Routing / TLS
 

@@ -78,11 +78,16 @@ release:
 #    before the upgrade, and leaves them stopped.
 sudo ./scripts/restore.sh ./data/backups/capka-<taken-before-the-upgrade>.sql.gz
 
-# 2. Checks out the previous release, pins its images and starts it.
+# 2. Restarts the workspaces' idle clocks, which came back from the dump
+#    (DEPLOY.md, Restore); otherwise the controller may delete live workspaces.
+sudo docker compose exec -T postgres psql -X -U Capka -d Capka \
+  -c 'UPDATE sandbox_sessions SET last_activity = (extract(epoch from now()) * 1000)::bigint'
+
+# 3. Checks out the previous release, pins its images and starts it.
 sudo CAPKA_BRANCH=v<previous> ./scripts/update.sh
 ```
 
-Do not `docker compose start`/`up` between the two steps: the newer image would
+Do not `docker compose start`/`up` before step 3: the newer image would
 migrate the restored database forward again. Step 1 needs the `restore.sh` of a
 release newer than v0.42.0; v0.42.0 and earlier ship one that restores over the
 live schema and restarts the platform itself. On such a checkout swap the script
