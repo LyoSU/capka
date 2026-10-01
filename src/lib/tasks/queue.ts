@@ -523,9 +523,10 @@ export async function settleCancelledContinuation(messageId: string, tx: QueueTx
  * decide or answer it after that: its card would stay live (keeping the web composer
  * blocked), and a late tap would resume a reply the conversation has moved on from.
  * Each undecided approval is declined with the reason the model reads, so its card
- * reads "not allowed"; each unanswered ask is skipped with the result an explicit Skip
- * stores. Calls already decided are left to the continuation that owns them. Pass the
- * admission's transaction, so the new message and this settle land together.
+ * reads declined / not allowed; each unanswered ask is skipped with the result an
+ * explicit Skip stores. Calls already decided are left to the continuation that owns
+ * them. Pass the admission's transaction, so the new message and this settle land
+ * together.
  *
  * Compare-and-set on the metadata read, so a decision landing at the same moment is
  * never overwritten: whichever writes first wins (a decision needs its call still
@@ -559,6 +560,8 @@ export async function settleMovedPast(messageId: string, tx: QueueTx = db): Prom
        WHERE id = ${messageId} AND metadata = ${read}::jsonb`);
     if (settled.rowCount) return;
   }
+  // Left to the read-time seal, so a card that stayed waiting leaves a trace.
+  log.warn("could not settle a waiting reply the chat went past", { messageId });
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,
