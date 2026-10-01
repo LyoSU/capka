@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 
-// Mock the run dependencies so we exercise the real worker→queue→runner→
-// realtime→usage→DB wiring without a network LLM or a sandbox.
+// Mock the run dependencies so we exercise the real runner→realtime→usage→DB
+// wiring without a network LLM or a sandbox. (The enqueue/claim half lives in
+// queue.integration.test.ts.)
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
@@ -52,7 +53,7 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";
-import { enqueueTask, claimNextTask } from "../tasks/queue";
+import type { TaskRow } from "../tasks/queue";
 import { runAgentTask } from "../tasks/runner";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -78,20 +79,19 @@ run("runAgentTask end-to-end (mock model, real queue/realtime/DB)", () => {
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
   });
 
-  it("claims a queued task, streams it, persists message + usage, finalizes", async () => {
+  it("streams a claimed task, persists message + usage, finalizes", async () => {
     const events: Array<Record<string, unknown>> = [];
     const unsub = await realtime.subscribe(`user:${U}`, (d) => events.push(d as Record<string, unknown>));
 
-    await enqueueTask({
-      id: "e2e1",
-      chatId: C,
-      userId: U,
-      payload: { replyParentId: "m1" },
-    });
-
-    const task = await claimNextTask("w-e2e");
-    expect(task?.id).toBe("e2e1");
-    await runAgentTask(task!, "w-e2e");
+    // Inserted already claimed rather than enqueued: a dev worker polling the same
+    // database would otherwise take a queued row first (and run it on a real model).
+    const { rows } = await pool.query<TaskRow>(
+      `INSERT INTO tasks (id, chat_id, user_id, status, payload, worker_id, lease_expires_at, heartbeat_at, attempts)
+       VALUES ('e2e1', $1, $2, 'running', $3::jsonb, 'w-e2e', now() + interval '5 minutes', now(), 1)
+       RETURNING *`,
+      [C, U, JSON.stringify({ replyParentId: "m1" })],
+    );
+    await runAgentTask(rows[0], "w-e2e");
     await new Promise((r) => setTimeout(r, 300)); // let final NOTIFYs land
 
     // Realtime: start → text → finish(completed)

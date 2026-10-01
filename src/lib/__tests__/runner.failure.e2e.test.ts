@@ -26,7 +26,7 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";
-import { enqueueTask, claimNextTask } from "../tasks/queue";
+import type { TaskRow } from "../tasks/queue";
 import { runAgentTask } from "../tasks/runner";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -54,16 +54,15 @@ run("runAgentTask: model/provider gone (prepareRun throws before insert)", () =>
     const events: Array<Record<string, unknown>> = [];
     const unsub = await realtime.subscribe(`user:${U}`, (d) => events.push(d as Record<string, unknown>));
 
-    await enqueueTask({
-      id: "e2e-fail-1",
-      chatId: C,
-      userId: U,
-      payload: { uiMessages: [{ id: "mf1", role: "user", parts: [{ type: "text", text: "hi" }] }] },
-    });
-
-    const task = await claimNextTask("w-e2e-fail");
-    expect(task?.id).toBe("e2e-fail-1");
-    await runAgentTask(task!, "w-e2e-fail");
+    // Inserted already claimed, as in runner.e2e.test.ts: a dev worker polling the
+    // same database would otherwise take a queued row first.
+    const { rows } = await pool.query<TaskRow>(
+      `INSERT INTO tasks (id, chat_id, user_id, status, payload, worker_id, lease_expires_at, heartbeat_at, attempts)
+       VALUES ('e2e-fail-1', $1, $2, 'running', $3::jsonb, 'w-e2e-fail', now() + interval '5 minutes', now(), 1)
+       RETURNING *`,
+      [C, U, JSON.stringify({ uiMessages: [{ id: "mf1", role: "user", parts: [{ type: "text", text: "hi" }] }] })],
+    );
+    await runAgentTask(rows[0], "w-e2e-fail");
     await new Promise((r) => setTimeout(r, 300)); // let final NOTIFYs land
 
     // A failed assistant message was INSERTED (not silently dropped) and the
