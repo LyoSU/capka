@@ -60,12 +60,14 @@ describe("checkConfig", () => {
     expect(checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: "http://10.0.0.5:3000" })).toContainEqual(
       expect.objectContaining({ key: "PUBLIC_URL", level: "warn", message: expect.stringContaining("Secure") }),
     );
-    // The legacy alias only sets better-auth's baseURL — getPublicUrl never reads it, so
-    // the origin still comes from headers. Warn, but without the Secure claim: auth.ts
-    // does issue Secure cookies for an https alias.
+    // The legacy alias is only a partial fallback: better-auth's baseURL and the MCP OAuth
+    // redirect read it, getPublicUrl never does, so other absolute links and origin checks
+    // still come from headers. Warn, but without the Secure claim: auth.ts does issue
+    // Secure cookies for an https alias.
     const aliasOnly = checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined, BETTER_AUTH_URL: "https://a.example" });
     const aliasWarn = aliasOnly.find((i) => i.key === "PUBLIC_URL");
-    expect(aliasWarn).toMatchObject({ level: "warn", message: expect.stringContaining("BETTER_AUTH_URL only sets better-auth's own base URL") });
+    expect(aliasWarn).toMatchObject({ level: "warn", message: expect.stringContaining("BETTER_AUTH_URL is only a partial fallback") });
+    expect(aliasWarn?.message).toContain("sign-in and MCP OAuth links use it");
     // What the headers decide is the absolute links and the trusted origin, not just "sign-in".
     expect(aliasWarn?.message).toContain("absolute links and the trusted origin");
     expect(aliasWarn?.message).not.toContain("Secure");

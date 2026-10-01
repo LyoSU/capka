@@ -185,7 +185,9 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
         (secure ? "" : "session cookies are issued without the Secure flag, and ") +
         "absolute links and the trusted origin come from each request's Host / X-Forwarded-Host " +
         "header (http://localhost:3000 without one)" +
-        (env.BETTER_AUTH_URL?.trim() ? "; BETTER_AUTH_URL only sets better-auth's own base URL" : "") +
+        (env.BETTER_AUTH_URL?.trim()
+          ? "; BETTER_AUTH_URL is only a partial fallback (sign-in and MCP OAuth links use it; other absolute links and origin checks still follow the headers)"
+          : "") +
         ". Set PUBLIC_URL to the https:// address users open.",
     });
   } else if (isProd && !secure) {
