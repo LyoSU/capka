@@ -246,10 +246,11 @@ export const POST = apiHandler(async (req: Request) => {
         chatId,
         // A compacted reply's checkpoint is spliced in directly under it, and what
         // follows the reply hangs below the checkpoint. A client that has not reloaded
-        // since `chat:compacted` still names the reply — an edit of the message after it,
-        // a send from that leaf — and would land beside the checkpoint: a version switcher
-        // counting the divider, and a turn run at full window. Resolved in this INSERT
-        // rather than at the lookup above, so a checkpoint committed in between counts too.
+        // since `chat:compacted` still names the reply as the parent of an edit, and a
+        // plain send whose activeLeafId was read before the checkpoint committed does too;
+        // either would land beside the checkpoint: a version switcher counting the divider,
+        // and a turn run at full window. Resolved in this INSERT rather than at the lookup
+        // above, so a checkpoint committed in between counts too.
         parentId: parentIsReply
           ? sql<string>`coalesce((select c.id from messages c where c.parent_id = ${parentId} and c.metadata ? 'compaction' limit 1), ${parentId})`
           : parentId,
