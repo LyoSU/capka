@@ -25,14 +25,15 @@ export async function POST(request: Request) {
     if (!emailSignupAllowed({ mode, emailEnabled, setupDone })) {
       return Response.json({ error: "Registration is disabled" }, { status: 403 });
     }
-    // Reserve the synthetic Telegram domain: nobody may register an
-    // @telegram.local address, which would otherwise let an attacker pre-seed
-    // the predictable placeholder email of a Telegram user (account-takeover
-    // vector). Read via clone() so the original body still reaches the handler.
-    const email = await request
-      .clone()
-      .json()
-      .then((b: { email?: string }) => b?.email ?? "")
+    // Early, friendly refusal of the reserved synthetic Telegram domain. The
+    // authoritative check is user.create.before in lib/auth.ts; this one only
+    // spares the caller a generic error. better-auth accepts form-encoded
+    // sign-ups as well as JSON, so read both. clone() leaves the original body
+    // for the handler.
+    const body = request.clone();
+    const email = await (request.headers.get("content-type")?.includes("form")
+      ? body.formData().then((f) => String(f.get("email") ?? ""))
+      : body.json().then((b: { email?: unknown }) => String(b?.email ?? "")))
       .catch(() => "");
     if (email && isReservedTelegramEmail(email)) {
       return Response.json({ error: "This email address is not allowed" }, { status: 400 });

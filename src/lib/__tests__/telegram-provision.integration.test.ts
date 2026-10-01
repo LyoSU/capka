@@ -122,6 +122,26 @@ run("provisionTelegramUser", () => {
     expect(await linkCount(id)).toBe(1);
   });
 
+  it("refuses to heal a synthetic-email row that already signs in another way", async () => {
+    await setSetting("registration_mode", "open");
+    const id = IDS[5];
+    const email = `tg${id}@telegram.local`;
+    const squatId = `heal-squat-${id}`;
+    // A row holding the synthetic email but carrying a password: whoever made it
+    // can sign in to it, so binding the Telegram id there would hand them the
+    // Telegram user's account.
+    await pool.query(`INSERT INTO "user" (id, name, email, role, status) VALUES ($1, 'Squat', $2, 'user', 'active')`, [squatId, email]);
+    await pool.query(
+      `INSERT INTO account (id, account_id, provider_id, user_id, password) VALUES ($1, $2, 'credential', $2, 'hash')`,
+      [`cred-${squatId}`, squatId],
+    );
+
+    const r = await provisionTelegramUser(id, { name: "Victim", username: null });
+    expect(r).toEqual({ refused: "conflict" });
+    expect(await accountCount(id)).toBe(0);
+    expect(await linkCount(id)).toBe(0);
+  });
+
   it("unlink revokes BOTH the delivery link and the login identity (account row)", async () => {
     await setSetting("registration_mode", "open");
     const id = IDS[0];

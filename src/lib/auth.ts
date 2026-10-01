@@ -12,6 +12,7 @@ import { getMasterKey, getTelegramOidcConfig, getRegistrationMode, isSetupComple
 import { getPublicUrl } from "./url";
 import {
   decodeTelegramClaims,
+  isReservedTelegramEmail,
   resolveRegistration,
   syntheticTelegramEmail,
   telegramDisplayName,
@@ -96,8 +97,8 @@ export async function getAuth() {
     // pre-registered email/password account could hijack a victim's Telegram
     // login. Auto-link-by-email has no legitimate use here (real users never own
     // an @telegram.local address), so we drop the root cause entirely. The
-    // synthetic domain is also reserved against email sign-up (see the
-    // /api/auth/[...all] gate) so it can't be squatted.
+    // synthetic domain is also reserved against every other way of creating a
+    // user (user.create.before below) so it can't be squatted.
     account: {
       accountLinking: {
         enabled: true,
@@ -115,6 +116,15 @@ export async function getAuth() {
           // operator can bootstrap; admin is granted only by the SETUP_TOKEN-gated
           // /api/setup flow, never by being first to register.
           before: async (user, ctx) => {
+            // The synthetic tg<id>@telegram.local domain belongs to the Telegram
+            // callback alone. Enforced here, not only in the [...all] route,
+            // because every creation path passes through this hook whatever the
+            // body encoding (sign-up also accepts form posts) or caller.
+            const isTelegramCallback =
+              ctx?.path === "/oauth2/callback/:providerId" && ctx.params?.providerId === TELEGRAM_PROVIDER_ID;
+            if (isReservedTelegramEmail(user.email) && !isTelegramCallback) {
+              throw new APIError("BAD_REQUEST", { message: "This email address is not allowed" });
+            }
             const isOAuth = !!ctx?.path?.includes("callback");
             const isEmailSignup = ctx?.path === "/sign-up/email";
             if (!isOAuth && !isEmailSignup) return;
@@ -253,7 +263,7 @@ const TG_PROVISION_LOCK = 0x74677576; // 'tguv'
  *  lifecycle status, which the caller still gates on) or a policy refusal. */
 export type TelegramProvisionOutcome =
   | { userId: string; status: AccountStatus }
-  | { refused: "closed" | "setup_incomplete" };
+  | { refused: "closed" | "setup_incomplete" | "conflict" };
 
 /**
  * Resolve — or, on first contact, CREATE — the platform user behind a Telegram
@@ -322,6 +332,25 @@ export async function provisionTelegramUser(
       .where(eq(schema.users.email, email))
       .limit(1);
     const userId = u!.id;
+
+    // Only a true orphan may be healed: a row that signs in some other way (a
+    // password, or any other identity) was not made by Telegram provisioning, and
+    // binding this Telegram id to it would hand the Telegram user's chats to
+    // whoever controls that row. Refuse instead of guessing.
+    if (userId !== newUserId) {
+      const [other] = await tx
+        .select({ providerId: schema.accounts.providerId })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.userId, userId))
+        .limit(1);
+      if (other) {
+        console.error(
+          `[auth] refused to bind Telegram id ${telegramUserId} to existing user ${userId}: ` +
+            `it already has a "${other.providerId}" account`,
+        );
+        return { refused: "conflict" };
+      }
+    }
 
     // Tokenless account row — better-auth fills tokens on a later OIDC sign-in;
     // it only needs the provider+accountId→user mapping to avoid a duplicate user.
