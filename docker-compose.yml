@@ -213,10 +213,11 @@ services:
       # Default runc — boots on any Docker host. gVisor is opt-in: set runsc AND
       # install gVisor on the host (scripts/install-gvisor.sh) for the hardened,
       # fail-closed secure profile (untrusted/multi-tenant workloads).
-      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runc}
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
       # Controller auto-detects the daemon-host path backing ./data by inspecting
       # its own mount at boot, so bind mounts resolve regardless of launch cwd.
       # Set HOST_DATA_ROOT only to override.
+      - HOST_DATA_ROOT=${HOST_DATA_ROOT:-}
       - SANDBOX_IMAGE=ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
       # Egress kill-switch. Default true (agents reach the internet; granted
       # egress is still firewalled off private/metadata ranges). Set false to
@@ -235,29 +236,48 @@ services:
       # roots), only subpaths of these may be mounted, on top of the system-path
       # denylist. Unset → any non-system path, gated by the admin confirm.
       - SANDBOX_MOUNT_ALLOW=${SANDBOX_MOUNT_ALLOW:-}
-      # Per-sandbox RAM. The /tmp + /opt/mcp tmpfs are charged to this same
-      # cgroup, so keep headroom.
-      - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-1024}
-      # gVisor's own stub processes count against this budget and are never
-      # reclaimed, so it is spent for the life of the sandbox, not per command.
-      - SANDBOX_PIDS_LIMIT=${SANDBOX_PIDS_LIMIT:-1024}
-      # Passed through empty rather than with a default repeated here: the
-      # controller treats an empty value as unset and applies its own default, so
-      # there is only ever one number to keep in sync (see posFloatEnv/posIntEnv).
+      # Every tunable below is passed through empty rather than with a default
+      # repeated here: the controller treats an empty value as unset and applies
+      # its own default (sandbox-controller/server.js), so a deployment without
+      # this file gets the same behaviour. The defaults quoted in these comments
+      # are checked against the code by src/lib/__tests__/deploy-contract.test.ts.
+      #
+      # Per-sandbox RAM, default 1024. The /tmp + /opt/mcp tmpfs are charged to
+      # this same cgroup, so keep headroom.
+      - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-}
+      # Per-sandbox /tmp tmpfs in MB, default 64. Counts against SANDBOX_MEMORY_MB.
+      - SANDBOX_TMP_MB=${SANDBOX_TMP_MB:-}
+      # Default 1024. gVisor's own stub processes count against this budget and
+      # are never reclaimed, so it is spent for the life of the sandbox.
+      - SANDBOX_PIDS_LIMIT=${SANDBOX_PIDS_LIMIT:-}
+      # CPU cores per sandbox, default 1.0.
       - SANDBOX_CPUS=${SANDBOX_CPUS:-}
-      - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-2}
+      # Time limit for a sandbox command that does not set its own, default 30000.
+      - SANDBOX_EXEC_TIMEOUT_MS=${SANDBOX_EXEC_TIMEOUT_MS:-}
+      # Concurrent sandboxes per user, default 2.
+      - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-}
+      # Disk budget per workspace, default 500; 0 disables the check.
+      - MAX_WORKSPACE_MB=${MAX_WORKSPACE_MB:-}
+      # Largest single file, kernel-enforced; default MAX_WORKSPACE_MB, 0 disables.
+      - MAX_FILE_MB=${MAX_FILE_MB:-}
+      # Disk budget for each user's /shared store, default 500; 0 disables.
+      - MAX_SHARED_MB=${MAX_SHARED_MB:-}
+      # Largest upload into a workspace, default 100.
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-}
       # Stop an idle CONTAINER after this (files + row survive, revived on the
-      # next tool call).
-      - SANDBOX_IDLE_TTL_MS=${SANDBOX_IDLE_TTL_MS:-900000}
-      # How long a background job may hold its sandbox past the idle cutoff, and
-      # the ceiling on that hold. Empty ⇒ the controller's defaults (1h / 6h).
+      # next tool call). Default 900000 (15 min).
+      - SANDBOX_IDLE_TTL_MS=${SANDBOX_IDLE_TTL_MS:-}
+      # How long a background job may hold its sandbox past the idle cutoff,
+      # default 3600000 (1h).
       - SANDBOX_BUSY_LEASE_MS=${SANDBOX_BUSY_LEASE_MS:-}
+      # Ceiling on that hold, default 21600000 (6h).
       - SANDBOX_BUSY_MAX_MS=${SANDBOX_BUSY_MAX_MS:-}
       # Delete a WORKSPACE (row + disk) unused this long — the real "how long do
-      # my files live" knob.
-      - WORKSPACE_TTL_MS=${WORKSPACE_TTL_MS:-2592000000}
+      # my files live" knob. Default 2592000000 (30 days).
+      - WORKSPACE_TTL_MS=${WORKSPACE_TTL_MS:-}
       # Grace for TRULY orphaned dirs (no DB row) before the sweep removes them.
-      - GC_GRACE_MS=${GC_GRACE_MS:-604800000}
+      # Default 604800000 (7 days).
+      - GC_GRACE_MS=${GC_GRACE_MS:-}
     networks:
       - default
       - docker-proxy

@@ -19,8 +19,8 @@ const COMPOSE = readFileSync("docker-compose.yml", "utf8");
 const BUILD = readFileSync("docker-compose.build.yml", "utf8");
 const ENV_EXAMPLE = readFileSync(".env.example", "utf8");
 
-/** One service's block out of a compose file, comments stripped. */
-function serviceBlock(file: string, name: string): string {
+/** One service's block out of a compose file, comments stripped unless asked. */
+function serviceBlock(file: string, name: string, { comments = false } = {}): string {
   const start = file.indexOf(`\n  ${name}:`);
   expect(start, `service ${name} not found`).toBeGreaterThan(-1);
   const rest = file.slice(start + 1);
@@ -28,7 +28,7 @@ function serviceBlock(file: string, name: string): string {
   // or a comment, so do not require a newline right after it.
   const end = rest.search(/\n {2}[a-z][a-z0-9_-]*:/);
   const block = end === -1 ? rest : rest.slice(0, end);
-  return block.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  return comments ? block : block.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
 }
 
 /** `image:` reference of a service, verbatim (including the `${...}` parts). */
@@ -327,6 +327,143 @@ describe("every documented knob reaches the container that reads it", () => {
       .filter((n) => documented.has(n))
       .filter((n) => !new RegExp(`^\\s*- ${n}=`, "m").test(passed));
     expect(missing, `documented in .env.example but not passed to sandbox-controller: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  /**
+   * The controller and the egress proxy, held to the same rule as the platform: every
+   * variable they read is an operator knob that compose passes through from `.env`
+   * and that is documented somewhere an operator looks, or it is named here as
+   * internal with the reason. Before this, only knobs that already had a `NAME=` line
+   * in .env.example were checked, so MAX_WORKSPACE_MB and MAX_FILE_MB were documented
+   * in SECURITY.md, read by the controller, and unreachable under compose.
+   */
+  const CONTROLLER_INTERNAL = new Set<string>([
+    // Fixed by compose to the stack's own wiring; an operator changing one is
+    // changing the topology, not tuning a value.
+    "DOCKER_HOST",
+    "DATA_ROOT",
+    "DATABASE_URL",
+    "COMPUTE_BACKEND",
+    "WORKSPACE_STORE",
+    "SANDBOX_IMAGE",
+    "SANDBOX_EGRESS_NETWORK",
+    "SANDBOX_EGRESS_PROXY_ENDPOINT",
+    // The listen port, which the platform's SANDBOX_CONTROLLER_URL and the
+    // healthcheck both name as 3001.
+    "PORT",
+    // Dev overlay and tests only: the first accepts the well-known dev secret, the
+    // second lets a test import server.js without booting it.
+    "ALLOW_DEFAULT_SECRET",
+    "CONTROLLER_NO_BOOT",
+    // Must match the users baked into Dockerfile.sandbox (1000 and 1001).
+    "SANDBOX_UID",
+    "SANDBOX_GID",
+    "SANDBOX_MCP_UID",
+    "SANDBOX_MCP_GID",
+    // Derived from SANDBOX_RUNTIME; overriding it could only weaken the runsc check.
+    "SANDBOX_PROFILE",
+    // Internal sizes and cadences. The operator-facing limits on the same things are
+    // SANDBOX_TMP_MB, MAX_WORKSPACE_MB and the platform's MAX_TOOL_OUTPUT_CHARS.
+    "SANDBOX_MCP_TMP_MB",
+    "SANDBOX_HOME_MB",
+    "MAX_EXEC_OUTPUT_BYTES",
+    "QUOTA_CACHE_TTL_MS",
+    "OVER_QUOTA_SCAN_MS",
+    "REGEN_REAP_IDLE_MS",
+    "FLUSH_INTERVAL_MS",
+  ]);
+  const PROXY_INTERNAL = new Set<string>([
+    // Fixed by compose: the controller hands sandboxes capka-egress-proxy:3128.
+    "EGRESS_PROXY_PORT",
+    "EGRESS_PROXY_BIND",
+    // Internal limits on the proxy's own connections.
+    "EGRESS_MAX_TUNNELS",
+    "EGRESS_IDLE_MS",
+    "EGRESS_CONNECT_MS",
+  ]);
+
+  /** Every place an operator reads about configuration. */
+  const DOCS = ["README.md", "SECURITY.md", ...readdirSync("docs").filter((f) => f.endsWith(".md")).map((f) => join("docs", f))]
+    .map((f) => readFileSync(f, "utf8"))
+    .join("\n");
+
+  describe.each([
+    { service: "sandbox-controller", sources: () => controllerSources, internal: CONTROLLER_INTERNAL },
+    { service: "egress-proxy", sources: () => ["sandbox-controller/egress-proxy.js"], internal: PROXY_INTERNAL },
+  ])("$service", ({ service, sources, internal }) => {
+    const read = () => envRead(sources());
+    const raw = () => serviceBlock(COMPOSE, service, { comments: true }).split("\n");
+    /** Passed from the operator's `.env`, not set to a fixed value by compose. */
+    const passedFromEnv = (n: string) => new RegExp(`^\\s*- ${n}=\\$\\{${n}[:}]`, "m").test(serviceBlock(COMPOSE, service));
+    /** Its compose line has a comment right above it saying what it is. */
+    const commentedInCompose = (n: string) => {
+      const lines = raw();
+      const i = lines.findIndex((l) => l.trim().startsWith(`- ${n}=`));
+      return i > 0 && lines[i - 1].trim().startsWith("#");
+    };
+
+    it("passes every variable it reads through from .env, or names it internal", () => {
+      const unreachable = [...read()].filter((n) => !internal.has(n) && !passedFromEnv(n)).sort();
+      expect(unreachable, `read by ${service} but never reaches it from .env: ${unreachable.join(", ")}`).toEqual([]);
+    });
+
+    it("documents every variable it reads, or names it internal", () => {
+      const undocumented = [...read()]
+        .filter((n) => !internal.has(n))
+        .filter((n) => !documented.has(n) && !new RegExp(`\\b${n}\\b`).test(DOCS) && !commentedInCompose(n))
+        .sort();
+      expect(undocumented, `read by ${service} but documented nowhere: ${undocumented.join(", ")}`).toEqual([]);
+    });
+
+    it("keeps every internal exemption current", () => {
+      // An exemption for a name no longer read, or one compose now passes from .env,
+      // has stopped being true and would hide the next real gap.
+      const stale = [...internal].filter((n) => !read().has(n) || passedFromEnv(n));
+      expect(stale, `stale internal exemptions for ${service}: ${stale.join(", ")}`).toEqual([]);
+    });
+  });
+
+  /**
+   * One default per controller knob. Compose used to repeat its own (1024 MB RAM,
+   * 2 sessions per user, 7-day orphan grace) over different code defaults (512, 5,
+   * 1 hour), so a deployment without compose silently ran other limits than the
+   * documented ones. Compose now passes the knobs empty; this keeps it that way and
+   * holds every default quoted in compose comments and DEPLOY.md to the code.
+   */
+  describe("controller defaults", () => {
+    const code = new Map(
+      [...readFileSync("sandbox-controller/server.js", "utf8").matchAll(/(?:posInt|posFloat|int)Env\(\s*"([A-Z][A-Z0-9_]*)",\s*([0-9.]+)\s*\)/g)]
+        .map((m) => [m[1], Number(m[2])] as const),
+    );
+
+    it("are not repeated by compose", () => {
+      // SANDBOX_ALLOW_NETWORK differs on purpose: the code fails closed (no egress)
+      // when nothing sets it, and the shipped stack opens it.
+      const repeated = [...serviceBlock(COMPOSE, "sandbox-controller").matchAll(/^\s*- ([A-Z][A-Z0-9_]*)=\$\{\1:-([^}]+)\}/gm)]
+        .map((m) => m[1])
+        .filter((n) => n !== "SANDBOX_ALLOW_NETWORK");
+      expect(repeated, `compose repeats a controller default: ${repeated.join(", ")}`).toEqual([]);
+    });
+
+    it("match what compose comments and DEPLOY.md quote", () => {
+      const quoted: [string, string, number][] = [];
+      const lines = serviceBlock(COMPOSE, "sandbox-controller", { comments: true }).split("\n");
+      lines.forEach((l, i) => {
+        const name = l.match(/^\s*- ([A-Z][A-Z0-9_]*)=/)?.[1];
+        if (!name) return;
+        let j = i - 1;
+        while (j >= 0 && lines[j].trim().startsWith("#")) j--;
+        const n = lines.slice(j + 1, i).join(" ").match(/\bdefault ([0-9]+(?:\.[0-9]+)?)/i)?.[1];
+        if (n) quoted.push(["docker-compose.yml", name, Number(n)]);
+      });
+      for (const m of readFileSync("docs/DEPLOY.md", "utf8").matchAll(/`([A-Z][A-Z0-9_]*)` \(([0-9]+(?:\.[0-9]+)?)\)/g)) {
+        if (code.has(m[1])) quoted.push(["docs/DEPLOY.md", m[1], Number(m[2])]);
+      }
+      // The comparison must have something to compare, or a format change would pass it.
+      expect(quoted.length).toBeGreaterThan(15);
+      const wrong = quoted.filter(([, n, v]) => code.get(n) !== v).map(([f, n, v]) => `${f}: ${n} ${v} (code ${code.get(n)})`);
+      expect(wrong).toEqual([]);
+    });
   });
 
   it("passes every documented proxy knob into egress-proxy", () => {

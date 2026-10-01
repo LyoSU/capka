@@ -89,7 +89,7 @@ const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "capka-sandbox";
 const TMP_MB = posIntEnv("SANDBOX_TMP_MB", 64);
 const MCP_TMP_MB = posIntEnv("SANDBOX_MCP_TMP_MB", 256);
 const HOME_MB = posIntEnv("SANDBOX_HOME_MB", 64);
-const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 512) * 1024 * 1024;
+const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 1024) * 1024 * 1024;
 const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 1024);
 
 /** What the agent is told when the workspace container is gone — reclaimed while
@@ -119,7 +119,7 @@ const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 // only paths under one of these may be mounted. Unset ⇒ any path passing the
 // denylist is allowed, with the in-chat admin confirm as the final gate.
 const MOUNT_ALLOW_ROOTS = (process.env.SANDBOX_MOUNT_ALLOW || "").split(":").filter(Boolean);
-const MAX_SESSIONS_PER_USER = posIntEnv("MAX_SESSIONS_PER_USER", 5);
+const MAX_SESSIONS_PER_USER = posIntEnv("MAX_SESSIONS_PER_USER", 2);
 const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
 // Budget for the per-user SHARED store (`/shared`), counted separately from any
 // one workspace because it is shared BY all of them and outlives each. It was
@@ -138,7 +138,7 @@ const QUOTA_CACHE_TTL_MS = intEnv("QUOTA_CACHE_TTL_MS", 5000);
 const MAX_UPLOAD_MB = posIntEnv("MAX_UPLOAD_MB", 100);
 const SANDBOX_UID = intEnv("SANDBOX_UID", 1000);
 const SANDBOX_GID = intEnv("SANDBOX_GID", 1000);
-const GC_GRACE_MS = posIntEnv("GC_GRACE_MS", 3600000); // 1h
+const GC_GRACE_MS = posIntEnv("GC_GRACE_MS", 604800000); // 7d
 const FLUSH_INTERVAL_MS = posIntEnv("FLUSH_INTERVAL_MS", 60000);
 // The over-quota breach is advisory (ops alerting only) — no need to `du` every
 // live workspace each minute. Scan on a slow cadence and warn once per crossing.
