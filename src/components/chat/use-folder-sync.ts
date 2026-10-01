@@ -89,7 +89,12 @@ export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget;
       if (alive) setCanAttach(!!acc?.canAttach);
     })();
     void refresh();
-    return () => { alive = false; };
+    // The assistant's pick-a-folder card attaches through the bridge, not through
+    // connect(), and announces it with this event — without it the folder would sit
+    // outside the turn-scoped sync until a reload.
+    const onChanged = () => void refresh();
+    window.addEventListener("folders:changed", onChanged);
+    return () => { alive = false; window.removeEventListener("folders:changed", onChanged); };
   }, [refresh]);
 
   // Full sync over every connected folder (skipping those needing a re-grant).

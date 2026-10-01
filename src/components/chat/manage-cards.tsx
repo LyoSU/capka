@@ -156,15 +156,22 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
       const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
       const { chatTarget } = await import("@/lib/workspace-target");
       const folder = await pickAndCreate(chatTarget(chatId));
-      if (folder) onPicked?.(folder.name);
+      if (folder) {
+        // The composer's folder sync lists folders on mount only — tell it this one exists.
+        window.dispatchEvent(new Event("folders:changed"));
+        onPicked?.(folder.name);
+      }
     } catch (e) {
       // The bridge's errors are English and technical — the same localized lines the
       // composer menu shows for the same picker, never the raw message. A folder whose
-      // row exists is attached and the next turn's sync retries it.
+      // row exists is attached: once the composer lists it, the next turn's sync retries it.
       if (e instanceof Error && e.name === "FolderTooLargeError") {
         const m = e as Error & { count?: number; bytes?: number };
         setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      } else setErr(t(e instanceof Error && "attached" in e ? "syncFailed" : "attachFailed"));
+      } else if (e instanceof Error && "attached" in e) {
+        window.dispatchEvent(new Event("folders:changed"));
+        setErr(t("syncFailed"));
+      } else setErr(t("attachFailed"));
     } finally {
       setBusy(false);
     }
