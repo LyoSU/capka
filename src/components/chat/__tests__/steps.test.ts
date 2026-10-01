@@ -43,11 +43,13 @@ describe("describeStep — a memory step names the attempt, not the outcome", ()
   it("the retired pair falls through to the generic label rather than to a dead key", () => {
     // A step row PERSISTED before the retirement renders in the timeline forever, so the
     // question is not whether the tools exist but what a stored row does now. It reads as an
-    // unknown tool — a prettified name — which is honest, and it is why removing the cases is
-    // safe while removing the keys would not have been if anything still referenced them.
+    // unknown tool — the generic label, with the raw id for an admin only — which is honest,
+    // and it is why removing the cases is safe while removing the keys would not have been if
+    // anything still referenced them.
     for (const tool of ["memory_propose", "memory_update"]) {
       const d = describeStep(t, tool, {});
-      expect(d.label).toContain("Memory");
+      expect(d.label).toBe("usedTool");
+      expect(d.adminDetail).toBe(tool);
       expect(d.category).toBe("other");
     }
   });
@@ -199,10 +201,26 @@ describe("describeStep — skills", () => {
 });
 
 describe("describeStep — unknown tools", () => {
-  it("falls back to 'other' with a prettified name", () => {
+  it("falls back to a generic localized label; the raw id is admin-only detail", () => {
     const d = describeStep(t, "some_weird_tool");
     expect(d.category).toBe("other");
-    expect(d.label).toContain("Some weird tool");
+    expect(d.label).toBe("usedTool");
+    expect(d.detail).toBeUndefined();
+    expect(d.adminDetail).toBe("some_weird_tool");
+  });
+
+  it("renders a web-search connector as the search it ran", () => {
+    const d = describeStep(t, "mcp__searxng_mcp__searxng_web_search", { query: "petrol prices" });
+    expect(d.category).toBe("search");
+    expect(d.label).toBe('searchedWebFor({"query":"petrol prices"})');
+    expect(describeStep(t, "mcp__tavily__tavily-search", { query: "x" }).category).toBe("search");
+    // A connector's own `search` stays that connector's step.
+    expect(describeStep(t, "mcp__notion__search", { query: "Q2" }).category).toBe("mcp");
+    expect(describeStep(t, "mcp__google_drive__search_files").category).toBe("mcp");
+  });
+
+  it("drops an _mcp/-mcp suffix from the connector's name", () => {
+    expect(describeStep(t, "mcp__github_mcp__list_issues").brand!.label).toBe("GitHub");
   });
 
   it("shows a neutral working label while the name is still streaming", () => {

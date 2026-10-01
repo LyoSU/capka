@@ -595,6 +595,7 @@
     "tool": {
       "done": "Done",
       "failed": "failed",
+      "stepFailed": "This step couldn't be completed.",
       "technicalDetails": "Technical details",
       "artifacts": "{count, plural, one {Artifact} other {# Artifacts}}",
       "steps": "{count, plural, one {# step} other {# steps}}",
@@ -673,7 +674,6 @@
       "steer": "You added",
       "compacted": "Context compressed",
       "imageUnavailable": "Image unavailable",
-      "reasonedFor": "Reasoned for {duration}",
       "workedFor": "Worked for {duration}",
       "activity": "Activity",
       "stepCount": "{count, plural, one {# action} other {# actions}}",

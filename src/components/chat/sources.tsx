@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { createContext, useContext, useState, type CSSProperties } from "react";
 import { useTranslations } from "next-intl";
 import { Globe, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -31,6 +31,24 @@ function Monogram({ host, className = "" }: { host: string; className?: string }
   );
 }
 
+/** What a reader sees on a citation: its place among the sources THIS reply cited
+ *  (first use = 1), keyed by url. Source numbers are minted per branch, so the raw
+ *  `n` of a later turn's citation can be 30 while its footer says "2 sources". The
+ *  chips and the footer both read their number from here. */
+export const CitationOrdinals = createContext<Map<string, number> | null>(null);
+
+/** One row per url, in first-use order — the grouping the footer lists and the
+ *  ordinals count. */
+export function groupByUrl(list: NumberedSource[]): { ns: number[]; source: NumberedSource }[] {
+  const byUrl = new Map<string, { ns: number[]; source: NumberedSource }>();
+  for (const s of list) {
+    const g = byUrl.get(s.url);
+    if (g) g.ns.push(s.n);
+    else byUrl.set(s.url, { ns: [s.n], source: s });
+  }
+  return [...byUrl.values()];
+}
+
 /** The number badge shared by the inline chip and the footer tile (sizes differ,
  *  surface language matches), so a [N] in the text and its tile read as the
  *  same object. */
@@ -47,8 +65,9 @@ const NUMBER_PILL =
  * link. The `citation-chip` class opts the anchor out of the prose link color,
  * hover underline, and the print URL-append (globals.css).
  */
-export function CitationChip({ n, source }: { n: number; source: NumberedSource }) {
+export function CitationChip({ n: raw, source }: { n: number; source: NumberedSource }) {
   const t = useTranslations("chat.citations");
+  const n = useContext(CitationOrdinals)?.get(source.url) ?? raw;
   const host = hostOf(source.url);
   return (
     <Tooltip>
@@ -89,18 +108,12 @@ const STACKED_MARKS = 4;
  *  Only the cited ones (the full result lists already live in the step panels),
  *  in first-use order, one row per URL: branch-global numbering can hand the same
  *  page two numbers across searches, and two rows for one page would read as two
- *  sources. */
+ *  sources. Each row is numbered by that order — the number its chips show. */
 export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
   const t = useTranslations("chat.citations");
   const [open, setOpen] = useState(false);
 
-  const byUrl = new Map<string, { ns: number[]; source: NumberedSource }>();
-  for (const s of list) {
-    const g = byUrl.get(s.url);
-    if (g) g.ns.push(s.n);
-    else byUrl.set(s.url, { ns: [s.n], source: s });
-  }
-  const rows = [...byUrl.values()];
+  const rows = groupByUrl(list);
 
   return (
     <div className="animate-message-in mt-3">
@@ -139,7 +152,7 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
               clips to its own edge — without the 1px margins the outline survived only
               on the top edge, where the gap left it room. */}
           <ul className="mx-px mb-px mt-1.5 flex list-none flex-col gap-px rounded-lg bg-muted/40 p-1 shadow-hairline">
-            {rows.map(({ ns, source: s }, i) => {
+            {rows.map(({ source: s }, i) => {
               const host = hostOf(s.url);
               return (
                 // The class is applied only while open, so the rows cascade in on
@@ -154,11 +167,8 @@ export function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
                   >
                     <Monogram host={host ?? ""} />
                     <span className="min-w-0 flex-1 truncate text-foreground">{s.title}</span>
-                    <span className="flex shrink-0 gap-1">
-                      {ns.map((n) => (
-                        <span key={n} className={`${NUMBER_PILL} h-4 min-w-4 bg-background px-1 text-[10px]`}>{n}</span>
-                      ))}
-                    </span>
+                    {/* The same ordinal the chips in the text show (CitationOrdinals). */}
+                    <span className={`${NUMBER_PILL} h-4 min-w-4 shrink-0 bg-background px-1 text-[10px]`}>{i + 1}</span>
                     <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground sm:inline">{host ?? s.url}</span>
                   </a>
                 </li>

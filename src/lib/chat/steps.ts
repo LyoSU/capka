@@ -41,6 +41,8 @@ export interface StepInfo {
   file?: string;
   category: StepCategory;
   brand?: StepBrand;
+  /** The raw tool id behind a generic label — for an admin's eyes only. */
+  adminDetail?: string;
 }
 
 /** Last path segment, or "" when no usable path (e.g. args still streaming). */
@@ -102,7 +104,9 @@ const BRANDS: Record<string, { label: string; color: string }> = {
   grok: { label: "Grok", color: "#111111" },
 };
 
-function resolveBrand(server: string): StepBrand {
+function resolveBrand(rawServer: string): StepBrand {
+  // "searxng_mcp" / "tavily-mcp" name the transport, not the service.
+  const server = rawServer.replace(/[_-]mcp$/i, "") || rawServer;
   const norm = server.toLowerCase().replace(/[_\-\s]+/g, "");
   const known = BRANDS[norm];
   const label = known?.label ?? titleCaseSlug(server);
@@ -157,6 +161,13 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
 
   const mcp = parseMcp(toolName);
   if (mcp) {
+    // A web-search connector (SearXNG, Tavily, Brave…) reads as the search it ran,
+    // not as "Searxng · Searxng web search". Keyed on the tool OR a search-shaped
+    // server, so a Notion/Drive `search` stays that connector's own step.
+    if (/web/i.test(mcp.tool) || (/search/i.test(mcp.tool) && /(searx|tavily|brave|^exa|serp|web)/i.test(mcp.server))) {
+      const query = clip(args.query ?? args.q, 40);
+      return { iconKey: "globe", label: query ? t("searchedWebFor", { query }) : t("searchedWeb"), activeLabel: t("searchingWeb"), category: "search" };
+    }
     const brand = resolveBrand(mcp.server);
     const action = prettyToolName(stripConnectorPrefix(mcp.tool, brand.label, mcp.server));
     // When the tool's whole name IS the connector's name, there is no action left to
@@ -332,8 +343,9 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
     return { iconKey: "globe", label: t("fetchedPage"), activeLabel: t("fetchingPage"), category: "browse" };
   }
 
-  const pretty = prettyToolName(toolName);
-  return { iconKey: "wrench", label: pretty || t("usedTool"), activeLabel: pretty ? `${pretty}…` : t("working"), category: "other" };
+  // An unknown tool's id is our or a plugin author's vocabulary, never the
+  // reader's language — a calm generic sentence, with the id for admins only.
+  return { iconKey: "wrench", label: t("usedTool"), activeLabel: t("working"), category: "other", adminDetail: toolName };
 }
 
 /**

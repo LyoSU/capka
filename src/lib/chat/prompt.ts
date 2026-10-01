@@ -40,7 +40,7 @@ export interface BuiltPrompt {
 // mcp/search-normalize.ts). One static sentence teaches the convention; the
 // result itself repeats it, so this is reinforcement, not the sole carrier.
 const CITATIONS_PROMPT = `## Citing sources
-When a tool result lists numbered search results ("[N] Title — URL"), cite them inline as [N] immediately after each claim that uses them. Only cite numbers that actually appear in this conversation's results — never invent one.`;
+When a tool result lists numbered search results ("[N] Title — URL"), cite them inline as [N] immediately after each claim that uses them. Only cite numbers that actually appear in this conversation's results — never invent one. Write the marker as exactly [N] (or [N, M]): no extra or escaped brackets, no link around it, and no source name, URL or "Source:" label next to it — the interface turns [N] into a link and lists the sources itself.`;
 
 const MANAGE_PROMPT = `## Managing settings & configuration
 - When the user asks to change a preference or setting (their language/timezone, connectors, skills, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page, following that tool's rules: discover with \`list\`/\`capabilities\` (never invent a control id), then CALL the matching action and react to its result — permission is decided entirely by the server, so never refuse up front.

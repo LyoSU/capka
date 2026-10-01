@@ -36,7 +36,7 @@ import {
 } from "@/lib/chat/record-list";
 import { isBareUrl, type StepField } from "@/lib/chat/steps";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
-import { hostOf, CitedSourcesFooter } from "./sources";
+import { hostOf, CitedSourcesFooter, CitationOrdinals, groupByUrl } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
 import type { AuxRecord } from "@/lib/chat/contracts";
@@ -1051,16 +1051,14 @@ function ReasoningRow({ text, isStreaming, stagger }: { text: string; isStreamin
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
     <div className="animate-fade-up py-1.5" style={{ "--i": i } as React.CSSProperties}>
-      {/* A thought reads as prose in the answer's own column — same size, same ink
-          — because that is what it is: the assistant talking through the task.
-          Boxing it or greying it out made it look like machine output the reader
-          was meant to skip. The header above already says this is the run, not
-          the reply; the tool rows below it are the ones set apart. No icon, no
-          pulse: the running step carries the one spinner. */}
+      {/* A thought reads as prose in the answer's column, unboxed, but one step
+          down in size and ink: at the answer's own size and colour a long thought
+          read AS the answer, and the reader could not tell where the reply began.
+          No icon, no pulse: the running step carries the one spinner. */}
       {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
           mechanically slanted — the same reason blockquotes dropped italic in
           globals.css. */}
-      <div className="reasoning-prose min-w-0 text-base leading-relaxed text-foreground">
+      <div className="reasoning-prose min-w-0 text-sm text-muted-foreground">
         <Markdown isStreaming={isStreaming}>{clean}</Markdown>
       </div>
     </div>
@@ -1091,7 +1089,7 @@ function StepGlyph({ d, state }: { d: StepDescriptor; state: "running" | "error"
  *  are joined by a hairline under the glyph (`connect`), so a burst of actions
  *  reads as one sequence and a thought between them breaks it. The whole row
  *  expands to the payload beneath; the chevron only shows under the cursor. */
-function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: string; connect?: boolean; stagger?: number }) {
+function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; chatId?: string; isAdmin?: boolean; connect?: boolean; stagger?: number }) {
   // See ReasoningRow: the cascade step is fixed at mount.
   const [i] = useState(stagger ?? 0);
   const tSteps = useTranslations("steps");
@@ -1114,10 +1112,13 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
   // call is still in an input-* state: arguments stream in character by character,
   // so a running step's args are a prefix of themselves, and showing a prefix of a
   // program as though it were the program is worse than showing nothing.
-  const inv = useMemo(
-    () => (part.state.startsWith("input-") ? null : describeInvocation(rawName, part.input)),
-    [part.state, rawName, part.input],
-  );
+  // A connector's raw arguments ("time range: day", "query: …") are the tool
+  // author's vocabulary, not the reader's: admins get them, everyone else gets the
+  // row's sentence alone. Code and diffs stay — they ARE what the step did.
+  const inv = useMemo(() => {
+    const v = part.state.startsWith("input-") ? null : describeInvocation(rawName, part.input);
+    return v?.kind === "fields" && !isAdmin ? null : v;
+  }, [part.state, rawName, part.input, isAdmin]);
   const outText = useMemo(() => formatValue(part.output), [part.output]);
 
   // Now true when there is only an INVOCATION and no output: "Ran Python" with an
@@ -1125,14 +1126,14 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
   // the step whose code you most want to see.
   const expandable = !isRunning && rawName !== "manage" && (!!outText || !!inv || !!part.errorText);
 
-  // A failed step opens itself. It is the one row on the rail that the reader
-  // definitely needs, and it was the one row folded away behind a chevron.
-  // An effect rather than an initial value because a step usually starts running
-  // and fails later, long after this component first mounted.
-  const [open, setOpen] = useState(false);
+  // A failed step opens itself for an admin — the error text is something they
+  // can act on. Initial state covers a row that mounts already failed (no closed
+  // first paint); the effect covers one that fails while on screen. For everyone
+  // else the row's "· failed" already says all the panel would.
+  const [open, setOpen] = useState(!!isAdmin && isError);
   useEffect(() => {
-    if (isError) setOpen(true);
-  }, [isError]);
+    if (isAdmin && isError) setOpen(true);
+  }, [isAdmin, isError]);
 
   const fileChip =
     d.file && d.detail && chatId ? <StepFileChip path={d.file} name={d.detail} chatId={chatId} /> : null;
@@ -1180,9 +1181,9 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
           "machine detail" and lets the eye take the sentence in its own language.
           When we know WHICH file it is, it gets a thumbnail and opens the file. */}
       {fileChip ??
-        (d.detail && (
+        ((d.detail ?? (isAdmin ? d.adminDetail : undefined)) && (
           <span className="pointer-events-none relative z-10 min-w-0 truncate font-mono text-[13px]">
-            {d.detail}
+            {d.detail ?? d.adminDetail}
           </span>
         ))}
       {/* Present only under the cursor (and while open): at rest the run should
@@ -1215,7 +1216,13 @@ function StepRow({ part, chatId, connect, stagger }: { part: ToolPart; chatId?: 
         {/* Sent, then returned, in that order — the order they happened in. */}
         <div className="mb-2 ml-[30px] mt-1 space-y-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
           {inv && <Invocation inv={inv} />}
-          <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
+          {/* The raw error is a provider's or connector's own wording — for an
+              admin only; anyone else gets one calm sentence. */}
+          {part.errorText && !isAdmin ? (
+            <p className="text-sm text-muted-foreground">{t("stepFailed")}</p>
+          ) : (
+            <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -1267,7 +1274,7 @@ type ActivityItem =
  *  went: thoughts as prose, actions as small glyph rows between them, consecutive
  *  actions joined by a hairline. No container and no cap — the group header is
  *  the frame. */
-function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; onUndone?: (id: string) => void; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
+function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, isAdmin, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; onUndone?: (id: string) => void; isStreaming?: boolean; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean }) {
   const tStatus = useTranslations("chat.taskStatus");
   // How many rows were on screen at the previous commit. Rows above that count are
   // new in THIS commit and cascade from zero; rows at or below it are not new and
@@ -1285,7 +1292,7 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, sandb
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} stagger={staggerIndex(i, base)} />
       : it.kind === "steer"
       ? <SteerRow key={it.id} text={it.text} connect={items[i + 1]?.kind === "tool"} stagger={staggerIndex(i, base)} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={staggerIndex(i, base)} />,
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} isAdmin={isAdmin} connect={items[i + 1]?.kind === "tool" || (i === items.length - 1 && writes.length > 0)} stagger={staggerIndex(i, base)} />,
   );
   // What the turn wrote to memory closes the rail: it is the one action of the turn
   // that outlives it, so it is listed last, after the steps that produced it, and
@@ -1322,7 +1329,7 @@ function ActivityRail({ items, writes = [], onUndone, isStreaming, chatId, sandb
  *  `timing` is present on the ONE group that owns the turn's measured span (see
  *  the call site); every other group shows its action count and no duration,
  *  because no honest number exists for it. */
-function ActivityGroup({ items, writes, isStreaming, timing, chatId, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; sandboxPending?: boolean }) {
+function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sandboxPending }: { items: ActivityItem[]; writes?: TurnWrite[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; isAdmin?: boolean; sandboxPending?: boolean }) {
   const t = useTranslations("chat.message");
   const tDuration = useTranslations("chat.duration");
   const anchorDisclosure = useDisclosureAnchor();
@@ -1391,7 +1398,9 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, sandboxPend
   const hasReasoning = items.some((it) => it.kind === "reasoning");
   const label =
     ms != null
-      ? t(hasReasoning ? "reasonedFor" : "workedFor", { duration: formatShortDuration(ms, tDuration) })
+      // One verb whatever the run held: switching "Reasoned" / "Worked" on whether a
+      // thought was streamed told the reader about the model, not about their task.
+      ? t("workedFor", { duration: formatShortDuration(ms, tDuration) })
       : streaming && hasReasoning
         ? t("thinking")
         : t(hasReasoning ? "reasoning" : "activity");
@@ -1458,7 +1467,7 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, sandboxPend
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
-          <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} sandboxPending={sandboxPending} />
+          <ActivityRail items={items} writes={shown} onUndone={(id) => setGone((g) => [...g, id])} isStreaming={isStreaming} chatId={chatId} isAdmin={isAdmin} sandboxPending={sandboxPending} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -2717,6 +2726,19 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const cited = turnSources.length
     ? citedSources(groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n"), turnSources)
     : [];
+  const ordinals = new Map(groupByUrl(cited).map((r, i) => [r.source.url, i + 1]));
+
+  // A turn that finished "completed" with nothing to read. Runs since the runner
+  // learnt to fail these (no_reply) never land here; older rows still do, and a
+  // bare "Worked for 21s" header with no answer under it reads as a hang. Shown
+  // as the same notice a failed turn gets, so it offers Continue too.
+  const noReply =
+    !isStreaming &&
+    metadata?.taskStatus === "completed" &&
+    !groups.some((g) => g.kind === "text" || g.kind === "ask" || g.kind === "approval" || g.kind === "manage");
+  const failure = metadata?.taskStatus === "failed"
+    ? metadata.errorCategory ?? ""
+    : noReply ? (groups.length ? "no_reply_partial" : "no_reply") : null;
 
   // An assistant turn that's still warming up (no parts yet) renders nothing —
   // the single "working…" indicator in the panel owns that state. Rendering an
@@ -2733,6 +2755,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
     // that (globals.css) so it runs edge to edge on a phone. Zeroed from md up,
     // where the column is centred and that margin is deliberate empty space.
     <div className="group/msg px-4 md:px-6 py-4 [--table-bleed:1.5rem] md:[--table-bleed:0px]">
+      <CitationOrdinals.Provider value={ordinals}>
       <div className="max-w-none">
         {groups.length > 0 ? (
           groups.map((g, gi) => {
@@ -2788,33 +2811,34 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                   timing={gi === firstActivityIdx ? { measuredMs: metadata?.reasoningMs, startedMsAgo: metadata?.runningMs } : undefined}
                   writes={gi === lastActivityIdx ? memoryWrites : undefined}
                   chatId={chatId}
+                  isAdmin={isAdmin}
                   sandboxPending={sandboxPending}
                 />
               </div>
             );
           })
-        ) : isStreaming || metadata?.taskStatus === "failed" ? null : (
+        ) : isStreaming || failure != null ? null : (
           <span className="text-muted-foreground text-sm">
             {metadata?.taskStatus === "cancelled" ? t("cancelled") : "…"}
           </span>
         )}
         {cited.length > 0 && !isStreaming && <CitedSourcesFooter list={cited} />}
-        {metadata?.taskStatus === "failed" && (
+        {failure != null && (
           <ErrorNotice
             message={
-              metadata.errorCategory && LOCALIZED_ERROR_CATEGORIES.has(metadata.errorCategory)
-                ? tErr(metadata.errorCategory)
-                : metadata.error || t("genericError")
+              failure && LOCALIZED_ERROR_CATEGORIES.has(failure)
+                ? tErr(failure)
+                : metadata?.error || t("genericError")
             }
-            detail={metadata.errorDetail || undefined}
+            detail={metadata?.errorDetail || undefined}
             isAdmin={isAdmin}
-            ownsResource={metadata.errorOwned ?? undefined}
+            ownsResource={metadata?.errorOwned ?? undefined}
             // Every one of these means "the reply stops mid-way but stands" — the
             // notice offers Continue instead of the retry advice a real failure gets.
-            partial={PARTIAL_ERROR_CATEGORIES.has(metadata.errorCategory ?? "")}
+            partial={PARTIAL_ERROR_CATEGORIES.has(failure)}
             // A deleted project is not a failure to redo: nothing to retry until the
             // deletion finishes, then a new message just works.
-            calm={metadata.errorCategory === "project_deleted"}
+            calm={failure === "project_deleted"}
             onContinue={onContinue}
           />
         )}
@@ -2864,6 +2888,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
           );
         })()}
       </div>
+      </CitationOrdinals.Provider>
     </div>
   );
 }

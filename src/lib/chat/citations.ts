@@ -18,8 +18,10 @@ import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
 /** `[3]` or `[1, 2]` — up to four digits (the allocation side stops minting at
  *  9999, see adapt.ts), comma groups allowed. Never matches footnote syntax
- *  (`[^1]`) or a markdown link label (those are link nodes). */
-const CITE_RE = /\[(\d{1,4}(?:\s*,\s*\d{1,4})*)\]/g;
+ *  (`[^1]`) or a markdown link label (those are link nodes). A doubled or
+ *  escaped wrapper some models add — `[[2]]`, `\[[2]\]` — is swallowed whole, so
+ *  no stray bracket is left standing beside the chip. */
+const CITE_RE = /\\?\[(?:\\?\[)?(\d{1,4}(?:\s*,\s*\d{1,4})*)(?:\\?\])?\\?\]/g;
 
 function chip(n: number, s: NumberedSource): RootContent {
   // A plain link node — no hProperties marker: Streamdown sanitizes the hast

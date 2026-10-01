@@ -595,6 +595,7 @@
     "tool": {
       "done": "Готово",
       "failed": "помилка",
+      "stepFailed": "Не вдалося виконати цей крок.",
       "technicalDetails": "Технічні деталі",
       "artifacts": "{count, plural, one {# артефакт} few {# артефакти} many {# артефактів} other {# артефакту}}",
       "steps": "{count, plural, one {# крок} few {# кроки} many {# кроків} other {# кроку}}",
@@ -673,7 +674,6 @@
       "steer": "Ви додали",
       "compacted": "Контекст стиснуто",
       "imageUnavailable": "Зображення недоступне",
-      "reasonedFor": "Міркував {duration}",
       "workedFor": "Працював {duration}",
       "activity": "Дії",
       "stepCount": "{count, plural, one {# дія} few {# дії} many {# дій} other {# дії}}",

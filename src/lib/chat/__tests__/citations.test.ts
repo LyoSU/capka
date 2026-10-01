@@ -32,6 +32,17 @@ describe("remarkCitations", () => {
     expect(children.filter((c) => c.type === "link").map((c) => c.url)).toEqual(["https://b.example/2", "https://c.example/3"]);
   });
 
+  it("swallows a doubled or escaped wrapper — no stray bracket beside the chip", () => {
+    for (const value of ["Kyiv [[2]] is.", "Kyiv \\[[2]\\] is."]) {
+      const tree = run(para([{ type: "text", value }]));
+      const children = (tree.children[0] as { children: { type: string; value?: string }[] }).children;
+      expect(children.map((c) => c.type)).toEqual(["text", "link", "text"]);
+      expect(children[0].value).toBe("Kyiv ");
+      expect(children[2].value).toBe(" is.");
+    }
+    expect(citedSources("x [[3]] y", SOURCES).map((s) => s.n)).toEqual([3]);
+  });
+
   it("leaves an invented number as plain text — visibly inert, never a fabricated link", () => {
     const tree = run(para([{ type: "text", value: "Bogus [9] claim." }]));
     const children = (tree.children[0] as { children: { type: string; value?: string }[] }).children;

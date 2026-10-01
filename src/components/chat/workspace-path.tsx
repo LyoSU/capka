@@ -144,13 +144,16 @@ export function makeWorkspaceComponents(chatId?: string, sources?: NumberedSourc
     a({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
       const rel = typeof href === "string" ? workspaceRelFromHref(href) : null;
       if (rel && chatId) return <WorkspacePathChip rel={rel} chatId={chatId} />;
-      if (byN && typeof children === "string" && /^\d{1,4}$/.test(children)) {
-        const source = byN.get(parseInt(children, 10));
+      // `[[2]](url)` arrives as a link labelled "[2]" — the brackets are the
+      // citation's own markup, not part of its label.
+      const label = typeof children === "string" ? children.replace(/^\[(\d{1,4})\]$/, "$1") : null;
+      if (byN && label && /^\d{1,4}$/.test(label)) {
+        const source = byN.get(parseInt(label, 10));
         // Both matches exact, so the chip never changes what the model wrote:
         // canonical text equality keeps a hand-written "007" a plain link, and
         // URL equality keeps a model-authored [7](elsewhere) pointing elsewhere
         // instead of being silently redirected to the numbered source.
-        if (source && String(source.n) === children && source.url === href) {
+        if (source && String(source.n) === label && source.url === href) {
           return <CitationChip n={source.n} source={source} />;
         }
       }

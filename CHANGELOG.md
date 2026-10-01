@@ -10,6 +10,11 @@ All notable changes to Capka are documented here. Format follows
 - A turn whose model ran tools and then ended without writing a reply (seen with Gemini) is continued once and, if still empty, ends as failed with a `no_reply`/`no_reply_partial` message instead of looking finished.
 - A connector whose tool calls fail on the service's own sign-in (e.g. Tavily's "Upstream refresh failed") now shows "Token rejected" with a Sign in button in Connectors, and the step says to sign in again instead of showing the raw provider error.
 - The tool-search step is labeled "Looked for a suitable tool" (localized) instead of an untranslated "Find tool".
+- Older turns that ended with steps but no reply now show the `no_reply` notice with Continue instead of a bare "Worked for …" header.
+- Non-admin users no longer see raw tool errors or connector parameters in a step's details; a failed step says "This step couldn't be completed" and only opens itself for admins.
+- A web search run through an MCP connector (e.g. SearXNG) reads "Searched the web for …"; an `_mcp`/`-mcp` suffix is dropped from connector names, and unknown tools read "Used a tool" (the tool id is shown to admins).
+- Citation numbers in a reply and its sources footer now count from 1 per reply instead of showing branch-wide numbers, and `[[2]]`/`\[[2]\]` markers no longer leave stray brackets.
+- Reasoning on the step rail is set smaller and muted so it no longer reads as the answer, and the run header always says "Worked for …".
 
 ## [0.43.0] - 2026-10-01
 
