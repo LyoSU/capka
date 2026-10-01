@@ -21,7 +21,7 @@ const admissionPaths: Record<string, string | null> = {
 const src = path.join(process.cwd(), "src");
 const admitting = readdirSync(src, { recursive: true, encoding: "utf8" })
   .map((f) => f.split(path.sep).join("/"))
-  .filter((f) => f.endsWith(".ts") && !f.includes("__tests__") && !f.endsWith(".test.ts"))
+  .filter((f) => /\.tsx?$/.test(f) && !f.includes("__tests__") && !/\.test\.tsx?$/.test(f))
   .filter((f) => f !== "lib/tasks/queue.ts" && f !== "lib/billing/limits.ts")
   .filter((f) => /reserveBudget\(|enqueueTask\(/.test(readFileSync(path.join(src, f), "utf8")))
   .sort();

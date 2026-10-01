@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { apiHandler, requireWriter } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { answerAskForUser, answerElicitationForUser } from "@/lib/ask/authed";
 import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
@@ -15,7 +15,11 @@ const bodySchema = z.object({
 /** Resolve the user's answer to a suspended `ask` call (or a blocked MCP
  *  elicitation). Session-authorized — the model can't forge it. */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireWriter();
+  // requireActive, not requireWriter: /api/chat already refuses a viewer a new
+  // turn, so the suspended turns a viewer owns are their automations' runs. A
+  // writer gate here would leave each one awaiting forever, and the automation
+  // skipped as busy on every later firing.
+  const { userId } = await requireActive();
   const limited = guardRateLimit(
     `ask-answer:${userId}`,
     RATE_LIMITS.askAnswer,

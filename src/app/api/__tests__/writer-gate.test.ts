@@ -58,21 +58,17 @@ describe("content-mutation routes require a write-capable account", () => {
     expect(requireWriter).toHaveBeenCalled();
   });
 
-  // Approving a step or answering a question resumes a paid turn — the same spend
-  // /api/chat refuses a viewer.
-  it("a viewer / pending account cannot approve a step or answer a question", async () => {
+  // Not a content mutation: a viewer cannot start a turn, so the suspended turns a
+  // viewer owns are their automations' runs. Refusing the decision would leave each
+  // one awaiting forever and the automation skipped as busy on every firing.
+  it("a viewer can still approve a step or answer a question (gate is requireActive)", async () => {
     requireWriter.mockImplementation(refuse);
     const post = (body: unknown) => new Request("http://x", { method: "POST", body: JSON.stringify(body) });
 
-    expect((await approvePost(post({ messageId: "m1", toolCallId: "t1", approved: true }))).status).toBe(403);
-    expect((await answerPost(post({ messageId: "m1", action: "submit" }))).status).toBe(403);
-    expect((await answerPost(post({ messageId: "m1", action: "submit", kind: "elicitation" }))).status).toBe(403);
-    expect(approveManageForUser).not.toHaveBeenCalled();
-    expect(answerAskForUser).not.toHaveBeenCalled();
-    expect(answerElicitationForUser).not.toHaveBeenCalled();
-
-    requireWriter.mockImplementation(asUser);
-    expect((await approvePost(post({ messageId: "m1", toolCallId: "t1", approved: true }))).status).toBe(200);
-    expect(approveManageForUser).toHaveBeenCalledWith("u1", { messageId: "m1", toolCallId: "t1", approved: true });
+    expect((await approvePost(post({ messageId: "m1", toolCallId: "t1", approved: false }))).status).toBe(200);
+    expect(approveManageForUser).toHaveBeenCalledWith("u1", { messageId: "m1", toolCallId: "t1", approved: false });
+    expect((await answerPost(post({ messageId: "m1", action: "skip" }))).status).toBe(200);
+    expect(answerAskForUser).toHaveBeenCalled();
+    expect(requireActive).toHaveBeenCalled();
   });
 });

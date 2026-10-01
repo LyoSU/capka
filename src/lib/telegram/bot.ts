@@ -237,9 +237,9 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // the right reply and returns null; a non-null link is an ACTIVE user.
   const link = await ensureUser(ctx);
   if (!link) return;
-  const refusal = spendRefusal(link);
-  if (refusal) {
-    await reply(ctx, refusal);
+  // A new turn needs a writer, like /api/chat (requireRole admin|user).
+  if (link.role !== "admin" && link.role !== "user") {
+    await reply(ctx, "readOnly");
     return;
   }
   // Same per-user flood guard as the web enqueue path.
@@ -537,9 +537,9 @@ async function buildBot(): Promise<Bot | null> {
       const t = tFor(ctx);
       const link = await findLink(ctx.from!.id);
       if (!link) { await ctx.answerCallbackQuery(); return; }
-      // Buttons stay: tapping again works once the account is restored.
-      const refusal = spendRefusal(link);
-      if (refusal) { await ctx.answerCallbackQuery({ text: t(refusal) }); return; }
+      // Buttons stay: tapping again works once the account is restored. Active is
+      // the whole gate, as on the web (requireActive) — see /api/manage/approve.
+      if (link.status !== "active") { await ctx.answerCallbackQuery({ text: t("accountNotActive") }); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
       const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved })
         .catch((e) => {
@@ -603,8 +603,7 @@ async function buildBot(): Promise<Bot | null> {
   bot.callbackQuery(/^ta:(\d+):(\d+)$/, async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) { await ctx.answerCallbackQuery(); return; }
-    const refusal = spendRefusal(link);
-    if (refusal) { await ctx.answerCallbackQuery({ text: tFor(ctx)(refusal) }); return; }
+    if (link.status !== "active") { await ctx.answerCallbackQuery({ text: tFor(ctx)("accountNotActive") }); return; }
     const { onAskChoice } = await import("./ask-collect");
     // Pass the tapper's userId — only the turn's OWNER may answer.
     await onAskChoice(bot, ctx.chat!.id, link.userId, Number(ctx.match![1]), Number(ctx.match![2]));
@@ -614,8 +613,7 @@ async function buildBot(): Promise<Bot | null> {
   bot.callbackQuery("taskip", async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) { await ctx.answerCallbackQuery(); return; }
-    const refusal = spendRefusal(link);
-    if (refusal) { await ctx.answerCallbackQuery({ text: tFor(ctx)(refusal) }); return; }
+    if (link.status !== "active") { await ctx.answerCallbackQuery({ text: tFor(ctx)("accountNotActive") }); return; }
     const { onAskSkip } = await import("./ask-collect");
     await onAskSkip(bot, ctx.chat!.id, link.userId);
     await ctx.answerCallbackQuery();
@@ -623,11 +621,11 @@ async function buildBot(): Promise<Bot | null> {
   });
 
   // Plain text → answer a pending `ask` question if one is collecting on this chat
-  // AND the sender owns it, otherwise straight into the engine as a new turn. An
-  // account that may not spend falls through, and ingest tells it why.
+  // AND the sender owns it, otherwise straight into the engine as a new turn. A
+  // non-active account falls through, and ingest tells it why.
   bot.on("message:text", async (ctx) => {
     const link = await findLink(ctx.from!.id);
-    if (link && !spendRefusal(link)) {
+    if (link?.status === "active") {
       const { onAskText } = await import("./ask-collect");
       if (await onAskText(bot, ctx.chat.id, link.userId, ctx.message.text)) return;
     }
@@ -999,11 +997,6 @@ async function findLink(telegramUserId: number) {
     .limit(1);
   return link || null;
 }
-
-/** Why this linked account may not start or resume a paid turn — the same gate the
- *  web puts on /api/chat (requireRole admin|user on an active account) — or null. */
-const spendRefusal = (l: { status: string; role: string }) =>
-  l.status !== "active" ? "accountNotActive" : l.role === "admin" || l.role === "user" ? null : "readOnly";
 
 /**
  * Resolve the platform user behind an incoming update, auto-provisioning a

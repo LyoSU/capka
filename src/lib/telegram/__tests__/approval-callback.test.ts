@@ -106,17 +106,29 @@ describe("telegram approval callback", () => {
     await expect(tap("ma:m1:#abc")).rejects.toThrow("db down");
   });
 
-  // The web refuses both on /api/manage/approve and /api/ask/answer; a button tap
-  // resumes the same paid turn, so it must refuse them too.
-  it.each([
-    [{ status: "suspended", role: "user" }, en.telegram.accountNotActive],
-    [{ status: "active", role: "viewer" }, en.telegram.readOnly],
-  ])("refuses an account that may not spend (%o) and keeps the buttons", async (who, text) => {
-    Object.assign(account, who);
+  // The web gate on /api/manage/approve is requireActive, so a suspended account is
+  // refused here too — and keeps its buttons for when it is restored.
+  it("refuses a suspended account and keeps the buttons", async () => {
+    account.status = "suspended";
     const ctx = await tap("ma:m1:#abc");
     expect(approveManageForUser).not.toHaveBeenCalled();
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text });
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: en.telegram.accountNotActive });
     expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
+  });
+
+  // A viewer cannot start a turn, so a viewer's suspended turn is an automation's
+  // run; refusing it would leave the automation skipped as busy forever.
+  it("lets a viewer decide and answer their automation's suspended turn", async () => {
+    account.role = "viewer";
+    approveManageForUser.mockResolvedValue("applied");
+    const ctx = await tap("ma:m1:#abc");
+    expect(approveManageForUser).toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: en.telegram.confirmApplied });
+    await tap("ta:0:0");
+    expect(ask.onAskChoice).toHaveBeenCalled();
+    ask.onAskText.mockResolvedValue(true);
+    await on["message:text"]({ from: { id: 7, language_code: "en" }, chat: { id: 7 }, message: { text: "yes" } });
+    expect(ask.onAskText).toHaveBeenCalled();
   });
 
   it("does not let a suspended account answer a question by button or by text", async () => {
