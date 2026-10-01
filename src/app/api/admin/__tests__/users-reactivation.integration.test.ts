@@ -71,10 +71,14 @@ run("PUT /api/admin/users status lifecycle", () => {
     expect(await count("link_codes")).toBe(0);
   });
 
-  it("approving a pending signup keeps its session", async () => {
+  // A pending account may have been suspended earlier, and nothing blocks it from
+  // signing in, so a session it holds cannot be told from a fresh signup's.
+  it("a session created while pending after a suspension does not survive approval", async () => {
+    await put("suspended");
     await put("pending");
     await seedSession();
-    await put("active");
     expect(await count("session")).toBe(1);
+    await put("active");
+    expect(await count("session")).toBe(0);
   });
 });

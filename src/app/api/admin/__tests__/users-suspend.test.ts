@@ -76,13 +76,21 @@ describe("admin user suspend / reactivate / tier lifecycle", () => {
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "user.reactivate" }));
   });
 
-  it("approving a pending signup stays a plain status_change", async () => {
+  it("approving a pending account drops sessions and link codes but stays a plain status_change", async () => {
     mocks.txSelect.mockReturnValue(selectChain([{ status: "pending" }]));
     mocks.txUpdate.mockReturnValue(updateChain([{ ...row, status: "active" }]));
     const res = await put({ userId: "user-1", status: "active" });
     expect(res.status).toBe(200);
-    expect(mocks.txDelete).not.toHaveBeenCalled();
+    expect(mocks.txDelete).toHaveBeenCalledWith(sessions);
+    expect(mocks.txDelete).toHaveBeenCalledWith(linkCodes);
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "user.status_change" }));
+  });
+
+  it("active to active is a no-op for sessions", async () => {
+    mocks.txUpdate.mockReturnValue(updateChain([{ ...row, status: "active" }]));
+    const res = await put({ userId: "user-1", status: "active" });
+    expect(res.status).toBe(200);
+    expect(mocks.txDelete).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown status", async () => {

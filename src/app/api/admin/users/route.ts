@@ -157,22 +157,22 @@ export const PUT = apiHandler(async (req: Request) => {
   // Lifecycle: approve/reactivate (active), send back to the approval queue
   // (pending), or revoke access (suspended). Any non-active status revokes the
   // user's live sessions in the SAME transaction as the flip, so a still-valid
-  // cookie can't outlive the change. Reactivating a SUSPENDED account does too:
-  // nothing blocks a suspended account from signing in, so any session it holds
-  // was created during the suspension. Approving a pending signup keeps its
-  // sessions (only the owner can hold one; the signup itself created it). Pending
-  // Telegram link codes go with them on every suspend and reactivation.
+  // cookie can't outlive the change. So does every move to active from a
+  // non-active status (approval or reactivation): nothing blocks a suspended or
+  // pending account from signing in, so a session it holds may have been created
+  // while it was not active, and a pending account that was suspended earlier is
+  // indistinguishable from a fresh signup. The cost is that an approved new
+  // signup signs in once more. Pending Telegram link codes go with the sessions.
   if (status) {
     if (!["active", "pending", "suspended"].includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
     const result = await db.transaction(async (tx) => {
       // Prior status read in the same transaction: it decides whether "active"
-      // means approving a pending signup or reactivating a suspended account —
-      // two different audit events.
+      // is a no-op or a move out of pending/suspended, and which audit event.
       const [before] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1);
       if (!before) return null;
       const [row] = await tx.update(users).set({ status }).where(eq(users.id, userId)).returning();
       if (!row) return null;
-      if (status !== "active" || before.status === "suspended") {
+      if (status !== "active" || before.status !== "active") {
         await tx.delete(sessions).where(eq(sessions.userId, userId));
         await tx.delete(linkCodes).where(eq(linkCodes.userId, userId));
       }
