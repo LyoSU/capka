@@ -704,7 +704,7 @@ const chatWithLeaf = {
  * Resolve the chat Telegram messages belong to: the link's pinned active chat
  * if it still exists, otherwise a fresh dedicated chat that we then pin.
  */
-async function resolveActiveChat(
+export async function resolveActiveChat(
   link: { id: string; userId: string; activeChatId: string | null },
   firstMessage: string,
 ) {
