@@ -158,13 +158,17 @@ run("provisionTelegramUser", () => {
         String(id),
         webId,
       ]);
+      const { rows: [{ pid }] } = await web.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`);
       const pending = provisionTelegramUser(id, { name: "Web", username: "web" });
       await vi.waitFor(
         async () => {
+          // Provisioning's insert, blocked by THIS transaction: another file's lock wait on
+          // the same database must neither satisfy the probe early nor push the count to 2.
           const { rows } = await pool.query(
-            `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+            `SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) AND query ILIKE 'insert into "user"%'`,
+            [pid],
           );
-          expect(rows.length).toBe(1);
+          expect(rows.length).toBeGreaterThanOrEqual(1);
         },
         { timeout: 5000, interval: 20 },
       );
