@@ -314,9 +314,18 @@ WHERE lower(btrim(u.email)) LIKE '%@telegram.local'
 SQL
 ```
 
-No rows is the expected result: a Telegram user's only sign-in is `telegram`. Treat
-every row as a squat: in Settings → People (`/settings/users`) suspend that user,
-which signs them out everywhere, then remove them.
+No rows is the expected result: a Telegram user's only sign-in is `telegram`. A row
+without `telegram` in `sign_in` is a squat: in Settings → People (`/settings/users`)
+suspend that user, which signs them out everywhere, then remove them.
+
+A row whose `sign_in` includes `telegram` is the real Telegram user's account, with
+their chats, that the squatter can also sign in to; removing it deletes their data.
+Suspend it, delete only the other sign-ins, then reactivate it:
+
+```bash
+docker compose exec -T postgres psql -X -U Capka -d Capka \
+  -c "DELETE FROM account WHERE user_id = '<id>' AND provider_id <> 'telegram'"
+```
 
 ## Known limitations & residual risks
 
