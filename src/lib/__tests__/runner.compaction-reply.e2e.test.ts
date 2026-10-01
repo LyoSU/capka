@@ -367,13 +367,29 @@ run("runAgentTask: compaction summarizes the reply that triggered it", () => {
     expect(rows[0].content).toContain(REPLY);
   }, 30_000);
 
-  it("after an emergency trim, compacts even though the trimmed prompt measured small", async () => {
+  it("after an emergency trim that dropped history, compacts even though the trimmed prompt measured small", async () => {
     const chat = `${CX}-trim-small`;
-    await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "Our supplier is Kestrel Ltd." }]);
+    const rows = [{ id: `${chat}-u0`, role: "user", content: "Our supplier is Kestrel Ltd." }];
+    for (let i = 0; i < 7; i++) {
+      rows.push({ id: `${chat}-a${i}`, role: "assistant", content: `Noted ${i}.` });
+      rows.push({ id: `${chat}-u${i + 1}`, role: "user", content: `Question ${i + 1}?` });
+    }
+    await seedPath(chat, rows);
     // Without a checkpoint the next turn sends the same history, overflows and trims again.
     script.push("overflow", answer(Math.ceil(limit * 0.3)));
-    const msgs = await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` });
+    const msgs = await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u7` });
     expect(JSON.stringify(msgs)).toContain("Kestrel");
+  }, 30_000);
+
+  it("after an emergency trim that dropped no history, leaves a small chat uncompacted", async () => {
+    const chat = `${CX}-trim-none`;
+    await seedPath(chat, [{ id: `${chat}-u1`, role: "user", content: "Our supplier is Kestrel Ltd." }]);
+    script.push("overflow", answer(Math.ceil(limit * 0.3)));
+    const before = compacted.length;
+    await runTask(`${chat}-task`, chat, { replyParentId: `${chat}-u1` }, false);
+    // The trim kept every row, so the overflow was this turn's own: nothing to summarize.
+    await settle();
+    expect(compacted.length).toBe(before);
   }, 30_000);
 
   describe("a summary that lands after the chat moved on", () => {

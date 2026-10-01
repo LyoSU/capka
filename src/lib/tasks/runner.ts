@@ -1953,6 +1953,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // only the most recent turns and re-stream. Once, so a still-too-big prompt
     // surfaces the friendly error instead of looping.
     let emergencyTrimmed = false;
+    // Whether that trim dropped history rows, not only this turn's own tool traffic.
+    let historyTrimmed = false;
     const retryOnContextOverflow = async (err: unknown): Promise<boolean> => {
       if (emergencyTrimmed || !isContextOverflowError(err)) return false;
       // The rejection usually names the real window. Remember it so this
@@ -1978,6 +1980,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // was sliced off, which 400s as AI_MissingToolResultsError on the retry —
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
+      historyTrimmed = trimmedUi.length < uiMessages.length;
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
       // Fresh objects — re-mark the cache tail, and BEFORE the note below goes on, as
       // at the initial build: the tail is the history's, and the turn context sits
@@ -2735,9 +2738,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // what that does and does not buy from the cache). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
-    // An emergency trim compacts however small the trimmed prompt measured: the
-    // overflow already proved the untrimmed history is over the window.
-    if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && (budget.shouldCompact || emergencyTrimmed)) {
+    // A trim that dropped history compacts however small the trimmed prompt measured:
+    // without a checkpoint the next turn loads the same history and trims again. One
+    // that dropped nothing cut only this turn's own tool traffic, so the budget decides.
+    if (profile.background.compaction && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && (budget.shouldCompact || historyTrimmed)) {
       // `taint.seen()` at the moment compaction is DISPATCHED, not an OR recomputed
       // over `nodes` — that array is block-scoped inside the `if (replyParentId)` above
       // and is not in scope here. It is already the fold over exactly those rows plus
