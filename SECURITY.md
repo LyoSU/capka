@@ -342,25 +342,29 @@ that do appear:
   first signed in with Telegram `<n>`.
 - **`shared`**: the real Telegram user's account, with their chats, that someone else
   can also sign in to; removing it deletes their data. Suspend it, then run the
-  statements below. They delete every other sign-in and bot link (if that removes the
-  owner's own bot link, their next message to the bot restores it), switch off the
-  account's automations and unshare its chats: a webhook URL or a share link the other
-  person created keeps working once the account is active again.
+  statements below. They delete every other sign-in and bot link, every session and
+  pending bot link code (a suspended account can still sign in, and that session works
+  again once it is reactivated), switch off the account's automations and unshare its
+  chats: a webhook URL or a share link the other person created keeps working once the
+  account is active again. If the owner is left with no bot link, their next message
+  to the bot restores it.
 
 ```bash
 docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
 DELETE FROM account WHERE user_id = '<id>' AND NOT (provider_id = 'telegram' AND account_id = '<n>');
 DELETE FROM telegram_links WHERE user_id = '<id>' AND telegram_user_id <> <n>;
+DELETE FROM link_codes WHERE user_id = '<id>';
+DELETE FROM session WHERE user_id = '<id>';
 UPDATE automations SET enabled = false WHERE user_id = '<id>';
 UPDATE chats SET visibility = 'private', share_token = NULL WHERE user_id = '<id>' AND share_token IS NOT NULL;
 SQL
 ```
 
 Then reactivate it. Before their next chat the owner checks Settings → Extensions
-(skills and connectors), Memory and Providers (when shown) and removes anything they did not add: a
-connector receives the agent's tool calls with their data. They turn back on the
-automations they want, using "Replace the address" on a webhook automation, and
-re-share the chats they meant to share (each gets a new link).
+(skills and connectors), Memory and Providers (when shown) and removes anything they
+did not add: a connector receives the agent's tool calls with their data. They turn
+back on the automations they want, using "Replace the address" on a webhook
+automation, and re-share the chats they meant to share (each gets a new link).
 
 ## Known limitations & residual risks
 
