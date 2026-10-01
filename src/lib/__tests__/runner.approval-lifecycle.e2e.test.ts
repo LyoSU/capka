@@ -172,6 +172,7 @@ const FIRST_HALF = {
   usage: { input: 100, output: 20, cached: 0 },
   costUsd: 0.01,
   durationMs: 1500,
+  reasoningMs: 1000,
 };
 
 /** A failed continuation keeps the first half's steers and files, but not its (i)
@@ -386,6 +387,8 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toBeTruthy();
     expectFirstHalfKept(row);
+    // The activity group still says how long the whole turn reasoned, as on the success path.
+    expect(row.reasoningMs).toBeGreaterThan(FIRST_HALF.reasoningMs);
     // Control: the stream had run — the call ran, kept its one result, and replied.
     expect(failNextCommit).toBe(null);
     expect(writes).toEqual([{ row: "final" }]);

@@ -2914,10 +2914,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // figures as they were: under this run's model they would read as the whole turn.
     // As on the success path, a failed turn owns the ErrorNotice and carries none,
     // and a cancelled one still did real work, so it shows both halves folded (the
-    // ledger below bills this run alone, as it always has).
+    // ledger below bills this run alone, as it always has). The reasoning time is
+    // folded on every outcome, as there: it heads the activity group, not the (i).
     const kept: MessageMeta = { ...firstHalf };
     for (const k of ["usage", "costUsd", "costSource", "durationMs", "llmCalls", "upstreamProvider", "generationId", "configId", "contextWindow", "contextTokens"] as const) delete kept[k];
-    let figures: MessageMeta = {};
+    const reasoningMs = (firstTextAt ?? Date.now()) - startedAt;
+    let figures: MessageMeta = { reasoningMs: foldTurnHalves({ reasoningMs }, firstHalf ?? {}).reasoningMs };
     if (status === "cancelled") {
       const usage = liveUsageMeta();
       const served = orLive.generationId != null || orLive.upstreamProvider != null;
@@ -2926,7 +2928,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         : undefined;
       const turn = foldTurnHalves({
         usage, costUsd: cost, costSource: cost == null ? undefined : served ? "provider" : "catalog",
-        durationMs: Date.now() - startedAt, reasoningMs: (firstTextAt ?? Date.now()) - startedAt, llmCalls: stepCount || undefined,
+        durationMs: Date.now() - startedAt, reasoningMs, llmCalls: stepCount || undefined,
       }, firstHalf ?? {});
       figures = {
         ...turn,
