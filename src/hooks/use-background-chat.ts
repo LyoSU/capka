@@ -235,8 +235,16 @@ export function useBackgroundChat({
   // owns those cases: a turn this tab never saw begin (Telegram, another tab, a
   // dropped task:start), a branch switched elsewhere, a follow-up already streaming
   // (its seq cursor is seeded only by loadHistory).
+  //
+  // `settling` counts these reads in flight. The turn goes idle before its rows are
+  // back, and until then our copy can lack the card it ended on — a poll noticed the
+  // finish while SSE was down, or the task:tool-approval was held past a gap and
+  // dropped at task:finish — so idle alone is not "free to send the queue".
+  const [settling, setSettling] = useState(0);
   const refreshTurn = useCallback((messageId: string | undefined) => {
-    if (!messageId) return loadHistory();
+    setSettling((n) => n + 1);
+    const done = () => setSettling((n) => n - 1);
+    if (!messageId) return loadHistory().finally(done);
     return fetch(`/api/chat?chatId=${chatId}&messageId=${encodeURIComponent(messageId)}`)
       .then((r) => (r.ok ? (r.json() as Promise<Message[]>) : null))
       .then((tail) => {
@@ -259,7 +267,8 @@ export function useBackgroundChat({
         });
         setError(null);
       })
-      .catch(() => loadHistory());
+      .catch(() => loadHistory())
+      .finally(done);
   }, [chatId, loadHistory]);
 
   // ── Check for running task on mount (reconnection) ─────────
@@ -1007,7 +1016,7 @@ export function useBackgroundChat({
   return {
     messages, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch,
     forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running",
-    awaitingInput, taskInfo,
+    awaitingInput, settling: settling > 0, taskInfo,
     // Never our OWN in-flight turn. A direct send from this tab is queued for the
     // moments between the POST and a worker claiming it, and announcing "a message
     // from another device is waiting" for the message the user just typed here is

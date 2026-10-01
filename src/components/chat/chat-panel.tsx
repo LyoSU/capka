@@ -194,7 +194,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     setGreeting(pickGreeting({ name: userName, t: tGreeting }));
   }, [chatId, userName, tGreeting]);
   const router = useRouter();
-  const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo, queuedTurn, refreshQueuedTurn } = useBackgroundChat({
+  const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, settling, taskInfo, queuedTurn, refreshQueuedTurn } = useBackgroundChat({
     chatId,
     projectId,
   });
@@ -643,9 +643,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   editingIdRef.current = editingId;
   // The same for a reply that ended on a card waiting for the user's approval or
   // answer: the drain re-reads it per item, so a card that comes up mid-burst
-  // stops the rest too.
+  // stops the rest too. A finished turn whose rows are still on their way back
+  // (`settling`) may be one of those, so it holds the same way.
   const awaitingRef = useRef(awaitingInput);
-  awaitingRef.current = awaitingInput;
+  awaitingRef.current = awaitingInput || settling;
 
   // The chat's model is gone and nothing is currently streaming — the composer
   // stays, says so in a strip above its footer, and refuses to send until another
@@ -677,8 +678,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // A reply waiting on the user's approval or answer holds the queue too: a
     // message sent now would go past the card, and the server would settle it
     // as undecided before the user got to decide. Deciding the card resumes the
-    // reply, and the queue goes out once that finishes.
-    if (awaitingInput) return;
+    // reply, and the queue goes out once that finishes. `settling` is the stretch
+    // before a finished turn's rows are back, when that card may not be in our copy
+    // yet.
+    if (awaitingInput || settling) return;
     const batch = queued;
     dispatchingRef.current = true;
     // The loop itself lives in `drainQueue` — the order of its dequeue against its
@@ -695,7 +698,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // `modelGone` is a dependency on purpose: picking a live model is what lets a
     // queue parked by a dead one go out, and nothing else in this list changes then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, queued, historyLoaded, editingId, modelGone, awaitingInput]);
+  }, [isLoading, queued, historyLoaded, editingId, modelGone, awaitingInput, settling]);
 
   const [filesOpen, setFilesOpen] = useState(false);
 

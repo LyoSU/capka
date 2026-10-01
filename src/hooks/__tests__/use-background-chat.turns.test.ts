@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import en from "../../../messages/en.json";
@@ -28,6 +28,8 @@ const msg = (id: string, role: string, text = id, metadata?: Record<string, unkn
 // What the server answers: the whole branch, and the turn read back from a message on.
 let branch: Msg[] = [];
 let turn: Msg[] | null = null;
+// Holds the turn read-back open until released, so the moment before it lands is observable.
+let turnGate: Promise<void> | null = null;
 let fullLoads = 0;
 const posts: Record<string, unknown>[] = [];
 let postReply: () => Promise<Response> = async () => Response.json({ taskId: "t-new" });
@@ -75,7 +77,10 @@ beforeAll(() => {
       fullLoads++;
       return Response.json(branch);
     }
-    if (url.startsWith("/api/chat?chatId=c1&messageId=")) return turn ? Response.json(turn) : new Response(null, { status: 500 });
+    if (url.startsWith("/api/chat?chatId=c1&messageId=")) {
+      if (turnGate) await turnGate;
+      return turn ? Response.json(turn) : new Response(null, { status: 500 });
+    }
     return Response.json(null);
   });
 });
@@ -199,5 +204,53 @@ describe("a tool that throws while the reply is on screen", () => {
 
     // An approval card reads "interrupted" for an output-error with no errorText.
     expect(api.messages[1].parts[0]).toMatchObject({ state: "output-error", errorText: "disk full" });
+  });
+});
+
+// The send queue goes out the moment the chat reads idle and no card waits
+// (chat-panel's drain). A finished turn whose card is not in our copy yet — the
+// finish seen by the poll while SSE was down, or a task:tool-approval held past a
+// gap and dropped at task:finish — must not read as free until its rows are back.
+describe("a turn that ended on a card is not free until its rows are back", () => {
+  const call = { type: "dynamic-tool", toolCallId: "tc1", toolName: "save_row", input: {} };
+  const running = () => ({ id: "a1", role: "assistant", parts: [{ ...call, state: "input-available" }], metadata: { taskStatus: "running" } }) as unknown as Msg;
+  const waiting = () => ({ id: "a1", role: "assistant", parts: [{ ...call, state: "approval-requested", approval: { id: "ap1" } }], metadata: { taskStatus: "awaiting_approval" } }) as unknown as Msg;
+  const drainable = () => !api.isLoading && !api.awaitingInput && !api.settling;
+
+  afterEach(() => { turnGate = null; vi.useRealTimers(); });
+
+  it.each([
+    ["the poll notices the finish while SSE is down", async () => {
+      await act(async () => { vi.advanceTimersByTime(3000); });
+      await settle();
+    }],
+    ["task:finish arrives with the approval event lost to a gap", () => emit({ type: "task:finish", messageId: "a1", status: "awaiting_approval" })],
+  ])("holds while %s", async (_road, finish) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    branch = [msg("u1", "user"), running()];
+    await mount();
+    expect(api.isLoading).toBe(true);
+    turn = [msg("u1", "user"), waiting()];
+    let release!: () => void;
+    turnGate = new Promise((r) => { release = r; });
+
+    await finish();
+
+    expect(api.isLoading).toBe(false);
+    expect(drainable()).toBe(false);
+    await act(async () => { release(); });
+    await settle();
+    expect(api.awaitingInput).toBe(true);
+    expect(drainable()).toBe(false);
+  });
+
+  it("frees the chat once the rows are back and nothing waits", async () => {
+    branch = [msg("u1", "user"), running()];
+    await mount();
+    turn = [msg("u1", "user"), msg("a1", "assistant", "done")];
+
+    await emit({ type: "task:finish", messageId: "a1", status: "completed" });
+
+    expect(drainable()).toBe(true);
   });
 });
