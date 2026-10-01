@@ -996,11 +996,12 @@ export function useBackgroundChat({
   // A tool call is suspended awaiting the user — a `manage` approval OR an `ask`
   // question. The composer blocks (like Claude Code) so the card is the only next
   // action. Once decided/answered the part leaves the awaiting state, so this
-  // clears itself.
-  const awaitingInput = messages.some(
-    (m) => m.role === "assistant" && m.parts.some((p) =>
-      p.type === "dynamic-tool" && (p.state === "approval-requested" || (p.toolName === "ask" && p.askForm && p.state === "input-available")),
-    ),
+  // clears itself. Only the LAST message can wait: a card the chat already went
+  // past (a follow-up queued while its reply ran) is settled by the turn that
+  // passed it, and must not block the composer meanwhile.
+  const last = messages.at(-1);
+  const awaitingInput = last?.role === "assistant" && last.parts.some((p) =>
+    p.type === "dynamic-tool" && (p.state === "approval-requested" || (p.toolName === "ask" && p.askForm && p.state === "input-available")),
   );
 
   return {

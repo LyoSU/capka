@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { convertToModelMessages, jsonSchema, streamText, tool, type ModelMessage } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import { toUIMessages } from "../presenter";
-import { INTERRUPTED_TOOL_RESULT, UNANSWERED_ASK_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls } from "../tool-results";
 import type { MessageMeta, StoredPart } from "../contracts";
 
 // Anthropic and OpenAI reject a tool call with no result, so an approval that
@@ -147,11 +147,11 @@ describe("approval history reaches the provider with a result for every call", (
     expect(executed).toBe(false);
   });
 
-  it("an unanswered ask the chat moved past reads as unanswered, not interrupted", async () => {
+  it("an unanswered ask the chat moved past reads as skipped, not interrupted", async () => {
     const question: StoredPart = { type: "tool-call", id: "q1", name: "ask", input: {}, answer: { form: { fields: [{ id: "row", label: "Which row?", kind: "text" }] } } };
     const waiting = row("a1", "assistant", { status: "awaiting_answer", parts: [question] });
     const { results } = await providerPrompt([ask, waiting, later]);
-    expect(results).toEqual([expect.objectContaining({ toolCallId: "q1", output: { type: "error-text", value: UNANSWERED_ASK_RESULT } })]);
+    expect(results).toEqual([expect.objectContaining({ toolCallId: "q1", output: { type: "json", value: { action: "skip", values: {} } } })]);
   });
 
   it("an undecided approval on the last message stays a live request", () => {
@@ -159,6 +159,22 @@ describe("approval history reaches the provider with a result for every call", (
     sealOrphanToolCalls(ui);
     expect(ui[1].parts[0]).toMatchObject({ state: "approval-requested", approval: { id: "ap1" } });
     expect((ui[1].parts[0] as { approval: { approved?: boolean } }).approval.approved).toBeUndefined();
+  });
+
+  // A card the chat went past reads the way a new turn settles it, with no buttons —
+  // a row stored before admission settled such cards, or that a turn passed unsettled.
+  it("the transcript shows a card the chat moved past as settled, and keeps the last one live", () => {
+    const question: StoredPart = { type: "tool-call", id: "q1", name: "ask", input: {}, answer: { form: { fields: [{ id: "row", label: "Which row?", kind: "text" }] } } };
+    const waiting = row("a1", "assistant", { status: "awaiting_approval", parts: [undecided, question] });
+    const [, past] = toUIMessages([ask, waiting, later]);
+    const skip = { action: "skip", values: {} };
+    expect(past.parts).toMatchObject([
+      { state: "approval-responded", approval: { id: "ap1", approved: false, reason: UNDECIDED_APPROVAL_REASON } },
+      { state: "output-available", output: skip, askValue: skip },
+    ]);
+    const [, live] = toUIMessages([ask, waiting]);
+    expect(live.parts).toMatchObject([{ state: "approval-requested" }, { state: "input-available" }]);
+    expect((live.parts[1] as { askValue?: unknown }).askValue).toBeUndefined();
   });
 
   it("the transcript keeps the declined card as it is — the seal is for model history only", () => {

@@ -6,7 +6,7 @@ import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import { enqueueTask, requestCancel, cancelQueuedTurn, ORPHAN_HOLD_AGE_MS } from "@/lib/tasks/queue";
+import { enqueueTask, requestCancel, cancelQueuedTurn, settleMovedPast, ORPHAN_HOLD_AGE_MS } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, isAppError } from "@/lib/errors";
@@ -305,28 +305,33 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // Save user message — chained onto the chat's current leaf so the conversation
   // tree stays linear and the web view shows full history.
   const tgUserId = nanoid();
-  await db.insert(messages).values({
-    id: tgUserId,
-    chatId: chat.id,
-    parentId: chat.activeLeafId ?? null,
-    role: "user",
-    content: text,
-    platform: "telegram",
-    telegramMessageId: ctx.message?.message_id,
-    // Record the attachments (reference metadata only — bytes live in the
-    // sandbox) so the web transcript shows them on the user bubble, exactly like
-    // a file sent from the web chat.
-    metadata: attachedFiles.length ? { attachedFiles } : null,
-  });
   // Name the chat from its first real message — like the web does. The chat may
   // have been created generically (/new, or a file-only first turn), so update
   // the title while it's still the placeholder rather than only at creation.
   const needsTitle = (!chat.title || chat.title === "Telegram Chat") && Boolean(text.trim());
-  await db.update(chats).set({
-    activeLeafId: tgUserId,
-    updatedAt: new Date(),
-    ...(needsTitle ? { title: text.slice(0, 100) } : {}),
-  }).where(eq(chats.id, chat.id));
+  await db.transaction(async (tx) => {
+    await tx.insert(messages).values({
+      id: tgUserId,
+      chatId: chat.id,
+      parentId: chat.activeLeafId ?? null,
+      role: "user",
+      content: text,
+      platform: "telegram",
+      telegramMessageId: ctx.message?.message_id,
+      // Record the attachments (reference metadata only — bytes live in the
+      // sandbox) so the web transcript shows them on the user bubble, exactly like
+      // a file sent from the web chat.
+      metadata: attachedFiles.length ? { attachedFiles } : null,
+    });
+    await tx.update(chats).set({
+      activeLeafId: tgUserId,
+      updatedAt: new Date(),
+      ...(needsTitle ? { title: text.slice(0, 100) } : {}),
+    }).where(eq(chats.id, chat.id));
+    // Typing instead of tapping the card the reply is waiting on goes past it: the
+    // card is settled with this message, never left live behind it.
+    if (chat.activeLeafId) await settleMovedPast(chat.activeLeafId, tx);
+  });
   await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
     // Answer the message we just added; the runner rebuilds the branch above it.

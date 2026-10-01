@@ -35,8 +35,10 @@ vi.mock("@/lib/providers/resolve", () => ({
 const take = vi.fn();
 vi.mock("@/lib/rate-limit", () => ({ take: (...a: unknown[]) => take(...a) }));
 const enqueueTask = vi.fn();
+const settleMovedPast = vi.fn();
 vi.mock("@/lib/tasks/queue", () => ({
   enqueueTask: (...a: unknown[]) => enqueueTask(...a),
+  settleMovedPast: (...a: unknown[]) => settleMovedPast(...a),
   requestCancel: vi.fn(),
   cancelQueuedTurn: vi.fn(),
   ORPHAN_HOLD_AGE_MS: 60 * 60_000,
@@ -47,7 +49,10 @@ vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: vi.fn(async () => {}) }
 // link (joined to its account's status and role), the pinned chat, and the "is
 // another turn running" probe.
 const state: { messageInsert?: Error; runningProbe?: Error; role: string } = { role: "user" };
-const chatRow = { id: "chat1", userId: "u1", title: "Hi", model: null, projectId: null, activeLeafId: null };
+const chatRow: { id: string; userId: string; title: string; model: null; projectId: null; activeLeafId: string | null } =
+  { id: "chat1", userId: "u1", title: "Hi", model: null, projectId: null, activeLeafId: null };
+// Every write the message makes, in order, with the handle it went through.
+const writes: { what: string; via: unknown }[] = [];
 const rowsFor = (table: unknown) => {
   if (table === telegramLinks) return [{ id: "link1", userId: "u1", telegramUserId: 42, activeChatId: "chat1", status: "active", role: state.role }];
   if (table === chats) return [chatRow];
@@ -57,9 +62,9 @@ const rowsFor = (table: unknown) => {
   }
   throw new Error("unexpected table");
 };
-vi.mock("@/lib/db", () => ({
-  pool: { connect: vi.fn() },
-  db: {
+vi.mock("@/lib/db", () => {
+  const handle = (name: string) => ({
+    name,
     select: () => ({
       from: (table: unknown) => {
         const q = { where: () => ({ limit: async () => rowsFor(table) }), innerJoin: () => q };
@@ -69,11 +74,16 @@ vi.mock("@/lib/db", () => ({
     insert: (table: unknown) => ({
       values: async () => {
         if (table === messages && state.messageInsert) throw state.messageInsert;
+        writes.push({ what: "insert", via: name });
       },
     }),
-    update: () => ({ set: () => ({ where: async () => {} }) }),
-  },
-}));
+    update: () => ({ set: () => ({ where: async () => { writes.push({ what: "update", via: name }); } }) }),
+  });
+  return {
+    pool: { connect: vi.fn() },
+    db: { ...handle("db"), transaction: async (fn: (tx: unknown) => unknown) => fn(handle("tx")) },
+  };
+});
 vi.mock("@/lib/settings", () => ({ getSetting: vi.fn(async () => null), setSetting: vi.fn(async () => {}) }));
 
 await import("../bot");
@@ -89,6 +99,11 @@ const send = (c = ctx()) => flush.fn!(42, { ctx: c, text: "hello", files: [] }).
 const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 
 beforeEach(() => {
+  writes.length = 0;
+  chatRow.activeLeafId = null;
+  settleMovedPast.mockReset().mockImplementation(async (_id: string, tx: unknown) => {
+    writes.push({ what: "settle", via: (tx as { name?: string } | undefined)?.name });
+  });
   state.messageInsert = undefined;
   state.runningProbe = undefined;
   state.role = "user";
@@ -183,6 +198,24 @@ describe("telegram ingest budget hold", () => {
     expect(take).not.toHaveBeenCalled();
     expect(reserveBudget).not.toHaveBeenCalled();
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  // Typing instead of tapping the card the reply waits on goes past it. Left live, the
+  // card kept the web composer blocked and fed every later turn a call with no result.
+  it("settles the card its chat's leaf still waits on, in the same transaction as the message", async () => {
+    chatRow.activeLeafId = "a1";
+    await send();
+    expect(settleMovedPast).toHaveBeenCalledOnce();
+    expect(settleMovedPast.mock.calls[0][0]).toBe("a1");
+    expect(writes).toEqual([
+      { what: "insert", via: "tx" }, { what: "update", via: "tx" }, { what: "settle", via: "tx" },
+    ]);
+    expect(enqueueTask.mock.calls[0][0].payload.replyParentId).not.toBe("a1");
+  });
+
+  it("settles nothing in a chat with no messages yet", async () => {
+    await send();
+    expect(settleMovedPast).not.toHaveBeenCalled();
   });
 
   it("says it could not start without showing the raw error", async () => {

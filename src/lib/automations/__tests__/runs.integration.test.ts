@@ -435,3 +435,52 @@ run("deliver_telegram routes a run's result", () => {
     expect(payload.origin).toBeUndefined();
   });
 });
+
+// The overlap guard skips while a COMPLETED previous run leaves a card waiting. After
+// a failed run it lets the firing through, and the thread can still end on a card the
+// user never answered (their own turn there): the firing goes past it, so it settles it.
+run("single mode past a card its thread still waits on", () => {
+  const U5 = "atest-user-5";
+  const T = "atest-thread-5";
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'E','e@test.local') ON CONFLICT (id) DO NOTHING`, [U5]);
+  });
+  afterAll(async () => {
+    await pool.query(`DELETE FROM tasks WHERE user_id = $1`, [U5]);
+    await pool.query(`DELETE FROM automations WHERE user_id = $1`, [U5]);
+    await pool.query(`DELETE FROM chats WHERE user_id = $1`, [U5]);
+    await pool.query(`DELETE FROM "user" WHERE id = $1`, [U5]);
+  });
+
+  it("declines the waiting card in the firing that goes past it", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations, chats, messages } = await import("@/lib/db/schema");
+    const { fireAutomation } = await import("../runs");
+
+    await pool.query(`INSERT INTO chats (id, user_id, title) VALUES ($1, $2, 'Thread')`, [T, U5]);
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES
+        ('at5-u1', $1, NULL, 'user', 'save it', NULL),
+        ('at5-a1', $1, 'at5-u1', 'assistant', '', $2::jsonb)`,
+      [T, JSON.stringify({ status: "awaiting_approval", parts: [{ type: "tool-call", id: "c1", name: "save_row", input: {}, approval: { id: "ap1" } }] })],
+    );
+    await pool.query(`UPDATE chats SET active_leaf_id = 'at5-a1' WHERE id = $1`, [T]);
+    await pool.query(`INSERT INTO tasks (id, chat_id, user_id, status) VALUES ('at5-prev', $1, $2, 'failed')`, [T, U5]);
+    const id = nanoid();
+    await db.insert(automations).values({
+      id, userId: U5, title: "Thread", prompt: "check in",
+      trigger: { kind: "schedule", cron: "0 * * * *", timezone: "UTC" },
+      threadMode: "single", threadChatId: T, lastTaskId: "at5-prev",
+    });
+    const [a] = await db.select().from(automations).where(eq(automations.id, id));
+
+    expect(await fireAutomation(a)).toEqual({ fired: true, chatId: T });
+
+    const [card] = await db.select().from(messages).where(eq(messages.id, "at5-a1"));
+    expect(card.metadata).toMatchObject({ status: "completed", parts: [{ id: "c1", approval: { id: "ap1", approved: false } }] });
+    const [chat] = await db.select().from(chats).where(eq(chats.id, T));
+    const [leaf] = await db.select().from(messages).where(eq(messages.id, chat.activeLeafId!));
+    expect(leaf).toMatchObject({ parentId: "at5-a1", content: "check in" });
+  });
+});

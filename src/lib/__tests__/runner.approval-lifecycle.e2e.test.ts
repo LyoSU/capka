@@ -125,6 +125,7 @@ vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 import { db, pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
 import { cancelQueuedTurn } from "../tasks/queue";
+import { UNDECIDED_APPROVAL_REASON } from "../chat/tool-results";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const U = "aplc-user";
@@ -513,6 +514,31 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
     expect(resultFor(row.parts, "c2").map((r) => r.output?.reason)).toEqual(reasons);
     expect((await pool.query(`SELECT id FROM tasks WHERE id=$1`, [`${chat}-task`])).rows).toEqual([]);
+  }, 30_000);
+
+  // A follow-up queued while the reply ran, and the reply then stopped on a card: the
+  // follow-up's turn goes past a call nobody will decide. That turn used to die with
+  // AI_MissingToolResultsError before reaching the model, and so did every later one.
+  it("a turn that goes past an undecided card answers, with the call declined, and settles the card", async () => {
+    const chat = `${C}-past`;
+    await seedSuspended(chat, { name: "save_row", approved: undefined as unknown as boolean });
+    await pool.query(`INSERT INTO messages (id, chat_id, parent_id, role, content) VALUES ($1,$2,$3,'user','never mind')`, [`${chat}-u2`, chat, `${chat}-a1`]);
+    await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-u2`, chat]);
+    const { rows } = await pool.query<ClaimedTask>(
+      `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at, payload)
+       VALUES ($1,$2,$3,'running','w-aplc', now() + interval '300 seconds', $4::jsonb) RETURNING *`,
+      [`${chat}-task`, chat, U, JSON.stringify({ replyParentId: `${chat}-u2` })],
+    );
+    await runAgentTask(rows[0], "w-aplc");
+
+    expect((await pool.query(`SELECT status FROM tasks WHERE id=$1`, [`${chat}-task`])).rows[0].status).toBe("completed");
+    expect(writes).toEqual([]);
+    expect(prompts).toHaveLength(1);
+    expectWireShape(prompts[0]);
+    expect(JSON.stringify(prompts[0])).toContain(JSON.stringify(UNDECIDED_APPROVAL_REASON));
+    const row = await storedRow(chat);
+    expect(row.status).toBe("completed");
+    expect(row.parts.find((p) => p.id === "c2")?.approval).toEqual({ id: "ap1", approved: false, reason: UNDECIDED_APPROVAL_REASON });
   }, 30_000);
 
   // The SDK runs an approval only when its response is the LAST message it is handed.

@@ -4,6 +4,7 @@ import { realtime } from "@/lib/realtime";
 import { releaseHold } from "@/lib/billing/limits";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
+import { UNDECIDED_APPROVAL_REASON } from "@/lib/chat/tool-results";
 import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR, type LLMErrorCategory } from "@/lib/errors/friendly";
 import { log } from "@/lib/log";
 
@@ -515,6 +516,49 @@ export async function settleCancelledContinuation(messageId: string, tx: QueueTx
   await tx.execute(sql`
     UPDATE messages SET metadata = ${JSON.stringify({ ...meta, status: "cancelled", parts })}::jsonb
      WHERE id = ${messageId} AND metadata = ${JSON.stringify(meta)}::jsonb`);
+}
+
+/**
+ * Settle a reply still waiting on the user once a new turn goes past it. Nobody will
+ * decide or answer it after that: its card would stay live (keeping the web composer
+ * blocked), and a late tap would resume a reply the conversation has moved on from.
+ * Each undecided approval is declined with the reason the model reads, so its card
+ * reads "not allowed"; each unanswered ask is skipped with the result an explicit Skip
+ * stores. Calls already decided are left to the continuation that owns them. Pass the
+ * admission's transaction, so the new message and this settle land together.
+ *
+ * Compare-and-set on the metadata read, so a decision landing at the same moment is
+ * never overwritten: whichever writes first wins (a decision needs its call still
+ * undecided, this needs the row unchanged), and the loser re-reads.
+ */
+export async function settleMovedPast(messageId: string, tx: QueueTx = db): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { rows } = await tx.execute(sql`
+      SELECT metadata FROM messages
+       WHERE id = ${messageId} AND metadata->>'status' IN ('awaiting_approval', 'awaiting_answer')`);
+    const meta = (rows as { metadata: MessageMeta }[])[0]?.metadata;
+    if (!meta) return;
+    const read = JSON.stringify(meta);
+    const parts = [...(meta.parts ?? [])];
+    let waiting = false;
+    for (const p of [...parts]) {
+      if (p.type !== "tool-call") continue;
+      if (p.approval && p.approval.approved === undefined) {
+        p.approval = { id: p.approval.id, approved: false, reason: UNDECIDED_APPROVAL_REASON };
+        waiting = true;
+      } else if (p.answer && p.answer.value === undefined) {
+        const value = { action: "skip" as const, values: {} };
+        p.answer = { form: p.answer.form, value };
+        parts.push({ type: "tool-result", id: p.id, name: p.name, output: value });
+        waiting = true;
+      }
+    }
+    if (!waiting) return;
+    const settled = await tx.execute(sql`
+      UPDATE messages SET metadata = ${JSON.stringify({ ...meta, status: "completed", parts })}::jsonb
+       WHERE id = ${messageId} AND metadata = ${read}::jsonb`);
+    if (settled.rowCount) return;
+  }
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,

@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession, requireActive, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -8,7 +8,7 @@ import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, isAppError } from "@/lib/errors";
-import { enqueueTask } from "@/lib/tasks/queue";
+import { enqueueTask, settleMovedPast, type QueueTx } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
@@ -145,10 +145,13 @@ export const POST = apiHandler(async (req: Request) => {
   // silently graft this turn onto a foreign branch. A regenerate that names no
   // message comes from a client too old to know it must: send it to reload too.
   // Checked before the budget hold, so a refusal has nothing to give back.
+  // Whether that parent still waits on a card the user never decided or answered is
+  // read in the same lookup: this message goes past it, so it is settled below.
+  let parentWaits = false;
   if (parentId || !text) {
     const [parent] = parentId
       ? await db
-          .select({ id: messages.id, role: messages.role })
+          .select({ id: messages.id, role: messages.role, status: sql<string | null>`${messages.metadata}->>'status'` })
           .from(messages)
           .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
           .limit(1)
@@ -163,6 +166,7 @@ export const POST = apiHandler(async (req: Request) => {
     if (!text && parent.role !== "user") {
       return Response.json({ error: "This reply can't be regenerated.", code: "CANNOT_REGENERATE" }, { status: 422 });
     }
+    parentWaits = parent.status === "awaiting_approval" || parent.status === "awaiting_answer";
   }
   // A brand-new chat's first message can't reuse an id another row already holds.
   // The check after the message insert below refuses that too and stays the
@@ -230,38 +234,53 @@ export const POST = apiHandler(async (req: Request) => {
     const newUserId = userMessageId || nanoid();
     // Order matters: the message row must exist before the chat's
     // active_leaf_id can reference it (FK), so these can't run in parallel.
-    const [inserted] = await db.insert(messages).values({
-      // Reuse the client's optimistic id so the rendered bubble keeps a stable
-      // React key when history reloads — otherwise it remounts and flashes.
-      id: newUserId,
-      chatId,
-      parentId,
-      role: "user",
-      content: text,
-      platform: "web",
-      // Persist what was attached so the history bubble can show it (reference
-      // metadata only — the bytes stay in the sandbox workspace).
-      metadata: attachedFiles?.length ? { attachedFiles } : null,
-    }).onConflictDoNothing().returning({ id: messages.id });
-    // A conflict is this same send retried (another tab, a resend) — or an id that
-    // is already some other row, which must not become this chat's leaf and reply
-    // parent. handedOff stays false → the finally below releases the hold.
-    if (!inserted) {
-      const [own] = await db
-        .select({ id: messages.id })
-        .from(messages)
-        .where(and(eq(messages.id, newUserId), eq(messages.chatId, chatId), eq(messages.role, "user")))
-        .limit(1);
-      if (!own) return Response.json({ error: "Message id already in use.", code: "MESSAGE_ID_IN_USE" }, { status: 409 });
-    }
-    await db.update(chats).set({
-      ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-      ...turnSettings,
-      // Point the chat at the new message so a reload mid-flight shows this
-      // branch; the worker then advances it to the assistant reply.
-      activeLeafId: newUserId,
-      updatedAt: new Date(),
-    }).where(eq(chats.id, chatId));
+    // False when the id is some other row's.
+    const save = async (exec: QueueTx) => {
+      const [inserted] = await exec.insert(messages).values({
+        // Reuse the client's optimistic id so the rendered bubble keeps a stable
+        // React key when history reloads — otherwise it remounts and flashes.
+        id: newUserId,
+        chatId,
+        parentId,
+        role: "user",
+        content: text,
+        platform: "web",
+        // Persist what was attached so the history bubble can show it (reference
+        // metadata only — the bytes stay in the sandbox workspace).
+        metadata: attachedFiles?.length ? { attachedFiles } : null,
+      }).onConflictDoNothing().returning({ id: messages.id });
+      // A conflict is this same send retried (another tab, a resend) — or an id that
+      // is already some other row, which must not become this chat's leaf and reply
+      // parent. handedOff stays false → the finally below releases the hold.
+      if (!inserted) {
+        const [own] = await exec
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.id, newUserId), eq(messages.chatId, chatId), eq(messages.role, "user")))
+          .limit(1);
+        if (!own) return false;
+      }
+      await exec.update(chats).set({
+        ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+        ...turnSettings,
+        // Point the chat at the new message so a reload mid-flight shows this
+        // branch; the worker then advances it to the assistant reply.
+        activeLeafId: newUserId,
+        updatedAt: new Date(),
+      }).where(eq(chats.id, chatId));
+      return true;
+    };
+    // Going past a reply that still waits on the user settles it in the same
+    // transaction, so its card never outlives the message that skipped it. Only then:
+    // an ordinary send stays the two plain statements it always was.
+    const saved = parentWaits
+      ? await db.transaction(async (tx) => {
+          if (!(await save(tx))) return false;
+          await settleMovedPast(parentId!, tx);
+          return true;
+        })
+      : await save(db);
+    if (!saved) return Response.json({ error: "Message id already in use.", code: "MESSAGE_ID_IN_USE" }, { status: 409 });
     replyParentId = newUserId;
   } else if (existingChat) {
     // A regenerate. `updatedAt` is bumped unconditionally, not only when a setting

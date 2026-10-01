@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { automations, chats, messages, telegramLinks, users, tasks } from "@/lib/db/schema";
 import { localDayOf, type AutomationTrigger } from "./schedule";
 import { evaluateRunWhen } from "./run-when";
-import { enqueueTask, notifyTaskEnqueued, type QueueTx } from "@/lib/tasks/queue";
+import { enqueueTask, notifyTaskEnqueued, settleMovedPast, type QueueTx } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
@@ -395,6 +395,10 @@ export async function fireAutomation(
         untrustedIngress: event !== null,
       }).returning();
       await tx.update(chats).set({ activeLeafId: inserted.id, updatedAt: new Date() }).where(eq(chats.id, chatId));
+      // The overlap guard looks for a waiting card only after a completed run, so a
+      // thread whose last run failed or was stopped can still end on one (the user's
+      // own turn there). This message goes past that card, so it is settled.
+      if (thread?.activeLeafId) await settleMovedPast(thread.activeLeafId, tx);
 
       // Deliver to Telegram when linked AND when this automation is meant to leave
       // the browser — the run's full result lands in the messenger via the existing

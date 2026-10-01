@@ -12,7 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath, replyText } from "@/lib/chat/tree";
 import { toUIMessages, expandSteers } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation, type NotRunReason } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux, readSteers, enqueueTask, sealUnrunApprovals, settleCancelledContinuation, settleMovedPast, type NotRunReason } from "@/lib/tasks/queue";
 import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
@@ -805,6 +805,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const own = nodes.at(-1)?.id === msgId ? nodes.slice(0, -1) : nodes;
       const head = own[own.findLastIndex((n) => n.role !== "user") + 1];
       if (head) loadedHead = { id: head.id, parentId: head.parentId };
+      // A reply on this path that still waits on the user is one this turn goes past —
+      // a follow-up queued while it ran, or a chat that moved on before admission
+      // settled such cards — so nobody will decide it now. Settled like any admission
+      // past it. Best-effort: the history below already reads it that way.
+      for (const n of own) {
+        const status = (n.metadata as MessageMeta | null)?.status;
+        if (status !== "awaiting_approval" && status !== "awaiting_answer") continue;
+        await settleMovedPast(n.id).catch((e) => tlog.warn("could not settle a waiting reply this turn goes past", { messageId: n.id, err: String(e) }));
+      }
       // Collect from the FULL path, not the compaction-collapsed model view:
       // the transcript still renders every old message, so uniqueness has to
       // hold against everything the user can see.

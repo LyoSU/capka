@@ -20,7 +20,10 @@ vi.mock("@/lib/auth", async (importOriginal) => {
 vi.mock("@/lib/providers/resolve", () => ({ resolveUserModelInfo }));
 vi.mock("@/lib/billing/limits", () => ({ reserveBudget, releaseHold }));
 // No task row is written: a live worker on the same database would claim it.
-vi.mock("@/lib/tasks/queue", () => ({ enqueueTask }));
+vi.mock("@/lib/tasks/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tasks/queue")>()),
+  enqueueTask,
+}));
 vi.mock("@/lib/rate-limit", () => ({ take: () => ({ ok: true }) }));
 
 import { pool } from "@/lib/db";
@@ -153,6 +156,37 @@ run("POST /api/chat guards against the real tables", () => {
     expect((await res.json()).code).toBe("CANNOT_REGENERATE");
     expect(reserveBudget).not.toHaveBeenCalled();
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  // A stale tab, or a client that never blocked its composer, sends past a reply whose
+  // card still waits. The card is settled with the message, so it stops being live.
+  it("settles the card of a waiting reply it sends past, in the same write", async () => {
+    await q(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ('rg-a3', 'rg-mine', 'rg-a2', 'assistant', '', $1::jsonb)`,
+      [JSON.stringify({ status: "awaiting_approval", parts: [{ type: "tool-call", id: "c1", name: "manage", input: {}, approval: { id: "ap1" } }] })],
+    );
+    await q(`UPDATE chats SET active_leaf_id = 'rg-a3' WHERE id = 'rg-mine'`, []);
+
+    expect((await send({ chatId: "rg-mine", userMessage: "never mind", userMessageId: "rg-u3" })).status).toBe(200);
+
+    const [{ metadata }] = await q(`SELECT metadata FROM messages WHERE id = 'rg-a3'`, []);
+    expect(metadata).toMatchObject({ status: "completed", parts: [{ id: "c1", approval: { id: "ap1", approved: false } }] });
+    expect(await leafOf("rg-mine")).toBe("rg-u3");
+    expect(enqueueTask.mock.calls[0][0].payload.replyParentId).toBe("rg-u3");
+  });
+
+  it("leaves the card waiting when the message it would have gone past is refused", async () => {
+    await q(
+      `INSERT INTO messages (id, chat_id, parent_id, role, content, metadata) VALUES ('rg-a3', 'rg-mine', 'rg-a2', 'assistant', '', $1::jsonb)`,
+      [JSON.stringify({ status: "awaiting_answer", parts: [{ type: "tool-call", id: "q1", name: "ask", input: {}, answer: { form: { fields: [{ id: "f", label: "F", kind: "text" }] } } }] })],
+    );
+    await q(`UPDATE chats SET active_leaf_id = 'rg-a3' WHERE id = 'rg-mine'`, []);
+
+    expect((await send({ chatId: "rg-mine", userMessage: "skip it", userMessageId: "rg-foreign" })).status).toBe(409);
+
+    const [{ metadata }] = await q(`SELECT metadata FROM messages WHERE id = 'rg-a3'`, []);
+    expect(metadata.status).toBe("awaiting_answer");
+    expect(await leafOf("rg-mine")).toBe("rg-a3");
   });
 
   it("still regenerates a reply to a user message", async () => {

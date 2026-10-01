@@ -1,6 +1,6 @@
 import { steerFrame, type StoredPart, type MessageMeta } from "./contracts";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
-import { INTERRUPTED_TOOL_RESULT } from "./tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNDECIDED_APPROVAL_REASON } from "./tool-results";
 
 /**
  * Convert DB message rows to UI message format.
@@ -74,6 +74,10 @@ export function toUIMessages(rows: {
     // is among these rows; a tail read's first row leaves it unsaid.
     const prev = rows[i - 1];
     const regenerable = m.role === "assistant" && prev && prev.id === m.parentId ? prev.role === "user" : undefined;
+    // A card only waits on the last message. One the chat already went past reads the
+    // way a new turn settles it (settleMovedPast) — a row stored before that existed,
+    // or that a turn went past without settling, renders the same and offers no buttons.
+    const movedPast = i < rows.length - 1;
     const parts: unknown[] = [];
 
     if (meta?.parts) {
@@ -97,14 +101,16 @@ export function toUIMessages(rows: {
           // available once its tool-result lands. `answer.form`/`answer.value` ride
           // along so the AskCard owns the whole lifecycle — NOT the orphan→error
           // fallback below. (Safe past sealOrphanToolCalls: an answered call is
-          // output-available; an unanswered one only reaches the model feed on a
-          // fork/abandon, where sealing to an error is the correct behavior.)
+          // output-available, and so is one the chat moved past, as skipped; an
+          // unanswered one still last only reaches the model feed on a fork, where
+          // sealing it as unanswered is the correct behavior.)
           if (p.answer) {
+            const skipped = !tr && !p.answer.value && movedPast ? { action: "skip", values: {} } : undefined;
             parts.push({
               type: "dynamic-tool", toolCallId: p.id, toolName: p.name, input: p.input,
-              state: tr ? "output-available" : "input-available",
-              output: tr?.output,
-              askForm: p.answer.form, askValue: p.answer.value,
+              state: tr || skipped ? "output-available" : "input-available",
+              output: tr?.output ?? skipped,
+              askForm: p.answer.form, askValue: p.answer.value ?? skipped,
             });
             continue;
           }
@@ -113,7 +119,9 @@ export function toUIMessages(rows: {
           // exact tool-approval-request/response the resume needs (and the card
           // renders Approve/Reject), NOT the orphan→output-error fallback below.
           if (p.approval) {
-            const a = p.approval;
+            const a = p.approval.approved === undefined && movedPast
+              ? { id: p.approval.id, approved: false, reason: UNDECIDED_APPROVAL_REASON }
+              : p.approval;
             // awaiting → approval-requested; approved-and-executed → output-available
             // (its tool-result landed) or output-error (it threw — the card reads
             // failed, and later turns carry the error as the call's result);
