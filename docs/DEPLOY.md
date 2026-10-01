@@ -177,11 +177,16 @@ from current `pg_dump` start with `\restrict`, which older `psql` clients reject
 git clone --branch v<release-of-the-dump> https://github.com/LyoSU/capka.git /opt/capka
 cd /opt/capka
 sudo cp /path/to/backup/.env .env && sudo chmod 600 .env   # same CAPKA_MASTER_KEY
+sudo sh scripts/up.sh                                      # empty database, no files yet
+sudo ./scripts/restore.sh /path/to/backup/capka-<timestamp>.sql.gz   # leaves the stack stopped
 sudo rsync -a /path/to/backup/data/ data/                  # ./data, without backups/
-sudo sh scripts/up.sh                                      # boots on an empty database
-sudo ./scripts/restore.sh /path/to/backup/capka-<timestamp>.sql.gz
 sudo sh scripts/up.sh
 ```
+
+Copy `./data` back only after the restore, while `restore.sh` has the
+controller stopped: the controller deletes workspace directories that have no
+row in the database and have not changed for a week (`rsync -a` and `tar` keep
+the old times), and on the empty database no workspace has a row.
 
 If the log shows `[security] CAPKA_MASTER_KEY does not match the key that
 encrypted the stored data`, the `.env` is not the one that belongs to the dump.
@@ -206,6 +211,7 @@ F=capka-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
 trap 'rm -f "$F.tmp"' EXIT
 docker exec postgres-<uuid> pg_dump -U Capka -d Capka --clean --if-exists | gzip > "$F.tmp"
 mv "$F.tmp" "$F"                           # only a finished dump gets the final name
+find . -name 'capka-*.sql.gz' -mtime +14 -delete   # nothing else prunes this directory
 ```
 
 The files live in the host directory mounted at `/data` in the controller:
@@ -225,14 +231,17 @@ if gunzip -t "$F" && gunzip -c "$F" | tail -n 20 | grep -q 'PostgreSQL database 
   { echo 'DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
     gunzip -c "$F"; } \
     | docker exec -i postgres-<uuid> psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d Capka >/dev/null \
-    && echo "restore OK"
+    && echo "restore OK" \
+    || echo "Restore failed and was rolled back: the database is as it was. platform and sandbox-controller are still stopped; redeploy the resource."
 else
   echo "Not restoring: $F is cut short or unreadable"
 fi
 ```
 
 Check the marker first, as above: psql commits whatever a cut-short dump
-contains, after dropping the old schema.
+contains, after dropping the old schema. On a new server, copy the files into the
+controller's `/data` directory after the restore and before the redeploy, for the
+reason given in [Restoring on a new host](#restoring-on-a-new-host).
 
 ## Routing / TLS
 
