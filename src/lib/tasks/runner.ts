@@ -1304,10 +1304,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     streamStarted = true;
     // The SDK runs the calls the user approved inside streamText, ahead of the first
     // step and with no `tool-call` event, so their windows open here or never.
-    const settledIds = new Set(parts.flatMap((p) => (p.type === "tool-result" || p.type === "tool-error" ? [p.id] : [])));
-    for (const p of parts) {
-      if (p.type === "tool-call" && p.approval?.approved === true && !settledIds.has(p.id)) toolStartedAt.set(p.id, Date.now());
-    }
+    const pendingApproved = () => {
+      const settled = new Set(parts.flatMap((p) => (p.type === "tool-result" || p.type === "tool-error" ? [p.id] : [])));
+      return parts.flatMap((p) => (p.type === "tool-call" && p.approval?.approved === true && !settled.has(p.id) ? [p.id] : []));
+    };
+    for (const id of pendingApproved()) toolStartedAt.set(id, Date.now());
     let result = makeStream();
 
     // Usage accumulated LIVE from finish-step events — the source of truth.
@@ -1544,6 +1545,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // MAX_TASK_MS, so an exhausted turn still reports "provider unresponsive"
       // rather than being cut off as a generic timeout.
       watchdog.start(recoveries > 0 ? STREAM_IDLE_MS * 2 : STREAM_IDLE_MS);
+      // An approved call the SDK runs ahead of the first step streams no `tool-call`,
+      // so the pause that event starts for any other call starts here: an approved
+      // write running past the window read as a hung model, and the retry ran it
+      // again. Its result, error or denial ends the pause.
+      pendingApproved().forEach(() => watchdog.enterTool());
       try {
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
@@ -1758,6 +1764,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // A declined call already has its decision and is left alone.
             const call = parts.find((p) => p.type === "tool-call" && p.id === event.toolCallId);
             if (call?.type !== "tool-call" || call.approval?.approved !== true) break;
+            watchdog.exitTool();
             const present = event.toolName in rawTools;
             const reason: NotRunReason = present ? "rule_changed" : "tool_unavailable";
             const output = { status: "error", code: "NOT_RUN", reason, error: present

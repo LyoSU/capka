@@ -4,6 +4,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { expectWireShape, type WireMsg } from "./wire-shape";
 
+// A short stall window, so a slow call can outlast it; every mock reply here is instant.
+vi.hoisted(() => { process.env.STREAM_IDLE_SECONDS = "3"; });
+
 /**
  * Every way an approval continuation can end has to leave its row settled: an
  * approved call with a result (or its decision, when declined) and a status that is
@@ -48,13 +51,19 @@ vi.mock("@/lib/providers/resolve", () => ({
   resolveAuxTarget: async (_userId: string, turn: unknown) => turn,
 }));
 const writes: unknown[] = [];
+// How long the next save_row takes.
+let slowWriteMs = 0;
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({
     tools: {
       save_row: tool({
         inputSchema: z.object({ row: z.string() }),
         needsApproval: true,
-        execute: async (input) => { writes.push(input); return "saved"; },
+        execute: async (input) => {
+          if (slowWriteMs) await new Promise((r) => setTimeout(r, slowWriteMs));
+          writes.push(input);
+          return "saved";
+        },
       }),
       // Asks for no approval (any more): the SDK drops an approval for it too.
       read_row: tool({
@@ -253,6 +262,25 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(writes).toEqual([{ row: "final" }]);
     const results = resultFor((await storedRow(chat)).parts, "c2");
     expect(results.map((r) => r.output)).toEqual(["saved"]);
+  }, 30_000);
+
+  // The SDK streams no `tool-call` for an approved call it runs ahead of the first
+  // step, so nothing paused the stall watchdog for it: a write slower than the window
+  // read as a hung model, and the retry ran it a second time.
+  it("does not take a slow approved call for a stalled model", async () => {
+    const chat = `${C}-slow`;
+    await seedSuspended(chat, { name: "save_row", approved: true });
+    slowWriteMs = 4_000;
+
+    try {
+      expect(await continueApproval(chat)).toBe("completed");
+    } finally {
+      slowWriteMs = 0;
+    }
+
+    expect(writes).toEqual([{ row: "final" }]);
+    expect(resultFor((await storedRow(chat)).parts, "c2").map((r) => r.output)).toEqual(["saved"]);
+    expect(prompts).toHaveLength(1);
   }, 30_000);
 
   // The first half's files were found in its own tool windows, which the
