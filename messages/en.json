@@ -253,6 +253,7 @@
       "editQueued": "Edit this message",
       "steerQueued": "Add to the current reply",
       "queuedHint": "{count, plural, one {Sends} other {Send}} when the reply finishes",
+      "queuedAwaiting": "{count, plural, one {Sends} other {Send}} after you respond to the request above",
       "queuedHeld": "Sending is paused while you edit",
       "queuedSendNow": "Send now",
       "queuedSendNowTitle": "Stop the reply and send straight away",

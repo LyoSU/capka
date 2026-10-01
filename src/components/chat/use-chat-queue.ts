@@ -149,6 +149,11 @@ export async function drainQueue(
     /** An open ghost editor parks the whole queue — re-read per item, since a
      *  burst takes a round-trip each and the pencil can be clicked mid-way. */
     editing: () => boolean;
+    /** The reply ended on an approval or question card. Sending past it would let
+     *  the server settle that card as undecided before the user ever saw it, so
+     *  the queue waits for the decision — re-read per item, since a card can come
+     *  up partway through a burst. */
+    awaiting: () => boolean;
     /** Message ids the transcript already holds, read live. */
     committed: () => ReadonlySet<string>;
     dequeue: (id: string) => void;
@@ -157,7 +162,7 @@ export async function drainQueue(
   },
 ): Promise<void> {
   for (const item of batch) {
-    if (io.editing()) break;
+    if (io.editing() || io.awaiting()) break;
     if (io.committed().has(item.id)) {
       // Already landed — this is the item a previous drain sent before its tab
       // closed, or one a second tab sent. Drop it instead of asking twice.

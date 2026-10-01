@@ -46,6 +46,7 @@ describe("drainQueue", () => {
   function harness(opts: {
     committed?: string[];
     editingAfter?: number;
+    awaitingAfter?: number;
     failOn?: string;
   } = {}) {
     const log: string[] = [];
@@ -55,6 +56,7 @@ describe("drainQueue", () => {
       log,
       io: {
         editing: () => opts.editingAfter !== undefined && sends >= opts.editingAfter,
+        awaiting: () => opts.awaitingAfter !== undefined && sends >= opts.awaitingAfter,
         committed: () => committed,
         dequeue: (id: string) => log.push(`dequeue:${id}`),
         setSending: (m: QueuedMessage | null) => log.push(`sending:${m?.id ?? "none"}`),
@@ -108,6 +110,21 @@ describe("drainQueue", () => {
   it("stops at the item being edited and leaves the rest queued", async () => {
     const h = harness({ editingAfter: 1 });
     await drainQueue([msg("a"), msg("b"), msg("c")], h.io);
+    expect(h.log).toEqual(["sending:a", "send:a", "dequeue:a"]);
+  });
+
+  // The defect: the reply ended on an approval or question card and the queued
+  // message went straight past it, so the server settled the card as undecided
+  // before the user ever saw it. The queue waits for the decision instead.
+  it("holds the queue while the reply waits on the user's decision", async () => {
+    const h = harness({ awaitingAfter: 0 });
+    await drainQueue([msg("a"), msg("b")], h.io);
+    expect(h.log).toEqual([]);
+  });
+
+  it("stops mid-burst when a card comes up and leaves the rest queued", async () => {
+    const h = harness({ awaitingAfter: 1 });
+    await drainQueue([msg("a"), msg("b")], h.io);
     expect(h.log).toEqual(["sending:a", "send:a", "dequeue:a"]);
   });
 });

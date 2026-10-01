@@ -641,6 +641,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingIdRef = useRef<string | null>(null);
   editingIdRef.current = editingId;
+  // The same for a reply that ended on a card waiting for the user's approval or
+  // answer: the drain re-reads it per item, so a card that comes up mid-burst
+  // stops the rest too.
+  const awaitingRef = useRef(awaitingInput);
+  awaitingRef.current = awaitingInput;
 
   // The chat's model is gone and nothing is currently streaming — the composer
   // stays, says so in a strip above its footer, and refuses to send until another
@@ -669,6 +674,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // the user is mid-sentence about what they want to say next, and firing the
     // messages around it would settle that question for them.
     if (editingId) return;
+    // A reply waiting on the user's approval or answer holds the queue too: a
+    // message sent now would go past the card, and the server would settle it
+    // as undecided before the user got to decide. Deciding the card resumes the
+    // reply, and the queue goes out once that finishes.
+    if (awaitingInput) return;
     const batch = queued;
     dispatchingRef.current = true;
     // The loop itself lives in `drainQueue` — the order of its dequeue against its
@@ -676,6 +686,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // its own.
     void drainQueue(batch, {
       editing: () => editingIdRef.current !== null,
+      awaiting: () => awaitingRef.current,
       committed: () => messageIdsRef.current,
       dequeue: (id) => setQueued((q) => q.filter((m) => m.id !== id)),
       setSending,
@@ -684,7 +695,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // `modelGone` is a dependency on purpose: picking a live model is what lets a
     // queue parked by a dead one go out, and nothing else in this list changes then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, queued, historyLoaded, editingId, modelGone]);
+  }, [isLoading, queued, historyLoaded, editingId, modelGone, awaitingInput]);
 
   const [filesOpen, setFilesOpen] = useState(false);
 
@@ -941,6 +952,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       <QueuedCaption
         count={ghosts.length}
         held={editingId !== null}
+        // "When the reply finishes" would be untrue while the reply waits on the
+        // user: the queue goes out only after the card above is decided.
+        label={awaitingInput && editingId === null ? t("panel.queuedAwaiting", { count: ghosts.length }) : undefined}
         // Only offered against a turn that is genuinely streaming. Two holds
         // must NOT be interruptible: `awaitingInput` is a turn suspended on the
         // user's own approval or answer — cancelling it throws away the question
