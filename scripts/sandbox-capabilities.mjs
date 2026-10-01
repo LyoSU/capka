@@ -35,6 +35,7 @@ export const TOOLS = [
   { bin: "weasyprint", version: "weasyprint --version", note: "HTML/CSS to PDF" },
   { bin: "html2pdf", version: "echo shim", note: "URL or .html to PDF via headless Chromium" },
   { bin: "mmdc", version: "echo shim", note: "Mermaid diagram to .svg/.png/.pdf" },
+  { bin: "docx-redline", version: "echo script", note: "Word tracked changes: `docx-redline ORIGINAL.docx EDITED.docx OUT.docx`" },
   { bin: "chromium", version: "chromium --version", note: "Headless browser; Playwright drives the same build" },
   { bin: "gs", version: "gs --version", note: "Ghostscript — PDF recompression, rasterising, PS/EPS" },
   { bin: "qpdf", version: "qpdf --version | head -1", note: "Lossless PDF structure edits" },
@@ -150,6 +151,17 @@ print('cells', len(pd.read_excel('i.xlsx', engine='calamine')))"`,
     cmd: `gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=j.pdf b.pdf >/dev/null && pdftotext j.pdf -`,
     want: /Привіт/,
     needs: "HTML to PDF (headless Chromium)",
+  },
+  {
+    name: "Word tracked changes",
+    // The edited figure has to come back as a deletion of the old one: a file that
+    // merely opens would also pass if Compare silently recorded nothing.
+    cmd: `python3 -c "
+import docx
+d = docx.Document(); d.add_paragraph('Pay 5000 within 14 days'); d.save('o.docx')
+d.paragraphs[0].runs[0].text = 'Pay 6500 within 10 days'; d.save('n.docx')" \
+&& docx-redline o.docx n.docx r.docx >/dev/null && unzip -p r.docx word/document.xml`,
+    want: /<w:delText[^>]*>[^<]*5000/,
   },
   {
     name: "writable HOME",

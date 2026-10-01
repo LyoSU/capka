@@ -339,6 +339,11 @@ COPY --chmod=755 scripts/sandbox-mmdc.cjs /opt/mermaid/mmdc.cjs
 RUN printf '#!/bin/sh\nexec node /opt/mermaid/mmdc.cjs "$@"\n' > /usr/local/bin/mmdc \
     && chmod 755 /usr/local/bin/mmdc
 
+# Word tracked changes: the original and the agent's edited .docx in, one .docx out
+# with the differences as accept/reject-able changes (LibreOffice Compare Document
+# over UNO). A plain file on PATH, after §8 for the same cache reason as mmdc.
+COPY --chmod=755 scripts/sandbox-docx-redline.py /usr/local/bin/docx-redline
+
 # ---------------------------------------------------------------------------
 # 9. Non-root user + workspace
 # ---------------------------------------------------------------------------
