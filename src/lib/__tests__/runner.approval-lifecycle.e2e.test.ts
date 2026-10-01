@@ -69,10 +69,19 @@ vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
 // Set to make the turn's own finish write throw once (a dropped connection), which
 // sends a turn whose stream already ran down the failure path.
 let failNextCommit = false;
+// Set to make the next settle of a cancelled continuation's row throw once.
+let failNextSettle = false;
 vi.mock("@/lib/tasks/queue", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tasks/queue")>();
   return {
     ...actual,
+    settleCancelledContinuation: async (...args: Parameters<typeof actual.settleCancelledContinuation>) => {
+      if (failNextSettle) {
+        failNextSettle = false;
+        throw new Error("Connection terminated unexpectedly");
+      }
+      return actual.settleCancelledContinuation(...args);
+    },
     commitTurnOutcome: async (input: Parameters<typeof actual.commitTurnOutcome>[0]) => {
       if (failNextCommit) {
         failNextCommit = false;
@@ -359,6 +368,25 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(row.status).toBe("cancelled");
     // A declined call keeps its decision alone, so its card still reads "declined".
     expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
+    expect(prompts).toEqual([]);
+    expect(writes).toEqual([]);
+  }, 30_000);
+
+  // Committing the cancel first and settling after left the row waiting for good when
+  // the settle threw: the outcome was taken, so the failure path stood down.
+  it("leaves no row waiting when settling a cancelled continuation fails", async () => {
+    const chat = `${C}-cancel-settle`;
+    await seedSuspended(chat, { name: "save_row", approved: true });
+    failNextSettle = true;
+
+    // The cancel rolled back with the settle, so the failure path still owned the
+    // outcome and wrote it over the row.
+    expect(await continueApproval(chat, {}, true)).toBe("failed");
+
+    expect(failNextSettle).toBe(false);
+    const row = await storedRow(chat);
+    expect(row.status).toBe("failed");
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
   }, 30_000);

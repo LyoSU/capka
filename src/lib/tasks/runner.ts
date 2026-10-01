@@ -503,10 +503,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Nothing was streamed yet, so there is no message to write — but the event
       // still announces an outcome, and announcing one we don't own would contradict
       // whatever the reconciler already told this user.
-      if (await finalizeTask(taskId, "cancelled", null, workerId)) {
-        // A continuation's row, though, still waits on this task with the user's
-        // decision on it — settled here or its card spins on "Applying…" forever.
-        if (resumeMessageId) await settleCancelledContinuation(resumeMessageId);
+      // A continuation's row, though, still waits on this task with the user's
+      // decision on it — settled here or its card spins on "Applying…" forever. In
+      // the same transaction: once the outcome commits, nothing else would settle it.
+      const owned = await db.transaction(async (tx) => {
+        if (!(await finalizeTask(taskId, "cancelled", null, workerId, tx))) return false;
+        if (resumeMessageId) await settleCancelledContinuation(resumeMessageId, tx);
+        return true;
+      });
+      if (owned) {
         await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
       } else {
         tlog.warn("cancellation outcome was already settled elsewhere; standing down");

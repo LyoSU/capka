@@ -289,13 +289,13 @@ export async function finalizeTask(
   /** The worker claiming the outcome. Adds an ownership check to the CAS; omit only
    *  where there is no run to own the row (clearing a still-queued task). */
   workerId?: string,
+  /** To commit the outcome together with a write that depends on owning it. */
+  tx: QueueTx = db,
 ): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `UPDATE tasks SET status = $2, error = $3, updated_at = now()
-      WHERE id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
-        ${workerId ? "AND worker_id = $4" : ""}`,
-    workerId ? [id, status, error ?? null, workerId] : [id, status, error ?? null],
-  );
+  const { rowCount } = await tx.execute(sql`
+    UPDATE tasks SET status = ${status}, error = ${error ?? null}, updated_at = now()
+     WHERE id = ${id} AND status NOT IN ('completed', 'failed', 'cancelled')
+       ${workerId ? sql`AND worker_id = ${workerId}` : sql``}`);
   return (rowCount ?? 0) > 0;
 }
 
