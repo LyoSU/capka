@@ -40,8 +40,10 @@ For production deploys, use [`DEPLOY.md`](DEPLOY.md).
 Pushing the tag IS the deploy: `stable` moves to the release and the public demo
 redeploys itself. Decide that before you tag, not after.
 
-1. On a clean `master`, run `scripts/release-gate.sh`. It must end on its final
-   `RELEASE GATE:` line; a report without it is an aborted run, so treat it as a failure.
+1. On a clean `master`, run `scripts/release-gate.sh` by hand; `npm run release` does
+   not run it. Tag only when it ends on `RELEASE GATE: PASS - the tree is fit to tag.`
+   and exits 0. `RELEASE GATE: FAIL` is a failure, and a report with no final
+   `RELEASE GATE:` line is an aborted run: also a failure.
 2. `npm run release <x.y.z|patch|minor|major>` bumps `package.json`, turns
    `[Unreleased]` in `CHANGELOG.md` into the dated section, commits
    `chore(release): cut vX.Y.Z` and tags it. It refuses a dirty tree and never pushes.
@@ -55,10 +57,18 @@ What the tag run does, in order:
   To start it by hand (the workflow has `workflow_dispatch`), then re-run the failed
   publish run:
   `gh workflow run ci.yml --ref vX.Y.Z`
-- A prerelease tag (`vX.Y.Z-rc.N`) publishes only its own image tag. A plain
-  `vX.Y.Z` also moves `vX.Y`, `vX`, and, only as the newest release overall,
-  `latest`, `stable` and the GitHub Release. An older maintenance tag never rolls a
-  channel back.
+- Every tag runs the whole workflow, but what it moves depends on the tag:
+  - A plain `vX.Y.Z` always publishes its own image tag. It also moves `vX.Y` when it
+    is the newest release of that minor, and `vX` when it is the newest of that major
+    (never for `v0.`). Only as the newest plain release overall does it also move
+    `latest` and the `stable` branch, and its GitHub Release gets the latest mark.
+  - A plain tag that is not the newest overall (an older maintenance release) moves
+    only the moving tags it is newest of, never `latest` or `stable`. Its GitHub
+    Release is still published, with `--latest=false`.
+  - A prerelease tag (`vX.Y.Z-rc.N`) publishes only its own image tag, moves nothing
+    else, and gets a GitHub prerelease with `--latest=false`.
+  Either way `/releases/latest` (the in-app update banner) never returns an older or
+  prerelease tag.
 - Images build per architecture, merge into one manifest, then `stable` moves, then
   the GitHub Release is published last. Do not run `gh release create` by hand.
 

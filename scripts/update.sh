@@ -42,9 +42,12 @@ if [ -z "${CAPKA_BRANCH:-}" ]; then
   LATEST="$NEWEST"
   if [ -n "$CURRENT_MAJOR" ] && [ "${CAPKA_ALLOW_MAJOR:-}" != "1" ]; then
     LATEST="$(printf '%s\n' "$RELEASES" | grep -E "^v${CURRENT_MAJOR}\." | tail -n1 || true)"
-    if [ -n "$NEWEST" ] && [ "$NEWEST" != "$LATEST" ]; then
+    if [ -n "$NEWEST" ] && [ "$(major "$NEWEST")" -gt "$CURRENT_MAJOR" ]; then
       echo "Note: $NEWEST is a new major version. Staying on v$CURRENT_MAJOR.x; to move, read its release notes, then run:" >&2
       echo "  sudo CAPKA_ALLOW_MAJOR=1 ./scripts/update.sh" >&2
+    elif [ -n "$NEWEST" ] && [ -z "$LATEST" ]; then
+      echo "Note: there is no release of v$CURRENT_MAJOR.x yet, so this install stays on $(git describe --tags --abbrev=0). To move to a newer prerelease tag, run:" >&2
+      echo "  sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=<tag> ./scripts/update.sh" >&2
     fi
   fi
   CAPKA_BRANCH="${LATEST:-master}"

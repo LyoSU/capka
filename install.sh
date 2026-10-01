@@ -274,7 +274,11 @@ resolve_version() {
       # Installed from a prerelease newer than every release of its major: stay
       # on it, never fall through to master or down over a database it migrated.
       if [ -z "$latest" ] || [ "$(printf '%s\n' "${cur%%-*}" "$latest" | sort -V | tail -n1)" != "$latest" ]; then
-        info "$cur is newer than any release of v$curmaj.x — staying on it."
+        if [ -z "$releases" ]; then
+          warn "Could not list the releases (check the network). Staying on $cur."
+        else
+          info "$cur is newer than any release of v$curmaj.x — staying on it."
+        fi
         CAPKA_BRANCH="$cur"
         CAPKA_VERSION="$cur"
         return 0
