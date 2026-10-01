@@ -30,7 +30,7 @@ leaves the platform serving and healthy while it retries in the background.
 Read the log instead:
 
 ```bash
-docker compose logs platform | grep '\[db\]'
+docker compose logs platform | grep -E 'migrations up to date|auto-migration'
 ```
 
 The **last** of these lines decides:
@@ -41,6 +41,12 @@ The **last** of these lines decides:
 - `[db] auto-migration failed (continuing; retrying in the background)` or
   `[db] auto-migration retry failed: …` — the schema is NOT current; the error
   after it says why. Fix the cause or roll back (below).
+- `[db] could not start auto-migration (continuing without it)` — the schema is
+  NOT current and nothing retries. Fix the cause and restart the platform.
+
+The other `[db]` lines (`carried … legacy memory doc(s)`, `memory-doc migration
+failed`) belong to a data migration that runs after the schema is current; they
+do not change the answer.
 
 ## Rollback
 
