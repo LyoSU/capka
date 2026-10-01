@@ -949,42 +949,49 @@ async function linkAccount(ctx: Context, code: string): Promise<void> {
     return;
   }
 
-  // A code minted before the account was suspended must not link it afterwards.
-  const [owner] = await db.select({ status: users.status }).from(users).where(eq(users.id, lc.userId)).limit(1);
-  if (owner?.status !== "active") {
+  // The status check and every write share one transaction that holds the owner row
+  // FOR SHARE: a suspension (an UPDATE of that row) either commits before the check
+  // and is seen by it, or waits for this commit, so a code minted before the account
+  // was suspended can never leave a Telegram sign-in on it.
+  const linked = await db.transaction(async (tx) => {
+    const [owner] = await tx.select({ status: users.status }).from(users).where(eq(users.id, lc.userId)).for("share").limit(1);
+    if (owner?.status !== "active") return false;
+
+    // This Telegram id may already be linked (re-running /link). The unique
+    // constraint on telegram_user_id would otherwise throw with no reply —
+    // re-point the existing link to the new account instead.
+    const [existing] = await tx.select({ id: telegramLinks.id }).from(telegramLinks).where(eq(telegramLinks.telegramUserId, ctx.from!.id)).limit(1);
+    if (existing) {
+      await tx
+        .update(telegramLinks)
+        .set({ userId: lc.userId, telegramUsername: ctx.from?.username || null, activeChatId: null })
+        .where(eq(telegramLinks.id, existing.id));
+    } else {
+      await tx.insert(telegramLinks).values({
+        id: nanoid(),
+        userId: lc.userId,
+        telegramUserId: ctx.from!.id,
+        telegramUsername: ctx.from?.username || null,
+      });
+    }
+    // One Telegram account per platform user: if they just linked from a new
+    // account (e.g. switching phones), drop any previous account so replies don't
+    // start arriving from two identities into the same profile.
+    await tx
+      .delete(telegramLinks)
+      .where(and(eq(telegramLinks.userId, lc.userId), ne(telegramLinks.telegramUserId, ctx.from!.id)));
+    // Mirror the binding into better-auth's account table so a later "Sign in with
+    // Telegram" (OIDC) resolves to THIS user instead of minting a duplicate — the
+    // two linking systems must agree on who owns a Telegram id. Account id is the
+    // numeric Telegram id (what the OIDC id_token returns).
+    await upsertTelegramAccountRow(tx, lc.userId, ctx.from!.id);
+    await tx.delete(linkCodes).where(eq(linkCodes.code, code));
+    return true;
+  });
+  if (!linked) {
     await reply(ctx, "accountNotActive");
     return;
   }
-
-  // This Telegram id may already be linked (re-running /link). The unique
-  // constraint on telegram_user_id would otherwise throw with no reply —
-  // re-point the existing link to the new account instead.
-  const existing = await findLink(ctx.from!.id);
-  if (existing) {
-    await db
-      .update(telegramLinks)
-      .set({ userId: lc.userId, telegramUsername: ctx.from?.username || null, activeChatId: null })
-      .where(eq(telegramLinks.id, existing.id));
-  } else {
-    await db.insert(telegramLinks).values({
-      id: nanoid(),
-      userId: lc.userId,
-      telegramUserId: ctx.from!.id,
-      telegramUsername: ctx.from?.username || null,
-    });
-  }
-  // One Telegram account per platform user: if they just linked from a new
-  // account (e.g. switching phones), drop any previous account so replies don't
-  // start arriving from two identities into the same profile.
-  await db
-    .delete(telegramLinks)
-    .where(and(eq(telegramLinks.userId, lc.userId), ne(telegramLinks.telegramUserId, ctx.from!.id)));
-  // Mirror the binding into better-auth's account table so a later "Sign in with
-  // Telegram" (OIDC) resolves to THIS user instead of minting a duplicate — the
-  // two linking systems must agree on who owns a Telegram id. Account id is the
-  // numeric Telegram id (what the OIDC id_token returns).
-  await upsertTelegramAccountRow(lc.userId, ctx.from!.id);
-  await db.delete(linkCodes).where(eq(linkCodes.code, code));
   await reply(ctx, "linked", { button: openChatButton() });
 }
 
@@ -994,20 +1001,20 @@ async function linkAccount(ctx: Context, code: string): Promise<void> {
  * better-auth fills tokens on the next OIDC sign-in; it only needs the
  * provider+accountId→user mapping to avoid creating a duplicate user.
  */
-async function upsertTelegramAccountRow(userId: string, telegramUserId: number): Promise<void> {
+async function upsertTelegramAccountRow(tx: Pick<typeof db, "select" | "insert" | "delete">, userId: string, telegramUserId: number): Promise<void> {
   const accountId = String(telegramUserId);
   // Re-point any existing telegram account for this id (it may belong to a stale
   // duplicate); then guarantee one exists for this user.
-  await db
+  await tx
     .delete(accounts)
     .where(and(eq(accounts.providerId, "telegram"), eq(accounts.accountId, accountId), ne(accounts.userId, userId)));
-  const [mine] = await db
+  const [mine] = await tx
     .select({ id: accounts.id })
     .from(accounts)
     .where(and(eq(accounts.providerId, "telegram"), eq(accounts.accountId, accountId), eq(accounts.userId, userId)))
     .limit(1);
   if (!mine) {
-    await db.insert(accounts).values({
+    await tx.insert(accounts).values({
       id: nanoid(),
       accountId,
       providerId: "telegram",

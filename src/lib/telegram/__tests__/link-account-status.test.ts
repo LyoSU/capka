@@ -6,12 +6,13 @@ const { owner, writes } = vi.hoisted(() => ({ owner: { status: "active" }, write
 
 vi.mock("@/lib/db", () => {
   const chain: Record<string, unknown> = {};
-  for (const m of ["from", "where", "innerJoin", "leftJoin", "orderBy"]) chain[m] = () => chain;
+  for (const m of ["from", "where", "innerJoin", "leftJoin", "orderBy", "for"]) chain[m] = () => chain;
   // The code lookup, the owner's status and findLink all read through this one chain;
   // a row carrying every field they ask for answers each of them.
   chain.limit = async () => [{ code: "ABC", userId: "u1", expiresAt: new Date(Date.now() + 60_000), status: owner.status }];
   const write = { values: writes, set: () => write, where: writes };
-  return { db: { select: () => chain, insert: () => write, update: () => write, delete: () => write }, pool: { connect: vi.fn() } };
+  const db = { select: () => chain, insert: () => write, update: () => write, delete: () => write, transaction: async (cb: (tx: unknown) => unknown) => cb(db) };
+  return { db, pool: { connect: vi.fn() } };
 });
 vi.mock("@/lib/settings", () => ({ getSetting: vi.fn(async () => "123:TESTTOKEN"), setSetting: vi.fn(async () => {}) }));
 
