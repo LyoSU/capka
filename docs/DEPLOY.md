@@ -223,7 +223,7 @@ F=capka-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
 trap 'rm -f "$F.tmp"' EXIT
 docker exec postgres-<uuid> pg_dump -U Capka -d Capka --clean --if-exists | gzip > "$F.tmp"
 mv "$F.tmp" "$F"                           # only a finished dump gets the final name
-find . -name 'capka-*.sql.gz' -mtime +14 -delete   # nothing else prunes this directory
+find . -name 'capka-*.sql.gz*' -mtime +14 -delete   # nothing else prunes this directory; the * takes a .tmp a killed dump left
 ```
 
 The files live in the host directory mounted at `/data` in the controller:
