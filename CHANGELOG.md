@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-01
+
 ### Added
 - Production boot logs a `[config] PUBLIC_URL` warning when `PUBLIC_URL` is unset or not https (session cookies lose the Secure flag and origins follow request headers); `BETTER_AUTH_URL` alone is only a partial fallback.
 - `docs/DEPLOY.md` has a Backup & restore section: a complete backup is `.env` (with `CAPKA_MASTER_KEY`), a database dump and all of `./data` except `./data/backups`. On a new host copy `./data` only after `restore.sh`, and after any restore reset the workspace idle clocks (one `UPDATE` in that section) before the first start, or the controller deletes long-idle workspaces a minute after boot.
