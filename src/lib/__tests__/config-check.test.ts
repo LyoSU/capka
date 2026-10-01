@@ -65,7 +65,9 @@ describe("checkConfig", () => {
     // does issue Secure cookies for an https alias.
     const aliasOnly = checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined, BETTER_AUTH_URL: "https://a.example" });
     const aliasWarn = aliasOnly.find((i) => i.key === "PUBLIC_URL");
-    expect(aliasWarn).toMatchObject({ level: "warn", message: expect.stringContaining("BETTER_AUTH_URL") });
+    expect(aliasWarn).toMatchObject({ level: "warn", message: expect.stringContaining("BETTER_AUTH_URL only sets better-auth's own base URL") });
+    // What the headers decide is the absolute links and the trusted origin, not just "sign-in".
+    expect(aliasWarn?.message).toContain("absolute links and the trusted origin");
     expect(aliasWarn?.message).not.toContain("Secure");
     expect(keysOf({ ...VALID, NODE_ENV: "production" })).not.toContain("PUBLIC_URL");
     // The scheme is case-insensitive, exactly as auth.ts reads it.

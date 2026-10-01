@@ -183,8 +183,9 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
       message:
         "not set — " +
         (secure ? "" : "session cookies are issued without the Secure flag, and ") +
-        "the sign-in origin is taken from each request's Host / X-Forwarded-Host header" +
-        (env.BETTER_AUTH_URL?.trim() ? " (BETTER_AUTH_URL only sets better-auth's own base URL)" : "") +
+        "absolute links and the trusted origin come from each request's Host / X-Forwarded-Host " +
+        "header (http://localhost:3000 without one)" +
+        (env.BETTER_AUTH_URL?.trim() ? "; BETTER_AUTH_URL only sets better-auth's own base URL" : "") +
         ". Set PUBLIC_URL to the https:// address users open.",
     });
   } else if (isProd && !secure) {

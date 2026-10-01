@@ -47,12 +47,14 @@ describe("getMasterKey", () => {
 
   it("on a key mismatch, points at both places the original key can live", async () => {
     // The original may have been an env key (.env backup) or a DB-stored one that an
-    // operator replaced with a new env value (the auth_secret row) — name both.
+    // operator replaced with a new env value (the auth_secret row) — name both, and
+    // tie the auth_secret one to that move: when the active key itself is the DB one,
+    // auth_secret is the key in use, never the original.
     process.env.CAPKA_MASTER_KEY = "a".repeat(64);
     dbRows.rows = [{ value: encrypt(CANARY_PLAINTEXT, "b".repeat(64)) }];
     const { assertMasterKeyConsistent } = await import("../settings");
     const err = await assertMasterKeyConsistent().then(() => null, (e: Error) => e);
     expect(err?.message).toMatch(/\.env backup/);
-    expect(err?.message).toMatch(/auth_secret/);
+    expect(err?.message).toMatch(/set only after the install had been running without it, the auth_secret/);
   });
 });

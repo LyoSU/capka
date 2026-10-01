@@ -152,8 +152,9 @@ export async function assertMasterKeyConsistent(): Promise<void> {
   throw new Error(
     "The master key in use does not match the key that encrypted the stored data, so saved " +
     "provider keys cannot be decrypted. Set CAPKA_MASTER_KEY to the original key — the value " +
-    "in your .env backup or, if this install kept its key in the database, the auth_secret " +
-    "value in the settings table — or clear the database to start fresh.",
+    "in your .env backup or, if CAPKA_MASTER_KEY was set only after the install had been " +
+    "running without it, the auth_secret value in the settings table — or clear the database " +
+    "to start fresh.",
   );
 }
 
