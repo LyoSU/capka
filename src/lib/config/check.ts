@@ -119,13 +119,18 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
   } else if (!masterKey) {
     // The whole point of CAPKA_MASTER_KEY is to keep the key OUT of the DB, so a
     // DB leak can't decrypt provider keys. Falling back to a DB-stored key defeats
-    // that — tolerable for a quick local run, a real hole in production.
+    // that — tolerable for a quick local run, a real hole in production. Production
+    // only takes that fallback with ALLOW_DB_MASTER_KEY=true; otherwise getMasterKey
+    // throws on every call, while the server still boots (this audit is advisory).
+    const dbFallback = !isProd || env.ALLOW_DB_MASTER_KEY === "true";
     issues.push({
       level: isProd ? "error" : "warn",
       key: "CAPKA_MASTER_KEY",
-      message:
-        "not set — a master key will be generated and stored in the DB. This is insecure " +
-        "(a DB leak then exposes every provider key). Set it in production: openssl rand -hex 32.",
+      message: dbFallback
+        ? "not set — the master key is stored in the DB instead (generated on first use). This is " +
+          "insecure (a DB leak then exposes every provider key). Set it in production: openssl rand -hex 32."
+        : "not set — every sign-in and every use of a stored key will fail until it is set " +
+          "(openssl rand -hex 32). ALLOW_DB_MASTER_KEY=true instead accepts an insecure DB-stored key.",
     });
   }
 

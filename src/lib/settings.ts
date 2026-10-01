@@ -151,8 +151,8 @@ export async function assertMasterKeyConsistent(): Promise<void> {
 
   throw new Error(
     "CAPKA_MASTER_KEY does not match the key that encrypted the stored data — " +
-    "provider keys cannot be decrypted. Restore the original key (the admin → security " +
-    "page shows the value to copy) or clear the database to start fresh.",
+    "provider keys cannot be decrypted. Set CAPKA_MASTER_KEY back to the original key " +
+    "(from your backup of .env) or clear the database to start fresh.",
   );
 }
 

@@ -76,6 +76,17 @@ describe("checkConfig", () => {
     expect(prod.find((i) => i.key === "DATABASE_URL")?.level).toBe("error");
   });
 
+  it("says what an absent master key actually does: a DB key in dev or with the opt-in, failure otherwise", () => {
+    const msg = (env: Record<string, string | undefined>) =>
+      checkConfig({ ...VALID, CAPKA_MASTER_KEY: undefined, ...env }).find((i) => i.key === "CAPKA_MASTER_KEY")?.message;
+    // settings.ts getMasterKey: production without the opt-in throws on every call.
+    expect(msg({ NODE_ENV: "production" })).toMatch(/will fail/);
+    expect(msg({ NODE_ENV: "production" })).toMatch(/ALLOW_DB_MASTER_KEY=true/);
+    expect(msg({ NODE_ENV: "production" })).not.toMatch(/stored in the DB instead/);
+    expect(msg({ NODE_ENV: "production", ALLOW_DB_MASTER_KEY: "true" })).toMatch(/stored in the DB instead/);
+    expect(msg({})).toMatch(/stored in the DB instead/);
+  });
+
   it("warns on a non-positive-integer numeric knob and accepts a valid one", () => {
     expect(checkConfig({ ...VALID, PG_POOL_MAX: "10g" })).toContainEqual(
       expect.objectContaining({ key: "PG_POOL_MAX", level: "warn" }),
