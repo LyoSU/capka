@@ -344,10 +344,11 @@ that do appear:
   can also sign in to; removing it deletes their data. Suspend it, then run the
   statements below. They delete every other sign-in and bot link, every session and
   pending bot link code (a suspended account can still sign in, and that session works
-  again once it is reactivated), switch off the account's automations and unshare its
-  chats: a webhook URL or a share link the other person created keeps working once the
-  account is active again. If the owner is left with no bot link, their next message
-  to the bot restores it.
+  again once it is reactivated; releases after v0.42.0 sign it out and drop its codes
+  on reactivation themselves, so those two `DELETE`s matter only on older ones),
+  switch off the account's automations and unshare its chats: a webhook URL or a share
+  link the other person created keeps working once the account is active again. If
+  the owner is left with no bot link, their next message to the bot restores it.
 
 ```bash
 docker compose exec -T postgres psql -X -U Capka -d Capka <<'SQL'
@@ -410,7 +411,8 @@ deployments — not a turnkey-certified multi-tenant platform.
   strong evidence, not a hard guarantee; for compliance, ship logs off-box.
 - **Dependency audit has accepted residual advisories.** Fixable ones are pinned
   via `overrides` (postcss, dompurify, and `js-yaml` under `gray-matter`, whose
-  input is also capped: SKILL.md frontmatter over 64 KB is refused before parsing).
+  input is also bounded: SKILL.md frontmatter must be plain YAML, without anchors or
+  aliases, and at most 8 KB).
   The unused `/_next/image` optimizer is switched off (`images.unoptimized`). What
   `npm audit --omit=dev` still lists is **dev tooling pulled into the prod tree by
   `better-auth`'s optional peer declarations** — the `esbuild` dev-server advisory

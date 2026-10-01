@@ -37,8 +37,9 @@ For production deploys, use [`DEPLOY.md`](DEPLOY.md).
 
 ## Cutting a release (maintainers)
 
-Pushing the tag IS the deploy: `stable` moves to the release and the public demo
-redeploys itself. Decide that before you tag, not after.
+Pushing the tag of the newest plain release IS the deploy: `stable` moves to it and
+the public demo redeploys itself (a prerelease or an older maintenance tag moves
+neither). Decide that before you tag, not after.
 
 1. On a clean `master`, run `scripts/release-gate.sh` by hand; `npm run release` does
    not run it. Tag only when it ends on `RELEASE GATE: PASS - the tree is fit to tag.`
