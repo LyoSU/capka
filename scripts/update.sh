@@ -48,6 +48,9 @@ if [ -z "${CAPKA_BRANCH:-}" ]; then
     elif [ -n "$NEWEST" ] && [ -z "$LATEST" ]; then
       echo "Note: there is no release of v$CURRENT_MAJOR.x yet, so this install stays on $(git describe --tags --abbrev=0). To move to a newer prerelease tag, run:" >&2
       echo "  sudo CAPKA_ALLOW_PRERELEASE=1 CAPKA_BRANCH=<tag> ./scripts/update.sh" >&2
+      # Nothing to update to. Falling through to master would refuse with advice
+      # that points at `stable` — an older major, a downgrade over a migrated DB.
+      exit 0
     fi
   fi
   CAPKA_BRANCH="${LATEST:-master}"
