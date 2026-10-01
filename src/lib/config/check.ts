@@ -3,6 +3,11 @@ import { finiteNonNeg, nonNegInt, posInt } from "@/lib/config/env";
 
 export type ConfigIssue = { level: "error" | "warn"; key: string; message: string };
 
+/** Whether a public URL's scheme is https, compared the way the URL parser sees it (so
+ *  `HTTPS://…` counts). auth.ts gates Secure session cookies on this exact call. */
+export const isHttpsUrl = (url: string | undefined): boolean =>
+  !!url && URL.canParse(url) && new URL(url).protocol === "https:";
+
 /**
  * The five expression shapes the read sites actually use, as executable MIRRORS:
  * `used` returns what that site will end up using for a given raw value, and `ok`
@@ -166,19 +171,23 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     }
   }
 
-  // auth.ts reads the same pair: Secure session cookies only for an https:// origin,
-  // and with neither set better-auth takes the origin from each request's headers.
-  const publicUrl = env.PUBLIC_URL?.trim() || env.BETTER_AUTH_URL?.trim();
+  // getPublicUrl (trusted origin, absolute links) reads PUBLIC_URL alone; auth.ts
+  // also takes BETTER_AUTH_URL as better-auth's baseURL and issues Secure session
+  // cookies only when that pair resolves to https — the same isHttpsUrl call.
+  const publicUrl = env.PUBLIC_URL?.trim();
+  const secure = isHttpsUrl(publicUrl || env.BETTER_AUTH_URL?.trim());
   if (isProd && !publicUrl) {
     issues.push({
       level: "warn",
       key: "PUBLIC_URL",
       message:
-        "not set — session cookies are issued without the Secure flag, and the sign-in origin is " +
-        "taken from each request's Host / X-Forwarded-Host header. Set PUBLIC_URL to the https:// " +
-        "address users open.",
+        "not set — " +
+        (secure ? "" : "session cookies are issued without the Secure flag, and ") +
+        "the sign-in origin is taken from each request's Host / X-Forwarded-Host header" +
+        (env.BETTER_AUTH_URL?.trim() ? " (BETTER_AUTH_URL only sets better-auth's own base URL)" : "") +
+        ". Set PUBLIC_URL to the https:// address users open.",
     });
-  } else if (isProd && publicUrl?.startsWith("http://")) {
+  } else if (isProd && !secure) {
     issues.push({
       level: "warn",
       key: "PUBLIC_URL",

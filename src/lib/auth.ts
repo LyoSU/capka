@@ -10,6 +10,7 @@ import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey, getTelegramOidcConfig, getRegistrationMode, isSetupComplete } from "./settings";
 import { getPublicUrl } from "./url";
+import { isHttpsUrl } from "./config/check";
 import {
   decodeTelegramClaims,
   isReservedTelegramEmail,
@@ -65,7 +66,7 @@ export async function getAuth() {
       // localhost / HTTP-only / PUBLIC_URL unset → non-secure so auth works.
       // Behind a TLS-terminating proxy, set PUBLIC_URL=https://… (the Caddy and
       // Coolify paths do) to restore the Secure flag.
-      useSecureCookies: (publicUrl ?? "").startsWith("https://"),
+      useSecureCookies: isHttpsUrl(publicUrl),
     },
     // CSRF check: trust whatever origin getPublicUrl resolves for this request
     // (PUBLIC_URL if set, else X-Forwarded-* / Host). Keeps the single domain in

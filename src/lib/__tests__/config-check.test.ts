@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { checkConfig, KNOB_SHAPES, NUMERIC_KNOBS } from "../config/check";
+import { checkConfig, isHttpsUrl, KNOB_SHAPES, NUMERIC_KNOBS } from "../config/check";
 import { nonNegInt, posInt } from "@/lib/config/env";
 import { readRetentionConfig } from "@/lib/db/retention";
 
@@ -60,10 +60,28 @@ describe("checkConfig", () => {
     expect(checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: "http://10.0.0.5:3000" })).toContainEqual(
       expect.objectContaining({ key: "PUBLIC_URL", level: "warn", message: expect.stringContaining("Secure") }),
     );
-    // The legacy alias is what auth.ts falls back to, so it satisfies the check too.
-    expect(keysOf({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined, BETTER_AUTH_URL: "https://a.example" })).not.toContain("PUBLIC_URL");
+    // The legacy alias only sets better-auth's baseURL — getPublicUrl never reads it, so
+    // the origin still comes from headers. Warn, but without the Secure claim: auth.ts
+    // does issue Secure cookies for an https alias.
+    const aliasOnly = checkConfig({ ...VALID, NODE_ENV: "production", PUBLIC_URL: undefined, BETTER_AUTH_URL: "https://a.example" });
+    const aliasWarn = aliasOnly.find((i) => i.key === "PUBLIC_URL");
+    expect(aliasWarn).toMatchObject({ level: "warn", message: expect.stringContaining("BETTER_AUTH_URL") });
+    expect(aliasWarn?.message).not.toContain("Secure");
     expect(keysOf({ ...VALID, NODE_ENV: "production" })).not.toContain("PUBLIC_URL");
+    // The scheme is case-insensitive, exactly as auth.ts reads it.
+    expect(keysOf({ ...VALID, NODE_ENV: "production", PUBLIC_URL: "HTTPS://app.example.com" })).not.toContain("PUBLIC_URL");
+    expect(keysOf({ ...VALID, NODE_ENV: "production", PUBLIC_URL: "HTTP://10.0.0.5:3000" })).toContain("PUBLIC_URL");
     expect(keysOf({ ...VALID, PUBLIC_URL: undefined })).not.toContain("PUBLIC_URL");
+  });
+
+  it("judges https the way auth.ts gates Secure cookies — by the same call", () => {
+    expect(isHttpsUrl("https://a.example")).toBe(true);
+    expect(isHttpsUrl("HTTPS://a.example")).toBe(true);
+    expect(isHttpsUrl("http://a.example")).toBe(false);
+    expect(isHttpsUrl("not a url")).toBe(false);
+    expect(isHttpsUrl(undefined)).toBe(false);
+    const auth = readFileSync(new URL("../auth.ts", import.meta.url), "utf8");
+    expect(auth).toContain("useSecureCookies: isHttpsUrl(publicUrl),");
   });
 
   it("escalates insecure-but-tolerable defaults to errors in production", () => {
