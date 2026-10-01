@@ -86,7 +86,8 @@ Do not `docker compose start`/`up` between the two steps: the newer image would
 migrate the restored database forward again. Step 1 needs the `restore.sh` of a
 release newer than v0.42.0; v0.42.0 and earlier ship one that restores over the
 live schema and restarts the platform itself. On such a checkout swap the script
-in first ([Restore](DEPLOY.md#restore)).
+in first, or, while no release after v0.42.0 exists, restore by hand
+([Restore](DEPLOY.md#restore) has both).
 
 Anything written after the dump was taken is lost. Keep the pre-upgrade dump
 until the new version is verified.

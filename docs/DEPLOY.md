@@ -190,7 +190,30 @@ files relative to itself, so it must stay in `scripts/`; `update.sh` and the
 installer put the release's own copy back:
 
 ```bash
-git fetch --depth 1 origin stable && git show FETCH_HEAD:scripts/restore.sh > scripts/restore.sh
+if sudo git fetch -q --depth 1 origin stable \
+   && sudo git show FETCH_HEAD:scripts/restore.sh | grep -q 'dump complete'; then
+  sudo git show FETCH_HEAD:scripts/restore.sh | sudo tee scripts/restore.sh >/dev/null && echo "restore.sh replaced"
+else
+  echo "NOT replaced: the fetch failed, or stable still ships the v0.42.0 script"
+fi
+```
+
+`NOT replaced` after a working fetch means no release after v0.42.0 exists yet.
+Do not run the old script then; restore by hand, which is what the current script
+does (same checks and transaction as under [Coolify](#coolify)):
+
+```bash
+F=./data/backups/capka-<timestamp>.sql.gz
+c() { sudo docker compose -f docker-compose.yml -f docker-compose.backup.yml "$@"; }
+if sudo gunzip -t "$F" && sudo gunzip -c "$F" | tail -n 20 | grep -q 'PostgreSQL database dump complete'; then
+  c stop platform sandbox-controller pg-backup
+  { echo 'DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+    sudo gunzip -c "$F"; } \
+    | c exec -T postgres psql -X -q -v ON_ERROR_STOP=1 --single-transaction -U Capka -d Capka >/dev/null \
+    && echo "restore OK, stack stopped" || echo "Restore failed and was rolled back; stack stopped"
+else
+  echo "Not restoring: $F is cut short or unreadable"
+fi
 ```
 
 **A dump older than `WORKSPACE_TTL_MS` (30 days) needs one more step before the
@@ -198,10 +221,12 @@ first start.** The controller deletes a workspace, files included, once its
 `last_activity` in the database is older than `WORKSPACE_TTL_MS`. That value comes
 back with the dump (file times do not count) and the first sweep runs a minute
 after boot. So set `WORKSPACE_TTL_MS` in `.env` to at least the dump's age plus 30
-days (e.g. `15552000000`, 180 days), and lower it again, with a re-run of
-`sudo sh scripts/up.sh`, once people have worked in their chats; workspaces nobody
-touched are deleted then. `GC_GRACE_MS` only covers directories that have no row,
-so it does not help.
+days (e.g. `15552000000`, 180 days) and make the first start `sudo sh scripts/up.sh`:
+it recreates the controller with the new value, while the `docker compose ... start`
+line `restore.sh` prints keeps the old container and its 30 days. Lower it again,
+with another `sudo sh scripts/up.sh`, once people have worked in their chats;
+workspaces nobody touched are deleted then. `GC_GRACE_MS` only covers directories
+that have no row, so it does not help.
 
 ### Restoring on a new host
 
