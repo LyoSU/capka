@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { apiHandler, requireActive } from "@/lib/auth";
+import { apiHandler, requireWriter } from "@/lib/auth";
 import { answerAskForUser, answerElicitationForUser } from "@/lib/ask/authed";
 import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
@@ -15,7 +15,7 @@ const bodySchema = z.object({
 /** Resolve the user's answer to a suspended `ask` call (or a blocked MCP
  *  elicitation). Session-authorized — the model can't forge it. */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireActive();
+  const { userId } = await requireWriter();
   const limited = guardRateLimit(
     `ask-answer:${userId}`,
     RATE_LIMITS.askAnswer,

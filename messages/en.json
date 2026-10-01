@@ -2421,7 +2421,7 @@
     "budgetReached": "💳 Spending limit reached. Please contact your admin to raise it.",
     "fileTooBig": "📎 `{name}` is larger than 20 MB, so Telegram won't let me fetch it.",
     "unsupported": "🤔 For now I work with text, photos and files. Send me one of those and I'll get going.",
-    "startError": "⚠️ Couldn't start the assistant. Please try again in a moment.\n\n`{error}`",
+    "startError": "⚠️ Couldn't start the assistant. Please try again in a moment.",
     "queuedBehind": "Got it — I'll answer this after the current reply. Tap Stop on the reply to get to it sooner.",
     "queuedDrop": "Don't send",
     "queuedDropped": "Dropped — I won't reply to that one. Your message is still in the chat.",
@@ -2435,6 +2435,8 @@
     "registrationClosed": "Registration is currently closed. Ask your administrator for access.",
     "setupIncomplete": "Capka isn't set up yet. Ask your administrator to finish the initial setup, then message me again.",
     "accountNotActive": "Your account isn't active. If you think this is a mistake, ask your administrator.",
+    "readOnly": "Your account can read chats but not send messages. Ask your admin if you need more access.",
+    "modelUnavailable": "This model isn't available right now. Pick another one with /model, or ask your admin.",
     "capabilityNotice": "⚠️ The current model can't process this attachment ({modalities}). Use /model to pick one that supports it.",
     "modality": {
       "audio": "audio",

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { telegramLinks, users, chats, messages, tasks } from "@/lib/db/schema";
+import { telegramLinks, chats, messages, tasks } from "@/lib/db/schema";
+import { ValidationError } from "@/lib/errors";
+import en from "../../../../messages/en.json";
 
 // A Telegram turn reserves a budget hold, then saves the message, moves the leaf and
 // enqueues. The hold has to be released on every path that does not hand it to a
@@ -26,9 +28,12 @@ vi.mock("@/lib/billing/limits", () => ({
   reserveBudget: (...a: unknown[]) => reserveBudget(...a),
   releaseHold: (...a: unknown[]) => releaseHold(...a),
 }));
+const resolveUserModelInfo = vi.fn();
 vi.mock("@/lib/providers/resolve", () => ({
-  resolveUserModelInfo: async () => ({ isShared: true, modelId: "m", provider: "p", configId: "cfg" }),
+  resolveUserModelInfo: (...a: unknown[]) => resolveUserModelInfo(...a),
 }));
+const take = vi.fn();
+vi.mock("@/lib/rate-limit", () => ({ take: (...a: unknown[]) => take(...a) }));
 const enqueueTask = vi.fn();
 vi.mock("@/lib/tasks/queue", () => ({
   enqueueTask: (...a: unknown[]) => enqueueTask(...a),
@@ -39,13 +44,12 @@ vi.mock("@/lib/tasks/queue", () => ({
 vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: vi.fn(async () => {}) }));
 
 // Reads are answered per TABLE, so each lookup ingest makes gets its own row: the
-// link, the user's status, the pinned chat, and the "is another turn running" probe.
-const state: { messageInsert?: Error; runningProbe?: Error } = {};
-const linkRow = { id: "link1", userId: "u1", telegramUserId: 42, activeChatId: "chat1" };
+// link (joined to its account's status and role), the pinned chat, and the "is
+// another turn running" probe.
+const state: { messageInsert?: Error; runningProbe?: Error; role: string } = { role: "user" };
 const chatRow = { id: "chat1", userId: "u1", title: "Hi", model: null, projectId: null, activeLeafId: null };
 const rowsFor = (table: unknown) => {
-  if (table === telegramLinks) return [linkRow];
-  if (table === users) return [{ status: "active" }];
+  if (table === telegramLinks) return [{ id: "link1", userId: "u1", telegramUserId: 42, activeChatId: "chat1", status: "active", role: state.role }];
   if (table === chats) return [chatRow];
   if (table === tasks) {
     if (state.runningProbe) throw state.runningProbe;
@@ -56,7 +60,12 @@ const rowsFor = (table: unknown) => {
 vi.mock("@/lib/db", () => ({
   pool: { connect: vi.fn() },
   db: {
-    select: () => ({ from: (table: unknown) => ({ where: () => ({ limit: async () => rowsFor(table) }) }) }),
+    select: () => ({
+      from: (table: unknown) => {
+        const q = { where: () => ({ limit: async () => rowsFor(table) }), innerJoin: () => q };
+        return q;
+      },
+    }),
     insert: (table: unknown) => ({
       values: async () => {
         if (table === messages && state.messageInsert) throw state.messageInsert;
@@ -82,6 +91,9 @@ const heldTaskId = () => reserveBudget.mock.calls[0][0].taskId as string;
 beforeEach(() => {
   state.messageInsert = undefined;
   state.runningProbe = undefined;
+  state.role = "user";
+  resolveUserModelInfo.mockReset().mockResolvedValue({ isShared: true, modelId: "m", provider: "p", configId: "cfg" });
+  take.mockReset().mockReturnValue({ ok: true });
   reserveBudget.mockReset().mockResolvedValue({ allowed: true, window: null, reason: null });
   releaseHold.mockReset().mockResolvedValue(undefined);
   enqueueTask.mockReset().mockImplementation(async (t: { id: string }) => ({ id: t.id, created: true }));
@@ -143,5 +155,41 @@ describe("telegram ingest budget hold", () => {
     expect(releaseHold).not.toHaveBeenCalled();
     // The turn is live, so "could not start" would be a lie.
     expect(c.replyWithRichMessage).not.toHaveBeenCalled();
+  });
+
+  // A model whose provider was removed resolves with a ValidationError. It used to
+  // escape the try and die in the burst collector's log: the user heard nothing.
+  it("tells the user to pick another model when theirs cannot be resolved, and holds nothing", async () => {
+    resolveUserModelInfo.mockRejectedValue(new ValidationError("Model config not found"));
+    const c = await send();
+    expect(c.replyWithRichMessage).toHaveBeenCalledWith({ markdown: en.telegram.modelUnavailable }, undefined);
+    expect(reserveBudget).not.toHaveBeenCalled();
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(releaseHold).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an unexpected resolver failure into a reply", async () => {
+    resolveUserModelInfo.mockRejectedValue(new Error("db"));
+    const c = await send();
+    expect(c.replyWithRichMessage).not.toHaveBeenCalled();
+    expect(reserveBudget).not.toHaveBeenCalled();
+  });
+
+  // The web refuses a viewer on /api/chat; Telegram used to check status only.
+  it("refuses a read-only viewer before the flood guard or the budget", async () => {
+    state.role = "viewer";
+    const c = await send();
+    expect(c.replyWithRichMessage).toHaveBeenCalledWith({ markdown: en.telegram.readOnly }, undefined);
+    expect(take).not.toHaveBeenCalled();
+    expect(reserveBudget).not.toHaveBeenCalled();
+    expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it("says it could not start without showing the raw error", async () => {
+    state.messageInsert = new Error('relation "x" does not exist');
+    const c = await send();
+    expect(c.replyWithRichMessage).toHaveBeenCalledWith({ markdown: en.telegram.startError }, undefined);
+    expect(JSON.stringify(c.replyWithRichMessage.mock.calls)).not.toContain("relation");
+    expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 });

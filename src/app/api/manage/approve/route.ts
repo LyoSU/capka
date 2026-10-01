@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { apiHandler, requireActive } from "@/lib/auth";
+import { apiHandler, requireWriter } from "@/lib/auth";
 import { approveManageForUser } from "@/lib/manage/authed";
 
 const bodySchema = z.object({
@@ -18,7 +18,7 @@ const bodySchema = z.object({
  * re-runs the tool (approved) or lets the model acknowledge the denial.
  */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireActive();
+  const { userId } = await requireWriter();
   const d = bodySchema.parse(await req.json());
   const outcome = await approveManageForUser(userId, d);
   // 200 even when the pending call is gone (already decided, or expired): the card

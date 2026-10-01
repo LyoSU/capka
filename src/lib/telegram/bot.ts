@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { PoolClient } from "pg";
 import { nanoid } from "nanoid";
-import { eq, and, ne, desc, isNotNull } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -237,6 +237,11 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // the right reply and returns null; a non-null link is an ACTIVE user.
   const link = await ensureUser(ctx);
   if (!link) return;
+  const refusal = spendRefusal(link);
+  if (refusal) {
+    await reply(ctx, refusal);
+    return;
+  }
   // Same per-user flood guard as the web enqueue path.
   if (!take(`chat:${link.userId}`).ok) {
     await reply(ctx, "tooFast");
@@ -255,8 +260,15 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // runner reconciles it to the real cost, or it's released if the turn folds.
   // Gated before any file download so a blocked user wastes no work.
   const tgTaskId = nanoid();
-  const { isShared: tgShared, modelId: tgModelId, provider: tgProvider, configId: tgConfigId } =
-    await resolveUserModelInfo(link.userId, chat.model ?? undefined);
+  // A model the user can no longer use (its provider removed or disabled) is theirs
+  // to fix with /model — say so instead of going silent. Nothing is reserved yet.
+  const model = await resolveUserModelInfo(link.userId, chat.model ?? undefined)
+    .catch((e: unknown) => { if (isAppError(e) && e.code === "VALIDATION_ERROR") return null; throw e; });
+  if (!model) {
+    await reply(ctx, "modelUnavailable");
+    return;
+  }
+  const { isShared: tgShared, modelId: tgModelId, provider: tgProvider, configId: tgConfigId } = model;
   const reservation = await reserveBudget({
     userId: link.userId, taskId: tgTaskId, onSharedKey: tgShared, modelId: tgModelId, provider: tgProvider,
     configId: tgConfigId,
@@ -359,8 +371,12 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     }
   } catch (error: unknown) {
     // Past the enqueue the turn is live and answering; only the queued notice failed.
+    // The raw error is for the log, never for the person reading the chat.
     if (handedOff) log.warn("telegram queued notice failed", { err: String(error) });
-    else await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
+    else {
+      log.error("telegram ingest failed", { err: String(error) });
+      await reply(ctx, "startError");
+    }
   } finally {
     if (!handedOff) await releaseHold(tgTaskId);
   }
@@ -521,6 +537,9 @@ async function buildBot(): Promise<Bot | null> {
       const t = tFor(ctx);
       const link = await findLink(ctx.from!.id);
       if (!link) { await ctx.answerCallbackQuery(); return; }
+      // Buttons stay: tapping again works once the account is restored.
+      const refusal = spendRefusal(link);
+      if (refusal) { await ctx.answerCallbackQuery({ text: t(refusal) }); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
       const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved })
         .catch((e) => {
@@ -584,6 +603,8 @@ async function buildBot(): Promise<Bot | null> {
   bot.callbackQuery(/^ta:(\d+):(\d+)$/, async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) { await ctx.answerCallbackQuery(); return; }
+    const refusal = spendRefusal(link);
+    if (refusal) { await ctx.answerCallbackQuery({ text: tFor(ctx)(refusal) }); return; }
     const { onAskChoice } = await import("./ask-collect");
     // Pass the tapper's userId — only the turn's OWNER may answer.
     await onAskChoice(bot, ctx.chat!.id, link.userId, Number(ctx.match![1]), Number(ctx.match![2]));
@@ -593,6 +614,8 @@ async function buildBot(): Promise<Bot | null> {
   bot.callbackQuery("taskip", async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) { await ctx.answerCallbackQuery(); return; }
+    const refusal = spendRefusal(link);
+    if (refusal) { await ctx.answerCallbackQuery({ text: tFor(ctx)(refusal) }); return; }
     const { onAskSkip } = await import("./ask-collect");
     await onAskSkip(bot, ctx.chat!.id, link.userId);
     await ctx.answerCallbackQuery();
@@ -600,10 +623,11 @@ async function buildBot(): Promise<Bot | null> {
   });
 
   // Plain text → answer a pending `ask` question if one is collecting on this chat
-  // AND the sender owns it, otherwise straight into the engine as a new turn.
+  // AND the sender owns it, otherwise straight into the engine as a new turn. An
+  // account that may not spend falls through, and ingest tells it why.
   bot.on("message:text", async (ctx) => {
     const link = await findLink(ctx.from!.id);
-    if (link) {
+    if (link && !spendRefusal(link)) {
       const { onAskText } = await import("./ask-collect");
       if (await onAskText(bot, ctx.chat.id, link.userId, ctx.message.text)) return;
     }
@@ -964,14 +988,22 @@ async function upsertTelegramAccountRow(userId: string, telegramUserId: number):
   }
 }
 
+/** The link for a Telegram user, carrying its account's status and role so the
+ *  gates below need no second lookup. */
 async function findLink(telegramUserId: number) {
   const [link] = await db
-    .select()
+    .select({ ...getTableColumns(telegramLinks), status: users.status, role: users.role })
     .from(telegramLinks)
+    .innerJoin(users, eq(users.id, telegramLinks.userId))
     .where(eq(telegramLinks.telegramUserId, telegramUserId))
     .limit(1);
   return link || null;
 }
+
+/** Why this linked account may not start or resume a paid turn — the same gate the
+ *  web puts on /api/chat (requireRole admin|user on an active account) — or null. */
+const spendRefusal = (l: { status: string; role: string }) =>
+  l.status !== "active" ? "accountNotActive" : l.role === "admin" || l.role === "user" ? null : "readOnly";
 
 /**
  * Resolve the platform user behind an incoming update, auto-provisioning a
@@ -991,8 +1023,7 @@ async function ensureUser(ctx: Context): Promise<Awaited<ReturnType<typeof findL
   let link = await findLink(tgId);
   let status: string | undefined;
   if (link) {
-    const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, link.userId)).limit(1);
-    status = u?.status;
+    status = link.status;
   } else {
     // Only ever auto-create from a real person's private chat — never a group
     // member or another bot. Elsewhere, fall back to the web sign-in path.
