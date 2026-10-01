@@ -62,6 +62,8 @@ import { cn } from "@/lib/utils";
 import { useLongPress } from "@/hooks/use-long-press";
 import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { haptic } from "@/lib/haptics";
+import { deriveTabState } from "@/lib/tab-state";
+import { useTabState } from "@/hooks/use-tab-state";
 
 /** Why a chat is stopped waiting for a person, derived server-side from its last
  *  message (GET /api/chats). Nothing is stored: the user's next message becomes
@@ -492,6 +494,13 @@ export function AppSidebar() {
   // toggle so the section stays compact at the top of the list.
   const [showAllTelegram, setShowAllTelegram] = useState(false);
   const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
+  // A reply finished in the open chat while this tab was in the background.
+  const [doneWhileAway, setDoneWhileAway] = useState(false);
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) setDoneWhileAway(false); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   // Search left this list for the ⌘K palette, which asks the same endpoint; the
   // sidebar always shows the unfiltered list.
@@ -719,7 +728,11 @@ export function AppSidebar() {
           // If you're watching this chat, the reply you just saw complete is
           // read — re-stamp lastReadAt (the open-time stamp predates the reply)
           // so it doesn't resurface as unread the moment you navigate away.
-          if (cid === activeChatIdRef.current) markReadRef.current(cid);
+          if (cid === activeChatIdRef.current) {
+            markReadRef.current(cid);
+            // Read on the server, but not by the person if the tab is hidden.
+            if (document.hidden) setDoneWhileAway(true);
+          }
           refresh();
         } else if (d.type === "new_message") {
           refresh();
@@ -832,16 +845,9 @@ export function AppSidebar() {
     },
   };
 
-  // A count in the tab title is the only way to notice a waiting chat from another
-  // tab. Only the prefix is ours — the rest of the title belongs to Next's
-  // metadata — so we strip a prefix we wrote before, write the current one, and
-  // hand the bare title back on cleanup.
-  const attentionCount = attentionChats.length;
-  useEffect(() => {
-    const base = document.title.replace(/^\(\d+\) /, "");
-    document.title = attentionCount > 0 ? `(${attentionCount}) ${base}` : base;
-    return () => { document.title = document.title.replace(/^\(\d+\) /, ""); };
-  }, [attentionCount]);
+  // The tab (title, favicon, app badge) is the only way to notice a chat from
+  // another tab or app, so it carries the same state the rows do.
+  useTabState(deriveTabState(chats, { activeChatId, doneWhileAway }));
 
   // A new chat from the sidebar is always project-less — a chat joins a project
   // only via its hub's "New chat" or the "Move to project" action.
