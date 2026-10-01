@@ -10,6 +10,7 @@ import { ProviderStatusBanner } from "@/components/layout/provider-status-banner
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { OrgChangeBanner } from "@/components/layout/org-change-banner";
 import { TimezoneSync } from "@/components/layout/timezone-sync";
+import { LaunchIntake } from "@/components/layout/launch-intake";
 import { isSetupComplete } from "@/lib/settings";
 import { currentSession } from "@/lib/auth";
 import { IsAdminProvider } from "@/hooks/use-is-admin";
@@ -65,6 +66,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </SidebarInset>
           <CommandPalette />
           <TimezoneSync />
+          <LaunchIntake />
         </SidebarProvider>
       </IsAdminProvider>
     </NextIntlClientProvider>

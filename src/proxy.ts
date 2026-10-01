@@ -47,7 +47,9 @@ export async function proxy(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    return NextResponse.redirect(new URL("/login", request.url));
+    // 303, not the default 307: a 307 replays a POST (the share sheet's /intake)
+    // against /login, which only answers GET.
+    return NextResponse.redirect(new URL("/login", request.url), 303);
   }
 
   return NextResponse.next();

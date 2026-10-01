@@ -25,6 +25,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useAttachments, DRAFT_FILES_PREFIX } from "@/components/chat/use-attachments";
+import { parseIntakeHash, takeIntake, type Intake } from "@/lib/chat/intake";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
 import { useChatQueue, visibleQueue, drainQueue, type QueuedMessage } from "@/components/chat/use-chat-queue";
 import { useShareImport } from "@/components/chat/use-share-import";
@@ -437,6 +438,28 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     },
     [setInput],
   );
+
+  // Files and text handed over from outside the composer — the OS share sheet
+  // (/intake, which hands its result over in the URL fragment) or "Open with"
+  // (launchQueue). Staged with the text in the composer, never sent for them.
+  const { add: addFiles, restore: restoreFiles } = attachments;
+  useEffect(() => {
+    const apply = ({ refs, files, text }: Intake) => {
+      if (refs?.length) restoreFiles(refs);
+      if (files?.length) addFiles(files);
+      if (text) setInput(text);
+      setStarterFocus((n) => n + 1);
+    };
+    const fromHash = parseIntakeHash(window.location.hash);
+    if (fromHash) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+      apply(fromHash);
+    }
+    const drain = () => takeIntake(chatId).forEach(apply);
+    drain();
+    window.addEventListener("capka:intake", drain);
+    return () => window.removeEventListener("capka:intake", drain);
+  }, [chatId, addFiles, restoreFiles, setInput]);
 
   // Pasting a public Claude/ChatGPT share link into the composer offers to import
   // that conversation as a fresh chat and continue it here. Detection is free

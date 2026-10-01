@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 - The browser tab shows what the chats need: the title is prefixed ● (waiting on you), ⟳ (working) or ✓ (unread reply) with a count, the favicon gets a matching dot, and an installed app shows the count as its badge where the platform supports it.
+- An installed Capka app (Chromium/Android) appears in the system share sheet and in "Open with" for office files, PDFs, CSV and text: the files land staged in a new chat's composer, not sent. Reinstalling is not needed; browsers pick up the new `manifest.json` on their own.
 
 ### Fixed
 - A turn whose model ran tools and then ended without writing a reply (seen with Gemini) is continued once and, if still empty, ends as failed with a `no_reply`/`no_reply_partial` message instead of looking finished.
