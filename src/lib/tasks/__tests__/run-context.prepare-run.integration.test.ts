@@ -12,7 +12,10 @@ import { MockLanguageModelV3 } from "ai/test";
  * wrong turn is gone for good, so both sides of that check are asserted on the flag.
  *
  * Only the seams that would leave the database are stubbed: the model, the sandbox,
- * and the vault (which would create a space for a fixture user).
+ * and the vault (which would create a space for a fixture user) — plus the concierge
+ * flag, which is one org-wide row: armed and consumed in the shared table, it would
+ * stand in for the real admin's flag, and a run killed before teardown would leave it
+ * gone for good.
  */
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({ model: new MockLanguageModelV3(), provider: "mock", modelId: "mock-model" }),
@@ -30,9 +33,20 @@ vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
 }));
 vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }));
 vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
+let conciergeFlag: string | null = null;
+vi.mock("@/lib/settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/settings")>();
+  return {
+    ...actual,
+    getSetting: async (key: string) => (key === "concierge_pending" ? conciergeFlag : actual.getSetting(key)),
+    setSetting: async (key: string, value: string, encrypted?: boolean) => {
+      if (key === "concierge_pending") conciergeFlag = value;
+      else await actual.setSetting(key, value, encrypted);
+    },
+  };
+});
 
 import { pool } from "../../db";
-import { getSetting } from "@/lib/settings";
 import { prepareRun } from "../run-context";
 import type { TaskPayload } from "../runner";
 
@@ -50,10 +64,7 @@ const prepare = async (payload: TaskPayload) => {
 };
 
 run("prepareRun: what it reads off the message tree", () => {
-  let savedFlag: string | null = null;
-
   beforeAll(async () => {
-    savedFlag = await getSetting("concierge_pending");
     await pool.query(`DELETE FROM messages WHERE chat_id IN ($1,$2)`, [C, OTHER]);
     await pool.query(`DELETE FROM chats WHERE id IN ($1,$2)`, [C, OTHER]);
     await pool.query(
@@ -76,8 +87,6 @@ run("prepareRun: what it reads off the message tree", () => {
     await pool.query(`DELETE FROM messages WHERE chat_id IN ($1,$2)`, [C, OTHER]);
     await pool.query(`DELETE FROM chats WHERE id IN ($1,$2)`, [C, OTHER]);
     await pool.query(`DELETE FROM "user" WHERE id=$1`, [U]);
-    if (savedFlag === null) await pool.query(`DELETE FROM settings WHERE key='concierge_pending'`);
-    else await pool.query(`UPDATE settings SET value=$1 WHERE key='concierge_pending'`, [savedFlag]);
   });
 
   it("anchors the user's text on the stored row, not on what the payload carried", async () => {
@@ -95,22 +104,18 @@ run("prepareRun: what it reads off the message tree", () => {
     expect((await prepare({ replyParentId: "prep-a1" })).userTurnText).toBe("");
   });
 
-  const armConcierge = () => pool.query(
-    `INSERT INTO settings (key, value) VALUES ('concierge_pending',$1)
-     ON CONFLICT (key) DO UPDATE SET value=$1, is_encrypted=false`, [U]);
-
   it("keeps the concierge flag on a turn that answers a non-root message", async () => {
-    await armConcierge();
+    conciergeFlag = U;
     const r = await prepare({ replyParentId: "prep-u2" });
     expect(r.prompt.volatile).not.toContain("## First run");
-    expect(await getSetting("concierge_pending")).toBe(U);
+    expect(conciergeFlag).toBe(U);
   });
 
   it("fires the concierge once, on the turn that answers the root", async () => {
-    await armConcierge();
+    conciergeFlag = U;
     const r = await prepare({ replyParentId: "prep-u1" });
     expect(r.prompt.volatile).toContain("## First run");
-    expect(await getSetting("concierge_pending")).toBe("");
+    expect(conciergeFlag).toBe("");
     // Consumed: the same root a second time does not nudge again.
     expect((await prepare({ replyParentId: "prep-u1" })).prompt.volatile).not.toContain("## First run");
   });
