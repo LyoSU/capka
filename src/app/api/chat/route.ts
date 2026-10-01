@@ -189,7 +189,7 @@ export const POST = apiHandler(async (req: Request) => {
   // The hold reserved above must be released on EVERY path that doesn't hand it to
   // a live turn — including an exception between here and enqueue. A failed
   // insert/update/enqueue would otherwise leak a pending hold that inflates the
-  // budget forever (no task row exists for the zombie reconciler to clean up).
+  // budget until the orphan-hold sweep (no task row, so only its age bound) releases it.
   let handedOff = false;
   try {
   if (!existingChat) {

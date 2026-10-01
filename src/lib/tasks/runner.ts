@@ -2790,7 +2790,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               usedTokens: budget.used, effectiveLimit: budget.effectiveLimit, checkpointId,
             });
           })
-          .catch((e) => tlog.error("compaction failed", { err: String(e) })),
+          .catch((e) => {
+            tlog.error("compaction failed", { err: String(e) });
+            // An emergency-trimmed turn that cannot compact leaves the chat near the window, so it keeps overflowing.
+            if (emergencyTrimmed) tlog.warn("compaction failed after an emergency trim — chat may stay near the context limit", { chatId });
+          }),
       );
     }
   } catch (e) {

@@ -97,7 +97,7 @@ export const POST = apiHandler(async (_req, { params }) => {
   } finally {
     // Always: the hold was only ever a reservation for a call that is now over, and the
     // spend below is recorded independently of it. Leaving it behind would inflate this
-    // user's budget forever — nothing reconciles a hold that has no task row.
+    // user's budget until the orphan-hold sweep releases it after its age bound.
     await releaseHold(holdId);
   }
 

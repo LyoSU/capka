@@ -420,8 +420,8 @@ export async function requestCancel(id: string): Promise<void> {
  * sweep's. `enqueueTask`'s callers reserve a pending budget hold keyed to the
  * task id, and every path that clears one — the runner's absorb, the reaper's
  * `swept_holds` — finds it by joining the task row. Once the row is gone nothing
- * can ever attribute that hold again, so it would erode the user's budget until
- * the 30-day window rolled. Delete and release travel together.
+ * can ever attribute that hold again, so only the age-bounded orphan-hold sweep
+ * would release it, an hour late. Delete and release travel together.
  *
  * The queued turn's user message is deliberately left in the transcript: it is
  * already persisted, and the next turn rebuilds its context from the live tree,
