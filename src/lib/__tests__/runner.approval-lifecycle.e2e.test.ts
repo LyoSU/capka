@@ -64,6 +64,22 @@ vi.mock("@/lib/sandbox/tools", () => ({
   }),
 }));
 vi.mock("@/lib/chat/title", () => ({ generateChatTitle: async () => "Rows" }));
+// Set to make the turn's own finish write throw once (a dropped connection), which
+// sends a turn whose stream already ran down the failure path.
+let failNextCommit = false;
+vi.mock("@/lib/tasks/queue", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tasks/queue")>();
+  return {
+    ...actual,
+    commitTurnOutcome: async (input: Parameters<typeof actual.commitTurnOutcome>[0]) => {
+      if (failNextCommit) {
+        failNextCommit = false;
+        throw new Error("Connection terminated unexpectedly");
+      }
+      return actual.commitTurnOutcome(input);
+    },
+  };
+});
 vi.mock("@/lib/sandbox/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sandbox/client")>()),
   // A workspace to list, so the turn context is on these prompts.
@@ -77,7 +93,7 @@ vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }))
 vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
 vi.mock("@/lib/vault/extract", () => ({ extractFacts: async () => {} }));
 
-import { pool } from "../db";
+import { db, pool } from "../db";
 import { runAgentTask, type ClaimedTask } from "../tasks/runner";
 import { cancelQueuedTurn } from "../tasks/queue";
 
@@ -88,7 +104,7 @@ const C = "aplc-chat";
 type Part = { type: string; id?: string; name?: string; output?: { code?: string; error?: string }; approval?: unknown };
 
 /** A suspended row whose one gated call now carries the user's decision. */
-async function seedSuspended(chat: string, call: { name: string; approved: boolean }) {
+async function seedSuspended(chat: string, call: { name: string; approved: boolean }, meta: Record<string, unknown> = {}) {
   await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [chat, U]);
   await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ($1,$2,'user','save the row')`, [`${chat}-u1`, chat]);
   await pool.query(
@@ -96,6 +112,7 @@ async function seedSuspended(chat: string, call: { name: string; approved: boole
     [`${chat}-a1`, chat, `${chat}-u1`, JSON.stringify({
       status: "awaiting_approval",
       parts: [{ type: "tool-call", id: "c2", name: call.name, input: { row: "final" }, approval: { id: "ap1", approved: call.approved } }],
+      ...meta,
     })],
   );
   await pool.query(`UPDATE chats SET active_leaf_id=$1 WHERE id=$2`, [`${chat}-a1`, chat]);
@@ -116,8 +133,17 @@ async function continueApproval(chat: string, payload: Record<string, unknown> =
 
 async function storedRow(chat: string) {
   const { rows } = await pool.query(`SELECT metadata FROM messages WHERE id=$1`, [`${chat}-a1`]);
-  return rows[0].metadata as { status: string; error?: string; parts: Part[] };
+  return rows[0].metadata as { status: string; error?: string; parts: Part[] } & Record<string, unknown>;
 }
+
+/** What the suspended half carried besides its parts: a steer, a file, its spend. */
+const FIRST_HALF = {
+  steers: [{ id: "s1", text: "use the final row", at: "2026-01-01T00:00:00.000Z", atStep: 1, afterToolCallId: null }],
+  touchedFiles: ["rows.csv"],
+  usage: { input: 100, output: 20, cached: 0 },
+  costUsd: 0.01,
+  durationMs: 1500,
+};
 
 const resultFor = (parts: Part[], id: string) => parts.filter((p) => p.type === "tool-result" && p.id === id);
 
@@ -202,7 +228,7 @@ run("runAgentTask: an approval continuation always settles its row", () => {
   // and left the task running and the card spinning.
   it("settles its own row when the continuation cannot start", async () => {
     const chat = `${C}-noproject`;
-    await seedSuspended(chat, { name: "save_row", approved: true });
+    await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
 
     expect(await continueApproval(chat, { projectId: "aplc-deleted-project" })).toBe("failed");
 
@@ -213,6 +239,57 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(row.parts.find((p) => p.type === "tool-call" && p.id === "c2")?.approval).toEqual({ id: "ap1", approved: true });
     const { rows } = await pool.query(`SELECT id FROM messages WHERE chat_id=$1 ORDER BY id`, [chat]);
     expect(rows.map((r) => r.id)).toEqual([`${chat}-a1`, `${chat}-u1`]);
+    expect(prompts).toEqual([]);
+    expect(writes).toEqual([]);
+    // The failure is written over the first half, not instead of it.
+    expect(row).toMatchObject(FIRST_HALF);
+  }, 30_000);
+
+  // The same, after the approved call already ran and the reply was written.
+  it("keeps the first half when the continuation fails after its stream started", async () => {
+    const chat = `${C}-dropped`;
+    await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
+    failNextCommit = true;
+
+    expect(await continueApproval(chat)).toBe("failed");
+
+    const row = await storedRow(chat);
+    expect(row.status).toBe("failed");
+    expect(row.error).toBeTruthy();
+    expect(row).toMatchObject(FIRST_HALF);
+    // Control: the stream had run — the call ran, kept its one result, and replied.
+    expect(failNextCommit).toBe(false);
+    expect(writes).toEqual([{ row: "final" }]);
+    expect(resultFor(row.parts, "c2").map((r) => r.output)).toEqual(["saved"]);
+    expect(prompts).toHaveLength(1);
+  }, 30_000);
+
+  // The read of the suspended row is what failed. Its row exists, so nothing may be
+  // inserted under its id: that rolled back and left the card waiting for good.
+  it("settles its own row when reading it fails", async () => {
+    const chat = `${C}-unread`;
+    await seedSuspended(chat, { name: "save_row", approved: true }, FIRST_HALF);
+    const select = db.select.bind(db);
+    let thrown = false;
+    const spy = vi.spyOn(db, "select").mockImplementation(((fields?: Record<string, unknown>) => {
+      if (!thrown && fields && "parentId" in fields && "metadata" in fields) {
+        thrown = true;
+        throw new Error("Connection terminated unexpectedly");
+      }
+      return select(fields as never);
+    }) as typeof db.select);
+
+    try {
+      expect(await continueApproval(chat)).toBe("failed");
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(thrown).toBe(true);
+    const row = await storedRow(chat);
+    expect(row.status).toBe("failed");
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+    expect(row).toMatchObject(FIRST_HALF);
     expect(prompts).toEqual([]);
     expect(writes).toEqual([]);
   }, 30_000);
@@ -235,10 +312,20 @@ run("runAgentTask: an approval continuation always settles its row", () => {
     expect(writes).toEqual([]);
   }, 30_000);
 
-  // The same Stop, with the row removed before any worker saw it.
-  it("settles the row when a queued continuation is removed", async () => {
-    const chat = `${C}-dequeue`;
-    await seedSuspended(chat, { name: "save_row", approved: true });
+  // The same Stop, with the row removed before any worker saw it. An answered ask
+  // already has its result, so only its status moves.
+  it.each([
+    ["approval", ["NOT_RUN"]],
+    ["ask", [undefined]],
+  ])("settles the row when a queued %s continuation is removed", async (kind, codes) => {
+    const chat = `${C}-dequeue-${kind}`;
+    await seedSuspended(chat, { name: "save_row", approved: true }, kind === "ask" ? {
+      status: "awaiting_answer",
+      parts: [
+        { type: "tool-call", id: "c2", name: "ask", input: {}, answer: { form: { question: "Which row?" }, value: { action: "accept", values: { row: "final" } } } },
+        { type: "tool-result", id: "c2", name: "ask", output: { action: "accept", values: { row: "final" } } },
+      ],
+    } : {});
     await pool.query(
       `INSERT INTO tasks (id, chat_id, user_id, status, payload) VALUES ($1,$2,$3,'queued',$4::jsonb)`,
       [`${chat}-task`, chat, U, JSON.stringify({ resumeMessageId: `${chat}-a1` })],
@@ -248,7 +335,8 @@ run("runAgentTask: an approval continuation always settles its row", () => {
 
     const row = await storedRow(chat);
     expect(row.status).toBe("cancelled");
-    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(["NOT_RUN"]);
+    expect(resultFor(row.parts, "c2").map((r) => r.output?.code)).toEqual(codes);
+    expect((await pool.query(`SELECT id FROM tasks WHERE id=$1`, [`${chat}-task`])).rows).toEqual([]);
   }, 30_000);
 
   // The SDK runs an approval only when its response is the LAST message it is handed.

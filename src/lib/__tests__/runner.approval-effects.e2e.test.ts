@@ -241,7 +241,9 @@ run("runAgentTask: an approval continuation after a tool already ran", () => {
     // The live view keeps them too: a reset leaves the two cards the page drew for the
     // suspended half, and drops only what the thrown-away attempt streamed after them.
     const resets = published.filter((e): e is Extract<TaskEvent, { type: "task:reset" }> => e.type === "task:reset");
-    if (kind === "unavailable" || kind === "empty") expect(resets.length).toBeGreaterThan(0);
+    // Every road but the transient resume throws the attempt away; that one keeps it.
+    if (kind === "transient") expect(resets).toEqual([]);
+    else expect(resets.length).toBeGreaterThan(0);
     const [suspended] = toUIMessages([{ id: `${chat}-a1`, role: "assistant", content: "", createdAt: null, platform: null,
       metadata: { status: "running", parts: SUSPENDED } }]);
     const live = [{ ...suspended, parts: [...suspended.parts, { type: "text", text: "Saving" }] }];

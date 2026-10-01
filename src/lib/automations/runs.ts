@@ -264,8 +264,8 @@ export async function fireAutomation(
     if (!run) {
       // The hold is released by the `finally` below on every path that does not
       // hand it to a live turn — but there is no `finally` yet at this point, so
-      // this one releases its own. Leaving it would inflate the user's budget
-      // forever with no task row for the zombie reconciler to find.
+      // this one releases its own. Left alone, with no task row to join it to, it
+      // would hold the user's budget until the orphan-hold sweep an hour later.
       await releaseHold(taskId);
       await stampSkip(db, a.id, { reason: "condition", at: new Date().toISOString(), ...(note ? { note } : {}) }, today);
       log.info("automation skipped: condition not met", { automationId: a.id, note });
@@ -433,8 +433,8 @@ export async function fireAutomation(
     })
     .catch(async (e) => {
       // The transaction rolled back, so there is no turn for the hold to belong
-      // to. Leaking it would inflate the user's budget forever, with no task row
-      // for the zombie reconciler to find.
+      // to. Leaked, it would hold the user's budget until the orphan-hold sweep an
+      // hour later.
       await releaseHold(taskId);
       throw e;
     });

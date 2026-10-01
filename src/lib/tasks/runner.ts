@@ -321,8 +321,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // row for the catch to write the failure onto, so the turn used to vanish with
   // no reply and no error (a silent dead-end that read as a hang). The catch
   // checks this flag and INSERTS a failed message instead, so the user always
-  // sees what went wrong.
-  let messageInserted = false;
+  // sees what went wrong. A continuation's row always exists: inserting under its
+  // id could only roll back and leave that row waiting forever.
+  let messageInserted = resumeMessageId !== null;
   // Set just before the first stream starts. A continuation runs the calls the user
   // approved inside that stream, so one that fails before it has run none of them.
   let streamStarted = false;
@@ -412,6 +413,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // and the (i) popover has to show both — read off that row below, folded in at the
   // metadata write only (foldTurnHalves explains why the ledger must not see it).
   const prior: TurnHalf = {};
+  // The suspended row a continuation loaded, whole. The success path rebuilds every
+  // field it needs from memory; the failure path writes far fewer, so it starts from
+  // this instead of erasing the first half's steers, files and figures. Undefined
+  // until read, which is how the failure path knows to read it itself.
+  let firstHalf: MessageMeta | undefined;
   // The LAST step's raw prompt size (input incl. cached), overwritten (not summed)
   // on every finish-step — unlike liveUsage above, this is a snapshot of the final
   // call's context, not a running total across a multi-step tool-calling turn.
@@ -531,7 +537,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // deleted project, say) settles this row instead of inserting one under its id.
       const [row] = await db.select({ metadata: messages.metadata, parentId: messages.parentId })
         .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
-      const meta = (row?.metadata ?? {}) as MessageMeta;
+      const meta = firstHalf = (row?.metadata ?? {}) as MessageMeta;
       for (const p of meta.parts ?? []) parts.push(p);
       suspendedParts = parts.length;
       // Rebuild the effect ledger from the row, not from this process's memory: the
@@ -574,7 +580,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         carriedSteers = (await readSteers(meta.taskId)).slice((meta.steers ?? []).length);
       }
       replyParentId = resumeMessageId;
-      messageInserted = true;
     }
     const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText, taint, quiet } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
@@ -2427,8 +2432,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               } finally {
                 // A turn that folded into an existing one does not own our hold, and
                 // neither does a throw between the reservation and the enqueue —
-                // release it or it inflates the user's budget forever with no task
-                // row for the zombie reconciler to find.
+                // release it, or with no task row to join it to, it holds the user's
+                // budget until the orphan-hold sweep an hour later.
                 if (!handedOff) await releaseHold(followUpTaskId);
               }
             }
@@ -2746,12 +2751,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // what the live turn shed and overflows. Without the thinking edit: compaction
           // runs with thinking off.
           return compactConversation(model, systemMessages, mergeUserRuns(compactionInput(history, reply, pruneArmedEarlier), provider), sourceTrust,
-            auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit));
+            auxUsageRecorder("compaction"), contextManagementOptions(provider, effectiveLimit), tlog);
         })()
           .then(async (result) => {
             if (!result) {
-              // compactConversation already logged why, without the chat: an emergency-trimmed
-              // turn that cannot compact leaves the chat near the window, so it keeps overflowing.
+              // compactConversation already logged why: an emergency-trimmed turn that cannot
+              // compact leaves the chat near the window, so it keeps overflowing.
               if (emergencyTrimmed) tlog.warn("compaction failed after an emergency trim — chat may stay near the context limit");
               return;
             }
@@ -2818,18 +2823,31 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       status, elapsedMs: Date.now() - startedAt, toolCount,
       ...(failure ? { error: failure.adminDetail } : { err: String(e) }),
     });
+    // Reading the suspended row is what threw: read it again, or the write below
+    // replaces it with a failure that has no parts. A second throw leaves it as it is.
+    if (resumeMessageId && !firstHalf) {
+      const [row] = await db.select({ metadata: messages.metadata }).from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
+      firstHalf = (row?.metadata ?? {}) as MessageMeta;
+      parts.push(...(firstHalf.parts ?? []));
+    }
     // A continuation that failed before its stream started (prepareRun threw: its
     // project was deleted, say) ran none of the calls the user approved.
     if (resumeMessageId && !streamStarted) {
       sealUnrunApprovals(parts, `Not run. ${failure?.userMessage ?? "The turn was stopped before this approved call ran."}`);
     }
-    const failureMeta = {
+    const failureMeta: MessageMeta = {
+      // A continuation's first half, kept: its steers, files, sources and the figures
+      // it billed. Carried as they were, not folded with this run's, which this path
+      // never reports for any turn — so nothing is counted twice.
+      ...firstHalf,
       taskId, status, parts: parts.length > 0 ? parts : undefined,
       // Which model failed/was cancelled — without it, model-filtered analytics
       // would silently exclude every failed turn and understate failure rates.
       // Null only when prepareRun threw before a model was ever resolved.
       ...(runModelId ? { model: runModelId } : {}),
       ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
+      // On EVERY outcome, as on the success path: the user said these to this turn.
+      ...(consumedSteers.length ? { steers: consumedSteers } : {}),
     };
     // Same single decision as the success path: claim the outcome and write the
     // message together, nothing before the claim. If prepareRun threw before the

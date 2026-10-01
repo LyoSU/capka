@@ -436,17 +436,27 @@ export async function cancelQueuedTurn(input: {
   userId: string;
   chatId: string;
 }): Promise<"removed" | "flagged"> {
-  const { rows } = await pool.query<{ id: string; resume: string | null }>(
-    `DELETE FROM tasks WHERE id = $1 AND status = 'queued' RETURNING id, payload->>'resumeMessageId' AS resume`,
+  // An ordinary turn is one statement. A continuation leaves a row behind that waits
+  // on this task, so its delete commits only together with settling that row: once
+  // the task is gone nothing else would ever settle it.
+  let { rows } = await pool.query<{ id: string }>(
+    `DELETE FROM tasks WHERE id = $1 AND status = 'queued' AND payload->>'resumeMessageId' IS NULL RETURNING id`,
     [input.id],
   );
+  if (!rows[0]) {
+    rows = await db.transaction(async (tx) => {
+      const removed = (await tx.execute(sql`
+        DELETE FROM tasks WHERE id = ${input.id} AND status = 'queued'
+        RETURNING id, payload->>'resumeMessageId' AS resume`)).rows as { id: string; resume: string | null }[];
+      if (removed[0]?.resume) await settleCancelledContinuation(removed[0].resume, tx);
+      return removed;
+    });
+  }
   if (!rows[0]) {
     await requestCancel(input.id);
     return "flagged";
   }
   await releaseHold(input.id);
-  // An approval continuation leaves a row behind that waits on this task.
-  if (rows[0].resume) await settleCancelledContinuation(rows[0].resume);
   // The row is gone, so nothing will ever publish an outcome for it — say so
   // here or every open client keeps showing a turn that no longer exists.
   await publishTaskEvent(input.userId, {
@@ -477,22 +487,21 @@ export function sealUnrunApprovals(parts: StoredPart[], error: string): StoredPa
 
 /**
  * Settle the row a cancelled continuation was queued to finish. That row still reads
- * `awaiting_approval` with the user's decision on it, and nothing else will ever move
- * it; its approved calls never ran. Compare-and-set on the metadata read, so a write
- * landing in between (a second decision) is never overwritten.
+ * `awaiting_approval` with the user's decision on it, or `awaiting_answer` with the
+ * user's answer already stored as its result, and nothing else will ever move it; its
+ * approved calls never ran. Compare-and-set on the metadata read, so a write landing
+ * in between (a second decision) is never overwritten.
  */
-export async function settleCancelledContinuation(messageId: string): Promise<void> {
-  const { rows } = await pool.query<{ metadata: MessageMeta }>(
-    `SELECT metadata FROM messages WHERE id = $1 AND metadata->>'status' = 'awaiting_approval'`,
-    [messageId],
-  );
-  const meta = rows[0]?.metadata;
+export async function settleCancelledContinuation(messageId: string, tx: QueueTx = db): Promise<void> {
+  const { rows } = await tx.execute(sql`
+    SELECT metadata FROM messages
+     WHERE id = ${messageId} AND metadata->>'status' IN ('awaiting_approval', 'awaiting_answer')`);
+  const meta = (rows as { metadata: MessageMeta }[])[0]?.metadata;
   if (!meta) return;
   const parts = sealUnrunApprovals([...(meta.parts ?? [])], "Not run. The turn was stopped before this approved call ran.");
-  await pool.query(
-    `UPDATE messages SET metadata = $2::jsonb WHERE id = $1 AND metadata = $3::jsonb`,
-    [messageId, JSON.stringify({ ...meta, status: "cancelled", parts }), JSON.stringify(meta)],
-  );
+  await tx.execute(sql`
+    UPDATE messages SET metadata = ${JSON.stringify({ ...meta, status: "cancelled", parts })}::jsonb
+     WHERE id = ${messageId} AND metadata = ${JSON.stringify(meta)}::jsonb`);
 }
 
 /** Longest single steer we accept. Generous for a sentence or two of correction,
@@ -627,6 +636,10 @@ const REPLY_TEXT_SQL = `CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
                WHERE p->>'type' = 'text' AND btrim(p->>'text', E' \\t\\n\\r\\f') <> ''), '')
             ELSE m.content END`;
 
+/** How old a budget hold with no task row must be before reconcileZombies releases it.
+ *  Every admission that reserves before its task row exists has to finish inside it. */
+export const ORPHAN_HOLD_AGE_MS = 60 * 60_000;
+
 /**
  * Fail any running task whose lease has expired (its worker died), reconcile its
  * abandoned assistant message, AND settle its outstanding budget hold — all in
@@ -711,12 +724,12 @@ export async function reconcileZombies(): Promise<ReconciledZombie[]> {
         -- fresh when its hold is gone.
         DELETE FROM usage u
          WHERE u.pending = true
-           AND u.created_at < now() - interval '1 hour'
+           AND u.created_at < now() - make_interval(secs => $3)
            AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = u.task_id)
      )
      SELECT d.id, d.user_id, d.chat_id, COALESCE(rm.partial, false) AS partial
        FROM dead d LEFT JOIN reconciled_messages rm ON rm.task_id = d.id`,
-    [INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE],
+    [INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE, ORPHAN_HOLD_AGE_MS / 1000],
   );
   return rows;
 }

@@ -8,7 +8,7 @@ import { buildModelContext } from "./build";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { foldReasoningIntoText, pruneTurnToolTraffic } from "./step-control";
 import { isContextOverflowError, isReasoningEchoRejectedError } from "@/lib/errors/friendly";
-import { log } from "@/lib/log";
+import { log, type Logger } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
 /**
@@ -145,6 +145,8 @@ export async function compactConversation(
   sourceTrust: boolean,
   onUsage?: (usage: TokenUsage) => void,
   providerOptions?: Record<string, unknown>,
+  /** The caller's logger, so a failure names the chat and task it was for. */
+  logger: Logger = log,
 ): Promise<{ text: string; trust: boolean } | null> {
   // Own root trace, like the other aux calls — compaction is fire-and-forget and
   // can outlive the turn that triggered it (see auxGenerate).
@@ -175,7 +177,7 @@ export async function compactConversation(
     const summary = text.trim();
     return summary.length > 0 ? { text: summary, trust: sourceTrust } : null;
   } catch (e) {
-    log.error("compaction failed", { err: String(e) });
+    logger.error("compaction failed", { err: String(e) });
     return null;
   }
 }

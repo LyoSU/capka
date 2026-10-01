@@ -34,6 +34,7 @@ vi.mock("@/lib/tasks/queue", () => ({
   enqueueTask: (...a: unknown[]) => enqueueTask(...a),
   requestCancel: vi.fn(),
   cancelQueuedTurn: vi.fn(),
+  ORPHAN_HOLD_AGE_MS: 60 * 60_000,
 }));
 vi.mock("@/lib/tasks/events", () => ({ publishTaskEvent: vi.fn(async () => {}) }));
 

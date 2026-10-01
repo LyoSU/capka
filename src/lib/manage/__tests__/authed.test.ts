@@ -245,7 +245,7 @@ describe("approveManageForUser — atomic single-use approval", () => {
     expect(outcome).toBe("busy");
     expect(rows.rolledBack).toBe(true);
     expect(notifyTaskEnqueued).not.toHaveBeenCalled();
-    // The incumbent carries its own hold; ours would inflate the budget forever.
+    // The incumbent carries its own hold; ours would hold the budget until the orphan sweep.
     expect(releaseHold).toHaveBeenCalledWith(heldTaskId());
   });
 

@@ -132,9 +132,8 @@ run("fireAutomation + run_when", () => {
     expect(gate[0].inputTokens).toBe(120);
     expect(gate[0].outputTokens).toBe(8);
     expect(gate[0].messageId).toBeNull(); // there is no message at gate time
-    // And the hold reserved for the run that never happened is gone: leaking it
-    // would inflate the user's budget forever, with no task row for the zombie
-    // reconciler to find.
+    // And the hold reserved for the run that never happened is gone: leaked, it
+    // would hold the user's budget until the orphan-hold sweep an hour later.
     expect(rows.filter((r) => r.pending)).toHaveLength(0);
   });
 

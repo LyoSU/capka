@@ -6,7 +6,7 @@ import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import { enqueueTask, requestCancel, cancelQueuedTurn } from "@/lib/tasks/queue";
+import { enqueueTask, requestCancel, cancelQueuedTurn, ORPHAN_HOLD_AGE_MS } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, isAppError } from "@/lib/errors";
@@ -57,10 +57,10 @@ function botState(): BotState {
 
 const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
 // How long one turn may spend pulling its files in. Its budget hold is reserved and
-// its task row does not exist yet, so the orphan-hold sweep (reconcileZombies: an
-// hour) would release the hold of a turn still being admitted; this stays far inside
-// that. Each upload carries its own 60s cap, so admission ends by this plus a minute.
-const FILE_INGEST_MS = 10 * 60_000;
+// its task row does not exist yet, so the orphan-hold sweep would release the hold of
+// a turn still being admitted; this stays far inside that. Each upload carries its
+// own 60s cap, so admission ends by this plus a minute.
+const FILE_INGEST_MS = ORPHAN_HOLD_AGE_MS / 6;
 
 // The command menu Telegram shows behind the "/" hint. Registered under the
 // default scope — English only, by design: the set is tiny and the menu is the
