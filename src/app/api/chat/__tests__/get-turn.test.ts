@@ -62,6 +62,7 @@ vi.mock("@/lib/db", async () => {
 });
 
 import { GET } from "@/app/api/chat/route";
+import { loadTranscript } from "@/lib/chat/transcript";
 
 const get = async (qs: string) => {
   const res = await GET(new Request(`http://x/api/chat?${qs}`));
@@ -103,5 +104,16 @@ describe("GET /api/chat with messageId", () => {
 
     expect(msgs.map((m) => m.id)).toEqual(["u1", "a1", "u2", "a2"]);
     expect(fullReads.ids[0].filter((p) => p !== "c1").sort()).toEqual(["a1", "a2", "u1", "u2"]);
+  });
+});
+
+describe("the chat page's first paint", () => {
+  it("is the same answer GET /api/chat gives, from the same loader", async () => {
+    const viaRoute = await get("chatId=c1");
+    // What the page passes: the chat row it already read, scoped to this user.
+    const viaPage = JSON.parse(JSON.stringify(await loadTranscript("c1", "u", "a2")));
+
+    expect(viaPage).toEqual(viaRoute);
+    expect(readTurnWrites).toHaveBeenLastCalledWith(["u1", "a1", "u2", "a2"], "u");
   });
 });

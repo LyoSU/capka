@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import { type FileRef } from "@/lib/constants";
@@ -29,6 +29,11 @@ type Message = {
   parts: Part[];
   metadata?: Record<string, unknown>;
 };
+/** One transcript message as GET /api/chat (and the chat page) hands it over. */
+export type TranscriptMessage = Message;
+
+const noSubscribe = () => () => {};
+const NO_MESSAGES: Message[] = [];
 
 /** A turn queued behind the chat's live one, as `GET /api/tasks` reports it.
  *  `platform` is that of the newest user message it will answer — the only thing
@@ -99,12 +104,30 @@ export function resetReply<M extends { id: string; parts: unknown[] }>(msgs: M[]
 export function useBackgroundChat({
   chatId,
   projectId,
+  initialMessages,
 }: {
   chatId: string;
   projectId?: string;
+  /** The transcript the page was rendered with. It is drawn at once, in place of
+   *  the skeleton, and is ONLY drawn: everything live about the chat — a running
+   *  turn's status, its stop target, its clock, the seq cursor its deltas reconcile
+   *  against, `historyLoaded` — is still adopted from the load below, at the same
+   *  moment it always was. The page can be much older than it looks: back/forward
+   *  replays a cached RSC payload, so a "running" turn in it may have ended minutes
+   *  ago, and adopting that would strand a stop button on an idle chat. */
+  initialMessages?: Message[];
 }) {
   const t = useTranslations("chat.hook");
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
+  // What the load below compares its answer with, so a snapshot identical to the
+  // one already on screen keeps its identity and re-renders nothing.
+  const preloadRef = useRef<{ messages: Message[]; json?: string } | null>(initialMessages?.length ? { messages: initialMessages } : null);
+  // Server render and hydration draw no transcript, as before: rendering it on the
+  // server would put day stamps and times through the server's timezone and miss
+  // the browser's on hydration. True from the first client render on, so a soft
+  // navigation paints the transcript on its first frame and a hard load right after
+  // hydrating, neither waiting on the load.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
   // The turn waiting behind the one in flight, as the SERVER sees it — a message
@@ -177,7 +200,14 @@ export function useBackgroundChat({
           // those, then keep re-appending the ones still mid-flight so a queued
           // message never blinks out between turns.
           pendingRef.current = pendingStillUnknown(history, pendingRef.current);
-          setMessages(mergePendingMessages(history, pendingRef.current));
+          const next = mergePendingMessages(history, pendingRef.current);
+          const preload = preloadRef.current;
+          preloadRef.current = null;
+          // The first load usually answers exactly what the page already drew;
+          // keep that array then, rather than re-render every message for nothing.
+          setMessages((prev) =>
+            preload && prev === preload.messages && JSON.stringify(next) === (preload.json ??= JSON.stringify(prev)) ? prev : next,
+          );
         }
         setError(null);
         setHistoryLoaded(true);
@@ -1014,7 +1044,7 @@ export function useBackgroundChat({
   );
 
   return {
-    messages, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch,
+    messages: hydrated ? messages : NO_MESSAGES, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch,
     forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running",
     awaitingInput, settling: settling > 0, taskInfo,
     // Never our OWN in-flight turn. A direct send from this tab is queued for the

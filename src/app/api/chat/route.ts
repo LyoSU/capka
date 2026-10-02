@@ -12,9 +12,8 @@ import { enqueueTask, settleMovedPast, type QueueTx } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
-import { toUIMessages } from "@/lib/chat/presenter";
-import { readTurnWrites } from "@/lib/vault/turn-writes";
-import { loadActivePath, switchSibling } from "@/lib/chat/tree";
+import { loadTranscript } from "@/lib/chat/transcript";
+import { switchSibling } from "@/lib/chat/tree";
 import { chatRequestSchema } from "@/lib/chat/contracts";
 import { take } from "@/lib/rate-limit";
 
@@ -347,19 +346,12 @@ export const GET = apiHandler(async (req: Request) => {
   // `messageId` asks for one finished turn onward instead of the whole branch — what
   // a client already holding the rest needs after `task:finish`. An empty answer
   // means that message is not on the active branch, and the client reloads in full.
-  const path = await loadActivePath(
+  return Response.json(await loadTranscript(
     chatId,
+    userId,
     (chat.activeLeafId as string | null) ?? null,
     searchParams.get("messageId") ?? undefined,
-  );
-  const rows = path.map((p) => ({ ...p.node, siblingIndex: p.siblingIndex, siblingCount: p.siblingCount }));
-
-  // What each turn saved to memory, for the "saved to memory" notice. One extra read for
-  // the whole visible branch rather than one per message, and it is passed to the
-  // presenter rather than merged into `rows`: this is the ONLY caller that renders the
-  // notice, and the share page must never be given the shape by accident.
-  const memoryWrites = await readTurnWrites(rows.map((r) => r.id), userId);
-  return Response.json(toUIMessages(rows, memoryWrites));
+  ));
 });
 
 // PATCH /api/chat — flip the visible branch to the prev/next version of a

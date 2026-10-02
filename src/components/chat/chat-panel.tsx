@@ -51,7 +51,7 @@ import { SelectionActions } from "@/components/chat/selection-actions";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { useBackgroundChat } from "@/hooks/use-background-chat";
+import { useBackgroundChat, type TranscriptMessage } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
 import { useChatScroll, ChatScrollProvider } from "@/components/chat/use-chat-scroll";
 import { foldableCount, placeholderPx } from "@/lib/chat/fold";
@@ -77,6 +77,9 @@ interface ChatPanelProps {
   /** Server-known: does this chat already have messages? Lets first paint pick
    *  the message-stream shell over the new-chat greeting while history loads. */
   initialHasHistory?: boolean;
+  /** The transcript as the server read it while rendering the page, so it paints
+   *  without waiting for the hook's own load (which still runs, to revalidate). */
+  initialMessages?: TranscriptMessage[];
   /** The signed-in user's display name — woven into the new-chat greeting. */
   userName?: string | null;
   /** Experimental: offer to import a pasted Claude/ChatGPT share link. Off unless
@@ -125,7 +128,7 @@ const FOLD_QUIET_MS = 1500;
  *  background job they started, seen through check_job) and delete_path. */
 const REMOVES_FILES = new Set(["execute_bash", "execute_python", "execute_node", "check_job", "delete_path"]);
 
-export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled, title }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, initialMessages, userName, shareImportEnabled, title }: ChatPanelProps) {
   const t = useTranslations("chat");
   const tGreeting = useTranslations("chat.greetings");
   const tTime = useTranslations("chat.time");
@@ -223,6 +226,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, settling, taskInfo, queuedTurn, refreshQueuedTurn } = useBackgroundChat({
     chatId,
     projectId,
+    initialMessages,
   });
 
   // Messages typed while a reply was streaming wait here and are dispatched one

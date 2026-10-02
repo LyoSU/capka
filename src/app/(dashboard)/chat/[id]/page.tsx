@@ -10,7 +10,9 @@ import { resolveInitialModel } from "@/lib/providers/default-model";
 import { parseThinkAmount } from "@/lib/models/thinking";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { isShareImportEnabled } from "@/lib/import/flag";
+import { loadTranscript } from "@/lib/chat/transcript";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import type { TranscriptMessage } from "@/hooks/use-background-chat";
 import { ChatTitleSync } from "@/components/chat/chat-title-sync";
 
 // The browser tab carries the conversation's own name, so a window with three
@@ -58,6 +60,17 @@ export default async function ChatIdPage({
 
   const projectId = existingChat?.projectId ?? qsProjectId ?? null;
 
+  // The transcript rides along with the page, so opening a chat is one round trip
+  // instead of the page and then the client's own GET /api/chat queued behind the
+  // panel's other boot requests. Same loader as that route, so the same answer;
+  // the row above is already scoped to this user, which is the route's ownership
+  // check. Started now, awaited last: it needs only the chat row. A chat with no
+  // row (a fresh /chat/<id>), or no messages, has nothing to load; a failed read
+  // leaves the panel to fetch it as it always did, rather than failing the page.
+  const transcript = existingChat?.activeLeafId
+    ? loadTranscript(chatId, session.user.id, existingChat.activeLeafId).catch(() => undefined)
+    : undefined;
+
   const project = projectId
     ? await db
         .select()
@@ -74,6 +87,7 @@ export default async function ChatIdPage({
     }),
     db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1).then((r) => r[0]),
   ]);
+  const initialMessages = await transcript;
 
   return (
     <>
@@ -90,6 +104,7 @@ export default async function ChatIdPage({
         projectName={project?.name}
         readOnly={existingChat?.source === "telegram"}
         initialHasHistory={!!existingChat?.activeLeafId}
+        initialMessages={initialMessages as TranscriptMessage[] | undefined}
         userName={session.user.name}
         shareImportEnabled={isShareImportEnabled()}
         title={existingChat?.title}
