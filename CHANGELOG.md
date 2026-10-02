@@ -8,7 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 - The chat header shows the chat's name (it opens the chat menu), a files button with a count, and Share; on phones it is a frosted bar that clears the notch. Rename is one dialog everywhere, with "Suggest a name" in place of the separate "Regenerate title" item.
-- The composer shows the model and answer depth as quiet text ("Model · Depth"; context-size and shared-key badges are admin-only), keeps the send button visible beside the microphone, and has a tray underneath: Project, Files, Capabilities.
+- The composer shows the model and answer depth as quiet text ("Model · Depth"; context-size and shared-key badges are admin-only), keeps the send button visible beside the microphone, and has a tray underneath: Project, Capabilities (Files lives in the chat header; the tray shows it only on a new chat inside a project).
 - The transcript fades out above the composer, and the scroll-to-bottom button rests on that fade.
 - Double-clicking a chat in the sidebar (or F2 on a focused one) renames it in place; Enter saves, Esc cancels. The menu's Rename still opens the dialog.
 - A long message from the user (or an automation's prompt) folds to six lines with "Show all" / "Show less".

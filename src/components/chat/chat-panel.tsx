@@ -875,9 +875,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   );
 
   // What this chat works with, as quiet text under the composer: where it lives,
-  // its files, and the doors to what extends the assistant. Each opens a surface
-  // that already exists. "Project" needs a saved chat to move, so a fresh one
-  // (still on the greeting) leaves it out — its project, if any, is named there.
+  // and the doors to what extends the assistant. Each opens a surface that already
+  // exists. "Project" needs a saved chat to move, so a fresh one (still on the
+  // greeting) leaves it out. Files is the header's button once there is a header;
+  // on the greeting (no header) it appears only for a project chat, whose
+  // workspace may already hold files.
   const trayBtn = "rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   const trayEl = readOnly ? null : (
     <div className="mt-1.5 flex items-center gap-0.5 px-1.5">
@@ -886,9 +888,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           {projectName ?? t("input.tray.project")}
         </button>
       )}
-      <button type="button" className={trayBtn} onClick={() => setFilesOpen(true)}>
-        {t("input.tray.files")}
-      </button>
+      {showGreeting && projectId && (
+        <button type="button" className={trayBtn} onClick={() => setFilesOpen(true)}>
+          {t("input.tray.files")}
+        </button>
+      )}
       <Popover>
         <PopoverTrigger className={`${trayBtn} data-popup-open:text-foreground`}>{t("input.tray.capabilities")}</PopoverTrigger>
         <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
