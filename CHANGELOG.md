@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- The chat header shows the chat's name (it opens the chat menu), a files button with a count, and Share; on phones it is a frosted bar that clears the notch. Rename is one dialog everywhere, with "Suggest a name" in place of the separate "Regenerate title" item.
+
 ## [0.44.0] - 2026-10-02
 
 ### Added

@@ -38,7 +38,7 @@ import type { TokenUsage } from "@/lib/pricing";
  * admitted a viewer and let any owner mint model calls past their cap by clicking a menu
  * item. Same helpers, deliberately, so there is one answer to "am I over the limit".
  */
-export const POST = apiHandler(async (_req, { params }) => {
+export const POST = apiHandler(async (req, { params }) => {
   const { userId } = await requireWriter();
   const { id } = await params;
   const chat = await requireOwned(chats, id, userId, "Chat");
@@ -119,6 +119,9 @@ export const POST = apiHandler(async (_req, { params }) => {
   if (!title) return Response.json({ title: null });
 
   const next = stripNul(title);
+  // `?suggest=1` is the rename dialog asking for a proposal: it fills the field
+  // and the person's Save is what writes it, so Cancel still changes nothing.
+  if (new URL(req.url).searchParams.has("suggest")) return Response.json({ title: next });
   // No `updatedAt` bump, matching the runner: renaming a chat is not activity in
   // it, and bumping would jump the row into the sidebar's "today" group and
   // remount it under the user who just clicked a menu item.

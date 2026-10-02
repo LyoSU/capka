@@ -58,7 +58,8 @@ export function ChatContextMenu({
   onOpenChange,
   showTrigger = true,
   contentProps,
-  renameInDialog = false,
+  shareOpen: shareOpenProp,
+  onShareOpenChange,
 }: {
   chat: ChatItem;
   onUpdate: () => void;
@@ -70,12 +71,10 @@ export function ChatContextMenu({
   /** Where the popover lands. The sidebar row wants it beside itself; a header
    *  button at the right edge of the window wants it below. */
   contentProps?: React.ComponentProps<typeof ActionMenu>["contentProps"];
-  /** Rename in a dialog rather than in place. The inline field REPLACES this
-   *  component's own output, which is right for a sidebar row — the row becomes
-   *  the field — and useless anywhere the component is not the row: in the chat
-   *  header it renders a `w-full` input into an icon-sized span, so Rename read
-   *  as a menu item that did nothing at all. */
-  renameInDialog?: boolean;
+  /** The share dialog, drivable from outside — the chat header has a share
+   *  button of its own beside the ⋯. Same fallback as `open`. */
+  shareOpen?: boolean;
+  onShareOpenChange?: (open: boolean) => void;
   // The menu's open state can be driven from the row (a long-press on touch,
   // where the visible ⋮ trigger is hidden). Falls back to internal state so the
   // component still works uncontrolled.
@@ -93,7 +92,9 @@ export function ChatContextMenu({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [retitling, setRetitling] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  const [internalShareOpen, setInternalShareOpen] = useState(false);
+  const shareOpen = shareOpenProp ?? internalShareOpen;
+  const setShareOpen = onShareOpenChange ?? setInternalShareOpen;
   const [visibility, setVisibility] = useState<Visibility>(
     (chat.visibility as Visibility) ?? "private",
   );
@@ -123,15 +124,16 @@ export function ChatContextMenu({
     }
   }
 
-  // Re-derive the title from the conversation. Three outcomes are NOT failures and
-  // must not read as one: the model declining to name the chat, and a chat with no
-  // reply yet, both leave the title alone and say so plainly. Only a real error
-  // gets the error toast.
-  async function regenerateTitle() {
+  // Suggest a title from the conversation, into the rename field — nothing is
+  // saved until the person presses Save, so Cancel still means "no change". Three
+  // outcomes are NOT failures and must not read as one: the model declining to
+  // name the chat, and a chat with no reply yet, both leave the field alone and
+  // say so plainly. Only a real error gets the error toast.
+  async function suggestTitle() {
     if (retitling) return;
     setRetitling(true);
     try {
-      const res = await fetch(`/api/chats/${chat.id}/title`, { method: "POST" });
+      const res = await fetch(`/api/chats/${chat.id}/title?suggest=1`, { method: "POST" });
       if (res.status === 409) {
         toast(t("menu.titleNothingYet"));
         return;
@@ -142,10 +144,7 @@ export function ChatContextMenu({
         toast(t("menu.titleUnchanged"));
         return;
       }
-      toast.success(t("menu.titleRegenerated"));
-      // The sidebar already has the new name from the server's `chat:title` event;
-      // this re-reads it for the surfaces that render the title server-side.
-      onUpdate();
+      setRenameValue(data.title);
     } catch {
       toast.error(t("menu.titleFailed"));
     } finally {
@@ -218,46 +217,12 @@ export function ChatContextMenu({
     }
   }
 
-  if (renaming && !renameInDialog) {
-    return (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submitRename();
-        }}
-        className="w-full px-1"
-      >
-        <Input
-          // The field replaces the chat row entirely, so without a name a screen
-          // reader announces the old title as a value with no idea what it is.
-          aria-label={t("menu.rename")}
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          onBlur={submitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setRenaming(false);
-          }}
-          className="h-6 px-1.5 text-base md:text-sm"
-          autoFocus
-        />
-      </form>
-    );
-  }
-
   // Grouped the way a person thinks about a chat, not the way the API is laid out:
   // what it is called and who sees it; where it sits in the list; where else it
   // can go; and, on its own, the one thing that cannot be undone.
   const items: ActionItem[] = [
     { key: "share", group: "name", icon: <Share2 />, label: t("menu.share"), onSelect: () => setShareOpen(true) },
     { key: "rename", group: "name", icon: <Pencil />, label: t("menu.rename"), onSelect: startRename },
-    {
-      key: "regenerate-title",
-      group: "name",
-      icon: <Sparkles />,
-      label: t("menu.regenerateTitle"),
-      disabled: retitling,
-      onSelect: regenerateTitle,
-    },
     {
       key: "pin",
       group: "list",
@@ -335,7 +300,9 @@ export function ChatContextMenu({
         )}
       </ActionMenu>
 
-      {renameInDialog && (
+      {/* One Rename, in a dialog everywhere: the sidebar row used to turn into a
+          field in place, beside a second "Update title" item that did the same job
+          by another road. The suggestion is now a button inside the one dialog. */}
         <Dialog open={renaming} onOpenChange={(o) => !o && setRenaming(false)}>
           <DialogContent>
             <DialogHeader>
@@ -344,8 +311,7 @@ export function ChatContextMenu({
                   Deliberately not a new i18n key for the same reason. */}
               <DialogTitle>{t("menu.rename")}</DialogTitle>
             </DialogHeader>
-            {/* A form, so Enter saves — the inline field gets that for free and
-                the dialog has to ask for it. */}
+            {/* A form, so Enter saves. */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -360,6 +326,10 @@ export function ChatContextMenu({
               />
             </form>
             <DialogFooter>
+              <Button variant="ghost" className="sm:mr-auto" onClick={suggestTitle} disabled={retitling}>
+                <Sparkles />
+                {t("menu.regenerateTitle")}
+              </Button>
               <Button variant="outline" onClick={() => setRenaming(false)}>
                 {tc("cancel")}
               </Button>
@@ -367,7 +337,6 @@ export function ChatContextMenu({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      )}
 
       <MoveToProjectDialog
         open={moveOpen}

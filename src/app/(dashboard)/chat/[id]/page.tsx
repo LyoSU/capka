@@ -51,7 +51,7 @@ export default async function ChatIdPage({
   // uses it to render the right shell on first paint instead of flashing the
   // new-chat greeting while history is still being fetched.
   const [existingChat] = await db
-    .select({ projectId: chats.projectId, model: chats.model, thinkAmount: chats.thinkAmount, source: chats.source, activeLeafId: chats.activeLeafId })
+    .select({ title: chats.title, projectId: chats.projectId, model: chats.model, thinkAmount: chats.thinkAmount, source: chats.source, activeLeafId: chats.activeLeafId })
     .from(chats)
     .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
     .limit(1);
@@ -92,6 +92,7 @@ export default async function ChatIdPage({
         initialHasHistory={!!existingChat?.activeLeafId}
         userName={session.user.name}
         shareImportEnabled={isShareImportEnabled()}
+        title={existingChat?.title}
       />
     </>
   );

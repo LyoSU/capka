@@ -80,6 +80,8 @@ interface ChatPanelProps {
    *  the operator sets CAPKA_SHARE_IMPORT; resolved server-side and threaded here
    *  so the client never reads env. */
   shareImportEnabled?: boolean;
+  /** The chat's name at first paint; the header keeps it live from there. */
+  title?: string | null;
 }
 
 /**
@@ -120,7 +122,7 @@ const FOLD_QUIET_MS = 1500;
  *  background job they started, seen through check_job) and delete_path. */
 const REMOVES_FILES = new Set(["execute_bash", "execute_python", "execute_node", "check_job", "delete_path"]);
 
-export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled, title }: ChatPanelProps) {
   const t = useTranslations("chat");
   const tGreeting = useTranslations("chat.greetings");
   const [model, setModel] = useState(defaultModel);
@@ -724,6 +726,15 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   }, [isLoading, queued, historyLoaded, editingId, modelGone, awaitingInput, settling]);
 
   const [filesOpen, setFilesOpen] = useState(false);
+  // How many files this conversation has brought in or produced — what the header's
+  // files button counts. By name: an attachment and the tool that later edits it
+  // name the same file by different paths.
+  const fileCount = new Set(
+    messages.flatMap((m) => {
+      const meta = m.metadata as { touchedFiles?: string[]; attachedFiles?: { name: string }[] } | undefined;
+      return [...(meta?.touchedFiles ?? []), ...(meta?.attachedFiles ?? []).map((f) => f.name)].map((p) => p.split("/").pop());
+    }),
+  ).size;
 
   // A monotonically-rising count of completed tool calls across the whole thread.
   // It ticks up the moment a tool finishes — exactly when the agent may have
@@ -1137,13 +1148,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               // Bottom room is the composer's live height plus the footer gradient's
               // own air, both measured — so the tail of a reply always clears the
               // overlaid composer, even after attachments grow it.
-              paddingTop: "var(--reading-line)",
+              // Plus the notch: the phone header grows by the safe-area inset (0 elsewhere).
+              paddingTop: "calc(var(--reading-line) + env(safe-area-inset-top, 0px))",
               paddingBottom: `calc(${scroll.bottomReserve}px + var(--kb, 0px))`,
               // The same optimal region, declared for the scrolls the BROWSER drives:
               // focusing a control with the keyboard, find-in-page, `scrollIntoView`.
               // Without it those land their target under the gradient header or behind
               // the composer, which our own engine would then have to undo.
-              scrollPaddingBlockStart: "var(--reading-line)",
+              scrollPaddingBlockStart: "calc(var(--reading-line) + env(safe-area-inset-top, 0px))",
               scrollPaddingBlockEnd: `calc(${scroll.bottomReserve}px + var(--kb, 0px))`,
             }}
           >
@@ -1284,50 +1296,55 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             </div>
           </div>
 
-          {/* Floating header — fades to transparent so messages scroll up
-              behind it. pointer-events-none lets scroll-over pass through;
-              only the controls themselves are interactive. */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-background via-background to-transparent px-4 pb-8 pt-3 md:px-6">
-            {/* Same corner on both breakpoints — only the density differs. Desktop
-                gets the labelled pill; a phone gets `compactControlsEl` above, which
-                is the same two settings behind one ~52px trigger. `min-w-0` keeps the
-                desktop row honest under width pressure. */}
-            <div className="flex min-w-0 items-center gap-2">
-              <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full bg-card shadow-raised md:hidden" />
-              {projectId && projectName && (
-                <Hint label={projectName} side="bottom">
-                  <Link
-                    href={`/projects/${projectId}`}
-                    className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-raised transition-colors hover:text-foreground"
+          {/* Floating header: the chat's name at the left (and the way into its
+              menu), files / share / ⋯ at the right. On desktop it fades to
+              transparent so messages scroll up behind it; a phone has no room for
+              a fade that tall, so there it is a frosted bar that clears the notch.
+              pointer-events-none lets scroll-over pass through; only the controls
+              themselves are interactive. */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] max-md:bg-background/80 max-md:backdrop-blur-md md:bg-gradient-to-b md:from-background md:via-background md:to-transparent md:px-6 md:pb-8">
+            <ChatMenuButton
+              chatId={chatId}
+              initialTitle={title}
+              readOnly={readOnly}
+              start={
+                <>
+                  <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full md:hidden" />
+                  {projectId && projectName && (
+                    <Hint label={projectName} side="bottom">
+                      <Link
+                        href={`/projects/${projectId}`}
+                        className="pointer-events-auto hidden max-w-[16rem] shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-hover hover:text-foreground sm:inline-flex"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{projectName}</span>
+                        <span aria-hidden className="pl-1 text-muted-foreground/70">/</span>
+                      </Link>
+                    </Hint>
+                  )}
+                </>
+              }
+              end={
+                <Hint label={t("panel.workspaceFiles")}>
+                  <Button
+                    variant="ghost"
+                    size={fileCount ? "sm" : "icon"}
+                    aria-label={fileCount ? `${t("panel.workspaceFiles")}: ${fileCount}` : t("panel.workspaceFiles")}
+                    // `shrink-0`: a fixed width is still shrinkable in flex, so under
+                    // width pressure this button squashed before the title gave way.
+                    className={`h-8 shrink-0 gap-1.5 text-muted-foreground transition-[transform,opacity] duration-200 hover:text-foreground ${fileCount ? "px-2" : "w-8"} ${
+                      filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
+                    }`}
+                    onClick={() => setFilesOpen(true)}
+                    aria-hidden={filesOpen}
+                    tabIndex={filesOpen ? -1 : 0}
                   >
-                    <FolderOpen className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{projectName}</span>
-                  </Link>
+                    <FolderOpen className="h-4 w-4" />
+                    {fileCount > 0 && <span className="tabular-nums">{fileCount}</span>}
+                  </Button>
                 </Hint>
-              )}
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <Hint label={t("panel.workspaceFiles")}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
-                  // width pressure this button squashed before the model name gave way.
-                  className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
-                    filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
-                  }`}
-                  onClick={() => setFilesOpen(true)}
-                  aria-hidden={filesOpen}
-                  tabIndex={filesOpen ? -1 : 0}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </Hint>
-              {/* Everything the sidebar row's menu does, for the chat in front of
-                  you. Not in a shared, read-only view: none of it is the reader's
-                  to do. */}
-              {!readOnly && <ChatMenuButton chatId={chatId} />}
-            </div>
+              }
+            />
           </div>
 
           <ChatNav
