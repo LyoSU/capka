@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
 
@@ -128,6 +128,26 @@ const REMOVES_FILES = new Set(["execute_bash", "execute_python", "execute_node",
 export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, userName, shareImportEnabled, title }: ChatPanelProps) {
   const t = useTranslations("chat");
   const tGreeting = useTranslations("chat.greetings");
+  const tTime = useTranslations("chat.time");
+  const format = useFormatter();
+  // The centred line above a conversation's first message and above the first one
+  // of each new day: "today 12:16", "yesterday 09:40", else the date. In the
+  // reader's own zone, passed explicitly because the app configures none.
+  const dayStamp = (iso: string) => {
+    const d = new Date(iso);
+    const now = new Date();
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const time = format.dateTime(d, { hour: "numeric", minute: "2-digit", timeZone });
+    const days = Math.round(
+      (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86_400_000,
+    );
+    if (days === 0) return tTime("today", { time });
+    if (days === 1) return tTime("yesterdayAt", { time });
+    return format.dateTime(d, {
+      day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone,
+      ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+    });
+  };
   const [model, setModel] = useState(defaultModel);
 
   // How hard the model should think in this chat. Persisted immediately (not only
@@ -1217,6 +1237,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
                 const isLatestUser = message.id === lastUserId;
+                const at = (message.metadata as { createdAt?: string | null } | undefined)?.createdAt;
+                const prevAt = i > 0 ? (messages[i - 1].metadata as { createdAt?: string | null } | undefined)?.createdAt : null;
+                const stamp = at && (i === 0 || (prevAt && new Date(prevAt).toDateString() !== new Date(at).toDateString())) ? dayStamp(at) : null;
                 return (
                   <div
                     key={message.id}
@@ -1231,6 +1254,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                     data-anchor-id={message.id}
                     ref={isLatestUser ? scroll.pinRef : undefined}
                   >
+                    {stamp && <p className="pt-1 text-center text-xs text-muted-foreground">{stamp}</p>}
                     <ChatMessage
                       message={message as never}
                       chatId={chatId}

@@ -639,7 +639,9 @@
     },
     "time": {
       "justNow": "щойно",
-      "yesterday": "Вчора, {time}"
+      "yesterday": "Вчора, {time}",
+      "today": "сьогодні {time}",
+      "yesterdayAt": "вчора {time}"
     },
     "details": {
       "show": "Деталі повідомлення",

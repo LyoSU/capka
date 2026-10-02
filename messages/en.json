@@ -639,7 +639,9 @@
     },
     "time": {
       "justNow": "just now",
-      "yesterday": "Yesterday {time}"
+      "yesterday": "Yesterday {time}",
+      "today": "Today {time}",
+      "yesterdayAt": "Yesterday {time}"
     },
     "details": {
       "show": "Message details",
