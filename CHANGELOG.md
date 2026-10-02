@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Quick Look previews Word, PowerPoint, OpenDocument and RTF files (converted to PDF in the chat's running sandbox, reusing the tile renderer's cache) and spreadsheets (xlsx, xls, ods, csv, tsv) as a table; PDFs now render in-app with pdf.js, so they also open on phones. Restart the platform so the new `/api/sandbox/files/pdf` route is served.
+
 ### Changed
 - The chat header shows the chat's name (it opens the chat menu), a files button with a count, and Share; on phones it is a frosted bar that clears the notch. Rename is one dialog everywhere, with "Suggest a name" in place of the separate "Regenerate title" item.
 - Skills, Connectors and Plugins are reached from the composer tray's "Capabilities" only; the "+" menu is just what you bring in (files, a folder, secrets).
