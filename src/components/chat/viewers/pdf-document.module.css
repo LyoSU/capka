@@ -1,0 +1,82 @@
+/* The page box and pdf.js's text layer — the transparent, selectable copy of the
+   page's text laid over the canvas, which is what makes a PDF selectable and
+   findable with the browser's own Find. The layer rules are pdf.js's own
+   (web/pdf_viewer.css, Apache-2.0), trimmed to the text layer: importing the whole
+   viewer stylesheet would bring the editor, annotation and toolbar styling too. */
+
+.page {
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+
+.page :global(.textLayer) {
+  color-scheme: only light;
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.page :global(.textLayer) :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.page :global(.textLayer) > :not(:global(.markedContent)),
+.page :global(.textLayer) :global(.markedContent) span:not(:global(.markedContent)) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.page :global(.textLayer) :global(.markedContent) {
+  display: contents;
+}
+
+.page :global(.textLayer) span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+
+.page :global(.textLayer) ::selection {
+  background: rgb(0 0 255 / 0.25);
+  background: color-mix(in srgb, AccentColor, transparent 50%);
+  color: transparent;
+}
+
+.page :global(.textLayer) br::selection {
+  background: transparent;
+}
+
+.page :global(.textLayer) :global(.endOfContent) {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.page :global(.textLayer.selecting) :global(.endOfContent) {
+  top: 0;
+}

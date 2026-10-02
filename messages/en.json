@@ -589,6 +589,10 @@
       "askConvert": "Ask to convert",
       "askConvertPrompt": "Please convert {name} to PDF into the workspace so I can preview it here.",
       "askConvertDone": "Added to the message box — just press send.",
+      "pdfDocument": "Document pages",
+      "pdfPage": "Page {current} of {total}",
+      "pdfPassword": "This PDF is password-protected. Download it to open it with your PDF app.",
+      "zoomFit": "Fit to width",
       "kind": {
         "folder": "Folder",
         "image": "Image",

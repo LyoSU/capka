@@ -10,6 +10,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileWarning, ImageOff, Loader2, Maximize2, Minimize2, RefreshCw, Sparkles, X, ZoomIn, ZoomOut } from "lucide-react";
@@ -56,7 +57,7 @@ function downloadUrl(f: PreviewFile) {
 }
 
 // One shared, cached status probe for a workspace file — the single source of
-// truth for "does this file exist / can it be opened", used by the PDF viewer,
+// truth for "does this file exist / can it be opened", used by the viewers,
 // the inline `/workspace/…` chips, and the artifact tiles so all three agree.
 // It fetches only the headers (the body is cancelled immediately), then maps the
 // response through the same classifier everywhere (see fileStatusFromHttp).
@@ -572,7 +573,7 @@ function Viewer({ file, kind, onClose, onPage, selectionBar }: {
     return <ImageViewer file={file} onPage={onPage} />;
   }
   if (kind === "pdf") {
-    return <PdfViewer file={file} />;
+    return <PdfViewer file={file} selectionBar={selectionBar} />;
   }
   if (kind === "html") {
     return <HtmlViewer file={file} />;
@@ -1084,22 +1085,76 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
 
 // ── PDF viewer ───────────────────────────────────────────────────────────────
 
-/**
- * PDF preview in a same-origin iframe (the browser's native viewer), but only
- * once we've confirmed the file is actually there. The download route returns an
- * error JSON for a missing file or a controller fault, and a bare iframe would
- * render that JSON as if it were the document — so we probe the status first and
- * show the same honest notice the image/text viewers use instead.
- */
-function PdfViewer({ file }: { file: PreviewFile }) {
-  const status = useFileStatus(file);
-  if (status === "checking")
-    return <ViewerLoading />;
-  if (status === "ok")
-    // Framed same-origin (allowed via the route's SAMEORIGIN + frame-ancestors
-    // 'self'); the response CSP default-src 'none' contains the document.
-    return <iframe src={inlineUrl(file)} title={file.name} className="h-full w-full border-0" />;
-  return <UnavailableNotice state={status} />;
+// pdf.js is big and only this viewer needs it: it loads on the first open of a
+// PDF, never with the chat.
+const PdfDocument = dynamic(() => import("./viewers/pdf-document"), { ssr: false, loading: () => <ViewerLoading /> });
+
+// Read whole into memory to be drawn here, so capped; past this it is a download.
+const MAX_PDF_BYTES = 60 * 1024 * 1024;
+
+type Bytes =
+  | { state: "loading" }
+  | { state: "ok"; data: ArrayBuffer }
+  | { state: "too-large" }
+  // `status` 0 is a network failure or the timeout; `reason` is only ever sent to an admin.
+  | { state: "failed"; status: number; reason?: string };
+
+/** A file's bytes for a viewer that draws them itself, with the same verdicts the
+ *  other viewers give (a 404 is "gone", a 5xx "temporary") and a size cap that is
+ *  checked before the body is read when the server says how big it is. */
+function useFileBytes(url: string, maxBytes: number, timeoutMs?: number, attempt = 0): Bytes {
+  const [bytes, setBytes] = useState<Bytes>({ state: "loading" });
+  useEffect(() => {
+    let alive = true;
+    const ctrl = new AbortController();
+    const timer = timeoutMs ? setTimeout(() => ctrl.abort(), timeoutMs) : undefined;
+    setBytes({ state: "loading" });
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { reason?: unknown } | null;
+          if (alive) setBytes({ state: "failed", status: res.status, reason: typeof body?.reason === "string" ? body.reason : undefined });
+          return;
+        }
+        if (Number(res.headers.get("Content-Length") || 0) > maxBytes) {
+          await res.body?.cancel().catch(() => {});
+          if (alive) setBytes({ state: "too-large" });
+          return;
+        }
+        const data = await res.arrayBuffer();
+        if (alive) setBytes(data.byteLength > maxBytes ? { state: "too-large" } : { state: "ok", data });
+      } catch {
+        if (alive) setBytes({ state: "failed", status: 0 });
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [url, maxBytes, timeoutMs, attempt]);
+  return bytes;
+}
+
+/** A failed fetch as the notice every viewer shows. */
+function bytesNotice(b: Exclude<Bytes, { state: "loading" | "ok" }>): "gone" | "temporary" | "error" | "too-large" {
+  if (b.state === "too-large") return "too-large";
+  if (b.status === 0) return "temporary";
+  const fs = fileStatusFromHttp(b.status);
+  return fs === "ok" ? "error" : fs;
+}
+
+/** A PDF, drawn in-app by pdf.js. It replaced a same-origin <iframe> of the
+ *  browser's own viewer, which phones do not have: iOS Safari showed only the
+ *  first page, Android a download link. */
+function PdfViewer({ file, selectionBar }: { file: PreviewFile; selectionBar?: React.ReactNode }) {
+  const bytes = useFileBytes(inlineUrl(file), MAX_PDF_BYTES);
+  if (bytes.state === "loading") return <ViewerLoading />;
+  if (bytes.state === "ok") return <PdfDocument data={bytes.data} selectionBar={selectionBar} />;
+  return <UnavailableNotice state={bytesNotice(bytes)} file={file} />;
 }
 
 /** The pane while a file is being fetched. Four viewers had their own identical
