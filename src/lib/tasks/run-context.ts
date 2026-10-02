@@ -11,6 +11,7 @@ import { createSession } from "@/lib/sandbox/client";
 import { makeViewFileTool } from "@/lib/sandbox/view-file";
 import { loadMcpTools } from "@/lib/mcp/load";
 import { planToolSearch } from "@/lib/mcp/tool-search";
+import { isKnownToolName } from "@/lib/chat/native-tools";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { makeManageTool } from "@/lib/manage/tool";
@@ -508,6 +509,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // Inert (all tools active, empty index) below the threshold.
     const toolSearch = planToolSearch({ tools, effectiveLimit });
     if (toolSearch.defer) Object.assign(tools, toolSearch.extraTools);
+    // Display code knows our tools only by NATIVE_TOOL_NAMES (see native-tools.ts);
+    // a tool registered here without a line there is one its sanitizer cannot see.
+    const unlisted = Object.keys(tools).filter((n) => !isKnownToolName(n));
+    if (unlisted.length) console.warn("[run] tools missing from NATIVE_TOOL_NAMES:", unlisted.join(", "));
 
     // Topics and the facts the person has confirmed — assembled and fenced by the
     // vault. Skipped entirely when memory is off (no space was resolved to build it

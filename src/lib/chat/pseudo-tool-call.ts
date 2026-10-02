@@ -76,14 +76,6 @@ export function stripPseudoToolCalls(text: string, isOurTool: (name: string) => 
     .trim();
 }
 
-/** Built-in tool names, for display code that cannot see the turn's tool set (the
- *  runner checks against the real one). A name missing here only means a leaked
- *  call stays visible, as it did before; connector tools match by their prefix. */
-const BUILTIN_TOOLS = new Set([
-  "execute_bash", "execute_python", "execute_node", "check_job",
-  "read_file", "write_file", "str_replace", "list_files", "search_files", "delete_path", "view_file",
-  "manage", "ask", "skill", "update_plan", "find_tool", "nothing_to_report", "google_search",
-  "memory_search", "memory_fact_write", "memory_note_write", "memory_open", "memory_file", "memory_link", "memory_forget",
-]);
-
-export const isKnownToolName = (name: string) => BUILTIN_TOOLS.has(name) || name.startsWith("mcp__");
+/** For display code that cannot see the turn's tool set (the runner checks against
+ *  the real one): our native tools by name, connector tools by their prefix. */
+export { isKnownToolName } from "./native-tools";
