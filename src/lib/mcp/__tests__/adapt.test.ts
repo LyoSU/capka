@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mcpToolName, adaptMcpTool, sanitizeToolSchema } from "../adapt";
 import { spillToWorkspace } from "../spill";
+import { CONNECTOR_SIGNIN_RE } from "@/lib/chat/tool-results";
 
 vi.mock("../spill", () => ({ spillToWorkspace: vi.fn() }));
 const mockedSpill = vi.mocked(spillToWorkspace);
@@ -122,6 +123,8 @@ describe("adaptMcpTool", () => {
     const err = await Promise.resolve(t.execute!({}, opts as never)).then(() => null, (e: Error) => e);
     expect(err?.message).toMatch(/Tavily needs to be signed in again/);
     expect(err?.message).not.toMatch(/invalid_request|oauth\/token/);
+    // The transcript reads the sentence back to show it in the reader's language.
+    expect(err?.message.match(CONNECTOR_SIGNIN_RE)?.[1]).toBe("Tavily");
   });
 
   it("maps result content to model output parts (text + media)", async () => {

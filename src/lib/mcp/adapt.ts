@@ -4,6 +4,7 @@ import { spillToWorkspace } from "./spill";
 import { extractSearchRecords, sourcesModelText, type NumberedSource } from "./search-normalize";
 import { nonNegInt, posInt } from "@/lib/config/env";
 import { AUTH_FAILURE_RE } from "./connect-errors";
+import { connectorSignInResult } from "@/lib/chat/tool-results";
 
 /** Ceiling for a single MCP media/blob block, measured on the base64 STRING
  *  length — that is what lands in Postgres and re-enters the model context every
@@ -227,7 +228,7 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
         // …") is shown on the step and relayed by the model; the raw provider text means
         // nothing to the person reading it, and the one useful move is to sign in again.
         if (AUTH_FAILURE_RE.test(text)) {
-          throw new Error(`${serverName} needs to be signed in again: its access to the service has expired. Open Settings → Connectors and sign in to ${serverName} again, then retry.`);
+          throw new Error(connectorSignInResult(serverName));
         }
         throw new Error(text || `${serverName} ${mcpTool.name} failed`);
       }

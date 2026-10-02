@@ -605,6 +605,7 @@
       "done": "Done",
       "failed": "failed",
       "stepFailed": "This step couldn't be completed.",
+      "connectorSignIn": "{name} needs you to sign in again: its access to the service has expired. Open Settings → Connectors, sign in to {name} again, then retry.",
       "technicalDetails": "Technical details",
       "artifacts": "Files · {count}",
       "steps": "{count, plural, one {# step} other {# steps}}",

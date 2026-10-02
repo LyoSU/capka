@@ -26,6 +26,7 @@ import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
 import { stripPseudoToolCalls, isKnownToolName } from "@/lib/chat/pseudo-tool-call";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
+import { CONNECTOR_SIGNIN_RE } from "@/lib/chat/tool-results";
 import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
 import { SandboxFileTile, FileThumb, usePreview, type PreviewFile } from "./file-preview";
 import { MessageEditor } from "./message-editor";
@@ -1194,6 +1195,7 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
   // A connector's raw arguments ("time range: day", "query: …") are the tool
   // author's vocabulary, not the reader's: admins get them, everyone else gets the
   // row's sentence alone. Code and diffs stay — they ARE what the step did.
+  const signIn = part.errorText?.match(CONNECTOR_SIGNIN_RE);
   const inv = useMemo(() => {
     const v = part.state.startsWith("input-") ? null : describeInvocation(rawName, part.input);
     return v?.kind === "fields" && !isAdmin ? null : v;
@@ -1308,7 +1310,11 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
           {inv && <Invocation inv={inv} />}
           {/* The raw error is a provider's or connector's own wording — for an
               admin only; anyone else gets one calm sentence. */}
-          {part.errorText && !isAdmin ? (
+          {/* …except a connector that needs signing in again: that sentence is
+              ours, and the one useful move is the same for both roles. */}
+          {signIn ? (
+            <p className="text-sm text-muted-foreground">{t("connectorSignIn", { name: signIn[1] })}</p>
+          ) : part.errorText && !isAdmin ? (
             <p className="text-sm text-muted-foreground">{t("stepFailed")}</p>
           ) : (
             <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />

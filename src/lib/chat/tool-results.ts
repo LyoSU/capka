@@ -36,6 +36,12 @@ export const INTERRUPTED_TOOL_RESULT =
 export const UNANSWERED_ASK_RESULT = "The user did not answer this question.";
 /** The decline an approval the chat moved past without a decision is sealed with. */
 export const UNDECIDED_APPROVAL_REASON = "The user moved on without deciding, so this did not run.";
+/** What a connector call refused over the SERVICE's sign-in fails with. English,
+ *  because the model reads and relays it; the transcript matches it back with
+ *  {@link CONNECTOR_SIGNIN_RE} and shows a localized sentence in its place. */
+export const connectorSignInResult = (server: string) =>
+  `${server} needs to be signed in again: its access to the service has expired. Open Settings → Connectors and sign in to ${server} again, then retry.`;
+export const CONNECTOR_SIGNIN_RE = /^(.+) needs to be signed in again: its access to the service has expired\./;
 
 export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] }>(messages: T[]): T[] {
   for (const [i, m] of messages.entries()) {
