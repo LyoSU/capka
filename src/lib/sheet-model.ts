@@ -8,7 +8,13 @@ import { read, utils, type CellObject, type WorkSheet } from "xlsx";
  */
 export const MAX_SHEET_ROWS = 5000;
 export const MAX_SHEET_COLS = 200;
-const DEFAULT_COL_PX = 72;
+// A column the file gives no width (every CSV column, many generated xlsx) is
+// sized to its content: the longest text in the first rows, at the table's 12px
+// type, plus the cell padding. A fixed default cut "12500.50" to "12500..." while
+// "9800.00" beside it fitted.
+const SAMPLE_ROWS = 200;
+const CHAR_PX = 7.5;
+const CELL_PAD_PX = 16;
 
 /** A plain string for an ordinary cell; an object only where there is more to say
  *  (a number to right-align, a merge origin). `null` is a cell a merge covers. */
@@ -96,8 +102,16 @@ export function sheetModel(name: string, ws: WorkSheet, delimited = false): Shee
   const cols = ws["!cols"] ?? [];
   const widths = Array.from({ length: nCols }, (_, c) => {
     const col = cols[c];
-    const px = col?.wpx ?? (col?.wch != null ? col.wch * 7 + 5 : DEFAULT_COL_PX);
-    return Math.round(Math.min(480, Math.max(32, px)));
+    const px = col?.wpx ?? (col?.wch != null ? col.wch * 7 + 5 : null);
+    if (px != null) return Math.round(Math.min(480, Math.max(32, px)));
+    let chars = 0;
+    for (let r = 0; r < Math.min(nRows, SAMPLE_ROWS); r++) {
+      const cell = rows[r][c];
+      // A merged block spans several columns; its text says nothing about this one.
+      if (cell === null || (typeof cell === "object" && (cell.cs ?? 1) > 1)) continue;
+      chars = Math.max(chars, (typeof cell === "string" ? cell : cell.v).length);
+    }
+    return Math.round(Math.min(320, Math.max(64, chars * CHAR_PX + CELL_PAD_PX)));
   });
 
   return { name, rows, widths, tall, totalRows, totalCols };

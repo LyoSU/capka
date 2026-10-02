@@ -28,7 +28,8 @@ describe("parseSheetFile", () => {
     expect(first.rows[1]).toEqual(["Item", "Qty", "Price"]);
     // Numbers as the file formats them, flagged for right alignment.
     expect(first.rows[2]).toEqual(["Pens", { v: "12", num: true }, { v: "1.50", num: true }]);
-    expect(first.widths).toEqual([150, 65, 72]); // wch is turned into pixels by SheetJS itself
+    // wpx as given; wch turned into pixels by SheetJS itself; no width → content.
+    expect(first.widths).toEqual([150, 65, 64]);
     expect(first.tall).toEqual([]);
     expect([first.totalRows, first.totalCols]).toEqual([3, 3]);
 
@@ -63,6 +64,17 @@ describe("parseSheetFile", () => {
     const [s] = parseSheetFile(csv, "csv");
     expect(s.rows[1]).toEqual([{ v: "01", num: true }, "1/2/2023", { v: "1,5", num: true }]);
     expect(s.rows[0][0]).toBe("id"); // the BOM is not part of the first header
+  });
+
+  it("sizes columns without a width to their content, within bounds", () => {
+    const csv = "amount,note,x\n9800.00,short,1\n12500.50," + "a".repeat(80) + ",2\n";
+    const [s] = parseSheetFile(new TextEncoder().encode(csv), "csv");
+    const [amount, note, x] = s.widths;
+    expect(amount).toBeGreaterThanOrEqual(8 * 7.5); // "12500.50" fits whole
+    expect(note).toBe(320); // a long cell is capped, not a 600px column
+    expect(x).toBe(64); // a one-character column keeps a usable minimum
+    expect(s.rows[2][0]).toEqual({ v: "12500.50", num: true });
+    expect(s.rows[1][0]).toEqual({ v: "9800.00", num: true });
   });
 
   it("reads TSV, and a CSV in the Windows Cyrillic code page", () => {
