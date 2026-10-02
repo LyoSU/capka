@@ -1135,6 +1135,9 @@ interface ModelPickerProps {
    * side by side in the header and have room to.
    */
   extra?: React.ReactNode;
+  /** Pill variant: the context-size and shared-key badges are provider plumbing,
+   *  shown to an admin only (PRODUCT.md, "hide the machinery"). */
+  isAdmin?: boolean;
   /** Configure mode: list models for these unsaved credentials. */
   provider?: ProviderName;
   apiKey?: string;
@@ -1179,6 +1182,7 @@ export function ModelPicker({
   className,
   compact = false,
   extra,
+  isAdmin = false,
   provider,
   apiKey,
   baseUrl,
@@ -1475,11 +1479,13 @@ export function ModelPicker({
           // CHROME sitting under a 15px text field, and at the field's own size
           // they competed with the words being typed. The name keeps `font-medium`
           // (below) so the step down in size is not also a step down in weight.
-          className={`flex h-9 min-w-0 items-center text-sm transition-micro hover:text-foreground ${
-            compact ? "gap-1 px-1.5" : "gap-2.5 px-3"
+          className={`group/pill flex h-9 min-w-0 items-center text-sm transition-micro ${
+            compact ? "gap-1 px-1.5" : "gap-1.5 pl-2 pr-1"
           }`}
         >
-          <span className={`relative flex size-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
+          {/* The full pill is plain text ("Gemini 3.5 Flash · Balanced"); only the
+              compact one, which has no name to show, keeps the brand mark. */}
+          {compact && <span className={`relative flex size-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
             <BrandIcon slug={currentModel?.icon} size={14} />
             {/* Compact has no name for the warning dot to sit beside, but "this
                 model is gone" is exactly the thing that must not be dropped for want
@@ -1490,7 +1496,7 @@ export function ModelPicker({
                 aria-label={t("unavailable")}
               />
             )}
-          </span>
+          </span>}
           {/* Until the catalog resolves the friendly name, show a skeleton rather
               than the raw model id — it would otherwise flash "glm-5.2" before
               snapping to "GLM 5.2". */}
@@ -1501,20 +1507,20 @@ export function ModelPicker({
               {/* The cap is responsive: 208px of model name ("Gemini 3.1 Flash Lite")
                   leaves no room beside it on a 360px screen. Narrow phones get a
                   short name and the full one in the panel a tap away. */}
-              <span className={`truncate max-w-32 sm:max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
+              <span className="truncate max-w-32 sm:max-w-52 text-muted-foreground transition-colors group-hover/pill:text-foreground">{displayName || placeholderText}</span>
               {/* The model's provider is gone — a warning dot flags it without
                   hiding which model this used to be (the name stays). Uses the
                   semantic warning token so it matches the unavailable banner. */}
               {modelMissing && (
                 <span className="size-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
-              {currentModel && currentModel.context > 0 && (
+              {isAdmin && currentModel && currentModel.context > 0 && (
                 <Hint label={t("context")}><span className="rounded bg-muted px-1 py-px text-xs leading-4 text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
               )}
               {/* Shared-key chip: shown when the whole offering is the shared key,
                   or (in a mixed own+shared picker) when the SELECTED model runs on
                   a shared connection. */}
-              {(state.isShared || currentModel?.configShared) && (
+              {isAdmin && (state.isShared || currentModel?.configShared) && (
                 <Hint label={t("sharedTooltip")}><span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground hidden sm:inline">{t("shared")}</span></Hint>
               )}
             </span>

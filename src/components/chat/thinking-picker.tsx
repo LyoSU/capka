@@ -181,29 +181,15 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
 
   return (
     <>
-      {/* Hairline against the model pill it shares a shell with. Lives here, not
+      {/* The separator of "Model · Depth", one line of quiet text. Lives here, not
           in the composer, so it disappears together with the control. */}
-      <span aria-hidden className="mr-0.5 h-4 w-px shrink-0 bg-border" />
+      <span aria-hidden className="shrink-0 text-sm text-muted-foreground">·</span>
       <Popover>
         <PopoverTrigger
           disabled={disabled}
           aria-label={`${t("label")}: ${t(`amount.${current}`)}`}
-          // 13px to match the model pill it sits beside — see the note there.
-          className="flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-muted-foreground transition-micro hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
+          className="flex h-9 items-center rounded-full px-1.5 text-sm text-muted-foreground transition-micro hover:text-foreground disabled:opacity-50 data-popup-open:text-foreground"
         >
-          {/* The glyph carries the meaning at a glance: bars that grow with depth.
-              aria-hidden — the trigger's own label already says it in words. */}
-          <span aria-hidden className="flex items-end gap-[2px]">
-            {stops.slice(1).map((_, i) => (
-              <span
-                key={i}
-                className={`w-[3px] rounded-full transition-[height,background-color] duration-200 ${
-                  i < index ? "bg-current" : "bg-current/25"
-                }`}
-                style={{ height: `${5 + i * 3}px` }}
-              />
-            ))}
-          </span>
           {/* All labels occupy ONE grid cell, so the slot is as wide as the longest
               one and the pill never changes width. Without this, dragging the
               slider re-lays-out the whole pill (and, since it's centred, shifts the
@@ -218,7 +204,7 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
               <span
                 key={s}
                 aria-hidden={s !== current}
-                className={`col-start-1 row-start-1 font-medium ${s === current ? "" : "invisible"}`}
+                className={`col-start-1 row-start-1 ${s === current ? "" : "invisible"}`}
               >
                 {t(`amount.${s}`)}
               </span>

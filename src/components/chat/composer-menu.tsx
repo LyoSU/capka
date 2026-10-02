@@ -197,21 +197,29 @@ export function ComposerMenu({
 
         <div className="my-1.5 border-t border-border" />
 
-        {/* Doors, not actions: each opens the settings page that owns the thing. */}
-        {[
-          { href: "/settings/skills", icon: <BookOpen className={icon} />, label: tMenu("skills") },
-          { href: "/settings/connectors", icon: <Blocks className={icon} />, label: tMenu("connectors") },
-          { href: "/settings/marketplace", icon: <Puzzle className={icon} />, label: tMenu("plugins") },
-        ].map((l) => (
-          <Link key={l.href} href={l.href} className={item} onClick={() => setOpen(false)}>
-            {l.icon}
-            <span className="flex-1">{l.label}</span>
-            <ChevronRight className="size-3.5 text-muted-foreground/60" />
-          </Link>
-        ))}
+        <CapabilityLinks onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
+}
+
+/** Doors, not actions: each opens the settings page that owns the thing. Shared
+ *  by the "+" menu and the composer tray's "Capabilities". */
+export function CapabilityLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const tMenu = useTranslations("chat.input.menu");
+  const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm leading-5 text-foreground transition-colors hover:bg-hover";
+  const icon = "size-5 shrink-0 text-muted-foreground";
+  return [
+    { href: "/settings/skills", icon: <BookOpen className={icon} />, label: tMenu("skills") },
+    { href: "/settings/connectors", icon: <Blocks className={icon} />, label: tMenu("connectors") },
+    { href: "/settings/marketplace", icon: <Puzzle className={icon} />, label: tMenu("plugins") },
+  ].map((l) => (
+    <Link key={l.href} href={l.href} className={item} onClick={onNavigate}>
+      {l.icon}
+      <span className="flex-1">{l.label}</span>
+      <ChevronRight className="size-3.5 text-muted-foreground/60" />
+    </Link>
+  ));
 }
 
 /** "3 min ago"-style relative time for the sync footer, localized. */

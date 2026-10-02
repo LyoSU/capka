@@ -125,6 +125,9 @@ interface ChatInputProps {
   /** Opens the credentials dialog from the "+" menu. Absent when this chat
    *  cannot hold any (read-only). */
   onOpenSecrets?: () => void;
+  /** Quiet text actions under the card — what this chat works with (project,
+   *  files, capabilities). The panel decides which exist for this chat. */
+  tray?: ReactNode;
 }
 
 export function ChatInput({
@@ -148,6 +151,7 @@ export function ChatInput({
   notice,
   sendBlocked = false,
   onOpenSecrets,
+  tray,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const tNotice = useTranslations("chat.notice");
@@ -423,24 +427,50 @@ export function ChatInput({
                 </button>
               )}
 
-              {/* One slot, four states. While a reply streams and the box is empty:
-                  Stop. While dictating: the dictation's own stop, tinted and pulsing
-                  (the global reduced-motion rule freezes it). Empty box, engine
-                  available: the microphone — voice is what an empty composer can
-                  still take, so it sits where the thumb already goes. Otherwise: Send,
-                  disabled until any in-flight upload settles. */}
+              {/* The microphone, beside the send button rather than in its place:
+                  voice is what an empty composer can still take, but a send button
+                  that disappears whenever the box is empty made the composer's one
+                  action hard to find. */}
+              {!hasContent && dictation.supported && !awaitingInput && !dictation.listening && (
+                <div className="flex shrink-0 items-center">
+                  <Hint label={t("dictation.start")}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t("dictation.start")}
+                      // Quiet at rest: the wash and full-strength ink arrive on hover.
+                      className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground hover:bg-hover hover:text-foreground active:bg-hover-strong"
+                      // Keep the caret where the words are going — a button click
+                      // would otherwise pull focus out of the composer.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={dictation.start}
+                    >
+                      <Mic className="size-4" />
+                    </Button>
+                  </Hint>
+                  <MicSettings lang={dictationLang} onLangChange={setDictationLang} />
+                </div>
+              )}
+
+              {/* One slot, three states, always present. While a reply streams and
+                  the box is empty: Stop. While dictating: the dictation's own stop,
+                  tinted and pulsing (the global reduced-motion rule freezes it).
+                  Otherwise: Send — disabled while there is nothing to send or an
+                  upload is still in flight; with text during a reply it queues (and
+                  Alt+Enter steers). */}
               {isLoading && !hasContent && !dictation.listening ? (
                 <Hint label={t("stop")}>
                   <Button
                     size="icon"
                     variant="outline"
-                    className="size-10 sm:size-9 shrink-0 rounded-xl"
+                    aria-label={t("stop")}
+                    className="size-10 sm:size-9 shrink-0 rounded-full"
                     // Keep the caret in the composer — a button click would otherwise
                     // steal focus (and close the mobile keyboard) on every send/stop.
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={onStop}
                   >
-                    <Square />
+                    <Square className="fill-current" />
                   </Button>
                 </Hint>
               ) : dictation.listening ? (
@@ -457,32 +487,11 @@ export function ChatInput({
                     <Square className="fill-current" />
                   </Button>
                 </Hint>
-              ) : !hasContent && dictation.supported && !awaitingInput ? (
-                <div className="flex shrink-0 items-center">
-                  <Hint label={t("dictation.start")}>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={t("dictation.start")}
-                      // Quiet at rest, like the two pills to its left: the wash and
-                      // full-strength ink arrive on hover. The "+" carries the one
-                      // fill in this row; a second ringed circle out here pulled the
-                      // eye to the least-used control on the screen.
-                      className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground hover:bg-hover hover:text-foreground active:bg-hover-strong"
-                      // Keep the caret where the words are going — a button click
-                      // would otherwise pull focus out of the composer.
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={dictation.start}
-                    >
-                      <Mic className="size-4" />
-                    </Button>
-                  </Hint>
-                  <MicSettings lang={dictationLang} onLangChange={setDictationLang} />
-                </div>
               ) : (
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button
                     size="icon"
+                    aria-label={isLoading ? t("queue") : t("send")}
                     className="group/send size-10 sm:size-9 shrink-0 rounded-full"
                     disabled={!canSend}
                     // Keep the caret in the composer — a button click would otherwise
@@ -538,6 +547,7 @@ export function ChatInput({
           <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
         </svg>
         </div>
+        {tray}
       </div>
     </div>
   );
