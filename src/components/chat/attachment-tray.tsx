@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { X, RotateCw, Loader2 } from "lucide-react";
-import { FileTile, SandboxFileTile, BinaryFileThumb, type PreviewFile } from "./file-preview";
+import { BinaryFileThumb, FileThumb, usePreview, type PreviewFile } from "./file-preview";
 import { isPastedText, type AttachedFile } from "./chat-input";
 import { Hint } from "@/components/ui/tooltip";
+import { fileKind, previewKind, splitFileName, thumbnailable } from "@/lib/file-kinds";
+import { formatSize } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 /**
- * The files staged for one message: the same square tiles used everywhere else a
- * file appears, so a file being attached looks like the file it will become.
+ * The files staged for one message, as one row of compact chips: a small picture
+ * (the first page or the photo when there is one, else the typed sheet) and the
+ * name with its kind. The big landscape tile stays for files in the transcript;
+ * here it stacked two-high on a phone and made the composer scroll inside itself.
  *
- * Shared by the composer and by both message editors — the tile, the ×, the
- * upload spinner and the retry-on-failure are one implementation, because three
+ * Shared by the composer and by both message editors — the chip, the ×, the
+ * upload progress and the retry-on-failure are one implementation, because three
  * copies of "what a half-uploaded file looks like" is three chances to disagree.
  */
 export function AttachmentTray({
@@ -27,10 +32,12 @@ export function AttachmentTray({
   className?: string;
 }) {
   const t = useTranslations("chat.input");
+  const tp = useTranslations("chat.preview");
+  const { open } = usePreview();
 
   // Thumbnails for locally-staged images (uploading / error), so a photo is
-  // obviously a photo before it lands in the sandbox. Ready chips render their
-  // thumbnail straight from the sandbox instead, so they need no object-URL.
+  // obviously a photo before it lands in the sandbox. Ready chips draw from the
+  // sandbox instead, so they need no object-URL.
   const previews = useMemo(() => {
     const m = new Map<string, string>();
     for (const af of files) {
@@ -40,100 +47,146 @@ export function AttachmentTray({
   }, [files]);
   useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
 
-  if (files.length === 0) return null;
-
-  const removeButton = (af: AttachedFile) => (
-    <button
-      type="button"
-      onClick={() => onRemove(af.id)}
-      // The dot is 20px, which is under the 24px minimum target — `before:-inset-2.5`
-      // grows the hit area to ~40px without moving the dot, which is what makes it
-      // usable with a thumb (WCAG 2.5.8 counts the target, not the paint).
-      className="absolute -right-1.5 -top-1.5 z-10 flex size-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-foreground/80"
-      aria-label={t("remove", { name: af.name })}
-    >
-      <X className="size-3" />
-    </button>
+  // Ready files open in Quick Look and page among each other with ←/→.
+  const ready: PreviewFile[] = files.flatMap((af) =>
+    af.status === "ready" && af.ref ? [{ path: af.ref.name, name: af.ref.name, chatId }] : [],
   );
 
-  // A paste that became a file gets a way back: quiet text on the tile's corner,
-  // opposite the x, so the conversion is never a one-way door.
-  const asTextButton = (af: AttachedFile) =>
-    onInsertText && isPastedText(af) ? (
-      <Hint label={t("pastedAsTextHint")}>
-        <button
-          type="button"
-          onClick={() => onInsertText(af)}
-          className="absolute left-2 top-2 z-10 rounded-md bg-background/85 px-1.5 py-0.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {t("pastedAsText")}
-        </button>
-      </Hint>
-    ) : null;
-
+  // Always mounted, so the first file slides the row open (`.reveal`) instead of
+  // the composer jumping a row taller in one frame.
   return (
-    // Wraps and scrolls, so many files never push the message body off-screen.
-    <div className={`flex max-h-44 flex-wrap gap-3 overflow-y-auto scrollbar-thin ${className ?? ""}`}>
-      {files.map((af, i) => {
-        // A staged file arrives with the same pop the finished turn's artifact
-        // tiles use, staggered per tile and capped at four steps, so a dropped
-        // folder reads as files landing rather than a row blinking into place.
-        // The wrapper is keyed on the file id and stays mounted through
-        // uploading → ready, so the tile changing state does not re-enter.
-        const enter = { animationDelay: `${Math.min(i, 4) * 60}ms` };
-        // Ready & in the sandbox → real thumbnail tile (works for restored chips
-        // too, whose bytes are no longer in memory).
-        if (af.status === "ready" && af.ref) {
-          const pf: PreviewFile = { path: af.ref.name, name: af.ref.name, chatId };
-          return (
-            <div key={af.id} className="animate-pop-in" style={enter}>
-              <SandboxFileTile file={pf} viewable={[pf]} overlay={<>{removeButton(af)}{asTextButton(af)}</>} />
-            </div>
-          );
-        }
-
-        const preview = previews.get(af.id);
-        const thumb = preview ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <BinaryFileThumb name={af.name} className="h-full w-full" />
-        );
-
-        // Uploading → dim + spinner; error → dim + retry, with a red ring.
-        const overlay =
-          af.status === "error" ? (
-            <>
-              {removeButton(af)}
-              {/* The hint states the failure; the button keeps its own label,
-                  which wins over the hint's, so the action stays announced. */}
-              <Hint label={t("uploadFailed", { files: af.name })}>
+    <div className="reveal" data-shut={files.length === 0 || undefined}>
+      <div>
+        <div className={cn("flex gap-2 overflow-x-auto overflow-y-hidden pb-0.5 scrollbar-thin", className)}>
+          {files.map((af, i) => {
+            const pf = af.status === "ready" && af.ref ? ready.find((r) => r.path === af.ref!.name) : undefined;
+            const { labelKey } = fileKind(af.name);
+            const { head, tail } = splitFileName(af.name);
+            const size = af.file?.size;
+            const failed = af.status === "error";
+            return (
+              <div
+                key={af.id}
+                // A staged file arrives with the same pop the finished turn's tiles
+                // use, staggered and capped at four steps. Keyed on the file id, so
+                // uploading → ready does not re-enter.
+                style={{ animationDelay: `${Math.min(i, 4) * 60}ms` }}
+                className={cn(
+                  "group/chip relative flex h-14 w-[220px] max-w-[220px] shrink-0 animate-pop-in items-center gap-2.5 rounded-xl border bg-card py-1.5 pl-1.5 pr-3",
+                  failed ? "border-destructive/60" : "border-border",
+                )}
+              >
+                <span className="relative size-11 shrink-0 overflow-hidden rounded-lg bg-muted">
+                  <ChipThumb af={af} file={pf} preview={previews.get(af.id)} />
+                  {af.status === "uploading" && (
+                    <span aria-hidden className="absolute inset-0 grid place-items-center bg-background/60">
+                      <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
+                    </span>
+                  )}
+                  {failed && (
+                    // The hint states the failure; the button keeps its own label,
+                    // which wins over the hint's, so the action stays announced.
+                    <Hint label={t("uploadFailed", { files: af.name })}>
+                      <button
+                        type="button"
+                        onClick={() => onRetry(af.id)}
+                        className="absolute inset-0 z-[2] grid place-items-center bg-destructive/20 text-destructive transition hover:bg-destructive/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        aria-label={t("retryUpload", { name: af.name })}
+                      >
+                        <RotateCw className="size-4" />
+                      </button>
+                    </Hint>
+                  )}
+                </span>
+                {/* The whole chip opens the file once it is in the sandbox; the
+                    filename inside is what names the control. */}
+                {pf ? (
+                  <button
+                    type="button"
+                    onClick={() => open(ready, Math.max(0, ready.indexOf(pf)))}
+                    className="absolute inset-0 z-[1] rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={af.name}
+                  >
+                    <span className="sr-only">{af.name}</span>
+                  </button>
+                ) : (
+                  <span className="sr-only">{af.name}</span>
+                )}
+                <span className="min-w-0 flex-1">
+                  {/* Middle truncation: the extension always shows, so
+                      report_v1.docx and report_v2.docx stay apart. */}
+                  <span aria-hidden className="flex text-sm leading-5 text-foreground">
+                    <span className="truncate">{head}</span>
+                    <span className="shrink-0 whitespace-pre">{tail}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+                    <span aria-hidden className="truncate tabular-nums">
+                      {tp(`kind.${labelKey}`)}
+                      {size !== undefined ? ` · ${formatSize(size)}` : ""}
+                    </span>
+                    {/* A paste that became a file gets a way back, as a quiet text
+                        action in the chip, so the conversion is never one-way.
+                        Above the chip's open control, which covers the rest. */}
+                    {onInsertText && isPastedText(af) && (
+                      <Hint label={t("pastedAsTextHint")}>
+                        <button
+                          type="button"
+                          onClick={() => onInsertText(af)}
+                          className="relative z-[2] shrink-0 rounded-sm font-medium text-muted-foreground underline-offset-2 transition-colors before:absolute before:-inset-x-1 before:-inset-y-2 before:content-[''] hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {t("pastedAsText")}
+                        </button>
+                      </Hint>
+                    )}
+                  </span>
+                </span>
                 <button
                   type="button"
-                  onClick={() => onRetry(af.id)}
-                  className="absolute inset-0 z-[1] grid place-items-center rounded-lg bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
-                  aria-label={t("retryUpload", { name: af.name })}
+                  onClick={() => onRemove(af.id)}
+                  // 20px, under the 24px minimum target: `before:-inset-2` grows the
+                  // hit area without moving the dot (WCAG 2.5.8 counts the target).
+                  // On a mouse it waits for hover or focus; on touch it is always there.
+                  className="absolute -right-1.5 -top-1.5 z-[3] flex size-5 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-border transition before:absolute before:-inset-2 before:content-[''] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:opacity-0 pointer-fine:group-hover/chip:opacity-100 pointer-fine:group-focus-within/chip:opacity-100"
+                  aria-label={t("remove", { name: af.name })}
                 >
-                  <RotateCw className="size-5" />
+                  <X className="size-3" />
                 </button>
-              </Hint>
-            </>
-          ) : (
-            <>
-              {removeButton(af)}
-              {asTextButton(af)}
-              <div aria-hidden className="absolute inset-0 z-[1] grid place-items-center rounded-lg bg-background/55">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
-            </>
-          );
-
-        return (
-          <div key={af.id} className="animate-pop-in" style={enter}>
-            <FileTile thumb={thumb} name={af.name} overlay={overlay} />
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** The chip's picture: a photo as itself, a document's first page when the
+ *  sandbox can draw it, otherwise the typed sheet. */
+function ChipThumb({ af, file, preview }: { af: AttachedFile; file?: PreviewFile; preview?: string }) {
+  const [page, setPage] = useState<"loading" | "ok" | "none">("loading");
+  if (preview)
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={preview} alt="" className="h-full w-full object-cover" />;
+  if (file && previewKind(file.name) === "image") return <FileThumb file={file} className="h-full w-full" />;
+  const sheet = <BinaryFileThumb name={af.name} className="h-full w-full" />;
+  if (!file || !thumbnailable(file.name) || page === "none") return sheet;
+  return (
+    <>
+      {sheet}
+      {/* Over the sheet, so a page that never comes (no sandbox running yet)
+          leaves the sheet showing; the route answers that with a quiet 204. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`/api/sandbox/files/thumbnail?chatId=${encodeURIComponent(file.chatId ?? "")}&path=${encodeURIComponent(file.path)}`}
+        alt=""
+        loading="lazy"
+        onLoad={() => setPage("ok")}
+        onError={() => setPage("none")}
+        className={cn(
+          "absolute inset-0 h-full w-full bg-white object-cover object-top transition-opacity duration-200 dark:brightness-[.92]",
+          page === "ok" ? "opacity-100" : "opacity-0",
+        )}
+      />
+    </>
   );
 }

@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - Quick Look previews Word, PowerPoint, OpenDocument and RTF files (converted to PDF in the chat's running sandbox, reusing the tile renderer's cache) and spreadsheets (xlsx, xls, ods, csv, tsv) as a table; PDFs now render in-app with pdf.js, so they also open on phones. Restart the platform so the new `/api/sandbox/files/pdf` route is served.
 
 ### Changed
+- Files staged in the composer (and in the message editors) are one row of compact chips (picture, name, kind and size) instead of large stacked cards, so the box no longer scrolls inside itself on a phone; × shows on hover with a mouse, always on touch.
 - Opening a chat renders its messages with the page instead of after a second request (`GET /api/chat` still runs in the background to refresh them).
 - A long paste that became a text file shows an "As text" button on its chip that puts the text back into the box, editable.
 - On desktop the answer sits closer under the user's message: copy/edit/fork appear on hover or keyboard focus without reserving a row. Phones keep them in place.
