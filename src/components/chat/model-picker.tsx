@@ -292,15 +292,45 @@ interface ModelsState {
   syncing: boolean;
 }
 
-// Cache last successful results per source so re-mounting the picker (every
-// navigation between chats) shows models instantly and revalidates quietly,
-// instead of flashing a spinner and re-probing the provider each time.
+// Last successful listing per source, kept for the page's lifetime so re-mounting
+// the picker (every navigation between chats) renders instantly and — while the
+// entry is fresh — costs no request at all (the list is ~160 KB and each load is a
+// provider catalog read). Past the TTL the entry is still shown (stale-while-
+// revalidate) and refreshed in the background; a window focus after the TTL does the
+// same for a tab that sat open. 5 min: long enough that a session of chat hopping is
+// one request, short enough that a catalog/recent-models change made elsewhere (another
+// admin, the manage agent) shows up without a reload; edits made in this tab clear it
+// outright (`clearClientModelsCache`).
+// Bound: keys are "active" and one "cfg:<id>" per connection (credentials listings are
+// never cached — their key would embed an API key), capped at CLIENT_MODELS_MAX with
+// oldest-first eviction.
 const CLIENT_MODELS_TTL_MS = 5 * 60_000;
-const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] }>();
-/** Drop every cached listing — after a connection's key/URL changes, what the
- *  pickers cached for it is stale. */
+const CLIENT_MODELS_MAX = 32;
+type ClientModelsEntry = { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] };
+const clientModelsCache = new Map<string, ClientModelsEntry>();
+let clientModelsEpoch = 0;
+/** Drop every cached listing — after a connection or the model filters change,
+ *  what the pickers cached is stale. Also bumps the epoch so a request already in
+ *  flight cannot write its pre-change answer back, and stops later callers joining it. */
 export function clearClientModelsCache() {
+  clientModelsEpoch++;
   clientModelsCache.clear();
+  inflightModels.clear();
+}
+export function putClientModels(key: string, entry: ClientModelsEntry) {
+  clientModelsCache.delete(key);
+  while (clientModelsCache.size >= CLIENT_MODELS_MAX) {
+    const oldest = clientModelsCache.keys().next().value;
+    if (oldest === undefined) break;
+    clientModelsCache.delete(oldest);
+  }
+  clientModelsCache.set(key, entry);
+}
+/** What a mounted picker may render without asking the server, and whether it must
+ *  still revalidate. Exported for tests. */
+export function readClientModels(key: string, now = Date.now()) {
+  const entry = clientModelsCache.get(key);
+  return entry ? { entry, fresh: now - entry.at < CLIENT_MODELS_TTL_MS } : undefined;
 }
 /** One `/api/models` request per key at a time. Several pickers mount together
  *  (composer, settings, a dialog) and each used to fire its own request before any
@@ -365,11 +395,12 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, 
       return;
     }
 
-    const cached = nonce > 0 ? undefined : clientModelsCache.get(key);
-    if (cached && Date.now() - cached.at < CLIENT_MODELS_TTL_MS) {
-      // Serve from cache immediately; the fetch below revalidates in the
-      // background without flipping back to a loading state.
-      setState({ models: cached.models, recent: cached.recent, failedConfigs: [], loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
+    const cached = nonce > 0 ? undefined : readClientModels(key);
+    if (cached) {
+      // Serve from cache immediately; a stale entry revalidates in the background
+      // (below) without flipping back to a loading state, a fresh one asks nothing.
+      const { entry } = cached;
+      setState({ models: entry.models, recent: entry.recent, failedConfigs: [], loading: false, error: null, isShared: entry.isShared, needsKey: false, syncing: false });
     } else {
       setState((s) => ({ ...s, loading: true, error: null, needsKey: false, syncing: false }));
     }
@@ -379,14 +410,15 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, 
     let force = nonce > 0;
     const load = async () => {
       try {
+        const epoch = clientModelsEpoch;
         const res = await fetchModelsShared(key, source, force);
         force = false;
         const data = res.data;
-        if (cancelled) return;
         const recent: string[] = Array.isArray(data.recent) ? data.recent : [];
-        if (res.ok && Array.isArray(data.models) && data.models.length > 0) {
-          clientModelsCache.set(key, { at: Date.now(), models: data.models, isShared: !!data.isShared, recent });
+        if (res.ok && source.mode !== "credentials" && epoch === clientModelsEpoch && Array.isArray(data.models) && data.models.length > 0) {
+          putClientModels(key, { at: Date.now(), models: data.models, isShared: !!data.isShared, recent });
         }
+        if (cancelled) return;
         setState({
           models: data.models ?? [],
           recent,
@@ -430,10 +462,17 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, 
         }
       }
     };
-    load();
+    if (!cached?.fresh) load();
+    // A tab left open past the TTL refreshes when it is looked at again.
+    const onFocus = () => {
+      const c = readClientModels(key);
+      if (source.mode !== "credentials" && !cancelled && (!c || !c.fresh)) load();
+    };
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       if (retry) clearTimeout(retry);
+      window.removeEventListener("focus", onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the inputs; fallbackValue is only a last-resort label
   }, [key, nonce]);

@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ConnectionRow, type ProviderConfig } from "@/components/settings/connection-row";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
-import { ModelPicker } from "@/components/chat/model-picker";
+import { ModelPicker, clearClientModelsCache } from "@/components/chat/model-picker";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
@@ -78,6 +78,7 @@ export default function ConnectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order: ids }),
       });
+      clearClientModelsCache();
       // On failure, snap back to the server's truth rather than leave a lie on screen.
       if (!res.ok) {
         toast.error(t("reorderError"));
@@ -151,6 +152,7 @@ export default function ConnectionsPage() {
       body: JSON.stringify({ id, enabled }),
     });
     if (res.ok) {
+      clearClientModelsCache();
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, isActive: enabled } : c)));
       toast.success(enabled ? t("enabledToast") : t("disabledToast"));
     } else {
@@ -161,6 +163,7 @@ export default function ConnectionsPage() {
   const handleDelete = async (id: string) => {
     const res = await fetch(`/api/settings/providers?id=${id}`, { method: "DELETE" });
     if (res.ok) {
+      clearClientModelsCache();
       setConfigs((prev) => prev.filter((c) => c.id !== id));
       setDeleteId(null);
       toast.success(t("removed"));
@@ -176,6 +179,7 @@ export default function ConnectionsPage() {
       body: JSON.stringify({ id, defaultModel: model }),
     });
     if (res.ok) {
+      clearClientModelsCache();
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, defaultModel: model } : c)));
       toast.success(t("modelUpdated"));
     } else {
@@ -183,24 +187,18 @@ export default function ConnectionsPage() {
     }
   };
 
-  // Persist a custom name/glyph. Local state is updated optimistically by the
-  // caller; this just saves and surfaces failures.
-  const saveMeta = async (id: string, patch: { label?: string | null; iconSlug?: string | null }) => {
+  // Persist a connection's glyph. Local state is updated optimistically by the
+  // caller; this just saves and surfaces failures. (The name is edited in the
+  // connection's dialog, not inline.)
+  const handleIconChange = async (id: string, slug: string | null) => {
+    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, iconSlug: slug } : c)));
     const res = await fetch("/api/settings/providers", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...patch }),
+      body: JSON.stringify({ id, iconSlug: slug }),
     });
-    if (!res.ok) toast.error(t("toggleError"));
-  };
-
-  const handleLabelChange = (id: string, label: string) =>
-    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, label } : c)));
-  const handleLabelCommit = (id: string) =>
-    saveMeta(id, { label: configsRef.current.find((c) => c.id === id)?.label });
-  const handleIconChange = (id: string, slug: string | null) => {
-    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, iconSlug: slug } : c)));
-    saveMeta(id, { iconSlug: slug });
+    if (res.ok) clearClientModelsCache();
+    else toast.error(t("toggleError"));
   };
 
   const handleToggleShared = async (id: string, shared: boolean) => {
@@ -210,7 +208,8 @@ export default function ConnectionsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, shared }),
     });
-    if (!res.ok) {
+    if (res.ok) clearClientModelsCache();
+    else {
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, shared: !shared } : c)));
       toast.error(t("toggleError"));
     }
@@ -226,8 +225,10 @@ export default function ConnectionsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, apiStyle: value }),
     });
-    if (res.ok) toast.success(tc("saved"));
-    else toast.error(t("toggleError"));
+    if (res.ok) {
+      clearClientModelsCache();
+      toast.success(tc("saved"));
+    } else toast.error(t("toggleError"));
   };
 
   // --- Model filter (admin, global governance) ---------------------------------
@@ -239,6 +240,7 @@ export default function ConnectionsPage() {
   };
   const saveMinCtx = async () => {
     const ok = await minCtx.persist(minCtx.value);
+    if (ok) clearClientModelsCache();
     if (ok) toast.success(tc("saved"));
     else toast.error(t("minContextSaveFailed"));
   };
@@ -249,6 +251,7 @@ export default function ConnectionsPage() {
   };
   const saveMaxPrice = async () => {
     const ok = await maxPrice.persist(maxPrice.value);
+    if (ok) clearClientModelsCache();
     if (ok) toast.success(tc("saved"));
     else toast.error(t("maxPriceSaveFailed"));
   };
@@ -259,6 +262,7 @@ export default function ConnectionsPage() {
   };
   const saveMaxCtxTokens = async () => {
     const ok = await maxCtxTokens.persist(maxCtxTokens.value);
+    if (ok) clearClientModelsCache();
     if (ok) toast.success(tc("saved"));
     else toast.error(t("maxContextTokensSaveFailed"));
   };
@@ -276,6 +280,7 @@ export default function ConnectionsPage() {
     try {
       const res = await fetch("/api/admin/models/resync", { method: "POST" });
       if (!res.ok) throw new Error();
+      clearClientModelsCache();
       const { openrouter } = await res.json();
       toast.success(t("resyncDone", { count: openrouter ?? 0 }));
     } catch {
@@ -333,8 +338,6 @@ export default function ConnectionsPage() {
                 onToggle={(enabled) => handleToggle(c.id, enabled)}
                 onDelete={() => setDeleteId(c.id)}
                 onUpdateModel={(model) => handleUpdateModel(c.id, model)}
-                onLabelChange={(label) => handleLabelChange(c.id, label)}
-                onLabelCommit={() => handleLabelCommit(c.id)}
                 onIconChange={(slug) => handleIconChange(c.id, slug)}
                 onToggleShared={(shared) => handleToggleShared(c.id, shared)}
                 onUpdateApiStyle={(style) => handleUpdateApiStyle(c.id, style)}

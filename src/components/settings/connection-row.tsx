@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { GripVertical, Trash2, ChevronDown, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Hint } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -45,8 +44,6 @@ export function ConnectionRow({
   onToggle,
   onDelete,
   onUpdateModel,
-  onLabelChange,
-  onLabelCommit,
   onIconChange,
   onToggleShared,
   onUpdateApiStyle,
@@ -63,8 +60,6 @@ export function ConnectionRow({
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
   onUpdateModel: (model: string) => void;
-  onLabelChange: (label: string) => void;
-  onLabelCommit: () => void;
   onIconChange: (slug: string | null) => void;
   onToggleShared: (shared: boolean) => void;
   onUpdateApiStyle: (style: string | null) => void;
@@ -160,19 +155,9 @@ export function ConnectionRow({
             </div>
           )}
 
-          {/* Rename in place (saves on blur), for every connection: two keys of
-              one provider ("OpenRouter — work") need telling apart. */}
+          {/* The name is edited in the connection's dialog (onEdit), not here. */}
           {(isAdmin || meta?.requiresBaseUrl) && (
-            <div className="flex items-end gap-2">
-              <div className="flex-1 space-y-1">
-                <label className="text-xs text-muted-foreground">{t("connectionName")}</label>
-                <Input
-                  value={c.label ?? ""}
-                  onChange={(e) => onLabelChange(e.target.value)}
-                  onBlur={onLabelCommit}
-                  placeholder={providerLabel(c.provider)}
-                />
-              </div>
+            <div className="flex">
               <IconPicker
                 value={c.iconSlug ?? null}
                 fallback={meta.iconSlug}

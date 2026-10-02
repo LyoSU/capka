@@ -181,6 +181,7 @@ export function AddProviderDialog({
       });
 
       if (saveRes.ok) {
+        clearClientModelsCache();
         toast.success(t("saved"));
         onOpenChange(false);
         onAdded();
