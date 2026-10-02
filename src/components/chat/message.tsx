@@ -2128,6 +2128,21 @@ function UserBubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const longPress = useLongPress(() => { setMenuOpen(true); haptic("tap"); });
 
+  // A long message — a pasted brief, an automation's standing prompt — folds to
+  // six lines with a toggle, so one question does not push the answer it asked
+  // for a screen away. Measured, not guessed from the character count: the
+  // break is wherever the text actually wraps at this width. Only past eight
+  // lines, so folding never hides just the last line or two. Before paint, so a
+  // long bubble never shows unfolded first.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useIsomorphicLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    setLong(el.scrollHeight > (parseFloat(getComputedStyle(el).lineHeight) || 26) * 8);
+  }, [text, editing]);
+
   if (editing) {
     return (
       <div className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4">
@@ -2214,7 +2229,31 @@ function UserBubble({
               {/* The same renderer as a reply, so what the person typed in Markdown
                   (a list, **bold**, a fence) reads the way they meant it. Hard breaks
                   keep their Enter as a new line — see withHardBreaks. */}
-              <Markdown>{withHardBreaks(text || "…")}</Markdown>
+              {/* The `.reveal` grammar, stopped at six lines instead of zero: the
+                  child's min-height is the folded track (0fr resolves to it), and
+                  the fade at its foot says "there is more" without a word. */}
+              <div className={long ? "reveal" : undefined} data-shut={long && !expanded ? "" : undefined} style={long ? { opacity: 1 } : undefined}>
+                <div
+                  ref={bodyRef}
+                  className={long && !expanded ? "[mask-image:linear-gradient(to_bottom,black_calc(100%_-_2lh),transparent)]" : undefined}
+                  style={long ? { minHeight: "6lh" } : undefined}
+                >
+                  <Markdown>{withHardBreaks(text || "…")}</Markdown>
+                </div>
+              </div>
+              {long && (
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  onClick={(e) => {
+                    setExpanded((v) => !v);
+                    anchorDisclosure({ reason: "trigger-press", trigger: e.currentTarget });
+                  }}
+                  className="mt-1 text-sm text-muted-foreground underline decoration-border underline-offset-[3px] transition-colors hover:text-foreground hover:decoration-current"
+                >
+                  {expanded ? tMsg("collapse") : tMsg("expand")}
+                </button>
+              )}
             </div>
           )}
           <div className="mt-1 flex items-center gap-1">

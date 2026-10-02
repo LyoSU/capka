@@ -672,6 +672,8 @@
       "auxTokens": "{input} / {output} tok."
     },
     "message": {
+      "expand": "Show all",
+      "collapse": "Show less",
       "cancelled": "Response was cancelled",
       "genericError": "Something went wrong while generating a response. Please try again.",
       "thinking": "Thinking…",

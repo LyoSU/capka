@@ -672,6 +672,8 @@
       "auxTokens": "{input} / {output} ток."
     },
     "message": {
+      "expand": "Показати все",
+      "collapse": "Згорнути",
       "cancelled": "Відповідь скасовано",
       "genericError": "Не вдалося згенерувати відповідь. Спробуйте ще раз.",
       "thinking": "Думаю…",
