@@ -19,9 +19,9 @@ type FolderSync = ReturnType<typeof useFolderSync>;
 /**
  * The composer's "+" menu: everything a person can bring INTO this chat, in one
  * place — files, a folder from their computer (when folder access is on), the
- * credentials the assistant may use here — and, below a rule, the doors to what
- * extends the assistant itself (skills, connectors, plugins). One button rather
- * than a row of icons, so the footer stays legible on a phone and a new option
+ * credentials the assistant may use here. The doors to what extends the assistant
+ * (skills, connectors, plugins) live once, in the tray under the composer. One
+ * button rather than a row of icons, so the footer stays legible on a phone and a new option
  * never costs the composer another glyph.
  */
 export function ComposerMenu({
@@ -194,17 +194,13 @@ export function ComposerMenu({
         )}
 
         {err && <div className="px-3 pt-1 text-xs text-destructive">{err}</div>}
-
-        <div className="my-1.5 border-t border-border" />
-
-        <CapabilityLinks onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
 }
 
 /** Doors, not actions: each opens the settings page that owns the thing. Shared
- *  by the "+" menu and the composer tray's "Capabilities". */
+ *  by the composer tray's "Capabilities". */
 export function CapabilityLinks({ onNavigate }: { onNavigate?: () => void }) {
   const tMenu = useTranslations("chat.input.menu");
   const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm leading-5 text-foreground transition-colors hover:bg-hover";
