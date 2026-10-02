@@ -3,7 +3,7 @@ import { requireSession, apiHandler } from "@/lib/auth";
 import { downloadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 import { safeFilename, contentDisposition } from "@/lib/download-filename";
-import { previewKind } from "@/lib/file-kinds";
+import { servesAsText } from "@/lib/file-kinds";
 
 // The controller serves every file as application/octet-stream. For inline
 // previews that's fine for raster images (the browser sniffs them from magic
@@ -21,10 +21,9 @@ function inlineContentType(filename: string): string | null {
   // why "open in a new tab" behaved exactly like Download for every .md, .csv and
   // .log in a workspace. text/plain is the safe way to make it show: it cannot
   // execute, and `nosniff` stops the browser re-reading a file whose contents
-  // happen to look like HTML as HTML. `previewKind` decides, so this can never
+  // happen to look like HTML as HTML. `servesAsText` decides, so this can never
   // drift from what the in-app viewer is willing to render.
-  const kind = previewKind(filename);
-  if (kind === "text" || kind === "markdown") return "text/plain; charset=utf-8";
+  if (servesAsText(filename)) return "text/plain; charset=utf-8";
   return null;
 }
 

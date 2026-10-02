@@ -598,6 +598,12 @@
       "officeRetry": "The preview isn't ready right now. Try again in a moment, or download the file.",
       "adminReason": "Details for admins: {reason}",
       "tryAgain": "Try again",
+      "sheetError": "This spreadsheet couldn't be opened here. You can still download it.",
+      "sheetTooBig": "This spreadsheet is too big to preview here. Download it to open it in your spreadsheet app.",
+      "sheetCutRows": "Showing the first {shown, number} of {total, number} rows.",
+      "sheetCutCols": "Showing the first {shown, number} of {total, number} columns.",
+      "sheetEmpty": "This sheet is empty",
+      "sheetTabs": "Sheets",
       "kind": {
         "folder": "Folder",
         "image": "Image",

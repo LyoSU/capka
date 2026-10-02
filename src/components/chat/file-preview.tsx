@@ -22,7 +22,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
-import { extOf, fileKind, previewKind, splitFileName, thumbnailable } from "@/lib/file-kinds";
+import { extOf, fileKind, previewKind, servesAsText, splitFileName, thumbnailable } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
 import { applyGesture, swipeVerdict, tapZoomTarget, wheelZoomFactor, TAP_SLOP_PX, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
@@ -348,7 +348,7 @@ export function DockedPreview({
   // click downloads the file — two buttons in one row doing the same thing, one
   // of them under a label that promises otherwise. Download is still right there
   // for those files, which is what they need anyway.
-  const opensInTab = kind === "image" || kind === "pdf" || kind === "text" || kind === "markdown";
+  const opensInTab = kind === "image" || kind === "pdf" || servesAsText(file.name);
   const go = useCallback(
     (delta: number) => onIndex((index + delta + files.length) % files.length),
     [index, files.length, onIndex],
@@ -579,6 +579,9 @@ function Viewer({ file, kind, onClose, onPage, selectionBar }: {
   // A document is converted in the workspace's sandbox; the shared store has none.
   if (kind === "office" && !file.shared) {
     return <OfficeViewer file={file} selectionBar={selectionBar} />;
+  }
+  if (kind === "sheet") {
+    return <SheetViewer file={file} selectionBar={selectionBar} />;
   }
   if (kind === "html") {
     return <HtmlViewer file={file} />;
@@ -1088,14 +1091,16 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
   );
 }
 
-// ── PDF and document viewers ───────────────────────────────────────────────
+// ── PDF, document and spreadsheet viewers ──────────────────────────────────
 
-// pdf.js is big and only these viewers need it: it loads on the first open of a
-// PDF or document, never with the chat.
+// pdf.js and SheetJS are big and only these viewers need them: each loads on the
+// first open of its kind, never with the chat.
 const PdfDocument = dynamic(() => import("./viewers/pdf-document"), { ssr: false, loading: () => <ViewerLoading /> });
+const SheetTable = dynamic(() => import("./viewers/sheet-table"), { ssr: false, loading: () => <ViewerLoading /> });
 
-// Read whole into memory to be drawn here, so capped; past this it is a download.
+// Read whole into memory to be drawn here, so capped; past these it is a download.
 const MAX_PDF_BYTES = 60 * 1024 * 1024;
+const MAX_SHEET_BYTES = 25 * 1024 * 1024;
 // A document converts in the sandbox; LibreOffice on a cold start takes seconds,
 // a big deck tens of them. Past this the wait is not a preview any more.
 const CONVERT_TIMEOUT_MS = 45_000;
@@ -1227,6 +1232,15 @@ function OfficeViewer({ file, selectionBar }: { file: PreviewFile; selectionBar?
       </div>
     </div>
   );
+}
+
+/** A spreadsheet (xlsx, xls, ods, csv, tsv) as a table, parsed in the browser. */
+function SheetViewer({ file, selectionBar }: { file: PreviewFile; selectionBar?: React.ReactNode }) {
+  const bytes = useFileBytes(inlineUrl(file), MAX_SHEET_BYTES);
+  if (bytes.state === "loading") return <ViewerLoading />;
+  if (bytes.state === "ok")
+    return <SheetTable data={bytes.data} ext={extOf(file.name)} downloadHref={downloadUrl(file)} fileName={file.name} selectionBar={selectionBar} />;
+  return <UnavailableNotice state={bytesNotice(bytes)} file={file} />;
 }
 
 /** The pane while a file is being fetched. Four viewers had their own identical

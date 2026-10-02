@@ -122,16 +122,20 @@ function isTextualMime(type: string): boolean {
  * just download. The single gate every file surface uses to decide whether a
  * tile is clickable (opens Quick Look). `markdown` renders rich; `text` covers
  * plain text AND code (Shiki-highlighted in the viewer). `office` is a document
- * or deck converted to PDF in the sandbox. Spreadsheets and other binaries
- * (xlsx/zip), video and audio return `null`.
+ * or deck converted to PDF in the sandbox; `sheet` is a spreadsheet (CSV and TSV
+ * included) parsed into a table in the browser. Other binaries (zip), video and
+ * audio return `null`.
  */
-export type PreviewKind = "image" | "pdf" | "office" | "markdown" | "html" | "text" | null;
+export type PreviewKind = "image" | "pdf" | "office" | "sheet" | "markdown" | "html" | "text" | null;
 
 const OFFICE_EXTS = new Set(["docx", "doc", "odt", "rtf", "pptx", "ppt", "odp"]);
+const SHEET_PREVIEW_EXTS = new Set(["xlsx", "xls", "ods", "csv", "tsv"]);
 
 export function previewKind(name: string): PreviewKind {
   const ext = extOf(name);
-  // 0) Documents by extension: MIME has no single family for them.
+  // 0) Office formats by extension: MIME has no single family for them, and
+  //    CSV/TSV are in TEXT_EXTS below but read far better as a table.
+  if (SHEET_PREVIEW_EXTS.has(ext)) return "sheet";
   if (OFFICE_EXTS.has(ext)) return "office";
   // 1) Dev files first — MIME mislabels several (.ts → video/mp2t).
   if (ext === "md" || ext === "markdown") return "markdown";
@@ -148,6 +152,15 @@ export function previewKind(name: string): PreviewKind {
   if (type === "text/html" || type === "application/xhtml+xml") return "html";
   if (isTextualMime(type)) return "text";
   return null;
+}
+
+/** Served inline as `text/plain`, so a browser tab SHOWS it rather than saving
+ *  it: what the text viewer reads, plus CSV/TSV, which preview as a table but are
+ *  text all the same. Both download routes and the "open in a new tab" control
+ *  ask this, so they cannot drift apart. */
+export function servesAsText(name: string): boolean {
+  const kind = previewKind(name);
+  return kind === "text" || kind === "markdown" || TEXT_EXTS.has(extOf(name));
 }
 
 /**

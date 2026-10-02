@@ -2,7 +2,7 @@ import { lookup } from "mime-types";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { downloadSharedFile } from "@/lib/sandbox/client";
 import { safeFilename, contentDisposition } from "@/lib/download-filename";
-import { previewKind } from "@/lib/file-kinds";
+import { servesAsText } from "@/lib/file-kinds";
 
 // Download one file out of the per-user shared store. Mirrors the workspace
 // download proxy — same filename sanitizing, same content-type narrowing, same
@@ -16,10 +16,9 @@ function inlineContentType(filename: string): string | null {
   // why "open in a new tab" behaved exactly like Download for every .md, .csv and
   // .log in a workspace. text/plain is the safe way to make it show: it cannot
   // execute, and `nosniff` stops the browser re-reading a file whose contents
-  // happen to look like HTML as HTML. `previewKind` decides, so this can never
+  // happen to look like HTML as HTML. `servesAsText` decides, so this can never
   // drift from what the in-app viewer is willing to render.
-  const kind = previewKind(filename);
-  if (kind === "text" || kind === "markdown") return "text/plain; charset=utf-8";
+  if (servesAsText(filename)) return "text/plain; charset=utf-8";
   return null;
 }
 

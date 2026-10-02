@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { previewKind, fileKind, extOf, splitFileName } from "../file-kinds";
+import { previewKind, fileKind, extOf, splitFileName, servesAsText } from "../file-kinds";
 
 describe("extOf", () => {
   it("lowercases the extension and drops the dot", () => {
@@ -27,7 +27,7 @@ describe("previewKind", () => {
   });
 
   it("treats code and plain text as text", () => {
-    for (const n of ["a.txt", "a.log", "a.csv", "a.json", "a.yaml", "a.toml", "a.py", "a.go", "a.rs", "a.css", "a.sh"])
+    for (const n of ["a.txt", "a.log", "a.json", "a.yaml", "a.toml", "a.py", "a.go", "a.rs", "a.css", "a.sh"])
       expect(previewKind(n)).toBe("text");
   });
 
@@ -42,9 +42,23 @@ describe("previewKind", () => {
       expect(previewKind(n)).toBe("office");
   });
 
+  it("previews spreadsheets as sheet, CSV and TSV included", () => {
+    for (const n of ["a.xlsx", "a.xls", "a.ods", "a.csv", "a.tsv", "A.CSV"])
+      expect(previewKind(n)).toBe("sheet");
+  });
+
   it("returns null for real binaries, video and audio", () => {
-    for (const n of ["a.xlsx", "a.zip", "a.mp4", "a.mp3", "a.bin"])
+    for (const n of ["a.zip", "a.mp4", "a.mp3", "a.bin", "a.numbers"])
       expect(previewKind(n)).toBeNull();
+  });
+});
+
+describe("servesAsText", () => {
+  it("covers what the text viewer reads plus CSV/TSV, which a tab should still show", () => {
+    for (const n of ["a.txt", "README.md", "a.ts", "a.csv", "a.tsv"]) expect(servesAsText(n)).toBe(true);
+  });
+  it("never covers a binary or HTML", () => {
+    for (const n of ["a.xlsx", "a.docx", "a.pdf", "a.png", "page.html"]) expect(servesAsText(n)).toBe(false);
   });
 });
 
