@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-02
+
 ### Added
 - Settings > Connections: an existing provider can be edited (Edit in the expanded row: base URL, API key, model, name; blank key keeps the stored one, changes are tested first) and any connection can be renamed, not only LiteLLM/Ollama. `GET /api/settings/providers` now returns `hasKey`/`keyHint` (last four); no schema change.
 - Quick Look previews Word, PowerPoint, OpenDocument and RTF files (converted to PDF in the chat's running sandbox, reusing the tile renderer's cache) and spreadsheets (xlsx, xls, ods, csv, tsv) as a table; PDFs now render in-app with pdf.js, so they also open on phones. Restart the platform so the new `/api/sandbox/files/pdf` route is served.
