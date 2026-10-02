@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, Lock, Minus, Plus } from "lucide-react";
-import { getDocument, GlobalWorkerOptions, TextLayer, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
+import { TextLayer, type PDFDocumentLoadingTask, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { openPdf } from "./pdf-load";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import styles from "./pdf-document.module.css";
@@ -29,12 +30,6 @@ const MAX_FIT = 1.6;
 // anything past ~16.7 Mpx, so the pixel ratio gives way first.
 const MAX_CANVAS_PX = 16_000_000;
 const PAD = 12;
-
-function ensureWorker() {
-  if (!GlobalWorkerOptions.workerPort) {
-    GlobalWorkerOptions.workerPort = new Worker(new URL("./pdf.worker.ts", import.meta.url), { type: "module" });
-  }
-}
 
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
@@ -63,25 +58,30 @@ export default function PdfDocument({ data, selectionBar }: {
   zoomRef.current = zoom;
 
   useEffect(() => {
-    ensureWorker();
     let alive = true;
-    // A copy: pdf.js transfers the buffer to its worker, and the effect may run
-    // again on the same `data` (Strict Mode) after the first one is detached.
-    const task = getDocument({ data: new Uint8Array(data.slice(0)), enableXfa: false });
-    task.promise.then(
-      async (d) => {
+    const fail = (err: unknown) => {
+      if (alive) setFailure((err as { name?: string })?.name === "PasswordException" ? "password" : "error");
+    };
+    // Nothing in here may throw past this effect: an error from pdf.js is this
+    // pane's calm failure, never the page's error boundary.
+    let task: PDFDocumentLoadingTask;
+    try {
+      task = openPdf(data);
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    task.promise
+      .then(async (d) => {
         const first = (await d.getPage(1)).getViewport({ scale: 1 });
         if (!alive) return;
         setSizes(Array.from({ length: d.numPages }, () => [first.width, first.height]));
         setDoc(d);
-      },
-      (err: unknown) => {
-        if (alive) setFailure((err as { name?: string })?.name === "PasswordException" ? "password" : "error");
-      },
-    );
+      })
+      .catch(fail);
     return () => {
       alive = false;
-      void task.destroy();
+      void task.destroy().catch(() => {});
     };
   }, [data]);
 
