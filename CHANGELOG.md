@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 - The chat header shows the chat's name (it opens the chat menu), a files button with a count, and Share; on phones it is a frosted bar that clears the notch. Rename is one dialog everywhere, with "Suggest a name" in place of the separate "Regenerate title" item.
 - The composer shows the model and answer depth as quiet text ("Model · Depth"; context-size and shared-key badges are admin-only), keeps the send button visible beside the microphone, and has a tray underneath: Project, Files, Capabilities.
 - The transcript fades out above the composer, and the scroll-to-bottom button rests on that fade.
+- Double-clicking a chat in the sidebar (or F2 on a focused one) renames it in place; Enter saves, Esc cancels. The menu's Rename still opens the dialog.
 - A long message from the user (or an automation's prompt) folds to six lines with "Show all" / "Show less".
 - A folded "Worked for …" header is underlined by a hairline separating the work from the answer, and the (i) popover writes long work times the same way as the header ("12 min", "1 h 5 min").
 - A quiet centred timestamp ("today 12:16", "yesterday 09:40", or the date) sits above a conversation's first message and the first message of each new day.

@@ -60,6 +60,8 @@ export function ChatContextMenu({
   contentProps,
   shareOpen: shareOpenProp,
   onShareOpenChange,
+  inlineRename = false,
+  onInlineRenameDone,
 }: {
   chat: ChatItem;
   onUpdate: () => void;
@@ -75,6 +77,11 @@ export function ChatContextMenu({
    *  button of its own beside the ⋯. Same fallback as `open`. */
   shareOpen?: boolean;
   onShareOpenChange?: (open: boolean) => void;
+  /** Rename in place: the component renders a field instead of its children (a
+   *  sidebar row turns into the input). Driven by the row — double-click, F2 —
+   *  while the menu's own Rename keeps opening the dialog. */
+  inlineRename?: boolean;
+  onInlineRenameDone?: () => void;
   // The menu's open state can be driven from the row (a long-press on touch,
   // where the visible ⋮ trigger is hidden). Falls back to internal state so the
   // component still works uncontrolled.
@@ -209,12 +216,51 @@ export function ChatContextMenu({
     setRenaming(true);
   }
 
+  // The one place a new name is written, for the dialog and the in-place field.
+  async function commitTitle(next: string) {
+    if (next.trim() && next !== chat.title) {
+      await patchChat({ title: next.trim() });
+    }
+  }
+
   async function submitRename() {
     if (!renaming) return;
     setRenaming(false);
-    if (renameValue.trim() && renameValue !== chat.title) {
-      await patchChat({ title: renameValue.trim() });
-    }
+    await commitTitle(renameValue);
+  }
+
+  if (inlineRename) {
+    const done = (save: boolean, value: string) => {
+      onInlineRenameDone?.();
+      if (save) void commitTitle(value);
+    };
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          done(true, new FormData(e.currentTarget).get("title") as string);
+        }}
+        className="w-full px-1"
+      >
+        <Input
+          name="title"
+          // The field replaces the chat row entirely, so without a name a screen
+          // reader announces the old title as a value with no idea what it is.
+          aria-label={t("menu.rename")}
+          defaultValue={chat.title || ""}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={(e) => done(true, e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              done(false, "");
+            }
+          }}
+          className="h-6 px-1.5 text-base md:text-sm"
+          autoFocus
+        />
+      </form>
+    );
   }
 
   // Grouped the way a person thinks about a chat, not the way the API is laid out:

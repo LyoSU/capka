@@ -304,6 +304,9 @@ function ChatRow({
   // the finger-lift fires on the underlying Link so the row doesn't navigate
   // while the menu opens.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Double-click or F2 turns the row into a rename field; the menu's Rename is
+  // the dialog (with "Suggest a name"), so there is still one menu item.
+  const [editing, setEditing] = useState(false);
   const firedRef = useRef(false);
   const longPress = useLongPress(() => {
     firedRef.current = true;
@@ -322,8 +325,26 @@ function ChatRow({
           firedRef.current = false;
         }
       }}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest("button, input")) return;
+        e.preventDefault();
+        setEditing(true);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "F2" && (e.target as HTMLElement).closest("a")) {
+          e.preventDefault();
+          setEditing(true);
+        }
+      }}
     >
-      <ChatContextMenu chat={chat} onUpdate={onUpdate} open={menuOpen} onOpenChange={setMenuOpen}>
+      <ChatContextMenu
+        chat={chat}
+        onUpdate={onUpdate}
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        inlineRename={editing}
+        onInlineRenameDone={() => setEditing(false)}
+      >
         <SidebarMenuButton
           render={<Link href={`/chat/${chat.id}`} />}
           data-active={active || undefined}

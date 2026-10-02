@@ -19,7 +19,9 @@ describe("the chat header's ⋯ menu", () => {
     expect(menu.match(/key: "rename"/g)).toHaveLength(1);
     expect(menu).not.toMatch(/regenerate-title/);
     expect(menu).toMatch(/<Dialog open=\{renaming\}/);
-    expect(menu).not.toMatch(/onBlur=\{submitRename\}/);
+    // The in-place field is driven by the sidebar row (double-click / F2), never by a menu item.
+    expect(menu).toMatch(/if \(inlineRename\) \{/);
+    expect(read("src/components/layout/app-sidebar.tsx")).toMatch(/onDoubleClick=/);
   });
 
   it("the suggestion fills the field rather than saving", () => {
@@ -35,6 +37,9 @@ describe("the chat header's ⋯ menu", () => {
     // the patch.
     expect(menu.split("submitRename").length - 1).toBeGreaterThanOrEqual(3);
     expect(menu.match(/async function submitRename/g)).toHaveLength(1);
+    // …and the dialog and the in-place field both write through the one commitTitle.
+    expect(menu.match(/async function commitTitle/g)).toHaveLength(1);
+    expect(menu.split("commitTitle(").length - 1).toBeGreaterThanOrEqual(3);
   });
 
   it("deleting the chat you are reading navigates away from it", () => {
