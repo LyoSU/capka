@@ -2149,7 +2149,20 @@ function UserBubble({
   useIsomorphicLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    setLong(el.scrollHeight > (parseFloat(getComputedStyle(el).lineHeight) || 26) * 8);
+    const measure = () => setLong(el.scrollHeight > (parseFloat(getComputedStyle(el).lineHeight) || 26) * 8);
+    measure();
+    // The wrap point moves with the width (window resize, sidebar toggle, phone
+    // rotation), so re-measure then — only on a width change, which is also what
+    // skips the observer's first callback, already covered by the measure above.
+    // `expanded` is untouched: a person's choice outlives a resize.
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      measure();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [text, editing]);
 
   if (editing) {

@@ -12,7 +12,7 @@ All notable changes to Capka are documented here. Format follows
 - The composer shows the model and answer depth as quiet text ("Model · Depth"; context-size and shared-key badges are admin-only), keeps the send button visible beside the microphone, and has a tray underneath: Project, Capabilities (Files lives in the chat header; the tray shows it only on a new chat inside a project).
 - The transcript fades out above the composer, and the scroll-to-bottom button rests on that fade.
 - Double-clicking a chat in the sidebar (or F2 on a focused one) renames it in place; Enter saves, Esc cancels. The menu's Rename still opens the dialog.
-- A long message from the user (or an automation's prompt) folds to six lines with "Show all" / "Show less".
+- A long message from the user (or an automation's prompt) folds to six lines with "Show all" / "Show less", re-measured when the window or sidebar width changes.
 - A folded "Worked for …" header is underlined by a hairline separating the work from the answer, and the (i) popover writes long work times the same way as the header ("12 min", "1 h 5 min").
 - A quiet centred timestamp ("today 12:16", "yesterday 09:40", or the date) sits above a conversation's first message and the first message of each new day.
 - The browser tab title carries only the count of chats waiting on you ("(2) …"); the ●/⟳/✓ glyphs are gone and the state stays on the favicon dot.
