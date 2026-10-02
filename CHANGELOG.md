@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-02
+
 ### Changed
 - The composer's right-hand button is one slot: a microphone (with the dictation language beside it) while the box is empty, Send once there is text or a file; Stop and the dictation stop are unchanged.
 - The strip under the composer is gone: the "+" menu now also holds Move to project and a Capabilities row (Skills, Connectors, Plugins). The chat header's "…" button is removed; the chat's name opens the one chat menu.
