@@ -19,6 +19,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Hint } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind, splitFileName, thumbnailable } from "@/lib/file-kinds";
@@ -575,6 +576,10 @@ function Viewer({ file, kind, onClose, onPage, selectionBar }: {
   if (kind === "pdf") {
     return <PdfViewer file={file} selectionBar={selectionBar} />;
   }
+  // A document is converted in the workspace's sandbox; the shared store has none.
+  if (kind === "office" && !file.shared) {
+    return <OfficeViewer file={file} selectionBar={selectionBar} />;
+  }
   if (kind === "html") {
     return <HtmlViewer file={file} />;
   }
@@ -1083,14 +1088,17 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
   );
 }
 
-// ── PDF viewer ───────────────────────────────────────────────────────────────
+// ── PDF and document viewers ───────────────────────────────────────────────
 
-// pdf.js is big and only this viewer needs it: it loads on the first open of a
-// PDF, never with the chat.
+// pdf.js is big and only these viewers need it: it loads on the first open of a
+// PDF or document, never with the chat.
 const PdfDocument = dynamic(() => import("./viewers/pdf-document"), { ssr: false, loading: () => <ViewerLoading /> });
 
 // Read whole into memory to be drawn here, so capped; past this it is a download.
 const MAX_PDF_BYTES = 60 * 1024 * 1024;
+// A document converts in the sandbox; LibreOffice on a cold start takes seconds,
+// a big deck tens of them. Past this the wait is not a preview any more.
+const CONVERT_TIMEOUT_MS = 45_000;
 
 type Bytes =
   | { state: "loading" }
@@ -1155,6 +1163,70 @@ function PdfViewer({ file, selectionBar }: { file: PreviewFile; selectionBar?: R
   if (bytes.state === "loading") return <ViewerLoading />;
   if (bytes.state === "ok") return <PdfDocument data={bytes.data} selectionBar={selectionBar} />;
   return <UnavailableNotice state={bytesNotice(bytes)} file={file} />;
+}
+
+/**
+ * A Word, PowerPoint, OpenDocument or RTF file, converted to PDF in the
+ * workspace's sandbox (by the same pipeline that draws its tile, which keeps the
+ * PDF) and shown in the PDF viewer. While LibreOffice works the tile's picture
+ * stands in for the document. A failure is a calm sentence and the download; an
+ * admin also gets the reason, which the route sends to nobody else.
+ */
+function OfficeViewer({ file, selectionBar }: { file: PreviewFile; selectionBar?: React.ReactNode }) {
+  const t = useTranslations("chat.preview");
+  const isAdmin = useIsAdmin();
+  const [attempt, setAttempt] = useState(0);
+  const [thumb, setThumb] = useState(true);
+  const q = `${fileQuery(file)}&path=${encodeURIComponent(file.path)}`;
+  const bytes = useFileBytes(`/api/sandbox/files/pdf?${q}`, MAX_PDF_BYTES, CONVERT_TIMEOUT_MS, attempt);
+
+  if (bytes.state === "ok") return <PdfDocument data={bytes.data} selectionBar={selectionBar} />;
+  if (bytes.state === "failed" && bytes.status === 404) return <UnavailableNotice state="gone" />;
+  if (bytes.state === "loading")
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+        <div className="relative flex aspect-[4/3] w-56 max-w-[70%] items-center justify-center overflow-hidden rounded-md bg-card shadow-sm ring-1 ring-black/10 dark:ring-white/10">
+          <BinaryFileThumb name={file.name} className="absolute inset-0 bg-transparent" />
+          {thumb && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/sandbox/files/thumbnail?${q}`}
+              alt=""
+              onError={() => setThumb(false)}
+              className="absolute inset-0 h-full w-full bg-white object-cover object-top dark:brightness-[.92]"
+            />
+          )}
+        </div>
+        <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+          {t("preparing")}
+        </p>
+      </div>
+    );
+
+  // 503 (no running sandbox, another conversion holding it) and a timeout are
+  // worth another try; a document LibreOffice cannot open, or too big, is not.
+  const retry = bytes.state === "failed" && (bytes.status === 0 || bytes.status >= 500);
+  const reason = bytes.state === "failed" ? bytes.reason : undefined;
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+      <BinaryFileThumb name={file.name} className="h-24 w-24 rounded-xl" />
+      <p className="max-w-sm text-sm text-muted-foreground">{retry ? t("officeRetry") : t("officeFailed")}</p>
+      {isAdmin && reason && <p className="max-w-sm text-xs text-muted-foreground/80">{t("adminReason", { reason })}</p>}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <a href={downloadUrl(file)} download={file.name} className={cn(buttonVariants({ size: "sm" }))}>
+          <Download className="h-4 w-4" />
+          {t("download")}
+        </a>
+        {retry && (
+          <Button variant="outline" size="sm" onClick={() => setAttempt((a) => a + 1)}>
+            <RefreshCw className="h-4 w-4" />
+            {t("tryAgain")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** The pane while a file is being fetched. Four viewers had their own identical

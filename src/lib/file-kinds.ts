@@ -121,13 +121,18 @@ function isTextualMime(type: string): boolean {
  * How a file can be previewed in-app, or `null` if it has no viewer and should
  * just download. The single gate every file surface uses to decide whether a
  * tile is clickable (opens Quick Look). `markdown` renders rich; `text` covers
- * plain text AND code (Shiki-highlighted in the viewer). Real binaries
- * (docx/xlsx/zip), video and audio return `null`.
+ * plain text AND code (Shiki-highlighted in the viewer). `office` is a document
+ * or deck converted to PDF in the sandbox. Spreadsheets and other binaries
+ * (xlsx/zip), video and audio return `null`.
  */
-export type PreviewKind = "image" | "pdf" | "markdown" | "html" | "text" | null;
+export type PreviewKind = "image" | "pdf" | "office" | "markdown" | "html" | "text" | null;
+
+const OFFICE_EXTS = new Set(["docx", "doc", "odt", "rtf", "pptx", "ppt", "odp"]);
 
 export function previewKind(name: string): PreviewKind {
   const ext = extOf(name);
+  // 0) Documents by extension: MIME has no single family for them.
+  if (OFFICE_EXTS.has(ext)) return "office";
   // 1) Dev files first — MIME mislabels several (.ts → video/mp2t).
   if (ext === "md" || ext === "markdown") return "markdown";
   // HTML is rendered (not just syntax-highlighted), so it must win over the code

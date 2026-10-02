@@ -37,8 +37,13 @@ describe("previewKind", () => {
     expect(previewKind("Component.vue")).toBe("text");
   });
 
+  it("previews documents and decks as office (converted to PDF), case-insensitively", () => {
+    for (const n of ["a.docx", "a.doc", "a.odt", "a.rtf", "deck.pptx", "deck.ppt", "deck.odp", "B.DOCX"])
+      expect(previewKind(n)).toBe("office");
+  });
+
   it("returns null for real binaries, video and audio", () => {
-    for (const n of ["a.docx", "a.xlsx", "a.zip", "a.mp4", "a.mp3", "a.bin"])
+    for (const n of ["a.xlsx", "a.zip", "a.mp4", "a.mp3", "a.bin"])
       expect(previewKind(n)).toBeNull();
   });
 });

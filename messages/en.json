@@ -593,6 +593,11 @@
       "pdfPage": "Page {current} of {total}",
       "pdfPassword": "This PDF is password-protected. Download it to open it with your PDF app.",
       "zoomFit": "Fit to width",
+      "preparing": "Preparing preview…",
+      "officeFailed": "This document can't be previewed here. You can still download it.",
+      "officeRetry": "The preview isn't ready right now. Try again in a moment, or download the file.",
+      "adminReason": "Details for admins: {reason}",
+      "tryAgain": "Try again",
       "kind": {
         "folder": "Folder",
         "image": "Image",
