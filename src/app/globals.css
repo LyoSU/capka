@@ -740,6 +740,15 @@
 }
 .animate-pop-in { animation: pop-in 0.28s var(--ease-out) both; }
 
+/* The composer's primary slot swapping record <-> send: the new button eases in
+   (slightly small and transparent -> full) so the swap reads as one control
+   changing rather than two appearing. The reduced-motion block zeroes it. */
+@keyframes slot-swap {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-slot-swap { animation: slot-swap 140ms var(--ease-strong) both; }
+
 /* Skeleton pulse: Tailwind's default `animate-pulse` runs a slow 2s ease-in-out,
    which reads as sluggish for a loading state. This is the same opacity pulse at
    a livelier ~1.5s cadence. The global reduced-motion block freezes it. */

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useRef, useEffect, useLayoutEffect, type KeyboardEvent, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ArrowUp, Info, Loader2, Mic, Plus, Square } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
 import { ComposerMenu } from "@/components/chat/composer-menu";
+import { composerSlot } from "@/components/chat/composer-slot";
 import { MicSettings } from "@/components/chat/mic-settings";
 import { FolderChips } from "@/components/chat/folder-chips";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
@@ -245,6 +246,25 @@ export function ChatInput({
   // A pending card (approval or question) hard-blocks sending — the user must act
   // on the card first.
   const canSend = hasContent && !uploading && !awaitingInput && !sendBlocked;
+  const slot = composerSlot({
+    hasContent,
+    hasStaged: files.length > 0,
+    isRunning: isLoading,
+    isDictating: dictation.listening,
+    dictationSupported: dictation.supported,
+    awaitingInput,
+  });
+
+  // A keyboard user who pressed the button in the slot (say, Enter on the mic)
+  // watches it be replaced; keep the focus in the composer instead of dropping it
+  // on <body>.
+  const slotHadFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (slotHadFocus.current && (!document.activeElement || document.activeElement === document.body)) {
+      textareaRef.current?.focus();
+    }
+    slotHadFocus.current = false;
+  }, [slot]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Escape takes back a dictation: the fastest way out of "that isn't what I
@@ -458,21 +478,18 @@ export function ChatInput({
                 </button>
               )}
 
-              {/* The microphone, beside the send button rather than in its place:
-                  voice is what an empty composer can still take, but a send button
-                  that disappears whenever the box is empty made the composer's one
-                  action hard to find. */}
-              {!hasContent && dictation.supported && !awaitingInput && !dictation.listening && (
+              {/* Dictation language: a quiet code left of the slot while the slot
+                  offers the microphone. While a reply streams over an empty box the
+                  slot is Stop, so the microphone (and its language) stays beside it. */}
+              {slot === "mic" && <MicSettings lang={dictationLang} onLangChange={setDictationLang} />}
+              {slot === "stop" && dictation.supported && !hasContent && files.length === 0 && !awaitingInput && (
                 <div className="flex shrink-0 items-center">
                   <Hint label={t("dictation.start")}>
                     <Button
                       size="icon"
                       variant="ghost"
                       aria-label={t("dictation.start")}
-                      // Quiet at rest: the wash and full-strength ink arrive on hover.
                       className="size-10 sm:size-9 shrink-0 rounded-full text-muted-foreground hover:bg-hover hover:text-foreground active:bg-hover-strong"
-                      // Keep the caret where the words are going — a button click
-                      // would otherwise pull focus out of the composer.
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={dictation.start}
                     >
@@ -483,13 +500,14 @@ export function ChatInput({
                 </div>
               )}
 
-              {/* One slot, three states, always present. While a reply streams and
-                  the box is empty: Stop. While dictating: the dictation's own stop,
-                  tinted and pulsing (the global reduced-motion rule freezes it).
-                  Otherwise: Send — disabled while there is nothing to send or an
-                  upload is still in flight; with text during a reply it queues (and
-                  Alt+Enter steers). */}
-              {isLoading && !hasContent && !dictation.listening ? (
+              {/* One fixed-size slot, four states (see `composerSlot`): record when
+                  there is nothing to send, send once there is, Stop during a reply
+                  over an empty box, and the dictation's own stop (tinted, pulsing)
+                  while recording. The keyed child re-mounts on a swap and eases in
+                  (140ms, none under reduced motion); the slot's size never changes. */}
+              <div className="relative size-10 shrink-0 sm:size-9" onFocus={() => (slotHadFocus.current = true)} onBlur={(e) => { if (e.relatedTarget) slotHadFocus.current = false; }}>
+              <div key={slot} className="animate-slot-swap size-full">
+              {slot === "stop" ? (
                 <Hint label={t("stop")}>
                   <Button
                     size="icon"
@@ -504,7 +522,7 @@ export function ChatInput({
                     <Square className="fill-current" />
                   </Button>
                 </Hint>
-              ) : dictation.listening ? (
+              ) : slot === "dictate-stop" ? (
                 <Hint label={t("dictation.stop")}>
                   <Button
                     size="icon"
@@ -518,6 +536,21 @@ export function ChatInput({
                     <Square className="fill-current" />
                   </Button>
                 </Hint>
+              ) : slot === "mic" ? (
+                <Hint label={t("dictation.start")}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={t("dictation.start")}
+                    // Quiet at rest: a muted disc, not the filled send look.
+                    className="size-10 sm:size-9 shrink-0 rounded-full bg-muted text-muted-foreground hover:bg-hover-strong hover:text-foreground"
+                    // Keep the caret where the words are going.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={dictation.start}
+                  >
+                    <Mic className="size-4" />
+                  </Button>
+                </Hint>
               ) : (
                 <Hint label={isLoading ? t(canSteer ? "queueOrSteer" : "queue") : t("send")}>
                   <Button
@@ -525,8 +558,6 @@ export function ChatInput({
                     aria-label={isLoading ? t("queue") : t("send")}
                     className="group/send size-10 sm:size-9 shrink-0 rounded-full"
                     disabled={!canSend}
-                    // Keep the caret in the composer — a button click would otherwise
-                    // steal focus (and close the mobile keyboard) on every send.
                     onMouseDown={(e) => e.preventDefault()}
                     // Ignore the click event React would pass as `opts`.
                     onClick={() => submit()}
@@ -539,6 +570,8 @@ export function ChatInput({
                   </Button>
                 </Hint>
               )}
+              </div>
+              </div>
             </div>
           </div>
         </div>
