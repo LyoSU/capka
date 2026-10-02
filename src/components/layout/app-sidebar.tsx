@@ -517,6 +517,9 @@ export function AppSidebar() {
   const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
   // A reply finished in the open chat while this tab was in the background.
   const [doneWhileAway, setDoneWhileAway] = useState(false);
+  // Chats whose reply finished elsewhere during this page session — what the tab
+  // counts (see deriveTabState). Opening a chat takes it out again.
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
     const onVisible = () => { if (!document.hidden) setDoneWhileAway(false); };
     document.addEventListener("visibilitychange", onVisible);
@@ -641,6 +644,12 @@ export function AppSidebar() {
   const markRead = useCallback((id: string) => {
     const pending = pendingReadRef.current;
     pending.add(id);
+    setFresh((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     // Opening is what retires a failure from the bucket; do it locally now rather
     // than waiting for a refresh, since the chat may sit outside the loaded page.
     setChats((prev) => prev.map((c) => (c.id === id && c.attention?.kind === "failed" ? { ...c, attention: null } : c)));
@@ -746,6 +755,7 @@ export function AppSidebar() {
             ? { attention: { kind: "failed" as const, since: new Date().toISOString() } }
             : {};
           setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false, ...failed } : c)));
+          if (cid !== activeChatIdRef.current && d.status !== "failed") setFresh((prev) => new Set(prev).add(cid));
           // If you're watching this chat, the reply you just saw complete is
           // read — re-stamp lastReadAt (the open-time stamp predates the reply)
           // so it doesn't resurface as unread the moment you navigate away.
@@ -868,7 +878,7 @@ export function AppSidebar() {
 
   // The tab (title, favicon, app badge) is the only way to notice a chat from
   // another tab or app, so it carries the same state the rows do.
-  useTabState(deriveTabState(chats, { activeChatId, doneWhileAway }));
+  useTabState(deriveTabState(chats, { activeChatId, doneWhileAway, fresh }));
 
   // A new chat from the sidebar is always project-less — a chat joins a project
   // only via its hub's "New chat" or the "Move to project" action.

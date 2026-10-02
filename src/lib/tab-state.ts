@@ -3,20 +3,25 @@
  *  One state, by priority: a chat stopped on the person (`needs`) outranks one the
  *  model is still working on (`working`), which outranks a finished reply they have
  *  not seen yet (`done`). `count` is what the app badge shows — the things waiting
- *  on the person, never the ones merely in progress. */
+ *  on the person, never the ones merely in progress.
+ *
+ *  "Not seen yet" means finished during THIS page session (`fresh`), not the
+ *  server's unread flag: that flag also covers every automation or Telegram chat
+ *  never opened, so it put a permanent count on every page, a new chat included.
+ *  The sidebar's dot still shows that backlog; the tab only announces news. */
 export type TabState = { kind: "needs" | "working" | "done" | "idle"; count: number };
 
-type Row = { id: string; unread?: boolean; running?: boolean; archived?: boolean | null; attention?: unknown };
+type Row = { id: string; running?: boolean; archived?: boolean | null; attention?: unknown };
 
 export function deriveTabState(
   chats: Row[],
-  { activeChatId, doneWhileAway }: { activeChatId: string | null; doneWhileAway: boolean },
+  { activeChatId, doneWhileAway, fresh }: { activeChatId: string | null; doneWhileAway: boolean; fresh: ReadonlySet<string> },
 ): TabState {
   const live = chats.filter((c) => !c.archived);
   const needs = live.filter((c) => c.attention && !c.running).length;
   // The open chat is never unread (opening it marks it read), so a reply that lands
   // in it while the tab is in the background is tracked separately.
-  const unread = live.filter((c) => c.unread && !c.attention && c.id !== activeChatId).length + (doneWhileAway ? 1 : 0);
+  const unread = live.filter((c) => fresh.has(c.id) && !c.attention && c.id !== activeChatId).length + (doneWhileAway ? 1 : 0);
   if (needs > 0) return { kind: "needs", count: needs + unread };
   if (live.some((c) => c.running)) return { kind: "working", count: unread };
   if (unread > 0) return { kind: "done", count: unread };

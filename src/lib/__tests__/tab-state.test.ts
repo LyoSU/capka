@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { deriveTabState, prefixTitle } from "@/lib/tab-state";
 
-const away = { activeChatId: null, doneWhileAway: false };
+const none = new Set<string>();
+const away = { activeChatId: null, doneWhileAway: false, fresh: none };
 
 describe("deriveTabState", () => {
   it("is idle with nothing going on", () => {
@@ -10,8 +11,8 @@ describe("deriveTabState", () => {
 
   it("puts a chat waiting on the person above one that is working", () => {
     const s = deriveTabState(
-      [{ id: "a", running: true }, { id: "b", attention: { kind: "ask" } }, { id: "c", unread: true }],
-      away,
+      [{ id: "a", running: true }, { id: "b", attention: { kind: "ask" } }, { id: "c" }],
+      { ...away, fresh: new Set(["c"]) },
     );
     expect(s).toEqual({ kind: "needs", count: 2 });
   });
@@ -20,17 +21,22 @@ describe("deriveTabState", () => {
     expect(deriveTabState([{ id: "a", running: true, attention: { kind: "ask" } }], away)).toEqual({ kind: "working", count: 0 });
   });
 
-  it("ignores archived chats and the open chat's unread flag", () => {
+  it("ignores archived chats and the open chat", () => {
     const s = deriveTabState(
-      [{ id: "a", unread: true, archived: true }, { id: "b", unread: true }],
-      { activeChatId: "b", doneWhileAway: false },
+      [{ id: "a", archived: true }, { id: "b" }],
+      { activeChatId: "b", doneWhileAway: false, fresh: new Set(["a", "b"]) },
     );
     expect(s).toEqual({ kind: "idle", count: 0 });
   });
 
   it("counts a reply that finished in the open chat while the tab was hidden", () => {
-    expect(deriveTabState([{ id: "b" }], { activeChatId: "b", doneWhileAway: true })).toEqual({ kind: "done", count: 1 });
+    expect(deriveTabState([{ id: "b" }], { activeChatId: "b", doneWhileAway: true, fresh: none })).toEqual({ kind: "done", count: 1 });
   });
+});
+
+it("does not count a backlog chat that only the server calls unread", () => {
+  // e.g. an automation chat never opened: the sidebar dot shows it, the tab does not.
+  expect(deriveTabState([{ id: "auto" }], away)).toEqual({ kind: "idle", count: 0 });
 });
 
 describe("prefixTitle", () => {
