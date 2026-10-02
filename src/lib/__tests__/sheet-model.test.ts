@@ -28,12 +28,23 @@ describe("parseSheetFile", () => {
     expect(first.rows[1]).toEqual(["Item", "Qty", "Price"]);
     // Numbers as the file formats them, flagged for right alignment.
     expect(first.rows[2]).toEqual(["Pens", { v: "12", num: true }, { v: "1.50", num: true }]);
-    // wpx as given; wch turned into pixels by SheetJS itself; no width → content.
-    expect(first.widths).toEqual([150, 65, 64]);
+    // The file's widths in Excel's character unit, drawn at the table's 12px type
+    // (wider than SheetJS's own pixels, which assume a narrower font); a column
+    // with no width is sized to its content.
+    expect(first.widths).toEqual([193, 86, 64]);
     expect(first.tall).toEqual([]);
     expect([first.totalRows, first.totalCols]).toEqual([3, 3]);
 
     expect(second).toMatchObject({ name: "Empty", rows: [], widths: [] });
+  });
+
+  it("formats a dotted date format SheetJS's formatter refuses", () => {
+    // "dd.mm.yyyy" throws inside SheetJS, which then leaves the cell unformatted
+    // and the table showed the serial (46023) instead of the date.
+    const ws = utils.aoa_to_sheet([["Date"], [new Date(Date.UTC(2026, 0, 1, 12))]], { cellDates: true });
+    ws["A2"].z = "dd.mm.yyyy";
+    const [s] = parseSheetFile(xlsx({ S: ws }), "xlsx");
+    expect(s.rows[1][0]).toEqual({ v: "01.01.2026", num: true });
   });
 
   it("records a tall merge so a window that starts inside it can start at its origin", () => {

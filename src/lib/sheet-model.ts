@@ -1,4 +1,4 @@
-import { read, utils, type CellObject, type WorkSheet } from "xlsx";
+import { read, SSF, utils, type CellObject, type WorkSheet } from "xlsx";
 
 /**
  * A spreadsheet reduced to what the in-app table draws: formatted text per cell,
@@ -48,6 +48,24 @@ function decodeText(bytes: Uint8Array): string {
   }
 }
 
+/** A cell as the file formats it. SheetJS's formatter throws on a date format
+ *  with bare dots ("dd.mm.yyyy", the usual Ukrainian one) and leaves `w` unset,
+ *  so such a date showed as its serial (46023). The same format with the dots
+ *  escaped formats fine, so that is tried before giving up on the raw value. */
+function cellText(cell: CellObject | undefined): string {
+  if (!cell) return "";
+  if (cell.w != null) return cell.w;
+  if (cell.v == null) return "";
+  if (typeof cell.v === "number" && typeof cell.z === "string") {
+    try {
+      return SSF.format(cell.z.replace(/(?<!\\)\./g, "\\."), cell.v);
+    } catch {
+      // still unparseable: the raw value below
+    }
+  }
+  return String(cell.v);
+}
+
 export function parseSheetFile(bytes: Uint8Array, ext: string): SheetModel[] {
   const delimited = ext === "csv" || ext === "tsv";
   const wb = delimited
@@ -78,7 +96,7 @@ export function sheetModel(name: string, ws: WorkSheet, delimited = false): Shee
     const row: SheetCell[] = new Array(nCols);
     for (let c = 0; c < nCols; c++) {
       const cell = src[c];
-      const v = cell ? (cell.w ?? (cell.v == null ? "" : String(cell.v))) : "";
+      const v = cellText(cell);
       const num = cell?.t === "n" || (delimited && v !== "" && NUMERIC.test(v));
       row[c] = num ? { v, num: true } : v;
     }
@@ -94,7 +112,7 @@ export function sheetModel(name: string, ws: WorkSheet, delimited = false): Shee
     if (rs < 1 || cs < 1 || (rs === 1 && cs === 1)) continue;
     for (let rr = r; rr < r + rs; rr++) for (let cc = c; cc < c + cs; cc++) rows[rr][cc] = null;
     const origin = data[r]?.[c];
-    const v = origin ? (origin.w ?? (origin.v == null ? "" : String(origin.v))) : "";
+    const v = cellText(origin);
     rows[r][c] = { v, rs, cs, ...(origin?.t === "n" ? { num: true as const } : {}) };
     if (rs > 1) tall.push([r, rs]);
   }
@@ -102,16 +120,20 @@ export function sheetModel(name: string, ws: WorkSheet, delimited = false): Shee
   const cols = ws["!cols"] ?? [];
   const widths = Array.from({ length: nCols }, (_, c) => {
     const col = cols[c];
-    const px = col?.wpx ?? (col?.wch != null ? col.wch * 7 + 5 : null);
+    // A width in Excel's own unit (characters of its default font) at this
+    // table's 12px type: SheetJS's own pixels assume a narrower font and cut a
+    // date like 01.01.2026 that Excel shows whole.
+    const chars = col?.width ?? col?.wch;
+    const px = chars != null ? chars * CHAR_PX + 5 : (col?.wpx ?? null);
     if (px != null) return Math.round(Math.min(480, Math.max(32, px)));
-    let chars = 0;
+    let longest = 0;
     for (let r = 0; r < Math.min(nRows, SAMPLE_ROWS); r++) {
       const cell = rows[r][c];
       // A merged block spans several columns; its text says nothing about this one.
       if (cell === null || (typeof cell === "object" && (cell.cs ?? 1) > 1)) continue;
-      chars = Math.max(chars, (typeof cell === "string" ? cell : cell.v).length);
+      longest = Math.max(longest, (typeof cell === "string" ? cell : cell.v).length);
     }
-    return Math.round(Math.min(320, Math.max(64, chars * CHAR_PX + CELL_PAD_PX)));
+    return Math.round(Math.min(320, Math.max(64, longest * CHAR_PX + CELL_PAD_PX)));
   });
 
   return { name, rows, widths, tall, totalRows, totalCols };
