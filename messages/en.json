@@ -284,8 +284,6 @@
       "namePlaceholder": "Name, for example Stripe key",
       "valuePlaceholder": "Paste the value",
       "save": "Save",
-      "pastedAsText": "As text",
-      "pastedAsTextHint": "Insert as plain, editable text",
       "remove": "Remove {name}",
       "nameInvalid": "Use a name that starts with a letter, like Stripe key.",
       "saveFailed": "Could not save it. Please try again.",
@@ -475,6 +473,8 @@
       "dropHere": "Drop files to attach",
       "uploadFailed": "Upload failed: {files}",
       "retryUpload": "Retry upload of {name}",
+      "pastedAsText": "As text",
+      "pastedAsTextHint": "Insert as plain, editable text",
       "blindModalities": "This model won't see {modalities} directly"
     },
     "import": {
