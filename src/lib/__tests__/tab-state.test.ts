@@ -34,12 +34,17 @@ describe("deriveTabState", () => {
 });
 
 describe("prefixTitle", () => {
-  it("writes and replaces only its own prefix", () => {
+  it("writes and replaces only its own count prefix", () => {
     const once = prefixTitle("Budget — Capka", { kind: "needs", count: 2 });
-    expect(once).toBe("● (2) Budget — Capka");
-    expect(prefixTitle(once, { kind: "working", count: 1 })).toBe("⟳ Budget — Capka");
+    expect(once).toBe("(2) Budget — Capka");
+    expect(prefixTitle(once, { kind: "working", count: 1 })).toBe("Budget — Capka");
     expect(prefixTitle(once, { kind: "idle", count: 0 })).toBe("Budget — Capka");
-    expect(prefixTitle(prefixTitle(once, { kind: "done", count: 3 }), { kind: "done", count: 3 })).toBe("✓ (3) Budget — Capka");
+    expect(prefixTitle(prefixTitle(once, { kind: "done", count: 3 }), { kind: "done", count: 3 })).toBe("(3) Budget — Capka");
+  });
+
+  it("strips the glyph prefix earlier builds wrote", () => {
+    expect(prefixTitle("\u25CF (2) Budget", { kind: "idle", count: 0 })).toBe("Budget");
+    expect(prefixTitle("\u27F3 Budget", { kind: "done", count: 1 })).toBe("(1) Budget");
   });
 
   it("strips the bare count prefix older builds wrote", () => {

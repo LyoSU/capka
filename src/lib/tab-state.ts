@@ -23,14 +23,14 @@ export function deriveTabState(
   return { kind: "idle", count: 0 };
 }
 
-const GLYPH = { needs: "●", working: "⟳", done: "✓", idle: "" } as const;
-const PREFIX = /^(?:[●⟳✓] )?(?:\(\d+\) )?/;
+// The state itself rides the favicon dot; the title carries only the count of
+// things waiting on the person, the "(2) Inbox" form every mail client uses.
+// The glyph alternation strips what earlier builds of this hook wrote.
+const PREFIX = /^(?:[\u25CF\u27F3\u2713] )?(?:\(\d+\) )?/;
 
 /** The title with our prefix applied; anything we wrote before is stripped first, so
  *  re-applying is idempotent and the rest of the title stays Next's. */
 export function prefixTitle(title: string, state: TabState): string {
   const base = title.replace(PREFIX, "");
-  if (state.kind === "idle") return base;
-  const count = state.kind !== "working" && state.count > 0 ? `(${state.count}) ` : "";
-  return `${GLYPH[state.kind]} ${count}${base}`;
+  return state.kind !== "working" && state.count > 0 ? `(${state.count}) ${base}` : base;
 }
