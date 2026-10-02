@@ -1558,9 +1558,6 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
         setOpen(v);
       }}
       data-collapse-instant={instant ? "" : undefined}
-      // Folded, the header is all that stands for the process, and a hairline
-      // under it is what separates "how it got there" from the answer below.
-      className={open ? undefined : "border-b border-border pb-1.5"}
     >
       {/* No pulse on the label while live: the rail below is already open and
           shows a spinning node on the running step, so a pulsing header is the
