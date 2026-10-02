@@ -101,7 +101,7 @@ export function thumbnailable(name: string): boolean {
 
 /** A filename cut in two for middle truncation: the head takes the CSS ellipsis,
  *  the tail (last two characters of the stem plus the extension) always shows, so
- *  a long "продажі_за_квартал.xlsx" reads "продажі_з…ал.xlsx", never "продажі_за_к…". */
+ *  a long "sales_for_quarter.xlsx" reads "sales_fo…er.xlsx", never "sales_for_qu…". */
 export function splitFileName(name: string): { head: string; tail: string } {
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : "";

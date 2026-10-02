@@ -5,8 +5,8 @@ const strip = (t: string) => stripPseudoToolCalls(t, isKnownToolName);
 
 describe("stripPseudoToolCalls", () => {
   it("drops a textual update_plan call on its own line", () => {
-    const t = "Починаю.\ncall:default_api:update_plan{steps:[{status:done,title:Зібрати дані},{status:in_progress,title:Звіт}]}\nГотово.";
-    expect(strip(t)).toBe("Починаю.\nГотово.");
+    const t = "Starting.\ncall:default_api:update_plan{steps:[{status:done,title:Gather data},{status:in_progress,title:Report}]}\nDone.";
+    expect(strip(t)).toBe("Starting.\nDone.");
   });
 
   it("drops a call that is the whole text", () => {
@@ -14,17 +14,17 @@ describe("stripPseudoToolCalls", () => {
   });
 
   it("spans to the MATCHING brace, braces inside strings included", () => {
-    const t = 'call:default_api:write_file{path:"a.txt",content:"x } y {"} після';
-    expect(strip(t)).toBe("після");
+    const t = 'call:default_api:write_file{path:"a.txt",content:"x } y {"} after';
+    expect(strip(t)).toBe("after");
   });
 
   it("an unclosed payload (still streaming) runs to the end of its line", () => {
-    expect(strip("Ось план\ncall:default_api:update_plan{steps:[{status:\nНаступний рядок")).toBe("Ось план\nНаступний рядок");
-    expect(strip("Ось план\ncall:default_api:update_plan{steps:[{sta")).toBe("Ось план");
+    expect(strip("Here is the plan\ncall:default_api:update_plan{steps:[{status:\nNext line")).toBe("Here is the plan\nNext line");
+    expect(strip("Here is the plan\ncall:default_api:update_plan{steps:[{sta")).toBe("Here is the plan");
   });
 
   it("takes along a fence wrapped around nothing but the call", () => {
-    expect(strip("До\n```tool_code\ncall:default_api:update_plan{steps:[]}\n```\nПісля")).toBe("До\nПісля");
+    expect(strip("Before\n```tool_code\ncall:default_api:update_plan{steps:[]}\n```\nAfter")).toBe("Before\nAfter");
   });
 
   it("does not eat the fences of neighbouring code blocks", () => {
@@ -37,13 +37,13 @@ describe("stripPseudoToolCalls", () => {
   });
 
   it("leaves a call to a name that is not ours untouched", () => {
-    const t = "Приклад: call:default_api:launch_rockets{now:true}";
+    const t = "Example: call:default_api:launch_rockets{now:true}";
     expect(strip(t)).toBe(t);
   });
 
   it("leaves ordinary prose and code untouched (same string back)", () => {
     for (const t of [
-      "Я оновив план і записав файл звіт.docx.",
+      "I updated the plan and wrote the file report.docx.",
       "Use update_plan{steps} to show progress.",
       "default_api:update_plan{x}",
       "```python\nprint({'a': 1})\n```",

@@ -76,8 +76,8 @@ describe("fileKind", () => {
 
 describe("splitFileName", () => {
   it("keeps the extension and the end of the stem in the tail", () => {
-    expect(splitFileName("продажі_за_квартал.xlsx")).toEqual({ head: "продажі_за_кварт", tail: "ал.xlsx" });
-    expect(splitFileName("звіт.docx")).toEqual({ head: "зв", tail: "іт.docx" });
+    expect(splitFileName("sales_for_quarter.xlsx")).toEqual({ head: "sales_for_quart", tail: "er.xlsx" });
+    expect(splitFileName("memo.docx")).toEqual({ head: "me", tail: "mo.docx" });
   });
   it("loses nothing: head + tail is the name", () => {
     for (const n of ["a.pdf", "x", ".env", "Makefile", "archive.tar.gz", "weird.extension_too_long"]) {
