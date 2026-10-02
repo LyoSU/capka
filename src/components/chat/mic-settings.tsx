@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { ChevronDown, Mic } from "lucide-react";
+import { Mic } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Hint } from "@/components/ui/tooltip";
-import { dictationLanguages, speechLangLabels } from "@/components/chat/use-dictation";
+import { dictationLanguages, speechLangCode, speechLangLabel, speechLangLabels } from "@/components/chat/use-dictation";
 
 /**
  * The small chevron beside the microphone: which microphone the browser is using,
@@ -35,6 +35,7 @@ export function MicSettings({ lang, onLangChange }: { lang: string; onLangChange
     const browser = typeof navigator === "undefined" ? [] : navigator.languages;
     return speechLangLabels(dictationLanguages(locale, browser, lang), locale);
   }, [locale, lang]);
+  const triggerLabel = t("languageTrigger", { language: speechLangLabel(lang.split("-")[0], locale) });
   const [open, setOpen] = useState(false);
   const [level, setLevel] = useState(0);
   const [device, setDevice] = useState<string | null>(null);
@@ -103,12 +104,12 @@ export function MicSettings({ lang, onLangChange }: { lang: string; onLangChange
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <Hint label={t("microphone")}>
+      <Hint label={triggerLabel}>
         <PopoverTrigger
-          aria-label={t("microphone")}
-          className="inline-flex h-10 w-6 items-center justify-center rounded-lg text-muted-foreground transition-micro hover:bg-hover hover:text-foreground data-popup-open:bg-hover-strong data-popup-open:text-foreground active:scale-[0.97] sm:h-9 sm:w-5"
+          aria-label={triggerLabel}
+          className="inline-flex h-10 items-center rounded-full px-2 text-[11px] font-medium tracking-wide text-muted-foreground transition-micro outline-none hover:bg-hover hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 data-popup-open:bg-hover-strong data-popup-open:text-foreground active:scale-[0.97] sm:h-9"
         >
-          <ChevronDown className="size-3.5" />
+          {speechLangCode(lang)}
         </PopoverTrigger>
       </Hint>
       <PopoverContent side="top" align="end" sideOffset={8} className="w-72">

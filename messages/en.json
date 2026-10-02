@@ -457,6 +457,7 @@
         "language": "The browser's speech engine does not support this language. Pick another one beside the microphone.",
         "insecure": "Dictation works only over HTTPS or on localhost.",
         "languageLabel": "Dictation language",
+        "languageTrigger": "Dictation language: {language}",
         "microphone": "Microphone",
         "microphoneDefault": "System default microphone",
         "level": "Microphone level",

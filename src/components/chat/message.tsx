@@ -2219,7 +2219,7 @@ function UserBubble({
       // ghost. The entrance animation starts from opacity 0, so replaying it
       // there would dip the bubble 0.55 → 0 → 1 at the exact moment it is
       // supposed to read as solidifying — a blink, not an arrival.
-      className={`group/msg flex justify-end px-4 md:px-6 py-4 pointer-coarse:select-none ${enter === false ? "" : "animate-message-in"}`}
+      className={`group/msg flex justify-end px-4 md:px-6 pt-4 pb-5 pointer-coarse:pb-4 pointer-coarse:select-none ${enter === false ? "" : "animate-message-in"}`}
       {...longPress}
     >
       <ActionMenu
@@ -2275,16 +2275,19 @@ function UserBubble({
               )}
             </div>
           )}
-          <div className="mt-1 flex items-center gap-1">
+          {/* With a mouse the row hangs in the bottom padding (absolute) so the
+              answer sits close under the question and hovering shifts nothing;
+              touch keeps it in flow, where the timestamp is permanent. */}
+          <div className="mt-1 flex items-center gap-1 pointer-fine:absolute pointer-fine:top-full pointer-fine:right-0 pointer-fine:z-10">
             {/* Inline icons are the desktop (hover) affordance; touch uses the
                 long-press menu instead, so these stay hover-only. */}
             {text && (
-              <span className="opacity-0 transition group-hover/msg:opacity-100">
+              <span className="opacity-0 transition group-hover/msg:opacity-100 group-focus-within/msg:opacity-100">
                 <CopyButton text={text} />
               </span>
             )}
             {onEdit && text && (
-              <span className="opacity-0 transition group-hover/msg:opacity-100">
+              <span className="opacity-0 transition group-hover/msg:opacity-100 group-focus-within/msg:opacity-100">
                 <Hint label={tMsg("edit")}>
                   <button
                     type="button"
@@ -2298,7 +2301,7 @@ function UserBubble({
               </span>
             )}
             {onFork && (
-              <span className="opacity-0 transition group-hover/msg:opacity-100">
+              <span className="opacity-0 transition group-hover/msg:opacity-100 group-focus-within/msg:opacity-100">
                 <ForkButton messageId={messageId} onFork={onFork} disabled={actionsDisabled} />
               </span>
             )}

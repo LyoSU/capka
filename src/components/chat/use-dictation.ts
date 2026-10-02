@@ -730,3 +730,24 @@ export function useDictation({
 
   return { supported, listening: state.listening, phase: state.phase, canUndo: state.canUndo, start, stop, undo, toggle };
 }
+
+/**
+ * The three-letter handle for a dictation language: the first three letters of its
+ * own name for itself, uppercased. Three, never two - "UK" reads as United Kingdom
+ * to someone looking for Ukrainian.
+ */
+export function speechLangCode(tag: string): string {
+  const base = tag.split("-")[0];
+  let name: string | undefined;
+  try {
+    name = new Intl.DisplayNames([base], { type: "language" }).of(base);
+  } catch {
+    // Malformed tag: fall through to the subtag itself.
+  }
+  const code = (name && name !== base ? name : base).slice(0, 3);
+  try {
+    return code.toLocaleUpperCase(base);
+  } catch {
+    return code.toUpperCase();
+  }
+}
