@@ -2,7 +2,7 @@
 
 import type { HTMLAttributes } from "react";
 import { useTranslations } from "next-intl";
-import { GripVertical, Trash2, ChevronDown } from "lucide-react";
+import { GripVertical, Trash2, ChevronDown, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,9 @@ export interface ProviderConfig {
   label: string | null;
   iconSlug: string | null;
   apiStyle: string | null;
+  /** Whether a key is stored, and its last four characters — never the key. */
+  hasKey?: boolean;
+  keyHint?: string | null;
 }
 
 /** One connection as a compact, draggable row that expands to its full settings.
@@ -47,6 +50,7 @@ export function ConnectionRow({
   onIconChange,
   onToggleShared,
   onUpdateApiStyle,
+  onEdit,
 }: {
   config: ProviderConfig;
   isAdmin: boolean;
@@ -64,6 +68,7 @@ export function ConnectionRow({
   onIconChange: (slug: string | null) => void;
   onToggleShared: (shared: boolean) => void;
   onUpdateApiStyle: (style: string | null) => void;
+  onEdit: () => void;
 }) {
   const t = useTranslations("settings.connections");
   const tc = useTranslations("common");
@@ -155,9 +160,9 @@ export function ConnectionRow({
             </div>
           )}
 
-          {/* Naming + glyph only for base-URL providers (LiteLLM/Ollama),
-              where the connection's real identity isn't fixed by the choice. */}
-          {meta?.requiresBaseUrl && (
+          {/* Rename in place (saves on blur), for every connection: two keys of
+              one provider ("OpenRouter — work") need telling apart. */}
+          {(isAdmin || meta?.requiresBaseUrl) && (
             <div className="flex items-end gap-2">
               <div className="flex-1 space-y-1">
                 <label className="text-xs text-muted-foreground">{t("connectionName")}</label>
@@ -185,6 +190,11 @@ export function ConnectionRow({
               />
               {t("enabled")}
             </label>
+            <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={onEdit}>
+              <Pencil />
+              {t("editProvider")}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -194,6 +204,7 @@ export function ConnectionRow({
               <Trash2 />
               {tc("delete")}
             </Button>
+            </div>
           </div>
         </CollapsibleContent>
       </Collapsible>

@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
-import { encrypt } from "@/lib/crypto";
+import { encrypt, decrypt } from "@/lib/crypto";
 import { getMasterKey, ownKeysAllowed } from "@/lib/settings";
 import { ForbiddenError } from "@/lib/errors";
 import { PROVIDERS } from "@/lib/providers";
@@ -43,13 +43,29 @@ export const GET = apiHandler(async () => {
       label: providerConfigs.label,
       iconSlug: providerConfigs.iconSlug,
       apiStyle: providerConfigs.apiStyle,
+      apiKey: providerConfigs.apiKey,
       createdAt: providerConfigs.createdAt,
     })
     .from(providerConfigs)
     .where(eq(providerConfigs.userId, userId))
     .orderBy(providerConfigs.sortOrder, providerConfigs.createdAt);
 
-  return Response.json(rows);
+  // The stored secret never leaves the server: the client only learns whether
+  // a key exists and its last four characters, so the edit form can show it.
+  const masterKey = rows.some((r) => r.apiKey) ? await getMasterKey() : "";
+  return Response.json(
+    rows.map(({ apiKey, ...r }) => {
+      let keyHint: string | null = null;
+      if (apiKey) {
+        try {
+          keyHint = decrypt(apiKey, masterKey).slice(-4);
+        } catch {
+          keyHint = null;
+        }
+      }
+      return { ...r, hasKey: !!apiKey, keyHint };
+    }),
+  );
 });
 
 export const POST = apiHandler(async (req: Request) => {
@@ -101,8 +117,8 @@ export const POST = apiHandler(async (req: Request) => {
 });
 
 export const PUT = apiHandler(async (req: Request) => {
-  const { userId } = await requireRole("admin", "user");
-  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle, order } = await req.json();
+  const { userId, role } = await requireRole("admin", "user");
+  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle, order, apiKey, baseUrl } = await req.json();
 
   // Reorder: an ordered list of the caller's OWN config ids. Every id must
   // belong to the caller and the list must cover exactly their configs — so a
@@ -158,6 +174,19 @@ export const PUT = apiHandler(async (req: Request) => {
   if (label !== undefined) set.label = label?.trim() || null;
   if (iconSlug !== undefined) set.iconSlug = iconSlug || null;
   if (typeof shared === "boolean") set.shared = shared;
+  // Credentials: an empty/absent key means "keep the current one"; a typed one
+  // replaces it. The base URL is replaced when present ("" clears it).
+  const newKey = typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : null;
+  if (newKey || baseUrl !== undefined) {
+    if (role !== "admin" && !(await ownKeysAllowed())) {
+      throw new ForbiddenError("Changing your own provider key is disabled on this instance.");
+    }
+    if (!validBaseUrl(baseUrl)) {
+      return Response.json({ error: "Base URL must be a valid http(s) URL." }, { status: 400 });
+    }
+    if (newKey) set.apiKey = encrypt(newKey, await getMasterKey());
+    if (baseUrl !== undefined) set.baseUrl = baseUrl || null;
+  }
   if (apiStyle !== undefined) set.apiStyle = normalizeApiStyle(apiStyle);
   if (Object.keys(set).length === 0) return Response.json({ error: "Nothing to update" }, { status: 400 });
 

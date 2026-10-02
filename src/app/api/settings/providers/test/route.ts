@@ -2,6 +2,11 @@ import { streamText, APICallError } from "ai";
 import { requireRole, apiHandler } from "@/lib/auth";
 import { getModel } from "@/lib/providers";
 import { assertSafeProviderConfig } from "@/lib/providers/list-models";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { providerConfigs } from "@/lib/db/schema";
+import { decrypt } from "@/lib/crypto";
+import { getMasterKey } from "@/lib/settings";
 import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
@@ -11,9 +16,21 @@ export const POST = apiHandler(async (req: Request) => {
   const rl = take(`provider-test:${userId}`);
   if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
 
-  const { provider, apiKey, modelId, baseUrl, apiStyle } = await req.json();
+  const body = await req.json();
+  const { provider, modelId, baseUrl, apiStyle, configId } = body;
+  let apiKey: string | undefined = body.apiKey;
   if (!provider || !modelId) {
     return Response.json({ error: "Missing provider or modelId" }, { status: 400 });
+  }
+  // Editing a saved connection with the key left blank: test with the stored
+  // key (owner-only), which stays server-side.
+  if (configId && !apiKey) {
+    const [row] = await db
+      .select({ apiKey: providerConfigs.apiKey })
+      .from(providerConfigs)
+      .where(and(eq(providerConfigs.id, configId), eq(providerConfigs.userId, userId)));
+    if (!row) return Response.json({ error: "Not found" }, { status: 404 });
+    if (row.apiKey) apiKey = decrypt(row.apiKey, await getMasterKey());
   }
 
   // Bound the whole probe: a custom baseUrl can be a black hole, and a health

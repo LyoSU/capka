@@ -17,31 +17,45 @@ import { Input } from "@/components/ui/input";
 import { Hint } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { ModelPicker } from "@/components/chat/model-picker";
+import { ModelPicker, clearClientModelsCache } from "@/components/chat/model-picker";
 import { ProviderGlyph } from "@/components/chat/provider-icons";
 import { IconPicker } from "@/components/settings/icon-picker";
+import type { ProviderConfig } from "@/components/settings/connection-row";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 
 /** The "add a connection" flow, in a modal so it never lengthens the list. Tests
- *  the connection before saving; on success calls onAdded so the list refetches. */
-export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAdded: () => void }) {
+ *  the connection before saving; on success calls onAdded so the list refetches.
+ *  With `editing` it is the same form for an existing connection: provider is
+ *  fixed, the key field is blank (blank = keep the stored key), and saving PUTs
+ *  to the same id so models and chats that reference it keep working. */
+export function AddProviderDialog({
+  isAdmin,
+  onAdded,
+  editing,
+  onEditClose,
+}: {
+  isAdmin: boolean;
+  onAdded: () => void;
+  editing?: ProviderConfig | null;
+  onEditClose?: () => void;
+}) {
   const t = useTranslations("settings.connections");
   const tc = useTranslations("common");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!editing);
   const [saving, setSaving] = useState(false);
 
-  const [provider, setProvider] = useState<ProviderName>("litellm");
+  const [provider, setProvider] = useState<ProviderName>((editing?.provider as ProviderName) ?? "litellm");
   const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
-  const [label, setLabel] = useState("");
-  const [iconSlug, setIconSlug] = useState<string | null>(null);
-  const [formShared, setFormShared] = useState(true);
+  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? "");
+  const [defaultModel, setDefaultModel] = useState(editing?.defaultModel ?? "");
+  const [label, setLabel] = useState(editing?.label ?? "");
+  const [iconSlug, setIconSlug] = useState<string | null>(editing?.iconSlug ?? null);
+  const [formShared, setFormShared] = useState(editing?.shared ?? true);
   const [showKey, setShowKey] = useState(false);
   // OpenAI/Azure only: drive the model over Chat Completions instead of the
   // default Responses API. Off persists as null (auto = Responses); on
   // persists "chat".
-  const [useChatApi, setUseChatApi] = useState(false);
+  const [useChatApi, setUseChatApi] = useState(editing?.apiStyle === "chat");
 
   const meta = PROVIDER_META[provider];
 
@@ -69,14 +83,19 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
 
   function onOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) reset();
+    if (!next) {
+      reset();
+      onEditClose?.();
+    }
   }
 
   async function handleTestAndSave() {
     setSaving(true);
     try {
       const modelId = defaultModel || undefined;
-      if (meta.requiresKey && !apiKey) {
+      // Editing: a blank key keeps the stored one.
+      const keepKey = !!editing && !apiKey;
+      if (meta.requiresKey && !apiKey && !(keepKey && editing?.hasKey)) {
         toast.error(t("keyRequired"));
         return;
       }
@@ -106,7 +125,8 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          apiKey: meta.requiresKey ? apiKey : undefined,
+          apiKey: meta.requiresKey ? apiKey || undefined : undefined,
+          configId: keepKey ? editing?.id : undefined,
           modelId,
           baseUrl: effectiveBaseUrl,
           apiStyle: effectiveApiStyle,
@@ -115,7 +135,33 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
 
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(t("connectionFailed", { error: testData.error }));
+        toast.error(editing ? t("editConnectionFailed", { error: testData.error }) : t("connectionFailed", { error: testData.error }));
+        return;
+      }
+
+      if (editing) {
+        const putRes = await fetch("/api/settings/providers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editing.id,
+            apiKey: apiKey || undefined,
+            baseUrl: effectiveBaseUrl ?? "",
+            defaultModel: modelId,
+            label,
+            iconSlug,
+            shared: isAdmin ? formShared : undefined,
+            apiStyle: provider === "openai" || provider === "azure" ? effectiveApiStyle ?? null : undefined,
+          }),
+        });
+        if (putRes.ok) {
+          clearClientModelsCache();
+          toast.success(t("editSaved"));
+          onOpenChange(false);
+          onAdded();
+        } else {
+          toast.error(t("saveError"));
+        }
         return;
       }
 
@@ -148,14 +194,16 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Plus />
-        {t("addProvider")}
-      </Button>
+      {!editing && (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus />
+          {t("addProvider")}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{t("addProvider")}</DialogTitle>
+            <DialogTitle>{editing ? t("editProvider") : t("addProvider")}</DialogTitle>
             <DialogDescription>{t("subtitle")}</DialogDescription>
           </DialogHeader>
 
@@ -165,6 +213,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
               <Select
                 value={provider}
                 onValueChange={(v) => changeProvider(v as ProviderName)}
+                disabled={!!editing}
                 items={Object.fromEntries(
                   PROVIDER_OPTIONS.map((p) => [
                     p.value,
@@ -205,7 +254,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                     type={showKey ? "text" : "password"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={editing?.hasKey ? `•••• ${editing.keyHint ?? ""}`.trim() : "sk-..."}
                     className="pr-9"
                   />
                   <Hint label={showKey ? t("hideKey") : t("showKey")} side="left">
@@ -244,15 +293,15 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                 variant="field"
                 value={defaultModel}
                 onChange={setDefaultModel}
-                provider={provider}
-                apiKey={apiKey}
-                baseUrl={baseUrl}
-                disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
-                placeholder={meta.requiresKey && !apiKey ? t("enterKeyFirst") : t("pickModel")}
+                {...(editing && !apiKey && baseUrl === (editing.baseUrl ?? "")
+                  ? { configId: editing.id }
+                  : { provider, apiKey, baseUrl })}
+                disabled={!editing && ((meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl))}
+                placeholder={!editing && meta.requiresKey && !apiKey ? t("enterKeyFirst") : t("pickModel")}
               />
             </div>
 
-            {meta.requiresBaseUrl && (
+            {(meta.requiresBaseUrl || editing) && (
               <div className="flex items-end gap-2">
                 <div className="flex-1 space-y-1.5">
                   <label className="text-sm">{t("connectionName")}</label>
@@ -279,7 +328,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
             </Button>
             <Button onClick={handleTestAndSave} disabled={saving}>
               {saving && <Loader2 className="animate-spin" />}
-              {t("testSave")}
+              {editing ? t("editSave") : t("testSave")}
             </Button>
           </DialogFooter>
         </DialogContent>

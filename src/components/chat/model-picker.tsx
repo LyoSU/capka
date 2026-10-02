@@ -297,6 +297,11 @@ interface ModelsState {
 // instead of flashing a spinner and re-probing the provider each time.
 const CLIENT_MODELS_TTL_MS = 5 * 60_000;
 const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean; recent: string[] }>();
+/** Drop every cached listing — after a connection's key/URL changes, what the
+ *  pickers cached for it is stale. */
+export function clearClientModelsCache() {
+  clientModelsCache.clear();
+}
 /** One `/api/models` request per key at a time. Several pickers mount together
  *  (composer, settings, a dialog) and each used to fire its own request before any
  *  of them had filled the cache — eight GETs per page load, each a provider

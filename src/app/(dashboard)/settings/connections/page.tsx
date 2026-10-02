@@ -34,6 +34,7 @@ export default function ConnectionsPage() {
   const auxModel = useSetting("aux_model", "");
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<ProviderConfig | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -337,6 +338,7 @@ export default function ConnectionsPage() {
                 onIconChange={(slug) => handleIconChange(c.id, slug)}
                 onToggleShared={(shared) => handleToggleShared(c.id, shared)}
                 onUpdateApiStyle={(style) => handleUpdateApiStyle(c.id, style)}
+                onEdit={() => setEditing(c)}
               />
             ))}
         </div>
@@ -406,6 +408,16 @@ export default function ConnectionsPage() {
             />
           </SettingsGroup>
         </SettingsSection>
+      )}
+
+      {editing && (
+        <AddProviderDialog
+          key={editing.id}
+          isAdmin={isAdmin}
+          editing={editing}
+          onEditClose={() => setEditing(null)}
+          onAdded={fetchConfigs}
+        />
       )}
 
       <ConfirmDialog
