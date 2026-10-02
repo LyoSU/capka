@@ -1405,7 +1405,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           <JumpPill
             show={scroll.showJump}
             tone={scroll.jumpTone}
-            bottom={scroll.bottomReserve}
+            // Down into the footer's fade strip (2.5rem, see below), resting 2px
+            // above the card: the pill sits ON the fade, as its own raised object.
+            bottom={scroll.bottomReserve - 38}
             onClick={scrollActions.jumpToBottom}
             newLabel={t("panel.newMessage")}
             label={t("panel.scrollDown")}
@@ -1413,7 +1415,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
           <div
             ref={scroll.footerRef}
-            className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6 transition-transform duration-200 ease-out"
+            // The top 2.5rem is the fade the transcript dissolves into: transparent
+            // to solid across exactly the strip above the card, so the text visibly
+            // thins out before it meets the composer instead of being cut by it.
+            // Solid below, behind the card. Part of the footer's own box, so the
+            // measured reserve keeps the last line of a reply clear of it at rest.
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,var(--color-background)_calc(100%_-_2.5rem),transparent)] pt-10 transition-transform duration-200 ease-out"
             // Lift the composer above the on-screen keyboard (iOS; ~0 elsewhere).
             style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
           >
