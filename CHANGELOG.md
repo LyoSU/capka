@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - The composer shows the model and answer depth as quiet text ("Model · Depth"; context-size and shared-key badges are admin-only), keeps the send button visible beside the microphone, and has a tray underneath: Project, Files, Capabilities.
 - The transcript fades out above the composer, and the scroll-to-bottom button rests on that fade.
 - A long message from the user (or an automation's prompt) folds to six lines with "Show all" / "Show less".
+- A folded "Worked for …" header is underlined by a hairline separating the work from the answer, and the (i) popover writes long work times the same way as the header ("12 min", "1 h 5 min").
 
 ## [0.44.0] - 2026-10-02
 

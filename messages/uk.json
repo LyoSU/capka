@@ -661,7 +661,6 @@
       "route": "Маршрут",
       "loadingRoute": "Завантаження…",
       "durationSec": "{s} с",
-      "durationMin": "{m} хв {s} с",
       "requests": "Запитів до моделі",
       "purposeTurn": "Відповідь",
       "purposeTitle": "Назва чату",

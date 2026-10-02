@@ -3,8 +3,8 @@ import type { Translator } from "@/lib/i18n/translator";
 /** Renders a whole number of seconds through the `chat.duration` messages.
  *  Localized rather than latin `s`/`m` because these numbers sit inside translated
  *  sentences, where a bare `8s` reads as untranslated UI. This is
- *  the shape `chat.details.durationSec/durationMin` has always used for the (i)
- *  popover — the live timer and the group header were the two stragglers. */
+ *  the shape the (i) popover's `chat.details.durationSec` uses, and past a
+ *  minute the popover renders through here too, so header and popover agree. */
 function render(sec: number, t: Translator): string {
   if (sec < 60) return t("sec", { s: sec });
   // Padded: this is the one string that ticks under the reader's eye, and an

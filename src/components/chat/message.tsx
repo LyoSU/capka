@@ -1552,6 +1552,9 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
         setOpen(v);
       }}
       data-collapse-instant={instant ? "" : undefined}
+      // Folded, the header is all that stands for the process, and a hairline
+      // under it is what separates "how it got there" from the answer below.
+      className={open ? undefined : "border-b border-border pb-1.5"}
     >
       {/* No pulse on the label while live: the rail below is already open and
           shows a spinning node on the running step, so a pulsing header is the
@@ -2359,12 +2362,14 @@ type GenStats = {
   chain?: { provider?: string; latencyMs?: number; status?: number }[];
 };
 
-/** Render the AI work time as "12.3s" under a minute, "1m 3s" beyond it. */
-function formatDuration(ms: number, t: TimeTranslator, locale: string): string {
+/** Render the AI work time as "12.3s" under a minute; beyond it, the same words
+ *  as the "Worked for …" header above it ("1 min 05 s", "12 min", "1 h 5 min"),
+ *  so the two never disagree about one turn. */
+function formatDuration(ms: number, t: TimeTranslator, tDuration: TimeTranslator, locale: string): string {
   const sec = ms / 1000;
   // One decimal in the reader's own notation: a decimal comma in Ukrainian, a dot in English.
   if (sec < 60) return t("durationSec", { s: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(sec) });
-  return t("durationMin", { m: Math.floor(sec / 60), s: Math.round(sec % 60) });
+  return formatShortDuration(ms, tDuration);
 }
 
 /** One label/value line in the details popover; value is tabular for alignment. */
@@ -2391,6 +2396,7 @@ function MessageDetails({
   steps?: number;
 }) {
   const t = useTranslations("chat.details");
+  const tDuration = useTranslations("chat.duration");
   const locale = useLocale();
   const { durationMs, model, usage, aux, llmCalls, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
 
@@ -2498,7 +2504,7 @@ function MessageDetails({
         <div className="text-muted-foreground">{exactTime}</div>
         {(durationMs != null || (steps != null && steps > 0)) && (
           <div className="mt-2.5 space-y-1.5 border-t pt-2.5">
-            {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t, locale)} />}
+            {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t, tDuration, locale)} />}
             {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
           </div>
         )}

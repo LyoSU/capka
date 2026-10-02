@@ -661,7 +661,6 @@
       "route": "Route",
       "loadingRoute": "Loading…",
       "durationSec": "{s}s",
-      "durationMin": "{m}m {s}s",
       "requests": "Model requests",
       "purposeTurn": "Reply",
       "purposeTitle": "Chat title",
