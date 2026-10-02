@@ -436,12 +436,8 @@
       "queue": "Queue message",
       "queueOrSteer": "Queue message — Alt+Enter adds it to the current reply",
       "add": "Add",
-      "tray": {
-        "project": "Project",
-        "files": "Files",
-        "capabilities": "Capabilities"
-      },
       "menu": {
+        "capabilities": "Capabilities",
         "secrets": "Secrets for this chat",
         "skills": "Skills",
         "connectors": "Connectors",

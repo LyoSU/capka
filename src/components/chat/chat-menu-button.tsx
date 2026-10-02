@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import { ChevronDown, MoreHorizontal, Share2 } from "lucide-react";
+import { ChevronDown, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { subscribeEvents } from "@/lib/event-stream";
@@ -10,7 +10,7 @@ import { ChatContextMenu, type ChatItem } from "./chat-context-menu";
 
 /**
  * The chat header's two ends: the conversation's name at the left — itself the way
- * into the chat's menu, like a document title — and share + ⋯ at the right. `start`
+ * into the chat's menu, like a document title — and Share at the right. `start`
  * and `end` are the panel's own pieces (the sidebar handle, the project badge, the
  * files button), slotted in so the header reads as one row in one order.
  *
@@ -45,10 +45,7 @@ export function ChatMenuButton({
   const [title, setTitle] = useState(initialTitle ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  // Which control opened the menu, so the popover hangs under the one pressed.
-  const [from, setFrom] = useState<"title" | "dots">("dots");
   const titleRef = useRef<HTMLButtonElement>(null);
-  const dotsRef = useRef<HTMLButtonElement>(null);
   // Set while a first fetch is in flight, so the click that started it still ends
   // with its surface open rather than silently doing nothing.
   const want = useRef<"menu" | "share" | null>(null);
@@ -106,9 +103,9 @@ export function ChatMenuButton({
             ref={titleRef}
             type="button"
             aria-haspopup="menu"
-            aria-expanded={menuOpen && from === "title"}
+            aria-expanded={menuOpen}
             aria-label={`${name} — ${t("menu.options")}`}
-            onClick={() => { setFrom("title"); show("menu"); }}
+            onClick={() => show("menu")}
             className="pointer-events-auto flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground hover:bg-hover"
           >
             <span className="truncate">{name}</span>
@@ -131,20 +128,6 @@ export function ChatMenuButton({
                 <Share2 className="h-4 w-4" />
               </Button>
             </Hint>
-            <Hint label={t("menu.options")}>
-              <Button
-                ref={dotsRef}
-                variant="ghost"
-                size="icon"
-                className="pointer-events-auto h-8 w-8 shrink-0"
-                aria-label={t("menu.options")}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen && from === "dots"}
-                onClick={() => { setFrom("dots"); show("menu"); }}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </Hint>
           </>
         )}
       </div>
@@ -158,9 +141,9 @@ export function ChatMenuButton({
           onShareOpenChange={setShareOpen}
           showTrigger={false}
           contentProps={{
-            anchor: from === "title" ? titleRef : dotsRef,
+            anchor: titleRef,
             side: "bottom",
-            align: from === "title" ? "start" : "end",
+            align: "start",
             sideOffset: 8,
             className: "w-auto",
           }}

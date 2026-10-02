@@ -135,9 +135,10 @@ interface ChatInputProps {
   /** Opens the credentials dialog from the "+" menu. Absent when this chat
    *  cannot hold any (read-only). */
   onOpenSecrets?: () => void;
-  /** Quiet text actions under the card — what this chat works with (project,
-   *  files, capabilities). The panel decides which exist for this chat. */
-  tray?: ReactNode;
+  /** Opens the move-to-project dialog from the "+" menu. Absent on a chat that
+   *  is not saved yet. */
+  onMoveToProject?: () => void;
+  projectName?: string | null;
 }
 
 export function ChatInput({
@@ -161,7 +162,8 @@ export function ChatInput({
   notice,
   sendBlocked = false,
   onOpenSecrets,
-  tray,
+  onMoveToProject,
+  projectName,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const tNotice = useTranslations("chat.notice");
@@ -416,7 +418,7 @@ export function ChatInput({
                   e.target.value = "";
                 }}
               />
-              <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets}>
+              <ComposerMenu folders={folders} onUpload={() => fileInputRef.current?.click()} onOpenSecrets={onOpenSecrets} onMoveToProject={onMoveToProject} projectName={projectName}>
                 <Hint label={t("add")}>
                   {/* A soft FILL at rest, never an edge. The composer card already
                       draws the only edge this row needs, and the model and depth
@@ -576,7 +578,6 @@ export function ChatInput({
           <rect x="0" y="0" width="100%" height="100%" pathLength={100} />
         </svg>
         </div>
-        {tray}
       </div>
     </div>
   );

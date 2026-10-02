@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- The strip under the composer is gone: the "+" menu now also holds Move to project and a Capabilities row (Skills, Connectors, Plugins). The chat header's "…" button is removed; the chat's name opens the one chat menu.
+
 ## [0.45.0] - 2026-10-02
 
 ### Added

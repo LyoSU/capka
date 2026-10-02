@@ -436,12 +436,8 @@
       "queue": "Додати в чергу",
       "queueOrSteer": "Додати в чергу — Alt+Enter вкине в поточну відповідь",
       "add": "Додати",
-      "tray": {
-        "project": "Проєкт",
-        "files": "Файли",
-        "capabilities": "Можливості"
-      },
       "menu": {
+        "capabilities": "Можливості",
         "secrets": "Секрети цього чату",
         "skills": "Навички",
         "connectors": "Конектори",

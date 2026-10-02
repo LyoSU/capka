@@ -6,7 +6,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import {
   FileUp, FolderPlus, FolderUp, Folder, FolderOpen, RefreshCw, Download, Loader2, X,
-  KeyRound, BookOpen, Blocks, Puzzle, ChevronRight,
+  KeyRound, BookOpen, Blocks, Puzzle, ChevronRight, ChevronLeft, FolderInput, Sparkles,
 } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
@@ -19,27 +19,38 @@ type FolderSync = ReturnType<typeof useFolderSync>;
 /**
  * The composer's "+" menu: everything a person can bring INTO this chat, in one
  * place — files, a folder from their computer (when folder access is on), the
- * credentials the assistant may use here. The doors to what extends the assistant
- * (skills, connectors, plugins) live once, in the tray under the composer. One
- * button rather than a row of icons, so the footer stays legible on a phone and a new option
- * never costs the composer another glyph.
+ * credentials the assistant may use here — and, below a rule, where the chat lives
+ * (its project) and the doors to what extends the assistant (skills, connectors,
+ * plugins), the last behind one "Capabilities" row that drills in. One button
+ * rather than a row of icons, so the footer stays legible on a phone and a new
+ * option never costs the composer another glyph.
  */
 export function ComposerMenu({
   folders,
   onUpload,
   onOpenSecrets,
+  onMoveToProject,
+  projectName,
   children,
 }: {
   folders?: FolderSync;
   onUpload: () => void;
   /** Absent for a chat that cannot hold credentials (read-only, no id yet). */
   onOpenSecrets?: () => void;
+  /** Opens the move-to-project dialog. Absent for a chat that is not saved yet,
+   *  which has nothing to move. */
+  onMoveToProject?: () => void;
+  projectName?: string | null;
   children: React.ReactNode;
 }) {
   const t = useTranslations("chat.folders");
   const tMenu = useTranslations("chat.input.menu");
   const locale = useLocale();
+  const tChat = useTranslations("chat.menu");
   const [open, setOpen] = useState(false);
+  // "main" is the list; "capabilities" drills in (a touch-friendly stand-in for a
+  // flyout, which has no hover to open it).
+  const [view, setView] = useState<"main" | "capabilities">("main");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [imported, setImported] = useState<{ name: string; count: number } | null>(null);
@@ -88,9 +99,19 @@ export function ComposerMenu({
   const icon = "size-5 shrink-0 text-muted-foreground";
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setView("main"); }}>
       <PopoverTrigger className="outline-none">{children}</PopoverTrigger>
       <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
+        {view === "capabilities" ? (
+          <>
+            <button type="button" className={`${item} font-medium`} onClick={() => setView("main")}>
+              <ChevronLeft className={icon} />
+              {tMenu("capabilities")}
+            </button>
+            <CapabilityLinks onNavigate={() => setOpen(false)} />
+          </>
+        ) : (
+          <>
         <button type="button" className={item} onClick={() => { onUpload(); setOpen(false); }}>
           <FileUp className={icon} />
           {t("uploadFiles")}
@@ -194,13 +215,29 @@ export function ComposerMenu({
         )}
 
         {err && <div className="px-3 pt-1 text-xs text-destructive">{err}</div>}
+
+        <div className="my-1.5 border-t border-border" />
+
+        {onMoveToProject && (
+          <button type="button" className={item} onClick={() => { setOpen(false); onMoveToProject(); }}>
+            <FolderInput className={icon} />
+            <span className="flex-1">{tChat("moveToProject")}</span>
+            {projectName && <span className="max-w-24 truncate text-xs text-muted-foreground">{projectName}</span>}
+          </button>
+        )}
+        <button type="button" className={item} onClick={() => setView("capabilities")}>
+          <Sparkles className={icon} />
+          <span className="flex-1">{tMenu("capabilities")}</span>
+          <ChevronRight className="size-3.5 text-muted-foreground/60" />
+        </button>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );
 }
 
-/** Doors, not actions: each opens the settings page that owns the thing. Shared
- *  by the composer tray's "Capabilities". */
+/** Doors, not actions: each opens the settings page that owns the thing. */
 export function CapabilityLinks({ onNavigate }: { onNavigate?: () => void }) {
   const tMenu = useTranslations("chat.input.menu");
   const item = "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm leading-5 text-foreground transition-colors hover:bg-hover";

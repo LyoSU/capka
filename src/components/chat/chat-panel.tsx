@@ -43,9 +43,7 @@ import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider, recheckFiles } from "@/components/chat/file-preview";
 import { ChatMenuButton } from "@/components/chat/chat-menu-button";
-import { CapabilityLinks } from "@/components/chat/composer-menu";
 import { MoveToProjectDialog } from "@/components/projects/move-to-project-dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { SelectionActions } from "@/components/chat/selection-actions";
 import { Button } from "@/components/ui/button";
@@ -878,43 +876,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     </>
   );
 
-  // What this chat works with, as quiet text under the composer: where it lives,
-  // and the doors to what extends the assistant. Each opens a surface that already
-  // exists. "Project" needs a saved chat to move, so a fresh one (still on the
-  // greeting) leaves it out. Files is the header's button once there is a header;
-  // on the greeting (no header) it appears only for a project chat, whose
-  // workspace may already hold files.
-  const trayBtn = "rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  const trayEl = readOnly ? null : (
-    <div className="mt-1.5 flex items-center gap-0.5 px-1.5">
-      {!showGreeting && (
-        <button type="button" className={`${trayBtn} min-w-0 truncate`} onClick={() => setMoveOpen(true)}>
-          {projectName ?? t("input.tray.project")}
-        </button>
-      )}
-      {showGreeting && projectId && (
-        <button type="button" className={trayBtn} onClick={() => setFilesOpen(true)}>
-          {t("input.tray.files")}
-        </button>
-      )}
-      <Popover>
-        <PopoverTrigger className={`${trayBtn} data-popup-open:text-foreground`}>{t("input.tray.capabilities")}</PopoverTrigger>
-        <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
-          <CapabilityLinks />
-        </PopoverContent>
-      </Popover>
-      <MoveToProjectDialog
-        open={moveOpen}
-        onOpenChange={setMoveOpen}
-        chat={{ id: chatId, title: title ?? null, projectId: projectId ?? null }}
-        onMoved={() => {
-          window.dispatchEvent(new CustomEvent("chat:changed", { detail: { id: chatId } }));
-          router.refresh();
-        }}
-      />
-    </div>
-  );
-
   const inputEl = readOnly ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
       <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/50 px-4 py-5 text-center">
@@ -1000,7 +961,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       }
       sendBlocked={modelGone}
       onOpenSecrets={readOnly ? undefined : () => setSecretsOpen(true)}
-      tray={trayEl}
+      onMoveToProject={showGreeting ? undefined : () => setMoveOpen(true)}
+      projectName={projectName}
     />
   );
 
@@ -1104,6 +1066,15 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     <PreviewProvider>
     {/* Full-window drop target — disabled for read-only Telegram chats (no composer). */}
     <FileDropZone onFiles={attachments.add} disabled={readOnly} />
+    <MoveToProjectDialog
+      open={moveOpen}
+      onOpenChange={setMoveOpen}
+      chat={{ id: chatId, title: title ?? null, projectId: projectId ?? null }}
+      onMoved={() => {
+        window.dispatchEvent(new CustomEvent("chat:changed", { detail: { id: chatId } }));
+        router.refresh();
+      }}
+    />
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
@@ -1367,7 +1338,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           </div>
 
           {/* Floating header: the chat's name at the left (and the way into its
-              menu), files / share / ⋯ at the right. On desktop it fades to
+              menu), files and share at the right. On desktop it fades to
               transparent so messages scroll up behind it; a phone has no room for
               a fade that tall, so there it is a frosted bar that clears the notch.
               pointer-events-none lets scroll-over pass through; only the controls

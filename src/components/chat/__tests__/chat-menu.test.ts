@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * The chat header's ⋯ runs the same menu as a sidebar row.
+ * The chat header's title opens the same menu as a sidebar row — and it is the only door.
  *
  * Rename used to be an INLINE field that replaced the component's whole output —
  * right on a sidebar row, broken in the header (a `w-full` input inside an
@@ -13,7 +13,14 @@ import { readFileSync } from "node:fs";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
-describe("the chat header's ⋯ menu", () => {
+describe("the chat header's title menu", () => {
+  it("is the one door: no second ⋯ button opens the same menu", () => {
+    const btn = read("src/components/chat/chat-menu-button.tsx");
+    expect(btn).not.toMatch(/MoreHorizontal/);
+    expect(btn.match(/show\("menu"\)/g)).toHaveLength(1);
+    expect(btn).toMatch(/aria-label=\{`\$\{name\} — \$\{t\("menu\.options"\)\}`\}/);
+  });
+
   it("has one rename item and no inline field", () => {
     const menu = read("src/components/chat/chat-context-menu.tsx");
     expect(menu.match(/key: "rename"/g)).toHaveLength(1);
