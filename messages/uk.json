@@ -284,6 +284,8 @@
       "namePlaceholder": "Назва, наприклад Ключ Stripe",
       "valuePlaceholder": "Вставте значення",
       "save": "Зберегти",
+      "pastedAsText": "Як текст",
+      "pastedAsTextHint": "Вставити як звичайний текст",
       "remove": "Видалити {name}",
       "nameInvalid": "Назва має починатися з літери, наприклад Ключ Stripe.",
       "saveFailed": "Не вдалося зберегти. Спробуйте ще раз.",

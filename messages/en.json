@@ -284,6 +284,8 @@
       "namePlaceholder": "Name, for example Stripe key",
       "valuePlaceholder": "Paste the value",
       "save": "Save",
+      "pastedAsText": "As text",
+      "pastedAsTextHint": "Insert as plain, editable text",
       "remove": "Remove {name}",
       "nameInvalid": "Use a name that starts with a letter, like Stripe key.",
       "saveFailed": "Could not save it. Please try again.",

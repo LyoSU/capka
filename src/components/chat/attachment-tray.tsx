@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { X, RotateCw, Loader2 } from "lucide-react";
 import { FileTile, SandboxFileTile, BinaryFileThumb, type PreviewFile } from "./file-preview";
-import type { AttachedFile } from "./chat-input";
+import { isPastedText, type AttachedFile } from "./chat-input";
 import { Hint } from "@/components/ui/tooltip";
 
 /**
@@ -16,12 +16,14 @@ import { Hint } from "@/components/ui/tooltip";
  * copies of "what a half-uploaded file looks like" is three chances to disagree.
  */
 export function AttachmentTray({
-  files, chatId, onRemove, onRetry, className,
+  files, chatId, onRemove, onRetry, onInsertText, className,
 }: {
   files: AttachedFile[];
   chatId: string;
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
+  /** Puts a pasted-text chip's content back into the text box as editable text. */
+  onInsertText?: (af: AttachedFile) => void;
   className?: string;
 }) {
   const t = useTranslations("chat.input");
@@ -54,6 +56,21 @@ export function AttachmentTray({
     </button>
   );
 
+  // A paste that became a file gets a way back: quiet text on the tile's corner,
+  // opposite the x, so the conversion is never a one-way door.
+  const asTextButton = (af: AttachedFile) =>
+    onInsertText && isPastedText(af) ? (
+      <Hint label={t("pastedAsTextHint")}>
+        <button
+          type="button"
+          onClick={() => onInsertText(af)}
+          className="absolute left-2 top-2 z-10 rounded-md bg-background/85 px-1.5 py-0.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {t("pastedAsText")}
+        </button>
+      </Hint>
+    ) : null;
+
   return (
     // Wraps and scrolls, so many files never push the message body off-screen.
     <div className={`flex max-h-44 flex-wrap gap-3 overflow-y-auto scrollbar-thin ${className ?? ""}`}>
@@ -70,7 +87,7 @@ export function AttachmentTray({
           const pf: PreviewFile = { path: af.ref.name, name: af.ref.name, chatId };
           return (
             <div key={af.id} className="animate-pop-in" style={enter}>
-              <SandboxFileTile file={pf} viewable={[pf]} overlay={removeButton(af)} />
+              <SandboxFileTile file={pf} viewable={[pf]} overlay={<>{removeButton(af)}{asTextButton(af)}</>} />
             </div>
           );
         }
@@ -104,6 +121,7 @@ export function AttachmentTray({
           ) : (
             <>
               {removeButton(af)}
+              {asTextButton(af)}
               <div aria-hidden className="absolute inset-0 z-[1] grid place-items-center rounded-lg bg-background/55">
                 <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>

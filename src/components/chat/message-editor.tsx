@@ -9,7 +9,7 @@ import type { FileRef } from "@/lib/constants";
 import { useAttachments } from "./use-attachments";
 import { useAutoGrow } from "./use-auto-grow";
 import { AttachmentTray } from "./attachment-tray";
-import { PASTE_AS_FILE_CHARS, pastedTextFile, uniquelyNamedPaste } from "./chat-input";
+import { PASTE_AS_FILE_CHARS, insertAtCaret, pastedTextFile, uniquelyNamedPaste, type AttachedFile } from "./chat-input";
 
 /**
  * Rewriting one message — its text AND the files it carries. Used both by a
@@ -57,6 +57,18 @@ export function MessageEditor({
     el.setSelectionRange(el.value.length, el.value.length);
   }, [autoFocus]);
 
+  const insertPastedAsText = async (af: AttachedFile) => {
+    const ta = taRef.current;
+    if (!af.file || !ta) return;
+    const text = await af.file.text();
+    const next = insertAtCaret(ta.value, text, ta.selectionStart, ta.selectionEnd);
+    attachments.remove(af.id);
+    ta.value = next.value;
+    resize();
+    ta.focus();
+    ta.setSelectionRange(next.caret, next.caret);
+  };
+
   const save = () => {
     const text = taRef.current?.value.trim() ?? "";
     // Nothing left to say and nothing to show — treat as a cancel rather than
@@ -74,6 +86,7 @@ export function MessageEditor({
           chatId={chatId}
           onRemove={attachments.remove}
           onRetry={attachments.retry}
+          onInsertText={insertPastedAsText}
           className="px-3 pt-3"
         />
         <textarea

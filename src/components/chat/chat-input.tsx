@@ -31,6 +31,16 @@ export function pastedTextFile(text: string): File {
   return new File([text], `pasted-text-${stamp}.txt`, { type: "text/plain" });
 }
 
+/** A chip made by {@link pastedTextFile} (and still holding its bytes), as opposed to a file the person chose. */
+export function isPastedText(af: { name: string; file?: File }): boolean {
+  return !!af.file && /^pasted-text-[\d-]+\.txt$/.test(af.name);
+}
+
+/** `text` placed over the selection `[start, end)` of `value`; `caret` lands after it. */
+export function insertAtCaret(value: string, text: string, start: number, end: number): { value: string; caret: number } {
+  return { value: value.slice(0, start) + text + value.slice(end), caret: start + text.length };
+}
+
 /**
  * Clipboard screenshots all arrive named "image.png" (or blank), so repeat pastes
  * collide: the sandbox writes them to the same path (second overwrites first) and
@@ -258,6 +268,24 @@ export function ChatInput({
     }
   };
 
+  // The way back from the paste-to-file conversion: the chip's text returns to
+  // the box, where it can be edited, and the chip goes.
+  const insertPastedAsText = async (af: AttachedFile) => {
+    if (!af.file) return;
+    const text = await af.file.text();
+    const ta = textareaRef.current;
+    const start = ta?.selectionStart ?? value.length;
+    const end = ta?.selectionEnd ?? value.length;
+    const next = insertAtCaret(value, text, start, end);
+    onRemoveFile(af.id);
+    onChange(next.value);
+    requestAnimationFrame(() => {
+      resize();
+      ta?.focus();
+      ta?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const pastedFiles = Array.from(e.clipboardData.files);
     if (pastedFiles.length > 0) {
@@ -308,6 +336,7 @@ export function ChatInput({
             chatId={chatId}
             onRemove={onRemoveFile}
             onRetry={onRetryFile}
+            onInsertText={insertPastedAsText}
             className="px-3 pt-3"
           />
           {/* Quiet heads-up when the picked model can't read a staged file's
