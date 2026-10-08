@@ -253,6 +253,7 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
     apiStyle: (config.apiStyle as ApiStyle | null) ?? undefined,
+    workspaceId: config.workspaceId || undefined,
     // Honor the admin's strict-SSRF policy on the redirect re-check too, matching
     // the assertSafeProviderConfig pre-flight above.
     blockPrivate: await getBlockPrivateProviderUrls(),

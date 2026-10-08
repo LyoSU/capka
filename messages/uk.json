@@ -1401,6 +1401,8 @@
       "showKey": "Показати API-ключ",
       "hideKey": "Сховати API-ключ",
       "baseUrl": "Базовий URL",
+      "workspaceId": "ID воркспейсу (необов'язково)",
+      "workspaceIdHint": "Лише для ключів, що починаються з sk-ant-usr-. Скопіюйте ID воркспейсу з Anthropic Console. Для звичайного API-ключа залиште порожнім.",
       "model": "Модель",
       "enterKeyFirst": "Спершу введіть свій API-ключ",
       "testSave": "Перевірити й зберегти",

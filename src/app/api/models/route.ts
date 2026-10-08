@@ -40,13 +40,13 @@ async function decryptKey(apiKey: string | null): Promise<string | undefined> {
   return decrypt(apiKey, mk);
 }
 
-async function respond(provider: string, apiKey: string | undefined, baseUrl: string | null, isShared: boolean) {
+async function respond(provider: string, apiKey: string | undefined, baseUrl: string | null, isShared: boolean, workspaceId?: string | null) {
   if (!isProviderName(provider)) return empty();
 
   let models: ModelInfo[] = [];
   let error: string | undefined;
   try {
-    models = await listProviderModels({ provider, apiKey, baseUrl: baseUrl ?? undefined });
+    models = await listProviderModels({ provider, apiKey, baseUrl: baseUrl ?? undefined, workspaceId: workspaceId || undefined });
     // Tag the connection provider so the picker gates attachment badges the same
     // way the runner does (single-config / credentials paths carry no configId).
     models = models.map((m) => ({ ...m, configProvider: provider }));
@@ -91,7 +91,7 @@ async function respondAggregated(
       if (!isProviderName(c.provider)) return { models: [] as ModelInfo[] };
       const apiKey = await decryptKey(c.apiKey);
       try {
-        let models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
+        let models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined, workspaceId: c.workspaceId ?? undefined });
         // A shared (admin) key spends the org budget, so the admin's min-context /
         // max-price caps gate what users may pick from it; own keys are untouched.
         if (c.isShared) models = await applySharedGovernance(models);
@@ -163,7 +163,7 @@ export const GET = apiHandler(async (req: Request) => {
       .where(and(eq(providerConfigs.id, configId), eq(providerConfigs.userId, userId)))
       .limit(1);
     if (!cfg) return empty();
-    return respond(cfg.provider, await decryptKey(cfg.apiKey), cfg.baseUrl, false);
+    return respond(cfg.provider, await decryptKey(cfg.apiKey), cfg.baseUrl, false, cfg.workspaceId);
   }
 
   const configs = await resolveEnabledConfigs(userId);
@@ -183,7 +183,7 @@ export const POST = apiHandler(async (req: Request) => {
   // Lists models for arbitrary credentials/base URLs — restrict to the roles
   // that can configure providers (also covers the in-progress admin in setup).
   await requireRole("admin", "user");
-  const { provider, apiKey, baseUrl } = await req.json();
+  const { provider, apiKey, baseUrl, workspaceId } = await req.json();
   if (!provider) return empty();
-  return respond(provider, apiKey || undefined, baseUrl ?? null, false);
+  return respond(provider, apiKey || undefined, baseUrl ?? null, false, typeof workspaceId === "string" ? workspaceId.trim() : null);
 });

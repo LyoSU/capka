@@ -126,6 +126,9 @@ export const providerConfigs = pgTable("provider_configs", {
   // Chat Completions, "responses" forces the Responses API. Only the `openai`
   // provider reads this; every other provider has a single correct transport.
   apiStyle: text("api_style"),
+  // Anthropic only: the workspace a user-scoped key (sk-ant-usr-…) must name in the
+  // `anthropic-workspace-id` header, or Anthropic answers 400. null = not needed.
+  workspaceId: text("workspace_id"),
   // User-chosen ordering of their own connections. Drives the settings list and,
   // through resolveEnabledConfigs, the order connections appear in the chat model
   // picker. Lower comes first; ties fall back to createdAt.

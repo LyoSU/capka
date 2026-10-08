@@ -29,6 +29,12 @@ function validBaseUrl(value: unknown): boolean {
   }
 }
 
+// The workspace ID travels as an HTTP header value, so keep it to a plain token;
+// empty is allowed (clears it).
+function validWorkspaceId(value: unknown): boolean {
+  return value === undefined || value === null || /^[\w-]{0,128}$/.test(String(value).trim());
+}
+
 export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
 
@@ -43,6 +49,7 @@ export const GET = apiHandler(async () => {
       label: providerConfigs.label,
       iconSlug: providerConfigs.iconSlug,
       apiStyle: providerConfigs.apiStyle,
+      workspaceId: providerConfigs.workspaceId,
       apiKey: providerConfigs.apiKey,
       createdAt: providerConfigs.createdAt,
     })
@@ -77,9 +84,12 @@ export const POST = apiHandler(async (req: Request) => {
     throw new ForbiddenError("Adding your own provider key is disabled on this instance.");
   }
 
-  const { provider, apiKey, baseUrl, defaultModel, label, iconSlug, shared, apiStyle } = await req.json();
+  const { provider, apiKey, baseUrl, defaultModel, label, iconSlug, shared, apiStyle, workspaceId } = await req.json();
   if (!provider || !PROVIDERS.includes(provider)) {
     return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
+  }
+  if (!validWorkspaceId(workspaceId)) {
+    return Response.json({ error: "Workspace ID may contain only letters, digits, - and _." }, { status: 400 });
   }
   if (!validBaseUrl(baseUrl)) {
     return Response.json({ error: "Base URL must be a valid http(s) URL." }, { status: 400 });
@@ -109,6 +119,7 @@ export const POST = apiHandler(async (req: Request) => {
     iconSlug: iconSlug || null,
     // Only meaningful for the openai provider; harmless null elsewhere.
     apiStyle: provider === "openai" ? normalizeApiStyle(apiStyle) : null,
+    workspaceId: provider === "anthropic" ? String(workspaceId ?? "").trim() || null : null,
     sortOrder: next,
   });
 
@@ -118,7 +129,7 @@ export const POST = apiHandler(async (req: Request) => {
 
 export const PUT = apiHandler(async (req: Request) => {
   const { userId, role } = await requireRole("admin", "user");
-  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle, order, apiKey, baseUrl } = await req.json();
+  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle, order, apiKey, baseUrl, workspaceId } = await req.json();
 
   // Reorder: an ordered list of the caller's OWN config ids. Every id must
   // belong to the caller and the list must cover exactly their configs — so a
@@ -177,15 +188,19 @@ export const PUT = apiHandler(async (req: Request) => {
   // Credentials: an empty/absent key means "keep the current one"; a typed one
   // replaces it. The base URL is replaced when present ("" clears it).
   const newKey = typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : null;
-  if (newKey || baseUrl !== undefined) {
+  if (newKey || baseUrl !== undefined || workspaceId !== undefined) {
     if (role !== "admin" && !(await ownKeysAllowed())) {
       throw new ForbiddenError("Changing your own provider key is disabled on this instance.");
     }
     if (!validBaseUrl(baseUrl)) {
       return Response.json({ error: "Base URL must be a valid http(s) URL." }, { status: 400 });
     }
+    if (!validWorkspaceId(workspaceId)) {
+      return Response.json({ error: "Workspace ID may contain only letters, digits, - and _." }, { status: 400 });
+    }
     if (newKey) set.apiKey = encrypt(newKey, await getMasterKey());
     if (baseUrl !== undefined) set.baseUrl = baseUrl || null;
+    if (workspaceId !== undefined) set.workspaceId = String(workspaceId ?? "").trim() || null;
   }
   if (apiStyle !== undefined) set.apiStyle = normalizeApiStyle(apiStyle);
   if (Object.keys(set).length === 0) return Response.json({ error: "Nothing to update" }, { status: 400 });

@@ -366,6 +366,7 @@ async function listAnthropic(
   apiKey: string,
   baseUrl?: string,
   blockPrivate = false,
+  workspaceId?: string,
 ): Promise<ModelInfo[]> {
   // A custom endpoint (an Anthropic-compatible aggregator like yunwu.ai) is
   // reached over the native Messages API at /v1/messages, but its MODEL LISTING
@@ -378,7 +379,7 @@ async function listAnthropic(
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       // Required by a user-scoped key (sk-ant-usr-…); see the inference client in providers/index.ts.
-      ...(process.env.ANTHROPIC_WORKSPACE_ID && { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID }),
+      ...(workspaceId && { "anthropic-workspace-id": workspaceId }),
     },
   })) as { data?: { id: string; display_name?: string }[] };
   const list = raw.data ?? [];
@@ -529,9 +530,9 @@ function rememberModels(key: string, models: ModelInfo[]): void {
   modelsCache.set(key, { at: now, models });
 }
 
-function modelsCacheKey(o: { provider: string; apiKey?: string; baseUrl?: string }): string {
+function modelsCacheKey(o: { provider: string; apiKey?: string; baseUrl?: string; workspaceId?: string }): string {
   const keyHash = o.apiKey ? createHash("sha256").update(o.apiKey).digest("hex").slice(0, 16) : "";
-  return `${o.provider}|${o.baseUrl ?? ""}|${keyHash}`;
+  return `${o.provider}|${o.baseUrl ?? ""}|${o.workspaceId ?? ""}|${keyHash}`;
 }
 
 /** Drop the cache (call when a provider config changes so the next list is fresh). */
@@ -588,6 +589,7 @@ export async function listProviderModels(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;
+  workspaceId?: string;
 }): Promise<ModelInfo[]> {
   // Governance is NOT applied here — it's scoped to shared offerings by the
   // caller (see applySharedGovernance). Own/owner lists are unfiltered.
@@ -599,6 +601,7 @@ async function listProviderModelsCached(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;
+  workspaceId?: string;
 }): Promise<ModelInfo[]> {
   // All providers (incl. OpenRouter, now a live keyed API call) cache per
   // credential set for a few minutes so re-mounting the picker doesn't re-probe.
@@ -614,6 +617,7 @@ async function listProviderModelsLive(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;
+  workspaceId?: string;
 }): Promise<ModelInfo[]> {
   // Only the user-supplied-URL providers need the SSRF policy; OpenRouter is
   // catalog-only and OpenAI/Anthropic use fixed public hosts.
@@ -666,7 +670,7 @@ async function listProviderModelsLive(opts: {
       return listAzure(opts.apiKey, opts.baseUrl, blockPrivate);
     case "anthropic":
       if (!opts.apiKey) return [];
-      return listAnthropic(opts.apiKey, opts.baseUrl, blockPrivate);
+      return listAnthropic(opts.apiKey, opts.baseUrl, blockPrivate, opts.workspaceId);
     case "google":
       if (!opts.apiKey) return [];
       return listGoogle(opts.apiKey);

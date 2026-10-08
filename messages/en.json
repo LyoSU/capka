@@ -1401,6 +1401,8 @@
       "showKey": "Show API key",
       "hideKey": "Hide API key",
       "baseUrl": "Base URL",
+      "workspaceId": "Workspace ID (optional)",
+      "workspaceIdHint": "Only for keys starting with sk-ant-usr-. Copy the workspace ID from the Anthropic Console. Leave empty for a regular API key.",
       "model": "Model",
       "enterKeyFirst": "Enter your API key first",
       "testSave": "Test & save",

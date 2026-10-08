@@ -24,6 +24,7 @@ export interface ProviderConfig {
   label: string | null;
   iconSlug: string | null;
   apiStyle: string | null;
+  workspaceId?: string | null;
   /** Whether a key is stored, and its last four characters — never the key. */
   hasKey?: boolean;
   keyHint?: string | null;

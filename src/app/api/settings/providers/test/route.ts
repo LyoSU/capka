@@ -17,7 +17,7 @@ export const POST = apiHandler(async (req: Request) => {
   if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
 
   const body = await req.json();
-  const { provider, modelId, baseUrl, apiStyle, configId } = body;
+  const { provider, modelId, baseUrl, apiStyle, workspaceId, configId } = body;
   let apiKey: string | undefined = body.apiKey;
   if (!provider || !modelId) {
     return Response.json({ error: "Missing provider or modelId" }, { status: 400 });
@@ -48,6 +48,7 @@ export const POST = apiHandler(async (req: Request) => {
       // Test over the very transport the saved config will use, so a "tools work?"
       // check isn't a false positive on a different API.
       apiStyle: apiStyle || undefined,
+      workspaceId: typeof workspaceId === "string" ? workspaceId.trim() || undefined : undefined,
     });
 
     // Probe over the STREAMING transport — that's the ONLY one real turns use

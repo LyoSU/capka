@@ -271,7 +271,7 @@ function ConnChip({ icon, label }: { icon?: string | null; label?: string | null
 type Source =
   | { mode: "active" }
   | { mode: "config"; configId: string }
-  | { mode: "credentials"; provider: ProviderName; apiKey?: string; baseUrl?: string };
+  | { mode: "credentials"; provider: ProviderName; apiKey?: string; baseUrl?: string; workspaceId?: string };
 
 interface ModelsState {
   models: ModelInfo[];
@@ -351,7 +351,7 @@ export function fetchModelsShared(key: string, source: Source, force = false): P
         ? await fetch("/api/models", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ provider: source.provider, apiKey: source.apiKey, baseUrl: source.baseUrl }),
+            body: JSON.stringify({ provider: source.provider, apiKey: source.apiKey, baseUrl: source.baseUrl, workspaceId: source.workspaceId }),
           })
         : source.mode === "config"
           ? await fetch(`/api/models?configId=${encodeURIComponent(source.configId)}`)
@@ -379,7 +379,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string, 
   // Stable key so the effect only re-runs when the real inputs change.
   const key =
     source.mode === "credentials"
-      ? `cred:${source.provider}:${source.apiKey ?? ""}:${source.baseUrl ?? ""}`
+      ? `cred:${source.provider}:${source.apiKey ?? ""}:${source.baseUrl ?? ""}:${source.workspaceId ?? ""}`
       : source.mode === "config"
         ? `cfg:${source.configId}`
         : "active";
@@ -1186,6 +1186,7 @@ interface ModelPickerProps {
   provider?: ProviderName;
   apiKey?: string;
   baseUrl?: string;
+  workspaceId?: string;
   /** List models for a specific saved provider config (editing its default). */
   configId?: string;
   placeholder?: string;
@@ -1230,6 +1231,7 @@ export function ModelPicker({
   provider,
   apiKey,
   baseUrl,
+  workspaceId,
   configId,
   placeholder,
   disabled,
@@ -1279,7 +1281,7 @@ export function ModelPicker({
   useBackDismiss(open && isMobile, close);
 
   const source: Source = provider
-    ? { mode: "credentials", provider, apiKey, baseUrl }
+    ? { mode: "credentials", provider, apiKey, baseUrl, workspaceId }
     : configId
       ? { mode: "config", configId }
       : { mode: "active" };

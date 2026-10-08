@@ -76,6 +76,8 @@ export function getModel(
     apiKey?: string;
     baseUrl?: string;
     apiStyle?: ApiStyle | null;
+    /** Anthropic only: the workspace a user-scoped key must name. */
+    workspaceId?: string;
     blockPrivate?: boolean;
     /** The connection row this model runs on — the key under which a refusal of
      *  `stream_options` is remembered (see stream-usage.ts). Absent off the turn
@@ -154,7 +156,7 @@ export function getModel(
     case "anthropic": {
       // A user-scoped key (sk-ant-usr-…) is rejected with a 400 unless the request
       // names the workspace; first-party host only, never forwarded to a custom endpoint.
-      const workspaceId = !config?.baseUrl ? process.env.ANTHROPIC_WORKSPACE_ID : undefined;
+      const workspaceId = !config?.baseUrl ? config?.workspaceId : undefined;
       const p = createAnthropic({
         apiKey: config?.apiKey,
         baseURL: config?.baseUrl,

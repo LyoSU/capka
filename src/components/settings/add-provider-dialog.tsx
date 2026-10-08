@@ -56,8 +56,14 @@ export function AddProviderDialog({
   // default Responses API. Off persists as null (auto = Responses); on
   // persists "chat".
   const [useChatApi, setUseChatApi] = useState(editing?.apiStyle === "chat");
+  // Anthropic only: a user-scoped key (sk-ant-usr-…) must name its workspace.
+  const [workspaceId, setWorkspaceId] = useState(editing?.workspaceId ?? "");
 
   const meta = PROVIDER_META[provider];
+  // The header goes to Anthropic's own host only, so the field (and the value) is
+  // dropped once a custom endpoint is typed.
+  const showWorkspaceId = provider === "anthropic" && !baseUrl.trim();
+  const effectiveWorkspaceId = showWorkspaceId ? workspaceId.trim() || undefined : undefined;
 
   function changeProvider(next: ProviderName) {
     setProvider(next);
@@ -66,6 +72,7 @@ export function AddProviderDialog({
     setLabel("");
     setIconSlug(null);
     setUseChatApi(false);
+    setWorkspaceId("");
     setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
   }
 
@@ -77,6 +84,7 @@ export function AddProviderDialog({
     setLabel("");
     setIconSlug(null);
     setUseChatApi(false);
+    setWorkspaceId("");
     setFormShared(true);
     setShowKey(false);
   }
@@ -130,6 +138,7 @@ export function AddProviderDialog({
           modelId,
           baseUrl: effectiveBaseUrl,
           apiStyle: effectiveApiStyle,
+          workspaceId: effectiveWorkspaceId,
         }),
       });
 
@@ -152,6 +161,8 @@ export function AddProviderDialog({
             iconSlug,
             shared: isAdmin ? formShared : undefined,
             apiStyle: provider === "openai" || provider === "azure" ? effectiveApiStyle ?? null : undefined,
+            // "" clears a stored ID (e.g. after switching to a custom endpoint).
+            workspaceId: provider === "anthropic" ? effectiveWorkspaceId ?? "" : undefined,
           }),
         });
         if (putRes.ok) {
@@ -177,6 +188,7 @@ export function AddProviderDialog({
           iconSlug: meta.requiresBaseUrl ? iconSlug : undefined,
           shared: isAdmin ? formShared : undefined,
           apiStyle: effectiveApiStyle,
+          workspaceId: effectiveWorkspaceId,
         }),
       });
 
@@ -278,6 +290,14 @@ export function AddProviderDialog({
               </div>
             )}
 
+            {showWorkspaceId && (
+              <div className="space-y-1.5">
+                <label className="text-sm">{t("workspaceId")}</label>
+                <Input value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" />
+                <p className="text-xs leading-snug text-muted-foreground">{t("workspaceIdHint")}</p>
+              </div>
+            )}
+
             {(provider === "openai" || provider === "azure") && (
               <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
                 <div className="min-w-0">
@@ -294,9 +314,9 @@ export function AddProviderDialog({
                 variant="field"
                 value={defaultModel}
                 onChange={setDefaultModel}
-                {...(editing && !apiKey && baseUrl === (editing.baseUrl ?? "")
+                {...(editing && !apiKey && baseUrl === (editing.baseUrl ?? "") && workspaceId === (editing.workspaceId ?? "")
                   ? { configId: editing.id }
-                  : { provider, apiKey, baseUrl })}
+                  : { provider, apiKey, baseUrl, workspaceId: effectiveWorkspaceId })}
                 disabled={!editing && ((meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl))}
                 placeholder={!editing && meta.requiresKey && !apiKey ? t("enterKeyFirst") : t("pickModel")}
               />
