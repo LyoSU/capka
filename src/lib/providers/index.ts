@@ -152,7 +152,15 @@ export function getModel(
       return config?.apiStyle === "chat" ? p.chat(modelId) : p(modelId);
     }
     case "anthropic": {
-      const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
+      // A user-scoped key (sk-ant-usr-…) is rejected with a 400 unless the request
+      // names the workspace; first-party host only, never forwarded to a custom endpoint.
+      const workspaceId = !config?.baseUrl ? process.env.ANTHROPIC_WORKSPACE_ID : undefined;
+      const p = createAnthropic({
+        apiKey: config?.apiKey,
+        baseURL: config?.baseUrl,
+        headers: workspaceId ? { "anthropic-workspace-id": workspaceId } : undefined,
+        fetch: guardedFetchFor(config?.baseUrl, blockPrivate),
+      });
       return p(modelId);
     }
     case "openrouter": {

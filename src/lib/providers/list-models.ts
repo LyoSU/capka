@@ -374,7 +374,12 @@ async function listAnthropic(
   // endpoint so the picker populates instead of 401-ing against api.anthropic.com.
   if (baseUrl) return listOpenAICompatible(baseUrl, apiKey, { blockPrivate });
   const raw = (await fetchJson("https://api.anthropic.com/v1/models?limit=100", {
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      // Required by a user-scoped key (sk-ant-usr-…); see the inference client in providers/index.ts.
+      ...(process.env.ANTHROPIC_WORKSPACE_ID && { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID }),
+    },
   })) as { data?: { id: string; display_name?: string }[] };
   const list = raw.data ?? [];
   const lookup = await catalogLookup(list.map((m) => m.id));

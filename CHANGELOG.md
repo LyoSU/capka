@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `ANTHROPIC_WORKSPACE_ID` env var: sent as `anthropic-workspace-id` on the default Anthropic host, so user-scoped keys (`sk-ant-usr-…`, rejected with HTTP 400 otherwise) can list and run models. The failed-catalog log line now carries `status` and `name`.
+
 ## [0.46.0] - 2026-10-02
 
 ### Changed

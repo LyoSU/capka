@@ -22,9 +22,15 @@ function recordModelLoadFailure(provider: string, error: unknown): void {
   // Provider errors can echo API keys, signed URLs, upstream response bodies, or
   // internal hostnames. Keep the response stable and record only the classified
   // category server-side — never the untrusted raw message.
+  // `status` is the bare HTTP code `fetchJson` puts in its message ("HTTP 403");
+  // `name` is the error class (TimeoutError, SyntaxError…). Neither can carry
+  // upstream content, and together they split what "unknown" lumps (403 vs 5xx
+  // vs a non-JSON body from a proxy).
   log.warn("provider model catalog load failed", {
     provider,
     category: classifyLLMError(error).category,
+    name: error instanceof Error ? error.name : typeof error,
+    status: error instanceof Error ? /^HTTP (\d{3})$/.exec(error.message)?.[1] : undefined,
   });
 }
 
