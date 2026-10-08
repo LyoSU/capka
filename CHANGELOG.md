@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.46.2] - 2026-10-08
+
 ### Changed
 - The Anthropic workspace ID for user-scoped keys (`sk-ant-usr-…`) is now a field on the connection (Settings > Connections) instead of an env var; `ANTHROPIC_WORKSPACE_ID` from 0.46.1 is removed. A migration adds `provider_configs.workspace_id` and applies at boot.
 
