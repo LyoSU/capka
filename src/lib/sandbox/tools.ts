@@ -165,6 +165,10 @@ export async function loadSandboxTools(
    *  Absent for a run with no chat (and for every caller that predates the feature),
    *  in which case nothing is injected and nothing is redacted. */
   secrets?: () => Promise<Record<string, string>>,
+  /** Records a started background job so the platform watches it and tells the agent
+   *  when it ends (src/lib/tasks/background-jobs.ts). Resolves to whether that notice
+   *  will arrive; absent or rejected means it won't, and the result says check_job. */
+  onBackgroundStart?: (job: { jobId: string; command: string }) => Promise<boolean>,
 ) {
   // ONE resolution per turn, memoized on the promise rather than the value: two tools
   // running concurrently must not each decrypt the same rows, and the very common
@@ -219,7 +223,7 @@ export async function loadSandboxTools(
   // the container instead of only on screen: the controller kills the command's
   // process group when this request's connection goes away. A detached background
   // job is deliberately NOT given it — it is meant to outlive the turn.
-  const run = async (cmd: string, timeout?: number, signal?: AbortSignal) => {
+  const run = async (cmd: string, timeout?: number, signal?: AbortSignal, defaultTimeout = 30000) => {
     await ensureSession();
     // Injected on EVERY command and redacted out of EVERY result, in this one
     // function — which is what makes the guarantee hold for tools nobody thought
@@ -236,7 +240,7 @@ export async function loadSandboxTools(
     // ahead keeps the injected set covered whatever order the query returns.
     const toRedact: [string, string][] = [...Object.entries(env), ...workspaceSecrets];
     try {
-      const result = await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal, env);
+      const result = await execCommand(sessionKey, cmd, Math.min(timeout || defaultTimeout, 300000), signal, env);
       return {
         ...result,
         stdout: redactSecrets(result.stdout, toRedact),
@@ -277,10 +281,11 @@ export async function loadSandboxTools(
           : "No network access — package installs and internet requests will fail. ") +
         "Set background:true for work that won't finish inside the 300s limit (bulk conversion, a " +
         "long scrape): it starts the command detached and returns a jobId immediately — the job " +
-        "keeps running after your reply. Check it later with check_job.",
+        "keeps running after your reply, and you are normally notified automatically when it ends " +
+        "(the result says so). Never poll check_job in a loop or sleep waiting for it.",
       inputSchema: z.object({
         command: z.string().describe("Bash command to execute"),
-        timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
+        timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
         background: z
           .boolean()
           .optional()
@@ -294,6 +299,25 @@ export async function loadSandboxTools(
           const result = await run(backgroundWrapper(command, jobId));
           if (result.exitCode !== 0) return { started: false, error: result.stderr || "Failed to start job" };
           await holdSandbox();
+          const notified = onBackgroundStart
+            ? await onBackgroundStart({ jobId, command }).catch((e) => {
+                console.warn("[sandbox] background job not watched:", e instanceof Error ? e.message : e);
+                return false;
+              })
+            : false;
+          if (notified) {
+            return {
+              started: true,
+              jobId,
+              logPath: `${JOBS_DIR}/${jobId}/log`,
+              note:
+                "Job started. You will be notified automatically when it finishes — its exit status and the " +
+                "end of its output arrive as a notice: during this reply if you are still working, otherwise " +
+                "as a new turn after it. DO NOT poll check_job in a loop or sleep waiting for it. Keep doing " +
+                "other useful work, or end your reply now and tell the user it is running and that you will " +
+                "follow up. check_job is only for a deliberate one-off look at its progress.",
+            };
+          }
           return {
             started: true,
             jobId,
@@ -305,14 +329,17 @@ export async function loadSandboxTools(
               "with no check at all — its log and exit code (if written) survive that.",
           };
         }
-        return captureResult(await run(withCapture(command), timeout, abortSignal));
+        // 120s default (not the file tools' 30s): pip installs and document conversions
+        // routinely run past 30s, and a timeout costs the model a failed call plus a retry.
+        return captureResult(await run(withCapture(command), timeout, abortSignal, 120000));
       },
     }),
 
     check_job: tool({
       description:
         "Check a background job started by execute_bash(background:true). Returns whether it's still " +
-        "running, its exit code once finished, and the tail of its output log.",
+        "running, its exit code once finished, and the tail of its output log. A one-off look — you " +
+        "don't need it to learn that a job ended when its start result said you will be notified.",
       inputSchema: z.object({
         jobId: z.string().describe("The jobId returned by execute_bash(background:true)"),
       }),
@@ -365,7 +392,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         "anything else with pip if needed.",
       inputSchema: z.object({
         code: z.string().describe("Python code to execute"),
-        timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
+        timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
       }),
       execute: async ({ code, timeout }, { abortSignal }) => {
         // Pipe the program straight into the interpreter's stdin instead of staging
@@ -374,7 +401,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         // editing. Base64 still guards against shell-escaping/delimiter collisions.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
-        return captureResult(await run(withCapture(cmd), timeout, abortSignal));
+        return captureResult(await run(withCapture(cmd), timeout, abortSignal, 120000));
       },
     }),
 
@@ -384,14 +411,14 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         "and other JS tasks. Common libraries are preinstalled; install anything else with npm if needed.",
       inputSchema: z.object({
         code: z.string().describe("JavaScript code to execute"),
-        timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
+        timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
       }),
       execute: async ({ code, timeout }, { abortSignal }) => {
         // Pipe through node's stdin (ESM, matching the previous .mjs staging) so
         // execution never depends on writable /tmp. See execute_python above.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | node --input-type=module`;
-        return captureResult(await run(withCapture(cmd), timeout, abortSignal));
+        return captureResult(await run(withCapture(cmd), timeout, abortSignal, 120000));
       },
     }),
 
@@ -470,21 +497,170 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
     str_replace: tool({
       description:
         "Replace text in an existing file. Use for iterative edits — change a specific part " +
-        "of a file without rewriting the whole thing.",
+        "of a file without rewriting the whole thing. old_str must match exactly one place in the " +
+        "file, unless you pass replace_all:true to change every occurrence. Copy old_str exactly; " +
+        "only if that finds nothing does it retry treating curly quotes, dashes and non-breaking " +
+        "spaces as plain ones, then ignoring trailing spaces — and line endings (\\n vs CRLF) always follow the file.",
       inputSchema: z.object({
         path: z.string().describe("File path relative to /workspace"),
-        old_str: z.string().describe("Exact text to find (must match exactly)"),
+        old_str: z
+          .string()
+          .describe("Exact text to find (must match exactly, and must occur only once unless replace_all is true)"),
         new_str: z.string().describe("Text to replace it with"),
+        replace_all: z.boolean().optional().describe("Replace every occurrence of old_str instead of requiring a unique match"),
       }),
-      execute: async ({ path, old_str, new_str }, { abortSignal }) => {
-        const pyCode = `import sys
-p = ${JSON.stringify(path)}
+      execute: async ({ path, old_str, new_str, replace_all }, { abortSignal }) => {
+        if (old_str === new_str) return { error: "old_str and new_str are identical — nothing to change.", success: false };
+        if (old_str === "") return { error: "old_str is empty — give the text to replace.", success: false };
+        // The script reports through a status on its FIRST line (OK n tier / NOTFOUND /
+        // MULTIPLE n / UNCHANGED / NOTUTF8) that the TS side parses, so no behavior hangs
+        // on matching prose. A NOTFOUND may be followed by a hint quoting the file; only
+        // line one is ever parsed, so file text there cannot pass for a status.
+        //
+        // Matching is tiered because the files here are mostly people's prose, where the
+        // model re-types curly quotes, en/em dashes and NBSPs as ASCII, and an exact
+        // match then misses for nothing. So:
+        // exact, then those look-alikes folded to ASCII, then whole lines ignoring trailing
+        // whitespace. « » are deliberately NOT folded: a model reproduces them reliably, so
+        // folding buys little, while a match it did make would swap a Ukrainian document's
+        // «» for the ASCII quotes in new_str. A miss instead shows those lines in the
+        // hint, whose comparison does fold them, since it only shows and never writes.
+        //
+        // String.raw so the Python escapes (\n, ‘) reach Python as written.
+        const pyCode = String.raw`import sys, re, bisect, difflib
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+path = ${JSON.stringify(path)}
 old = ${JSON.stringify(old_str)}
 new = ${JSON.stringify(new_str)}
-with open(p) as f: content = f.read()
-if old not in content: print('ERROR: text not found'); sys.exit(1)
-with open(p, 'w') as f: f.write(content.replace(old, new, 1))
-print('OK')`;
+replace_all = ${replace_all ? "True" : "False"}
+
+# One character to one character, so an offset found in norm(text) is the same
+# offset in text, and the ORIGINAL span is what gets replaced.
+TYPO = {}
+for chars, plain in (
+    ('‘’‚‛', "'"),
+    ('“”„‟', '"'),
+    ('‐‑‒–—―−', '-'),
+    ('   　' + ''.join(map(chr, range(0x2002, 0x200b))), ' '),
+):
+    for c in chars: TYPO[ord(c)] = plain
+
+def norm(s): return s.translate(TYPO)
+
+def find(hay, needle):
+    found, i = [], hay.find(needle)
+    while i != -1:
+        found.append((i, i + len(needle)))
+        i = hay.find(needle, i + len(needle))
+    return found
+
+def find_lines(view, search):
+    # Whole lines that agree once trailing whitespace is dropped; non-overlapping.
+    trailing_nl = search.endswith('\n')
+    want = search.split('\n')
+    if trailing_nl: want.pop()
+    want = [norm(l).rstrip() for l in want]
+    lines, pos = [], 0
+    for text in view.split('\n'):
+        lines.append((pos, text, pos + len(text) < len(view)))
+        pos += len(text) + 1
+    if lines[-1][1] == '': lines.pop()  # the empty "line" after a final newline
+    keys = [norm(text).rstrip() for _, text, _ in lines]
+    found = []
+    for i in range(len(lines) - len(want) + 1):
+        if keys[i:i + len(want)] != want: continue
+        last_start, last_text, has_nl = lines[i + len(want) - 1]
+        if trailing_nl and not has_nl: continue
+        if found and lines[i][0] < found[-1][1]: continue
+        found.append((lines[i][0], last_start + len(last_text) + (1 if trailing_nl else 0)))
+    return found
+
+def ending(text):
+    crlf = text.count('\r\n')
+    lf = text.count('\n') - crlf
+    return None if crlf == lf else '\r\n' if crlf > lf else '\n'
+
+def with_region_endings(region, replacement, fallback):
+    # A replacement line that keeps (or stands in for) a region line reuses that
+    # line's ending, so context inside the match keeps its bytes even in a file
+    # with mixed endings; only genuinely new lines take the fallback.
+    before = region.split('\n')
+    endings = ['\r\n' if l.endswith('\r') else '\n' for l in before[:-1]]
+    after = replacement.split('\n')
+    key = lambda l: norm(l.removesuffix('\r')).rstrip()
+    source = {}
+    sm = difflib.SequenceMatcher(None, [key(l) for l in before], [key(l) for l in after], autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ('equal', 'replace'):
+            for k in range(min(i2 - i1, j2 - j1)): source[j1 + k] = i1 + k
+    out = []
+    for j, line in enumerate(after[:-1]):
+        i = source.get(j)
+        out.append(line + (endings[i] if i is not None and i < len(endings) else fallback))
+    return ''.join(out) + after[-1]
+
+def miss_hint(view, search, replacement):
+    if len(replacement.strip()) >= 20 and norm(replacement) in norm(view):
+        return 'new_str is already in the file, so this edit may already be applied.'
+    # Each distinctive old_str line votes for where old_str would start, comparing
+    # with all whitespace removed; at least half must agree. Only the span between
+    # the first and last agreeing line is shown, so padding old_str reveals nothing.
+    # « » fold here (only shown, never written), so "word" finds the «word» line.
+    angle = str.maketrans('«»‹›', '""' + "''")
+    key = lambda l: ''.join(norm(l).translate(angle).split())
+    distinct = lambda k: any(c.isalnum() for c in k)
+    lines, wanted = view.split('\n'), search.split('\n')
+    positions, votes, distinct_count = {}, {}, 0
+    for i, l in enumerate(lines):
+        if distinct(key(l)): positions.setdefault(key(l), []).append(i)
+    for off, l in enumerate(wanted):
+        if not distinct(key(l)): continue
+        distinct_count += 1
+        for i in positions.get(key(l), []): votes[i - off] = votes.get(i - off, 0) + 1
+    if not votes: return None
+    start, count = max(votes.items(), key=lambda v: v[1])
+    if count * 2 < distinct_count: return None
+    matched = [start + off for off, l in enumerate(wanted)
+               if key(l) and 0 <= start + off < len(lines) and key(lines[start + off]) == key(l)]
+    first, to = matched[0], min(matched[-1] + 1, matched[0] + 12)
+    shown = [f'{n + 1}: ' + (l[:200] + '…' if len(l) > 200 else l) for n, l in enumerate(lines[first:to], first)]
+    return '\n'.join(['The closest lines in the file:'] + shown)
+
+try:
+    with open(path, encoding='utf-8', newline='') as f: source = f.read()
+except UnicodeDecodeError:
+    print('NOTUTF8'); sys.exit(1)
+
+view = source.replace('\r\n', '\n')
+search, replacement = old.replace('\r\n', '\n'), new.replace('\r\n', '\n')
+if old.replace('\r', '') == new.replace('\r', ''):
+    # Strings that differ only in \r ask to change line endings: exact bytes.
+    tier, matches = 'exact', find(source, old)
+    replace = lambda s, e: new
+else:
+    # Match on the LF view the model reads, then map offsets back to the source.
+    tier, matches = 'exact', find(view, search)
+    if not matches: tier, matches = 'typographic', find(norm(view), norm(search))
+    if not matches: tier, matches = 'whitespace', find_lines(view, search)
+    crs = [m.start() - k for k, m in enumerate(re.finditer('\r\n', source))]
+    matches = [(s + bisect.bisect_left(crs, s), e + bisect.bisect_left(crs, e)) for s, e in matches]
+    file_ending = ending(source) or '\n'
+    replace = lambda s, e: with_region_endings(source[s:e], replacement, ending(source[s:e]) or file_ending)
+
+if not matches:
+    print('NOTFOUND')
+    hint = miss_hint(view, search, replacement)
+    if hint: print(hint)
+    sys.exit(1)
+if len(matches) > 1 and not replace_all: print('MULTIPLE', len(matches)); sys.exit(1)
+out, last = [], 0
+for s, e in (matches if replace_all else matches[:1]):
+    out += [source[last:s], replace(s, e)]
+    last = e
+result = ''.join(out) + source[last:]
+if result == source: print('UNCHANGED'); sys.exit(1)
+with open(path, 'w', encoding='utf-8', newline='') as f: f.write(result)
+print('OK', len(matches) if replace_all else 1, tier)`;
         // Base64 + pipe to python3's stdin: verbatim script, no heredoc/escaping
         // surprises, and — crucially — no /tmp write, so editing a file in
         // /workspace survives even when the tmpfs /tmp is full. The path/old/new
@@ -492,23 +668,43 @@ print('OK')`;
         const encoded = Buffer.from(pyCode).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
         const result = await run(cmd, undefined, abortSignal);
-        if (result.exitCode !== 0) {
-          // The script's own "text not found" signal (stdout) is the common case;
-          // spell out that the match must be exact. Anything else is a shell/OS
-          // failure (missing file, etc.) — sanitize it like the other file tools
-          // rather than leaking a Python traceback into the card.
-          const error = result.stdout.includes("text not found")
-            ? `The old_str was not found in ${path}. It must match the file exactly, including whitespace and indentation.`
-            : friendlyFsError(result.stderr, path);
-          return { error, success: false };
+        // Status is line one; the rest is the miss hint — file text, which reaches the
+        // model only through `run`'s stdout and so is redacted like any other output.
+        const [head, ...rest] = result.stdout.split("\n");
+        const status = head.match(/^(OK|MULTIPLE|NOTFOUND|UNCHANGED|NOTUTF8)(?: (\d+))?(?: (exact|typographic|whitespace))?$/);
+        if (result.exitCode === 0 && status?.[1] === "OK") {
+          const count = Number(status[2]);
+          // Lines replaced, as a diff would count them: the `+N −M` under the tile.
+          const edit = { success: true, path, added: lineCount(new_str) * count, removed: lineCount(old_str) * count };
+          // A fallback match means the file differs from what the model assumed; say so
+          // once, so its next old_str copies the file's own characters.
+          if (status[3] === "typographic")
+            return { ...edit, note: "Matched only after treating the file's curly quotes, dashes or special spaces as plain ones; new_str was inserted exactly as written." };
+          if (status[3] === "whitespace")
+            return { ...edit, note: "Matched only after ignoring trailing spaces at the ends of lines." };
+          return edit;
         }
-        // Lines replaced, as a diff would count them: the `+N −M` under the tile.
-        return { success: true, path, added: lineCount(new_str), removed: lineCount(old_str) };
+        // The script's own status is the common failure; spell out what to do next.
+        // Anything else is a shell/OS failure (missing file, etc.) — sanitize it like
+        // the other file tools rather than leaking a Python traceback into the card.
+        const hint = rest.join("\n").trimEnd();
+        const error =
+          status?.[1] === "NOTFOUND"
+            ? `The old_str was not found in ${path}. It must match the file exactly, including whitespace and indentation.${hint ? `\n\n${hint}` : ""}`
+            : status?.[1] === "MULTIPLE"
+              ? `The old_str matches ${status[2]} places in ${path}. Include more surrounding text to make it unique, or pass replace_all:true to change every occurrence.`
+              : status?.[1] === "UNCHANGED"
+                ? `The edit leaves ${path} unchanged — it already contains that text.`
+                : status?.[1] === "NOTUTF8"
+                  ? `${path} is not UTF-8 text, so it can't be edited with str_replace. Use execute_python to edit it with the right encoding.`
+                  : friendlyFsError(result.stderr, path);
+        return { error, success: false };
       },
     }),
 
     list_files: tool({
-      description: "List files and directories in the workspace.",
+      description:
+        "List files and directories in the workspace (one directory level, with sizes and dates). To locate files by name, use execute_bash with `find`; search_files searches file contents.",
       inputSchema: z.object({
         path: z.string().optional().describe("Directory path (default: /workspace)"),
       }),
@@ -517,7 +713,7 @@ print('OK')`;
         const result = await run(`ls -la '${target}'`, undefined, abortSignal);
         const clamped = clampOutput(result.stdout, {
           mode: "head",
-          note: "Narrow it: pass a subdirectory, or use search_files by name.",
+          note: "Narrow it: pass a subdirectory, or use execute_bash with find.",
         });
         return {
           listing: clamped.text,
@@ -569,7 +765,7 @@ print('OK')`;
         const globFlag = glob ? `--glob '${glob.replace(/'/g, "'\\''")}'` : "";
         // One past the cap so we can tell the model whether matches were hidden —
         // a silent `| head -100` makes it believe there are exactly ≤100 matches.
-        const result = await run(`rg --no-heading -n '${safePattern}' '${target}' ${globFlag} | head -101`, undefined, abortSignal);
+        const result = await run(`rg --no-heading -n -e '${safePattern}' ${globFlag} -- '${target}' | head -101`, undefined, abortSignal);
         const body = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
         const all = body === "" ? [] : body.split("\n");
         const capped = all.length > 100;

@@ -227,6 +227,10 @@ export function contextManagementOptions(
  * prompt + the previous turn's tail + this turn's user tail + this one is already
  * exactly four; the session tier carries none). Step 0 is skipped — its tail is
  * the already-marked user message.
+ *
+ * The runner hands this the plain 5-minute marker while the other three live an
+ * hour: steps are seconds apart, and as the LAST breakpoint it is also the one
+ * Anthropic's ordering rule (1h entries before 5m ones) allows to be shorter.
  */
 export function markStepTail<T extends { providerOptions?: Record<string, Record<string, unknown>> }>(
   messages: T[],

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 const logged = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
 vi.mock("@/lib/log", () => ({ log: logged }));
 
-import { downloadFile, listFiles } from "../client";
+import { downloadFile, listFiles, uploadFile } from "../client";
 
 beforeEach(() => { for (const fn of Object.values(logged)) fn.mockReset(); });
 afterEach(() => vi.restoreAllMocks());
@@ -92,5 +92,37 @@ describe("what a failed sandbox call writes to the operator's log", () => {
     await expect(listFiles("chat1", ".", "user1")).rejects.toBeTruthy();
     expect(logged.error).toHaveBeenCalledWith("sandbox request failed", expect.objectContaining({ status: 500 }));
     expect(logged.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadFile name normalization", () => {
+  const sent = async (name: string, opts?: { verbatim?: boolean }) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      const f = (init!.body as FormData).get("file") as File;
+      return new Response(JSON.stringify({ ok: true, path: f.name, name: f.name }), { status: 200 });
+    });
+    const r = await uploadFile("chat1", ".", new File(["x"], name), "user1", opts);
+    return r;
+  };
+  const nfd = "Нові показники й ї.xlsx".normalize("NFD");
+
+  it("stores a macOS (NFD) name as NFC, so the returned attachment name matches the disk", async () => {
+    expect(nfd).not.toBe(nfd.normalize("NFC"));
+    const r = await sent(nfd);
+    expect(r.name).toBe("Нові показники й ї.xlsx".normalize("NFC"));
+    expect(r.path).toBe(r.name);
+  });
+
+  it("leaves NFC and ASCII names unchanged", async () => {
+    expect((await sent("Нові показники й ї.xlsx".normalize("NFC"))).name).toBe("Нові показники й ї.xlsx".normalize("NFC"));
+    expect((await sent("report 1.csv")).name).toBe("report 1.csv");
+  });
+
+  it("keeps the name verbatim for folder sync", async () => {
+    expect((await sent(nfd, { verbatim: true })).name).toBe(nfd);
+  });
+
+  it("maps NFD and NFC spellings of one name to the same stored name (the controller overwrites same-name uploads)", async () => {
+    expect((await sent(nfd)).name).toBe((await sent(nfd.normalize("NFC"))).name);
   });
 });

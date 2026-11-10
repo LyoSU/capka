@@ -568,6 +568,20 @@
       "when": 1791468058199,
       "tag": "0080_thankful_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794299495868,
+      "tag": "0081_clear_stale_claude_no_reasoning",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794300939948,
+      "tag": "0082_old_masked_marvel",
+      "breakpoints": true
     }
   ]
 }

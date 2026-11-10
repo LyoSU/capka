@@ -359,7 +359,7 @@ services:
       # Step at which a long tool loop is told to stop calling tools and answer.
       # Unset ⇒ five below the agent step cap.
       - FORCE_TEXT_AFTER_STEPS=${FORCE_TEXT_AFTER_STEPS:-}
-      # Hard ceiling on tool-calling steps in one turn. Unset ⇒ 25.
+      # Hard ceiling on tool-calling steps in one turn. Unset ⇒ 100.
       - MAX_AGENT_STEPS=${MAX_AGENT_STEPS:-}
       # Wall-clock ceiling for one turn, tool calls included. Unset ⇒ 20 minutes.
       - TASK_TIMEOUT_MINUTES=${TASK_TIMEOUT_MINUTES:-}
@@ -412,6 +412,8 @@ services:
       - PG_POOL_MAX=${PG_POOL_MAX:-}
       - JOBS_KEEP_DIRS=${JOBS_KEEP_DIRS:-}
       - JOB_LOG_CAP_MB=${JOB_LOG_CAP_MB:-}
+      - JOB_FOLLOWUP_CHAIN_MAX=${JOB_FOLLOWUP_CHAIN_MAX:-}
+      - JOB_WATCH_MAX_HOURS=${JOB_WATCH_MAX_HOURS:-}
       - VIEW_KEEP_DIRS=${VIEW_KEEP_DIRS:-}
       - OUTPUT_KEEP_FILES=${OUTPUT_KEEP_FILES:-}
       - OUTPUT_FILE_CAP_MB=${OUTPUT_FILE_CAP_MB:-}

@@ -392,11 +392,16 @@ export async function copyWorkspace(destSessionId: string, srcSessionId: string,
   });
 }
 
-export async function uploadFile(sessionId: string, path: string, file: File, userId?: string): Promise<{ ok: boolean; path: string; name: string }> {
+// `verbatim` keeps the name byte-for-byte: folder sync mirrors the user's own disk, where
+// a rename on the way in would make the next sync see a different file.
+export async function uploadFile(sessionId: string, path: string, file: File, userId?: string, opts?: { verbatim?: boolean }): Promise<{ ok: boolean; path: string; name: string }> {
   const id = sanitizeId(sessionId);
   const form = new FormData();
   form.append("path", path);
-  form.append("file", file);
+  // macOS sends names decomposed (NFD: "й" = и + U+0306) while the model writes the composed
+  // form (NFC), so `cat` on the stored name failed. Store NFC: the name the model reads
+  // is then the name on disk. Only the file name; `path` may be an existing directory.
+  form.append("file", file, opts?.verbatim ? file.name : file.name.normalize("NFC"));
 
   const query = userId
     ? `?userId=${encodeURIComponent(sanitizeId(userId))}&token=${workspaceToken(userId, sessionId)}`

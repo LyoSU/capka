@@ -94,7 +94,7 @@ export const POST = apiHandler(async (req: Request) => {
       const dir = slash >= 0 ? `${name}/${rel.slice(0, slash)}` : name;
       const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
       try {
-        await uploadFile(key, dir, new File([f], filename), userId);
+        await uploadFile(key, dir, new File([f], filename), userId, { verbatim: true });
       } catch (e) {
         failed++;
         throw e;

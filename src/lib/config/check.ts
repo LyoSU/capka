@@ -79,9 +79,11 @@ export const NUMERIC_KNOBS: {
   { key: "TASK_TIMEOUT_MINUTES", fallback: 20, shape: "posInt", site: "src/lib/tasks/runner.ts" },
   { key: "STREAM_IDLE_SECONDS", fallback: 60, shape: "posInt", site: "src/lib/tasks/runner.ts" },
   { key: "MAX_STREAM_RECOVERIES", fallback: 3, shape: "nonNegInt", site: "src/lib/tasks/runner.ts" },
-  { key: "MAX_AGENT_STEPS", fallback: 25, shape: "posInt", site: "src/lib/chat/context/step-control.ts" },
+  { key: "MAX_AGENT_STEPS", fallback: 100, shape: "posInt", site: "src/lib/chat/context/step-control.ts" },
   { key: "JOBS_KEEP_DIRS", fallback: 20, shape: "nonNegInt", site: "src/lib/sandbox/tools.ts" },
   { key: "JOB_LOG_CAP_MB", fallback: 10, shape: "posInt", site: "src/lib/sandbox/tools.ts" },
+  { key: "JOB_FOLLOWUP_CHAIN_MAX", fallback: 3, shape: "posInt", site: "src/lib/tasks/background-jobs.ts" },
+  { key: "JOB_WATCH_MAX_HOURS", fallback: 6, shape: "posInt", site: "src/lib/tasks/background-jobs.ts" },
   { key: "OUTPUT_KEEP_FILES", fallback: 5, shape: "nonNegInt", site: "src/lib/sandbox/tools.ts" },
   { key: "OUTPUT_FILE_CAP_MB", fallback: 10, shape: "posInt", site: "src/lib/sandbox/tools.ts" },
   { key: "VIEW_KEEP_DIRS", fallback: 4, shape: "nonNegInt", site: "src/lib/sandbox/view-file.ts" },
@@ -229,21 +231,23 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     );
   }
 
-  // Derived default and a two-sided clamp: `Math.min(MAX_STEPS, Math.max(1, ... ||
-  // MAX_STEPS - 5))`. Neither its valid range nor its effective value can be stated
+  // Derived default and a two-sided clamp: `Math.max(1, Math.min(MAX_STEPS - 1, ... ||
+  // MAX_STEPS - 5))` — below the cap, since a threshold AT the cap is never reached (see
+  // step-control.ts). Neither its valid range nor its effective value can be stated
   // without reading MAX_AGENT_STEPS first, which is also why raising that knob alone
   // moves this one.
   {
     const raw = env.FORCE_TEXT_AFTER_STEPS?.trim();
     if (raw !== undefined && raw !== "") {
-      const maxSteps = posInt(env.MAX_AGENT_STEPS, 25);
+      const maxSteps = posInt(env.MAX_AGENT_STEPS, 100);
+      const top = Math.max(1, maxSteps - 1);
       const n = Number(raw);
-      if (!Number.isInteger(n) || n < 1 || n > maxSteps) {
-        const effective = Math.min(maxSteps, Math.max(1, n || maxSteps - 5));
+      if (!Number.isInteger(n) || n < 1 || n > top) {
+        const effective = Math.max(1, Math.min(maxSteps - 1, n || maxSteps - 5));
         issues.push({
           level: "warn",
           key: "FORCE_TEXT_AFTER_STEPS",
-          message: `set to "${raw}", which is not an integer in 1–${maxSteps} (the MAX_AGENT_STEPS ceiling) — ${effective} will be used instead.`,
+          message: `set to "${raw}", which is not an integer in 1–${top} (below the MAX_AGENT_STEPS ceiling) — ${effective} will be used instead.`,
         });
       }
     }

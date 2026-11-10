@@ -295,8 +295,8 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
         await reply(ctx, "fileTooBig", { values: { name: f.fileName } });
         continue;
       }
-      await uploadFile(sessionKey, ".", file, link.userId);
-      attachedFiles.push({ name: f.fileName, type: f.mime });
+      const { name } = await uploadFile(sessionKey, ".", file, link.userId);
+      attachedFiles.push({ name: name || f.fileName, type: f.mime });
     } catch (e) {
       log.warn("telegram file ingest failed", { name: f.fileName, err: String(e) });
     }

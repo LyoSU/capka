@@ -21,6 +21,7 @@ const FULL: Parameters<typeof buildSystemPrompt>[0] = {
   attachedFolders: [{ name: "reports", readOnly: true }],
   syncedFolders: [{ name: "desktop" }],
   conversationStartedAt: new Date("2026-07-24T10:00:00Z"),
+  now: new Date("2026-08-14T21:30:00Z"),
   concierge: true,
   networkMode: "bridge",
 };
@@ -75,7 +76,7 @@ describe("buildSystemPrompt — tier assembly", () => {
     // The first two layers, verbatim and blank-line separated.
     expect(p.stable.startsWith(`${SYSTEM_PROMPT}\n\n${buildSandboxPrompt("none")}`)).toBe(true);
     // The rest follow in declaration order, each separated by exactly one blank line.
-    const order = ["--- Project Instructions ---", "pdf", "Available connectors", "Managing settings & configuration"];
+    const order = ["--- Project Instructions ---", "PDF things", "Available connectors", "Managing settings & configuration"];
     const positions = order.map((needle) => p.stable.indexOf(needle));
     expect(positions.every((i) => i > 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
@@ -152,6 +153,49 @@ describe("buildSystemPrompt — capability gating", () => {
     expect(p.session).toBe("");
     expect(p.stable).toContain(SYSTEM_PROMPT);
     expect(p.volatile).toContain("likes tea");
+  });
+});
+
+describe("buildSystemPrompt — current date", () => {
+  const user = { name: "Yura", timezone: "Europe/Kyiv" };
+  const started = new Date("2026-07-24T10:00:00Z");
+
+  it("puts the real current time first in the volatile tier, in the user's timezone", () => {
+    const p = buildSystemPrompt({ ...FULL, user, now: new Date("2026-08-14T21:30:00Z") });
+    // 21:30 UTC is already the next day in Kyiv (UTC+3).
+    expect(p.volatile.startsWith("## Current date and time\nSaturday, August 15, 2026 at 12:30 AM (Europe/Kyiv)")).toBe(true);
+    expect(p.stable).not.toContain("Current date and time");
+    expect(p.session).not.toContain("August 15");
+  });
+
+  it("falls back to UTC for an invalid timezone", () => {
+    const p = buildSystemPrompt({ user: { timezone: "Not/AZone" }, now: new Date("2026-08-14T21:30:00Z") });
+    expect(p.volatile).toContain("August 14, 2026");
+    expect(p.volatile).toContain("(UTC)");
+  });
+
+  it("is dropped with the session context", () => {
+    const p = buildSystemPrompt({ ...FULL, profile: { ...ASSISTANT_PROFILE, sessionContext: false } });
+    expect(p.volatile).not.toContain("Current date and time");
+  });
+
+  it("keeps stable and session byte-identical whatever `now` is", () => {
+    const a = buildSystemPrompt({ ...FULL, user, conversationStartedAt: started, now: new Date("2026-08-14T21:30:00Z") });
+    const b = buildSystemPrompt({ ...FULL, user, conversationStartedAt: started, now: new Date("2026-09-30T08:05:00Z") });
+    expect(b.stable).toBe(a.stable);
+    expect(b.session).toBe(a.session);
+    expect(b.volatile).not.toBe(a.volatile);
+    // The session tier says when the chat began, and points at the turn context for "now".
+    expect(a.session).toContain("started on");
+    expect(a.session).toContain("turn context");
+    expect(a.session).not.toContain("Treat that as the current date");
+  });
+});
+
+describe("buildSandboxPrompt — tool list", () => {
+  it("names every tool the model has beyond the basics", () => {
+    const p = buildSandboxPrompt("none");
+    for (const t of ["view_file", "check_job", "delete_path"]) expect(p).toContain(`\`${t}\``);
   });
 });
 

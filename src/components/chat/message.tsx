@@ -41,7 +41,7 @@ import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normali
 import { hostOf, CitedSourcesFooter, CitationOrdinals, groupByUrl } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import type { TurnWrite } from "@/lib/vault/turn-writes";
-import type { AuxRecord } from "@/lib/chat/contracts";
+import type { AuxRecord, WrapUpReason } from "@/lib/chat/contracts";
 import { edited, undoRequest } from "@/lib/chat/memory-notice";
 import { AskCard } from "./ask-card";
 import { PlanChecklist } from "./plan-checklist";
@@ -2728,6 +2728,19 @@ function QuietRow({ reason, children }: { reason: string; children: ReactNode })
   );
 }
 
+/** Capka's notice that background tasks ended. Stored as a user-ROLE row (the agent
+ *  needs a turn to answer), but nobody typed it — so one muted line, never a bubble
+ *  the person "said". The agent's reply below it carries the substance. */
+function JobNoticeRow({ outcome, count }: { outcome: "done" | "lost" | "unwatched"; count: number }) {
+  const t = useTranslations("chat.message.jobNotice");
+  return (
+    <div className="animate-message-in mx-4 my-2 flex items-baseline gap-2 text-xs text-muted-foreground md:mx-6">
+      <Clock className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+      <span>{t(outcome, { count })}</span>
+    </div>
+  );
+}
+
 function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onReload, onContinue, enter, pendingSteers }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
@@ -2735,7 +2748,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; regenerable?: boolean; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[]; steers?: { id: string; text: string; afterToolCallId: string | null }[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; regenerable?: boolean; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; aux?: AuxRecord[]; llmCalls?: number; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number }; memoryWrites?: TurnWrite[]; steers?: { id: string; text: string; afterToolCallId: string | null }[]; wrapUp?: WrapUpReason }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2860,7 +2873,10 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
       if (text.trim()) groups.push({ kind: "text", text });
     } else if (part.type === "reasoning") {
       const text = (part as { text: string }).text;
-      if (!text) continue;
+      // Raw provider reasoning is English third-person machinery — admin-only. A
+      // regular user's rail carries the tool steps; the panel's working indicator
+      // already covers the stretch while the model thinks.
+      if (!isAdmin || !text) continue;
       const last = groups[groups.length - 1];
       const lastItem = last?.kind === "activity" ? last.items[last.items.length - 1] : undefined;
       // Continuing a thought that is already on the rail: append the text as-is.
@@ -3043,6 +3059,19 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             onContinue={onContinue}
           />
         )}
+        {/* The reply was written with its tools withdrawn — out of steps, time or tool
+            output — so the work behind it may be unfinished. Not a failure: the same
+            part-way notice and Continue a cut-off turn gets, with which limit fired
+            behind the admin-only details rather than in the sentence. */}
+        {failure == null && !isStreaming && metadata?.wrapUp && (
+          <ErrorNotice
+            message={t("wrapUp")}
+            detail={t(`wrapUpDetail.${metadata.wrapUp}`)}
+            isAdmin={isAdmin}
+            partial
+            onContinue={onContinue}
+          />
+        )}
         {/* A turn that wrote memory but shows no rail to list it on (its tool parts are
             not in the transcript) still owes the person the visible half of the write:
             a rail with no steps, whose header is only the count and which opens onto
@@ -3101,8 +3130,9 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
 // in the memo wrapper, which calls no hooks itself — keeps ChatMessageImpl free
 // of a conditional return sitting between hook calls (rules-of-hooks).
 export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
-  const rowMeta = props.message.metadata as { compaction?: { summary: string }; quiet?: { reason: string } } | undefined;
+  const rowMeta = props.message.metadata as { compaction?: { summary: string }; quiet?: { reason: string }; jobNotice?: { outcome: "done" | "lost" | "unwatched"; count: number } } | undefined;
   if (rowMeta?.compaction) return <CompactionDivider summary={rowMeta.compaction.summary} />;
+  if (rowMeta?.jobNotice) return <JobNoticeRow outcome={rowMeta.jobNotice.outcome} count={rowMeta.jobNotice.count} />;
   // Same branch point as a checkpoint, and for the same reason: a quiet run is
   // not an assistant bubble with a flag on it, it is a different row. `quiet` is
   // only ever written at finalize, so a still-streaming turn never lands here.

@@ -15,11 +15,13 @@
  * the specific model actually accepts, from the enum learned at runtime (see
  * parseAllowedEfforts + models.capabilities.efforts).
  *
- * Anthropic/Google/Bedrock have no enum at all — they take a token budget — so
- * for them the intent maps to a number and this whole problem doesn't exist.
+ * Google takes a token budget, as do Claude models up to 4.5, so for them the
+ * intent maps to a number and this whole problem doesn't exist. Claude 4.6+ take
+ * adaptive thinking plus Anthropic's own effort ladder (see claudeTakesBudget).
  */
 
-/** Ordered weakest → strongest. `off` is the absence of a request, not a value. */
+/** Ordered weakest → strongest. `off` asks for no thinking: the absence of a
+ *  request, or the weakest effort on a model that thinks unasked (reasoningParams). */
 export const THINK_AMOUNTS = ["off", "brief", "balanced", "deep"] as const;
 export type ThinkAmount = (typeof THINK_AMOUNTS)[number];
 /** Any amount that actually asks for reasoning. */
@@ -52,7 +54,8 @@ const GUESS: Record<ThinkOn, string> = { brief: "low", balanced: "medium", deep:
 
 /**
  * Providers that take a token budget rather than an enum. They can express every
- * stop of the scale, always, so the UI never has to hide one.
+ * stop of the scale, always, so the UI never has to hide one. (Adaptive Claude
+ * takes low/medium/high on every model that has it, so the same holds there.)
  */
 const BUDGET_PROVIDERS = new Set(["anthropic", "bedrock", "google", "vertex"]);
 /**
@@ -70,6 +73,39 @@ const EFFORT_PROVIDERS = new Set([
  *  can't be lowered further; `deep` stays well under a typical output cap so the
  *  model can't spend the whole reply on thinking. */
 const BUDGET: Record<ThinkOn, number> = { brief: 1024, balanced: 4000, deep: 16000 };
+
+/**
+ * Whether a Claude model still takes the manual budget (`thinking.type:"enabled"`)
+ * instead of adaptive thinking + `effort`. Claude 4.5 and older accept ONLY the
+ * budget (adaptive is a 400 there); 4.6 takes both; 4.7 and every Claude 5 reject
+ * the budget with a 400. The legacy set is closed and every new model has been
+ * adaptive-only, so an id we can't read a version from (a new family, an alias)
+ * gets adaptive — the unknown case must never be the shape new models refuse.
+ */
+export function claudeTakesBudget(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  // Pre-4 naming puts the version first: claude-3-7-sonnet, claude-3.5-haiku, claude-instant-1.
+  if (/claude-(?:instant|[123](?:[-.]\d)?(?:-|$))/.test(id)) return true;
+  // The minor is ONE digit, so claude-sonnet-4-20250514 reads as 4.0, not 4.2.
+  const v = /claude-(?:opus|sonnet|haiku)-(\d+)(?:[-.](\d)(?!\d))?/.exec(id);
+  return !!v && Number(v[1]) * 10 + Number(v[2] ?? 0) < 46;
+}
+
+/**
+ * Whether a Claude model thinks when the request says nothing about thinking.
+ * Claude 5 does — at its default effort, with `display` defaulting to "omitted",
+ * so the user pays for thinking nobody sees — and several cannot be told not to
+ * (`thinking.type:"disabled"` is a 400 on Opus 5.5, Sonnet 5.5, Fable, Mythos).
+ * 4.6–4.8 think only when asked. Fable and Mythos have only shipped as 5+. An id
+ * we can't read a version from stays false, so the caller sends nothing, which
+ * no model refuses.
+ */
+export function claudeThinksUnasked(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (/claude-(?:fable|mythos)\b/.test(id)) return true;
+  const v = /claude-(?:opus|sonnet|haiku)-(\d{1,2})(?!\d)/.exec(id);
+  return !!v && Number(v[1]) >= 5;
+}
 
 /**
  * Which wire effort each stop maps to for a model whose enum is `allowed`.
@@ -99,10 +135,11 @@ export function effortSpread(allowed?: readonly string[] | null): Partial<Record
 }
 
 /**
- * The stops to offer for this model. `off` is always offered because it is the
- * ABSENCE of the parameter — omitting a knob is legal on every provider, which
- * is what makes "don't think" the one setting that can never 400. A provider
- * with no knob at all returns [] and the control is hidden entirely.
+ * The stops to offer for this model. `off` is always offered because it sends
+ * either nothing — omitting a knob is legal on every provider — or, on a Claude
+ * that thinks unasked, the lowest effort level every such model accepts, which is
+ * what makes "don't think" the one setting that can never 400. A provider with no
+ * knob at all returns [] and the control is hidden entirely.
  */
 export function availableAmounts(provider: string, allowed?: readonly string[] | null): ThinkAmount[] {
   if (BUDGET_PROVIDERS.has(provider)) return [...THINK_AMOUNTS];
@@ -128,7 +165,12 @@ export function clampAmount(amount: ThinkAmount, available: readonly ThinkAmount
  * the stream. Without them the provider reasons silently — or not at all — so
  * the SDK never emits `reasoning-delta` and the UI's thinking block stays empty.
  *
- * `off` (and any provider with no knob) returns undefined: we send nothing.
+ * `off` (and any provider with no knob) returns undefined: we send nothing. The
+ * one exception is a Claude that thinks unasked (claudeThinksUnasked), where
+ * nothing means default effort: `off` there is `effort:"low"` with no thinking
+ * block — effort lives in output_config and is legal without one, while
+ * `thinking:{type:"disabled"}` would 400. Callers must not read a defined result
+ * as "reasoning is on".
  *
  * Visibility caveat: OpenAI only returns a reasoning *summary* over the
  * Responses API ("openai" provider). Through an OpenAI-compatible gateway
@@ -139,16 +181,31 @@ export function reasoningParams(
   provider: string,
   amount: ThinkAmount,
   allowed?: readonly string[] | null,
+  modelId = "",
 ): Record<string, Record<string, unknown>> | undefined {
-  if (amount === "off") return undefined;
+  if (amount === "off") {
+    return provider === "anthropic" && claudeThinksUnasked(modelId) ? { anthropic: { effort: "low" } } : undefined;
+  }
   const budget = BUDGET[amount];
+  // Adaptive Claude: `display` defaults to "omitted" on Claude 5, which streams
+  // thinking blocks with no text — the UI's thinking block would stay empty — so
+  // ask for the summary. The effort is the model's own ladder; spread through the
+  // learned enum like everyone else's, which is low/medium/high until one is learned.
+  const effort = effortSpread(allowed)[amount];
+  const adaptive = { type: "adaptive", display: "summarized" };
   switch (provider) {
     case "anthropic":
+      if (!claudeTakesBudget(modelId)) return { anthropic: { thinking: adaptive, ...(effort && { effort }) } };
       // The SDK sets max_tokens to fit the budget — don't cap it ourselves.
       return { anthropic: { thinking: { type: "enabled", budgetTokens: budget } } };
     case "bedrock":
       // Converse reasoningConfig — Claude/Nova reasoning models stream
-      // reasoningContent; non-reasoning models trip the retry-without path.
+      // reasoningContent; non-reasoning models trip the retry-without path. The
+      // SDK only turns `adaptive` into Claude's thinking field for an id naming
+      // anthropic, so anything else keeps the budget shape it always had.
+      if (modelId.includes("anthropic") && !claudeTakesBudget(modelId)) {
+        return { bedrock: { reasoningConfig: { ...adaptive, ...(effort && { maxReasoningEffort: effort }) } } };
+      }
       return { bedrock: { reasoningConfig: { type: "enabled", budgetTokens: budget } } };
     case "google":
     case "vertex":
@@ -160,7 +217,6 @@ export function reasoningParams(
       return { google: { thinkingConfig: { includeThoughts: true, thinkingBudget: budget } } };
     default: {
       if (!EFFORT_PROVIDERS.has(provider)) return undefined;
-      const effort = effortSpread(allowed)[amount];
       if (!effort) return undefined; // this stop isn't expressible on this model
       // OpenRouter wraps the effort in its own normalizing object; the Responses
       // API pairs it with the summary knob (azure reads the "azure" namespace,

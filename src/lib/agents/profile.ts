@@ -100,7 +100,7 @@ export const agentProfileSchema = z.object({
        *  stops is the after-the-fact sweep for what it didn't think to. Already
        *  bounded by the `memory` capability above, which turns off memory entirely. */
       factExtraction: z.boolean().default(true),
-      /** Summarize a conversation that has filled 75% of the window, so the next
+      /** Summarize a conversation that is close to the end of the window, so the next
        *  turn starts from the summary. Off does NOT let a chat overflow: the
        *  reactive emergency trim still catches it — the conversation is cut back to
        *  its most recent turns instead of being summarized, which is cheaper and

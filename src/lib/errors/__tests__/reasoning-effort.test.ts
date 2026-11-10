@@ -89,3 +89,23 @@ describe("parseAllowedEfforts", () => {
     expect(parseAllowedEfforts(err)).not.toBeNull();
   });
 });
+
+describe("isReasoningUnsupportedError — history errors are not capability errors", () => {
+  // Each of these comes from a model that DOES reason, complaining about the thinking
+  // blocks replayed in the history. Matching them used to persist "this model cannot
+  // reason" and switch thinking off for everyone on that model.
+  it.each([
+    "messages.1.content.0.thinking.signature: Invalid `signature` in `thinking` block",
+    "messages.3.content.0: `thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified. These blocks must remain as they were in the original response.",
+    "messages.1.content.0.type: Expected `thinking` or `redacted_thinking`, but found `text`. When `thinking` is enabled, a final `assistant` message must start with a thinking block (preceeding the lastmost set of `tool_use` and `tool_result` blocks).",
+    "thinking blocks cannot be modified",
+  ])("does not match %s", (msg) => {
+    expect(isReasoningUnsupportedError(new Error(msg))).toBe(false);
+  });
+
+  it("still matches a model that genuinely cannot think", () => {
+    expect(isReasoningUnsupportedError(new Error("thinking is not supported for this model"))).toBe(true);
+    expect(isReasoningUnsupportedError(new Error("`thinking` is not supported by claude-3-haiku"))).toBe(true);
+    expect(isReasoningUnsupportedError(new Error("Unknown parameter: 'budget_tokens'"))).toBe(true);
+  });
+});

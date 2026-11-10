@@ -692,6 +692,12 @@
       "collapse": "Show less",
       "cancelled": "Response was cancelled",
       "genericError": "Something went wrong while generating a response. Please try again.",
+      "wrapUp": "The assistant paused here so this reply wouldn't run too long. If anything is still unfinished, ask it to continue — it will pick up where it left off.",
+      "wrapUpDetail": {
+        "steps": "Tools were withdrawn for the final step: the turn reached FORCE_TEXT_AFTER_STEPS. Raise MAX_AGENT_STEPS (and FORCE_TEXT_AFTER_STEPS) for longer tool loops.",
+        "time": "Tools were withdrawn for the final step: the turn had used WRAP_UP_AFTER_FRACTION of TASK_TIMEOUT_MINUTES. Raise TASK_TIMEOUT_MINUTES for heavier work.",
+        "output": "Tools were withdrawn for the final step: the turn's tool output passed MAX_TURN_TOOL_OUTPUT_CHARS."
+      },
       "thinking": "Thinking…",
       "copy": "Copy",
       "copied": "Copied",
@@ -723,6 +729,11 @@
       "quiet": {
         "title": "Nothing new",
         "showRun": "Show what it did"
+      },
+      "jobNotice": {
+        "done": "{count, plural, one {A background task finished} other {# background tasks finished}}",
+        "lost": "A background task stopped before it finished — its workspace was shut down",
+        "unwatched": "A background task is still running after several hours and is no longer being watched"
       }
     },
     "memory": {
@@ -971,7 +982,7 @@
           "factExtraction": "Remember from every turn",
           "factExtractionHint": "A request after every reply. Off means the agent saves only what it decides to save itself.",
           "compaction": "Summarize long conversations",
-          "compactionHint": "A request once a chat fills 75% of the window. Off drops the oldest turns instead of summarizing them."
+          "compactionHint": "One extra request when a chat gets close to the model's limit; earlier messages are condensed automatically. Off drops the oldest turns instead of summarizing them."
         }
       },
       "systemPromptHint": "How the assistant should work in this project: tone, what to always include, what to avoid."

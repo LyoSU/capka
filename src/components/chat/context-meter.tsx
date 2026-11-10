@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { compactAt } from "@/lib/chat/context/budget";
 
 /** Compact token count: 1240 → "1k", 124000 → "124k", 1200000 → "1.2M". */
 function fmtTokens(n: number): string {
@@ -16,8 +17,9 @@ function fmtTokens(n: number): string {
  * cap). Sits just left of the send button — deliberately unobtrusive (a ring,
  * not a full-width bar). Hover (or tap) reveals an island with the exact
  * figures, rendered via a portal so the composer's `overflow-hidden` can't clip
- * it. Hidden below 50%, turns amber near the ~75% mark where the server
- * compacts. Purely informational; compaction is automatic.
+ * it. Hidden below 50%, turns amber once usage reaches the point where the
+ * server compacts (`compactAt`, which depends on the window size). Purely
+ * informational; compaction is automatic.
  */
 export function ContextMeter({ used, window: limit }: { used: number; window: number }) {
   const t = useTranslations("chat.panel");
@@ -27,7 +29,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
   if (fraction < 0.5) return null;
 
   const pct = Math.min(100, Math.round(fraction * 100));
-  const warn = fraction >= 0.75;
+  const warn = used >= compactAt(limit);
   const r = 6.5;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - Math.min(1, fraction));

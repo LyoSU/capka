@@ -36,6 +36,7 @@ import { buildSystemPrompt } from "@/lib/chat/prompt";
 import { isInternalPath } from "@/lib/chat/artifacts";
 import { listSecretNames, loadSecretEnv } from "@/lib/chat/secrets";
 import { publishTaskEvent } from "./events";
+import { recordBackgroundJob } from "./background-jobs";
 import type { TaskPayload } from "./runner";
 
 /**
@@ -159,7 +160,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     getOrgInstructions(),
     // The user message this turn answers, from the tree — never from the payload.
     replyParentId
-      ? db.select({ content: messages.content, parentId: messages.parentId }).from(messages)
+      ? db.select({ content: messages.content, parentId: messages.parentId, platform: messages.platform }).from(messages)
           .where(and(eq(messages.id, replyParentId), eq(messages.chatId, chatId), eq(messages.role, "user")))
           .limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
@@ -232,7 +233,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // `ask`, which `userWordsFromAnswer` already narrows to free-text fields — is the one
   // ingress the turn taint is measured AGAINST. Marking it would make every turn untrusted
   // and the distinction empty.
-  const userTurnText = turnMessage?.content || answeredAsk;
+  // A background-job notice (platform "job") is a user-ROLE row nobody typed: it
+  // carries job output, so it must never count as what the person stated.
+  const userTurnText = (turnMessage?.platform === "job" ? "" : turnMessage?.content) || answeredAsk;
 
   // THE TURN'S THREE PER-TURN OBJECTS, constructed once, here, because the tool factory
   // below is called exactly once per turn and all three have exactly its lifetime: the
@@ -333,7 +336,14 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
         // redacted out of every result. A THUNK, not a value: a chat with no
         // secrets — nearly all of them — must not pay a decrypt round-trip for a
         // turn that never touches the sandbox.
-        chatId ? () => loadSecretEnv(chatId) : undefined)
+        chatId ? () => loadSecretEnv(chatId) : undefined,
+        // Watched, so the agent is told when it ends instead of polling check_job.
+        chatId
+          ? (job) => recordBackgroundJob({
+              ...job, chatId, userId, sessionKey, chain: payload.jobChain ?? 0,
+              turn: { requestModel: payload.requestModel, projectId: payload.projectId, origin: payload.origin },
+            })
+          : undefined)
     : empty;
   // The turn's citation counter: search-shaped connector results number their
   // records through it, so `[N]` stays unique across every search call of the

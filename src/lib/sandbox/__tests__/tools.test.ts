@@ -384,3 +384,96 @@ describe("background jobs lease the sandbox against idle eviction", () => {
     expect(markBusy).not.toHaveBeenCalled(); // nothing left to protect
   });
 });
+
+describe("sandbox tools — str_replace uniqueness, search_files flags, default timeouts", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    execCommand.mockResolvedValue({ stdout: "ok", stderr: "", exitCode: 0 });
+  });
+  const script = () => Buffer.from(lastCmd().match(/echo '([^']+)'/)![1], "base64").toString();
+  type Edit = { success: boolean; error?: string; added?: number; removed?: number };
+
+  it("str_replace refuses an ambiguous old_str and tells the model how to proceed", async () => {
+    execCommand.mockResolvedValue({ stdout: "MULTIPLE 3\n", stderr: "", exitCode: 1 });
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "y" }, opts)) as Edit;
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("matches 3 places");
+    expect(res.error).toContain("replace_all");
+    expect(script()).toContain("replace_all = False");
+  });
+
+  it("str_replace with replace_all scales the line counts by the replacements made", async () => {
+    execCommand.mockResolvedValue({ stdout: "OK 3 exact\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!(
+      { path: "a.txt", old_str: "x\ny", new_str: "z", replace_all: true }, opts,
+    )) as Edit;
+    expect(script()).toContain("replace_all = True");
+    expect(res).toEqual({ success: true, path: "a.txt", added: 3, removed: 6 }); // exact match: no note
+  });
+
+  it("str_replace tells the model when only a fallback tier matched", async () => {
+    execCommand.mockResolvedValue({ stdout: "OK 1 typographic\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!({ path: "a.txt", old_str: `"x"`, new_str: "y" }, opts)) as Edit & { note?: string };
+    expect(res).toMatchObject({ success: true, added: 1, removed: 1 });
+    expect(res.note).toContain("curly quotes");
+  });
+
+  it("str_replace keeps the not-found message", async () => {
+    execCommand.mockResolvedValue({ stdout: "NOTFOUND\n", stderr: "", exitCode: 1 });
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "y" }, opts)) as Edit;
+    expect(res.error).toBe("The old_str was not found in a.txt. It must match the file exactly, including whitespace and indentation.");
+  });
+
+  it("str_replace appends the miss hint, and parses the status from line one only", async () => {
+    // A quoted file line that reads like a status must not flip the result.
+    const hint = "The closest lines in the file:\n6: OK 1 exact";
+    execCommand.mockResolvedValue({ stdout: `NOTFOUND\n${hint}\n`, stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "y" }, opts)) as Edit;
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/not found in a\.txt\.[^]*\n\nThe closest lines in the file:\n6: OK 1 exact$/);
+  });
+
+  it("str_replace reports a non-UTF-8 file and a no-op edit in plain words", async () => {
+    const { tools } = await load();
+    execCommand.mockResolvedValue({ stdout: "NOTUTF8\n", stderr: "", exitCode: 1 });
+    const bad = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "y" }, opts)) as Edit;
+    expect(bad.error).toContain("not UTF-8");
+    execCommand.mockResolvedValue({ stdout: "UNCHANGED\n", stderr: "", exitCode: 1 });
+    const same = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "y" }, opts)) as Edit;
+    expect(same.error).toContain("unchanged");
+  });
+
+  it("str_replace writes nothing when old_str equals new_str", async () => {
+    const { tools } = await load();
+    const res = (await tools.str_replace.execute!({ path: "a.txt", old_str: "x", new_str: "x" }, opts)) as Edit;
+    expect(res.success).toBe(false);
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
+  it("search_files passes the pattern with -e and the path after --, so a leading '-' is not a flag", async () => {
+    const { tools } = await load();
+    await tools.search_files.execute!({ pattern: "-foo", path: "src" }, opts);
+    expect(lastCmd()).toContain("rg --no-heading -n -e '-foo'");
+    expect(lastCmd()).toContain("-- 'src'");
+  });
+
+  it("execute_bash defaults to a 120s timeout; file tools keep 30s; an explicit value still wins and is capped", async () => {
+    const { tools } = await load();
+    const timeoutOf = () => execCommand.mock.calls.at(-1)![2];
+    await tools.execute_bash.execute!({ command: "true" }, opts);
+    expect(timeoutOf()).toBe(120000);
+    await tools.execute_python.execute!({ code: "1" }, opts);
+    expect(timeoutOf()).toBe(120000);
+    await tools.execute_node.execute!({ code: "1" }, opts);
+    expect(timeoutOf()).toBe(120000);
+    await tools.execute_bash.execute!({ command: "true", timeout: 999999 }, opts);
+    expect(timeoutOf()).toBe(300000);
+    await tools.read_file.execute!({ path: "a.txt" }, opts);
+    expect(timeoutOf()).toBe(30000);
+  });
+});

@@ -122,6 +122,9 @@ export interface ConsumedSteer extends Steer {
  */
 export const steerFrame = (text: string) => `The user added while you were working: ${text}`;
 
+/** Which budget made a step answer in text instead of calling tools. */
+export type WrapUpReason = "steps" | "time" | "output";
+
 
 /** One background call's own accounting, denormalized onto the message row so the
  *  (i) popover needs no JOIN — the same bargain `usage`/`costUsd` make. */
@@ -273,6 +276,15 @@ export type MessageMeta = {
   // transcript renders a muted row instead of a bubble. The reply text is still
   // stored: a monitor's owner must be able to see that it ran.
   quiet?: { reason: string };
+  // On a `platform: "job"` user-role row only: Capka's notice that background jobs
+  // ended (src/lib/tasks/background-jobs.ts). The transcript draws a muted line, not
+  // a bubble the person said; `outcome` is the one that most needs their attention.
+  jobNotice?: { outcome: "done" | "lost" | "unwatched"; count: number };
+  // This COMPLETED turn ended on a wrap-up step: it ran out of steps, time or tool
+  // output, had its tools withdrawn, and was told to say what is done and what is
+  // left (see wrapUpReason). The reply stands, but the work may not be finished, so
+  // the transcript offers Continue under it. Absent on every other turn.
+  wrapUp?: WrapUpReason;
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

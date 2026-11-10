@@ -11,7 +11,19 @@ export interface TokenUsage {
    *  already excluded them from `inputTokens`, so pricing them here adds the
    *  charge that was missing rather than double-counting one that was there. */
   cacheWriteTokens?: number;
+  /** The part of `cacheWriteTokens` written with a 1-hour TTL — a SUBSET, not a
+   *  fifth bucket, so every token total stays what it was and only the price of
+   *  these differs. Anthropic bills a 1h write at 2x base input against 1.25x for
+   *  the 5-minute default, and reports the split per request. */
+  cacheWrite1hTokens?: number;
 }
+
+/** A 1h cache write over a 5-minute one: 2x / 1.25x base input. Applied to the
+ *  catalog's own 5-minute rate rather than stored as a second price — the models
+ *  table has one write column, and OpenRouter's `input_cache_write_1h` and
+ *  LiteLLM's `cache_creation_input_token_cost_above_1hr` are 1.6x their 5-minute
+ *  rate on every Anthropic-served Claude they list (only resellers deviate). */
+export const CACHE_WRITE_1H_FACTOR = 2 / 1.25;
 
 /** Pure cost math from per-token prices. */
 export function computeCost(price: ModelPrice, usage: TokenUsage): number {
@@ -19,11 +31,15 @@ export function computeCost(price: ModelPrice, usage: TokenUsage): number {
   const output = usage.outputTokens ?? 0;
   const cached = usage.cachedInputTokens ?? 0;
   const cacheWrite = usage.cacheWriteTokens ?? 0;
+  // Clamped to the writes it is a part of, so a malformed report can't bill more
+  // write tokens than were written.
+  const hour = Math.min(usage.cacheWrite1hTokens ?? 0, cacheWrite);
   return (
     input * price.input +
     output * price.output +
     cached * price.cacheRead +
-    cacheWrite * price.cacheWrite
+    (cacheWrite - hour) * price.cacheWrite +
+    hour * price.cacheWrite * CACHE_WRITE_1H_FACTOR
   );
 }
 

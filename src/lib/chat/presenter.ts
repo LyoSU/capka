@@ -242,6 +242,11 @@ export function toUIMessages(rows: {
         // A monitor run that found nothing worth reporting — the transcript draws
         // one muted row with the reason instead of a full assistant bubble.
         quiet: meta?.quiet,
+        // Capka's "background job ended" notice — a muted line, not a user bubble.
+        jobNotice: meta?.jobNotice,
+        // The reply was written with tools withdrawn (out of steps, time or tool
+        // output): the message offers Continue under it. See MessageMeta.wrapUp.
+        wrapUp: meta?.wrapUp,
         // Tech details for the assistant (i) popover.
         durationMs: meta?.durationMs,
         reasoningMs: meta?.reasoningMs,

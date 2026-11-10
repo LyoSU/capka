@@ -6,6 +6,29 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- The agent is notified when an `execute_bash` background job ends (folded into the running reply, or as one follow-up turn under the usual budget gates, at most `JOB_FOLLOWUP_CHAIN_MAX`, default 3, in a row); jobs are watched for `JOB_WATCH_MAX_HOURS` (default 6). A migration adds `background_jobs` and applies at boot.
+
+- `str_replace` takes `replace_all`, refuses an ambiguous match instead of editing the first one, and tolerates typographic-quote and trailing-whitespace differences.
+- The turn context now carries the current date and time, so a chat left open overnight no longer answers with the day it started.
+
+### Changed
+- Claude 4.6 and later (including the Claude 5 family) are sent adaptive thinking with an effort level instead of a token budget, which those models reject. A migration clears the stale "cannot reason" flag on such models and applies at boot.
+- Prompt-cache breakpoints on Claude use a 1-hour TTL (the moving step tail stays at 5 minutes); 1-hour cache writes are priced at 2x input in cost accounting.
+- Auto-compaction triggers at the context window minus a 15% reserve (at least 16k tokens) instead of at 75%, and its summary follows a fixed structure.
+- Sandbox commands default to a 120 s timeout (was 30 s) and return about 2 s sooner each; the command is delivered over stdin, so one longer than 128 KiB no longer fails. Redeploy `sandbox-controller` together with the platform.
+- Regular users no longer see the model's reasoning text between tool calls; admins still do.
+- `scripts/install-gvisor.sh` installs from the release archive (`runsc`, `containerd-shim-runsc-v1`, `gvisor-bin`) with a sha512 check; gVisor releases from 2026-11 no longer publish the single binary it downloaded.
+- `MAX_AGENT_STEPS` now defaults to 100, up from 25; `FORCE_TEXT_AFTER_STEPS` still defaults to five below it and is now clamped to one below it (a value at the cap never fired).
+- A turn that runs out of steps, run time (`WRAP_UP_AFTER_FRACTION`) or tool output (`MAX_TURN_TOOL_OUTPUT_CHARS`) is now told to say what is done and what is left, and the reply offers Continue; admins see which limit fired under its technical details.
+
+### Fixed
+- A command printing more than `MAX_EXEC_OUTPUT_BYTES` no longer reports its output as discarded when the full log was saved in the workspace.
+- The `MAX_TURN_TOOL_OUTPUT_CHARS` brake no longer fires a step late.
+- Tool arguments of the wrong type (a number or boolean sent as a string, stringified JSON, a bare value where a list is expected) are coerced to the tool's schema instead of failing the call.
+- Uploaded file names are normalized to NFC, so a file named on macOS can be opened by the name the user typed.
+- A model without reasoning is no longer recorded after a thinking-block history error (`Invalid signature in thinking block`, "thinking blocks cannot be modified"), which had switched thinking off for a model that supports it.
+
 ## [0.46.2] - 2026-10-08
 
 ### Changed

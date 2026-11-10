@@ -1,16 +1,23 @@
 import type { ModelMessage } from "ai";
-import { steerFrame } from "@/lib/chat/contracts";
+import { steerFrame, type WrapUpReason } from "@/lib/chat/contracts";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { CLEARED_TOOL_INPUT, CLEARED_TOOL_OUTPUT } from "./tool-clearing";
-import { outputBytes } from "@/lib/tool-output";
+import { outputBytes, MAX_TURN_TOOL_OUTPUT_CHARS } from "@/lib/tool-output";
 import { posInt } from "@/lib/config/env";
 
 /**
  * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
- * model that keeps calling tools from looping forever. Raise MAX_AGENT_STEPS for
- * workflows that legitimately chain many tool calls.
+ * model that keeps calling tools from looping forever.
+ *
+ * 100, not the 25 this started at. 25 was below what a real office task takes on
+ * current models — read eight attached files, cross-check them, build a deliverable
+ * — and a turn that ran out of steps stopped with the work half-done. The step count
+ * is not the guard that matters anyway: the wall clock (TASK_TIMEOUT_MINUTES, braked
+ * by WRAP_UP_AFTER_FRACTION) bounds how long a turn runs, and the per-turn tool-output
+ * budget (MAX_TURN_TOOL_OUTPUT_CHARS) bounds how much it reads. This one is left as
+ * the backstop against a model that loops on cheap, fast calls neither of those sees.
  */
-export const MAX_STEPS = posInt(process.env.MAX_AGENT_STEPS, 25);
+export const MAX_STEPS = posInt(process.env.MAX_AGENT_STEPS, 100);
 
 /**
  * After this many tool steps WITHIN a single turn, force the model to answer in
@@ -19,18 +26,25 @@ export const MAX_STEPS = posInt(process.env.MAX_AGENT_STEPS, 25);
  *
  * Derived by default, not fixed: a hardcoded threshold above a lowered
  * MAX_AGENT_STEPS would never fire, and the turn would hit the ceiling mid-tool —
- * the very failure this exists to prevent. The floor of 1 keeps the wrap-up step
- * meaningful even at a cap of 1 or 2.
+ * the very failure this exists to prevent.
  *
- * But `cap - 5` is only a sane default while the cap is small. An operator who
- * raises MAX_AGENT_STEPS to 200 for legitimate bulk work also pushes wrap-up to
- * step 195 — deferring it past the point where it could do any good, since the
- * turn's context is long since spent. FORCE_TEXT_AFTER_STEPS is therefore its own
- * knob, clamped to the cap so a too-high value can't disable it outright.
+ * `cap - 5` stays the default at a cap of 100. The worry that once made it a
+ * separate knob — that wrap-up at step 195 of 200 comes after the context is spent —
+ * no longer leans on this number: the per-turn tool-output budget and the mid-turn
+ * prune bound the context, and the clock brake usually fires long before step 95.
+ * So this is the last of three brakes, and the only thing it must do is fire before
+ * the cap. The five spare steps are for a provider that ignores `toolChoice: 'none'`
+ * and calls a tool anyway: the forced steps that follow still carry the wrap-up
+ * instruction, so it gets a few more chances to answer before the cap cuts it.
+ *
+ * Clamped to [1, cap - 1]. Step numbers run 0..cap-1, so a threshold AT the cap is
+ * never reached — the ceiling stops the turn first, mid-tool, with nothing said.
+ * (A cap of 1 has no room for a wrap-up step; the floor keeps that turn's single
+ * step usable rather than forcing it to answer without ever looking.)
  */
-export const FORCE_TEXT_AFTER_STEPS = Math.min(
-  MAX_STEPS,
-  Math.max(1, Number(process.env.FORCE_TEXT_AFTER_STEPS) || MAX_STEPS - 5),
+export const FORCE_TEXT_AFTER_STEPS = Math.max(
+  1,
+  Math.min(MAX_STEPS - 1, Number(process.env.FORCE_TEXT_AFTER_STEPS) || MAX_STEPS - 5),
 );
 
 /**
@@ -92,31 +106,90 @@ export function foldReasoningIntoText(messages: ModelMessage[]): ModelMessage[] 
 }
 
 /**
- * Per-step settings for streamText's prepareStep hook.
+ * Whether this step must answer in text instead of calling tools, and why —
+ * `undefined` for an ordinary step.
  *
- * CACHE NOTE: this deliberately NEVER returns `messages`. Rewriting the message
- * array between steps would change the prompt prefix on every step and break the
- * prompt cache mid-turn (the exact trap from "Don't Break the Cache"). Switching
- * `toolChoice` does invalidate the cache once — but only on this single late
- * step, where the turn is wrapping up anyway, so the cost is one-off, not
- * per-step. Hence the only lever here is a late `toolChoice: 'none'`.
- *
- * TWO ceilings arm it, because a turn can run out of either budget first. The step
+ * THREE ceilings arm it, because a turn can run out of any of them first. The step
  * count is the one a chatty model exhausts; the wall clock is the one heavy sandbox
- * work exhausts, and it usually gets there first — MAX_STEPS tool calls at the
- * controller's per-exec timeout can exceed the task deadline on their own, so a turn
- * doing real work hits the clock with steps to spare. Left to the deadline alone,
- * that turn is aborted mid-tool and the reply is a hard cut; braking a little early
- * turns the same run into a real answer that says what it got done.
+ * work exhausts, and it usually gets there first — a turn doing real work hits the
+ * clock with steps to spare. Left to the deadline alone, that turn is aborted
+ * mid-tool and the reply is a hard cut; braking a little early turns the same run
+ * into a real answer that says what it got done. The output budget is the third: a
+ * turn whose tool results already add up past MAX_TURN_TOOL_OUTPUT_CHARS answers
+ * with what it has instead of gathering more.
+ *
+ * `step` is counted across the whole TURN, not one stream: the runner re-streams on
+ * a stall, a capability retry or an overflow trim, and the SDK's own step number
+ * restarts at 0 on each. Read per stream, a stall after step 96 handed the turn a
+ * fresh 95 steps and dropped the wrap-up the turn had already reached.
+ *
+ * The reason only matters for the record (an admin sees which limit fired). The
+ * model is told the same thing in all three cases — see WRAP_UP_INSTRUCTION.
  */
-export function stepSettings(
-  stepNumber: number,
-  /** How much of the task's wall-clock budget is spent, 0..1. Zero = no clock pressure. */
-  elapsedFraction = 0,
-): { toolChoice?: "none" } {
-  return stepNumber >= FORCE_TEXT_AFTER_STEPS || elapsedFraction >= WRAP_UP_AFTER_FRACTION
-    ? { toolChoice: "none" }
-    : {};
+export function wrapUpReason(input: {
+  step: number;
+  /** How much of the task's wall-clock budget is spent, 0..1. */
+  elapsedFraction?: number;
+  /** Characters of tool output this turn has read so far. */
+  outputChars?: number;
+}): WrapUpReason | undefined {
+  if (input.step >= FORCE_TEXT_AFTER_STEPS) return "steps";
+  if ((input.elapsedFraction ?? 0) >= WRAP_UP_AFTER_FRACTION) return "time";
+  if ((input.outputChars ?? 0) >= MAX_TURN_TOOL_OUTPUT_CHARS) return "output";
+  return undefined;
+}
+
+/**
+ * What the model reads on the step its tools are taken away.
+ *
+ * Without it `toolChoice: 'none'` is silent: the model is stripped of its tools and
+ * never told why, so it either writes an ordinary "done" that hides the unfinished
+ * half, announces "next I'll do X" and stops, or says nothing at all — and the person
+ * reading it, who is not technical, sees the work stop with no way forward.
+ *
+ * Phrased for the reply it produces, which an office worker reads: outcome first,
+ * files by their `/workspace/…` path (the interface turns those into download cards),
+ * then what is left and the one thing to do about it. No "steps" or "limits" — that
+ * is machinery, and it reads as the product breaking. Framed as coming from the
+ * system for the same reason a steer is framed as coming from the user: it rides in a
+ * `user` message (the only role every provider accepts after a tool result), and
+ * unframed it would read as the person's own words.
+ */
+export const WRAP_UP_INSTRUCTION =
+  "[System note — not from the user] You can't use tools for the rest of this reply: no running code, no reading or writing files, no searching. "
+  + "Answer now, in text only, in the language you have been using with the user. "
+  + "Lead with the outcome: say plainly what is finished and where the results are, naming each file you made by its /workspace/… path as usual. "
+  + "Then say what is not finished yet, and that if they ask you to continue you will pick up where you left off. "
+  + "Don't announce or promise anything for this reply that you would need tools for. "
+  + "Don't mention steps, limits, tools or how you work — if something is left, just say it needs another go to finish.";
+
+/**
+ * Append the wrap-up instruction to ONE step's prompt.
+ *
+ * Appended, never spliced: on Claude models that return thinking blocks, changing
+ * anything before the last returned thinking block is a hard 400, and the tail is
+ * the one place nothing has been returned after. The end is also the one legal spot
+ * after a tool result (see injectSteers) — a run of user messages it forms with a
+ * steer or a resume request is folded by `mergeUserRuns`.
+ *
+ * Not re-placed at a fixed index like a steer, because it is not part of the turn's
+ * history: it is this step's instruction and nothing else. A `messages` value from
+ * `prepareStep` is that step's prompt and is never fed back into the SDK's own
+ * history, so it is never persisted, never shown, and never replayed into the next
+ * turn or the compaction summary (both are built from the stored parts). A step that
+ * is forced again — a provider that called a tool anyway, a re-stream after a stall —
+ * gets it appended afresh at its own tail, so it is present exactly once per request.
+ *
+ * Cache: appending cannot change a single byte before it, so every prefix a cache
+ * could hit is untouched. The step it lands on is a cache miss anyway — on the
+ * Anthropic provider `toolChoice: 'none'` drops the `tools` array from the request
+ * outright, and tools head the cached prefix; on Anthropic via a gateway that keeps
+ * the tools, Anthropic documents a `tool_choice` change as invalidating the cached
+ * messages. Other providers cache by prefix, which an append leaves whole. The instruction
+ * itself is a few hundred bytes of uncached input on a request that ends the turn.
+ */
+export function appendWrapUp(messages: ModelMessage[]): ModelMessage[] {
+  return [...messages, { role: "user", content: WRAP_UP_INSTRUCTION }];
 }
 
 /**
@@ -127,7 +200,7 @@ export function stepSettings(
  * evaluated at a turn BOUNDARY and buildModelContext clears at turn BUILD, so a
  * single turn that keeps calling tools had exactly one thing standing between it
  * and the ceiling: Anthropic's server-side edit, which no other provider gets.
- * A turn that starts at 74% of the window sails past 75% and on to the hard limit
+ * A turn that starts just under the compaction point sails past it and on to the hard limit
  * with nothing but the reactive `context_too_long` retry to catch it — and that
  * retry re-streams from a blind mechanical trim, which is a far worse outcome
  * than shedding some old tool bodies here.
@@ -199,6 +272,9 @@ export interface PlacedSteer {
   text: string;
   /** Absolute index into the step's REBUILT message list. Undefined until placed. */
   index?: number;
+  /** Already a complete message — not the user's words, so not framed as a steer.
+   *  A background-job notice rides the same placement (see background-jobs.ts). */
+  raw?: boolean;
 }
 
 /**
@@ -241,7 +317,7 @@ export function injectSteers(
   const out: ModelMessage[] = [];
   for (let i = 0; i <= messages.length; i++) {
     for (const s of placed) {
-      if (s.index === i) out.push({ role: "user", content: steerFrame(s.text) });
+      if (s.index === i) out.push({ role: "user", content: s.raw ? s.text : steerFrame(s.text) });
     }
     if (i < messages.length) out.push(messages[i]);
   }

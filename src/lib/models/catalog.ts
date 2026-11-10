@@ -60,8 +60,9 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
     const input = num(m.pricing?.prompt);
     const output = num(m.pricing?.completion);
     const cacheRead = num(m.pricing?.input_cache_read);
-    // OpenRouter also publishes `input_cache_write_1h`; we price the default
-    // (5-minute) TTL because that's the only one we ever ask for.
+    // The 5-minute write rate. OpenRouter also publishes `input_cache_write_1h`,
+    // which computeCost derives from this one instead (CACHE_WRITE_1H_FACTOR) —
+    // the row has a single write column.
     const cacheWrite = num(m.pricing?.input_cache_write);
     const ctx = m.context_length ?? null;
     const params = m.supported_parameters ?? [];
@@ -395,8 +396,8 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
         input: parseFloat(exact.inputPrice),
         output: parseFloat(exact.outputPrice ?? "0"),
         cacheRead: parseFloat(exact.cacheReadPrice ?? "0"),
-        // No multiplier is assumed anywhere: both price books publish the real
-        // cache-write rate. When a source omits it, fall back to the BASE INPUT
+        // No multiplier is assumed here: both price books publish the real
+        // (5-minute) cache-write rate. When a source omits it, fall back to the BASE INPUT
         // rate — a cache write is never cheaper than plain input, so that
         // under-states rather than invents, and it is strictly better than the
         // zero these tokens used to be charged.

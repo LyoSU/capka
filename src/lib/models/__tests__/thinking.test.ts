@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   availableAmounts,
   clampAmount,
+  claudeTakesBudget,
+  claudeThinksUnasked,
   effortSpread,
   parseThinkAmount,
   reasoningParams,
@@ -104,14 +106,38 @@ describe("reasoningParams", () => {
     for (const p of ["anthropic", "openai", "openrouter", "litellm", "google"]) {
       expect(reasoningParams(p, "off")).toBeUndefined();
     }
+    // Claude 4.6–4.8 think only when asked, and older Claude never unasked.
+    for (const id of ["claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-3-7-sonnet-latest"]) {
+      expect(reasoningParams("anthropic", "off", null, id), id).toBeUndefined();
+    }
+    // An unreadable Claude id: nothing, which no model refuses.
+    expect(reasoningParams("anthropic", "off", null, "claude-latest")).toBeUndefined();
+    // Only direct Anthropic gets the effort-only shape.
+    expect(reasoningParams("openrouter", "off", null, "anthropic/claude-opus-5.5")).toBeUndefined();
+    expect(reasoningParams("bedrock", "off", null, "us.anthropic.claude-opus-5-v1:0")).toBeUndefined();
+  });
+
+  it("makes 'off' the lowest effort, with no thinking block, on a Claude that thinks unasked", () => {
+    // Claude 5 thinks at its default effort when nothing is sent, and
+    // `thinking:{type:"disabled"}` is a 400 on several of them.
+    for (const id of [
+      "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5",
+      "claude-fable-5-2", "claude-mythos-5", "claude-mythos-preview", "Claude-Opus-5-5-20260101",
+    ]) {
+      expect(reasoningParams("anthropic", "off", null, id), id).toEqual({ anthropic: { effort: "low" } });
+      expect(claudeThinksUnasked(id), id).toBe(true);
+    }
+    for (const id of ["claude-opus-4-8", "claude-sonnet-4-20250514", "claude-opus-20250514", "claude-3-5-haiku", "gpt-5"]) {
+      expect(claudeThinksUnasked(id), id).toBe(false);
+    }
   });
 
   it("maps intent to a token budget on the budget providers", () => {
-    expect(reasoningParams("anthropic", "balanced")).toEqual({
+    expect(reasoningParams("anthropic", "balanced", null, "claude-sonnet-4-5-20250929")).toEqual({
       anthropic: { thinking: { type: "enabled", budgetTokens: 4000 } },
     });
     // 1024 is Anthropic's documented minimum — "brief" can't go under it.
-    expect(reasoningParams("anthropic", "brief")).toEqual({
+    expect(reasoningParams("anthropic", "brief", null, "claude-3-7-sonnet-20250219")).toEqual({
       anthropic: { thinking: { type: "enabled", budgetTokens: 1024 } },
     });
     expect(reasoningParams("google", "deep")).toEqual({
@@ -120,6 +146,49 @@ describe("reasoningParams", () => {
     expect(reasoningParams("vertex", "brief")).toEqual({
       google: { thinkingConfig: { includeThoughts: true, thinkingBudget: 1024 } },
     });
+  });
+
+  it("sends adaptive thinking + effort to Claude 4.6 and newer, budget to older", () => {
+    // Claude 4.7+ and every Claude 5 reject `type:"enabled"` with a 400; 4.5 and
+    // older reject `adaptive`. The summary is asked for because Claude 5 defaults
+    // `display` to "omitted", which streams thinking blocks with no text.
+    const adaptive = (effort: string) => ({
+      anthropic: { thinking: { type: "adaptive", display: "summarized" }, effort },
+    });
+    expect(reasoningParams("anthropic", "brief", null, "claude-opus-5-5")).toEqual(adaptive("low"));
+    expect(reasoningParams("anthropic", "balanced", null, "claude-sonnet-4-6")).toEqual(adaptive("medium"));
+    expect(reasoningParams("anthropic", "deep", null, "claude-fable-5-2")).toEqual(adaptive("high"));
+    // A model we have never heard of is new, and new models are adaptive-only.
+    expect(reasoningParams("anthropic", "deep", null, "claude-sonnet-7")).toEqual(adaptive("high"));
+    expect(reasoningParams("anthropic", "deep")).toEqual(adaptive("high"));
+    // Bedrock: the SDK maps these onto Claude's thinking + output_config.effort.
+    expect(reasoningParams("bedrock", "balanced", null, "us.anthropic.claude-opus-5-v1:0")).toEqual({
+      bedrock: { reasoningConfig: { type: "adaptive", display: "summarized", maxReasoningEffort: "medium" } },
+    });
+    expect(reasoningParams("bedrock", "balanced", null, "us.anthropic.claude-sonnet-4-5-20250929-v1:0")).toEqual({
+      bedrock: { reasoningConfig: { type: "enabled", budgetTokens: 4000 } },
+    });
+    // Not Claude: the shape it always had.
+    expect(reasoningParams("bedrock", "brief", null, "amazon.nova-pro-v1:0")).toEqual({
+      bedrock: { reasoningConfig: { type: "enabled", budgetTokens: 1024 } },
+    });
+  });
+
+  it("tells the legacy Claude ids apart from the adaptive ones", () => {
+    for (const id of [
+      "claude-sonnet-4-20250514", // 4.0, not 4.2: the minor is one digit
+      "claude-opus-4-1-20250805",
+      "claude-haiku-4-5",
+      "anthropic/claude-sonnet-4.5",
+      "claude-sonnet-4-5@20250929",
+      "claude-3-7-sonnet-latest",
+      "anthropic/claude-3.5-haiku",
+      "claude-3-opus-20240229",
+    ]) expect(claudeTakesBudget(id), id).toBe(true);
+    for (const id of [
+      "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-5", "claude-sonnet-5-5",
+      "claude-haiku-5-5", "claude-fable-5-1", "claude-mythos-preview", "anthropic/claude-opus-4.8",
+    ]) expect(claudeTakesBudget(id), id).toBe(false);
   });
 
   it("uses the model's own enum on the OpenAI-compatible family", () => {

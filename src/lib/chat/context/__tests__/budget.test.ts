@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { contextBudget, COMPACT_THRESHOLD, DEFAULT_CONTEXT_LENGTH } from "@/lib/chat/context/budget";
+import { contextBudget, compactAt, COMPACT_THRESHOLD, DEFAULT_CONTEXT_LENGTH } from "@/lib/chat/context/budget";
+import { toolClearTrigger } from "@/lib/chat/context/provider-edits";
 
 describe("contextBudget", () => {
   it("clamps the effective limit to the admin cap, below the model's window", () => {
     // Model advertises 1M, but the admin capped users at 200k.
-    const b = contextBudget({ usedTokens: 160_000, modelContextLength: 1_000_000, adminCap: 200_000 });
+    const b = contextBudget({ usedTokens: 175_000, modelContextLength: 1_000_000, adminCap: 200_000 });
     expect(b.effectiveLimit).toBe(200_000);
-    expect(b.fraction).toBeCloseTo(0.8, 5);
-    expect(b.shouldCompact).toBe(true); // 80% > 75% threshold
+    expect(b.fraction).toBeCloseTo(0.875, 5);
+    // The reserve is taken from the CAPPED window: 200k - 30k, not 1M - 150k.
+    expect(b.compactAt).toBe(170_000);
+    expect(b.shouldCompact).toBe(true);
   });
 
   it("uses the model window when no admin cap is set", () => {
@@ -35,8 +38,33 @@ describe("contextBudget", () => {
     expect(b.shouldCompact).toBe(true);
   });
 
-  it("triggers exactly at the threshold", () => {
-    const b = contextBudget({ usedTokens: COMPACT_THRESHOLD * 200_000, modelContextLength: 200_000 });
-    expect(b.shouldCompact).toBe(true);
+  it("triggers exactly at the reserve, not a token before", () => {
+    expect(contextBudget({ usedTokens: 170_000, modelContextLength: 200_000 }).shouldCompact).toBe(true);
+    expect(contextBudget({ usedTokens: 169_999, modelContextLength: 200_000 }).shouldCompact).toBe(false);
+  });
+});
+
+describe("compactAt", () => {
+  // window → trigger. Old flat 75%: 24k / 96k / 150k / 750k / (unknown) 96k.
+  it.each([
+    [32_768, 16_768], // 16k floor: 4.9k would be less than one large file read
+    [128_000, 108_800], // 15%
+    [200_000, 170_000],
+    [1_000_000, 850_000], // 150k free, not 250k
+    [16_000, 13_600], // too small to give up 16k: the share alone, never a trigger at 0
+  ])("a %i-token window compacts at %i", (window, at) => {
+    expect(compactAt(window)).toBe(at);
+  });
+
+  it("applies to the default window when the model's is unknown", () => {
+    expect(contextBudget({ usedTokens: 0, modelContextLength: null }).compactAt).toBe(compactAt(DEFAULT_CONTEXT_LENGTH));
+  });
+
+  it("never fires before the tool-clearing trigger, so clearing stays the cheaper relief", () => {
+    for (let w = 8_000; w <= 2_000_000; w += 1_000) expect(compactAt(w)).toBeGreaterThanOrEqual(toolClearTrigger(w));
+  });
+
+  it("keeps the summary floor at or below the trigger on every window, so a kept summary cannot re-trip it", () => {
+    for (let w = 8_000; w <= 2_000_000; w += 1_000) expect(w * COMPACT_THRESHOLD).toBeLessThanOrEqual(compactAt(w));
   });
 });

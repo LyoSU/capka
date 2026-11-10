@@ -17,7 +17,7 @@ import { QUIET_PROMPT } from "@/lib/automations/quiet-tool";
  *    CACHE-CRITICAL: it must be derived from the conversation start time, never
  *    a live clock — a per-turn value here would change the prefix and bust the
  *    cache for everything after it.
- * 3. `volatile` — memories, workspace snapshot, just-attached files. Changes
+ * 3. `volatile` — the current date/time, memories, workspace snapshot, just-attached files. Changes
  *    per run, so it is NOT a system message: the runner sends it after the
  *    conversation history, as the turn context following the user's own words
  *    in the latest user message (see wrapTurnContext), so churn invalidates
@@ -47,6 +47,22 @@ const MANAGE_PROMPT = `## Managing settings & configuration
 - When the user describes a RECURRING intent ("every week", "every morning", "keep an eye on", "remind me", "every Monday"), in whatever language they use, offer to create an automation (\`add\` on \`automations\`): the platform will run the instruction on schedule and deliver results as a new chat (+ Telegram if linked). Translate the schedule into a cron expression in the user's timezone yourself — the user must never see cron syntax; the approval card shows them the next run dates instead. For "remind me once at X" use \`once_at\`. After creating one, offer to run the instruction right now yourself as a test.`;
 
 /**
+ * Friendly local date+time with the IANA id appended (dateStyle/timeStyle can't
+ * carry a tz label, and the id is unambiguous). A stored-but-invalid tz would make
+ * Intl throw, so fall back to UTC rather than crash a run. The id shown is the one
+ * actually used.
+ */
+function formatWhen(date: Date, tz: string, locale: string): string {
+  const fmt = (timeZone: string) =>
+    `${new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone }).format(date)} (${timeZone})`;
+  try {
+    return fmt(tz);
+  } catch {
+    return fmt("UTC");
+  }
+}
+
+/**
  * Per-conversation context block (tier 2). Fixed for the whole conversation.
  *
  * Returning "" is safe — the caller then skips the breakpoint and the extra
@@ -71,16 +87,7 @@ export function buildSessionContext(opts: {
   const lines: string[] = [];
   if (name) lines.push(`- Name: ${name}`);
   if (startedAt) {
-    // Friendly local date+time. dateStyle/timeStyle can't carry a tz label, so
-    // we append the IANA id — unambiguous and stable. A stored-but-invalid tz
-    // would make Intl throw, so fall back to UTC rather than crash a run.
-    let when: string;
-    try {
-      when = new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone: tz }).format(startedAt);
-    } catch {
-      when = new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone: "UTC" }).format(startedAt);
-    }
-    lines.push(`- This conversation started on ${when} (${tz}). Treat that as the current date/time unless the user indicates otherwise.`);
+    lines.push(`- This conversation started on ${formatWhen(startedAt, tz, locale)}. The current date and time is given in the turn context; use it, not this, for "today" and "now".`);
   }
   return `## Who you're talking to\n${lines.join("\n")}`;
 }
@@ -102,6 +109,8 @@ export function buildSystemPrompt(opts: {
    *  Files the model writes there flow back to the user after the turn. */
   syncedFolders?: { name: string }[];
   conversationStartedAt?: Date | null;
+  /** The real current time, for the volatile tier. Defaults to `new Date()`. */
+  now?: Date;
   locale?: string | null;
   /** The operator's very first message right after finishing setup — adds a
    *  one-time concierge nudge so the agent welcomes them and offers to configure
@@ -229,6 +238,12 @@ export function buildSystemPrompt(opts: {
     // download can fail or an oversize file can't be delivered), so building it
     // from a capability prediction here would promise files the model never got.
     volatile: tier([
+      // The only live clock in the prompt. The session tier knows just when the chat
+      // STARTED (cache-stable); a chat that lives for days needs the real "now", and
+      // this tier is rebuilt every run and sits after the history, so it busts nothing.
+      profile.sessionContext
+        ? `## Current date and time\n${formatWhen(opts.now ?? new Date(), opts.user?.timezone || "UTC", opts.locale || "en")}`
+        : undefined,
       // One block, not two: the manifest already splits itself into user/project
       // sections and knows which of them exist this turn.
       caps.memory && memoryManifest ? memoryManifest : undefined,

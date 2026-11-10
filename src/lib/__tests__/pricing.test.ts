@@ -27,6 +27,23 @@ describe("computeCost", () => {
     expect(got).toBeCloseTo(1.875, 6);
     expect(computeCost(OPUS, { cacheWriteTokens: 0 })).toBe(0);
   });
+
+  it("prices the 1-hour share of the writes at 2x base input, the rest at the 5-minute rate", () => {
+    // 100k writes, 60k of them 1h: 40k × $18.75/M + 60k × $30/M (= 1.6 × 18.75).
+    const got = computeCost(OPUS, { cacheWriteTokens: 100_000, cacheWrite1hTokens: 60_000 });
+    expect(got).toBeCloseTo(0.75 + 1.8, 9);
+    // On Anthropic's own price list that is exactly 2x base input per 1h token.
+    expect(computeCost(OPUS, { cacheWriteTokens: 1, cacheWrite1hTokens: 1 })).toBeCloseTo(2 * OPUS.input, 12);
+  });
+
+  it("treats the 1h count as part of the writes, never as extra tokens", () => {
+    // A report claiming more 1h tokens than writes is clamped to the writes.
+    expect(computeCost(OPUS, { cacheWriteTokens: 1000, cacheWrite1hTokens: 5000 }))
+      .toBeCloseTo(computeCost(OPUS, { cacheWriteTokens: 1000, cacheWrite1hTokens: 1000 }), 12);
+    expect(computeCost(OPUS, { cacheWrite1hTokens: 5000 })).toBe(0);
+    // Absent → every write at the 5-minute rate, as before.
+    expect(computeCost(OPUS, { cacheWriteTokens: 1000 })).toBeCloseTo(1000 * OPUS.cacheWrite, 12);
+  });
 });
 
 describe("toTokenUsage", () => {

@@ -331,6 +331,12 @@ export async function startWorker(): Promise<void> {
   void schedulerTick().catch(() => {});
   const schedulerTimer = setInterval(() => void schedulerTick().catch(() => {}), 30_000);
 
+  // Notice ended background jobs and tell their chats (background-jobs.ts). Same
+  // cadence and the same replica-safety as the scheduler: every transition is conditional.
+  const { watchBackgroundJobs } = await import("@/lib/tasks/background-jobs");
+  const jobsWatch = () => void watchBackgroundJobs().catch((e) => log.warn("background job watch failed", { err: String(e) }));
+  const jobsTimer = setInterval(jobsWatch, 30_000);
+
   // Finish any project delete whose post-commit teardown failed (controller blip,
   // crash between commit and teardown): a tombstoned row is retried until its
   // sandbox/workspace/folders are gone and the row is physically removed.
@@ -358,6 +364,7 @@ export async function startWorker(): Promise<void> {
     clearInterval(retentionTimer);
     clearInterval(opsTimer);
     clearInterval(schedulerTimer);
+    clearInterval(jobsTimer);
     clearInterval(teardownTimer);
     clearTimeout(parityFirstRun);
     clearInterval(parityTimer);

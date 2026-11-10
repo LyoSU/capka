@@ -377,6 +377,30 @@ export const tasks = pgTable("tasks", {
   uniqueIndex("uq_tasks_one_queued_per_chat").on(table.chatId).where(sql`status = 'queued'`),
 ]);
 
+// A detached `execute_bash(background:true)` job the platform watches so the agent
+// is told when it ends instead of polling `check_job` (see src/lib/tasks/background-jobs.ts).
+// status: running → finished (the watcher saw it end, `result` set) → delivered (a
+// running turn folded it in, or a follow-up turn was queued for it). Each arrow is a
+// conditional UPDATE on the previous status, which is what makes delivery exactly-once.
+export const backgroundJobs = pgTable("background_jobs", {
+  id: text("id").primaryKey(),
+  chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionKey: text("session_key").notNull(),
+  /** The sandbox-side id: the job's files live under /workspace/.capka/jobs/<jobId>. */
+  jobId: text("job_id").notNull(),
+  command: text("command").notNull(),
+  /** How many automatic follow-up turns led to the turn that started this job. */
+  chain: integer("chain").notNull().default(0),
+  /** What a follow-up turn needs from the starting turn's payload: model, project, origin. */
+  turn: jsonb("turn").notNull().default({}),
+  status: text("status").notNull().default("running"),
+  result: jsonb("result"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  checkedAt: timestamp("checked_at"),
+  finishedAt: timestamp("finished_at"),
+}, (t) => [index("idx_background_jobs_status_chat").on(t.status, t.chatId)]);
+
 // Per-task / per-message token usage and cost, captured at finalize time.
 export const usage = pgTable("usage", {
   id: text("id").primaryKey(),

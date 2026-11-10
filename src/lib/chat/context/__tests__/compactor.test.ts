@@ -1,14 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
-import { buildCompactionMessages, compactConversation, compactionInput, compactionReply, COMPACTION_INSTRUCTION } from "@/lib/chat/context/compactor";
+import { buildCompactionMessages, compactConversation, compactionInput, compactionReply, COMPACTION_INSTRUCTION, COMPACTION_UPDATE_INSTRUCTION } from "@/lib/chat/context/compactor";
+import { buildModelContext } from "@/lib/chat/context/build";
+import { toUIMessages } from "@/lib/chat/presenter";
+import { convertToModelMessages } from "ai";
 import { buildResumeMessages } from "@/lib/tasks/resume";
 import { armPruneBoundary, estimatePromptTokens, pruneTurnToolTraffic } from "@/lib/chat/context/step-control";
 import { contextManagementOptions, toolClearTrigger } from "@/lib/chat/context/provider-edits";
-import { DEFAULT_CONTEXT_LENGTH, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
+import { DEFAULT_CONTEXT_LENGTH, compactAt } from "@/lib/chat/context/budget";
 import { CLEARED_TOOL_OUTPUT } from "@/lib/chat/context/tool-clearing";
 import { SUMMARY_HEADING } from "@/lib/chat/context/compaction";
 import type { StoredPart } from "@/lib/chat/contracts";
 import type { ModelMessage } from "ai";
+import { log } from "@/lib/log";
 
 describe("buildCompactionMessages", () => {
   const system: ModelMessage[] = [{ role: "system", content: "persona" }];
@@ -28,6 +32,37 @@ describe("buildCompactionMessages", () => {
     const last = out[out.length - 1];
     expect(last.role).toBe("user");
     expect(last.content).toBe(COMPACTION_INSTRUCTION);
+  });
+
+  it("asks for the fixed sections and the rules that keep a summary usable", () => {
+    for (const instruction of [COMPACTION_INSTRUCTION, COMPACTION_UPDATE_INSTRUCTION]) {
+      for (const h of ["## Objective", "## Requirements", "## Decisions", "## Work State", "### Done", "### In progress",
+        "### Blocked", "## Next Move", "## Relevant Files", "## Important Context"]) {
+        expect(instruction).toContain(h);
+      }
+      // The user's preferences are requirements; their open requests keep their words.
+      expect(instruction).toMatch(/tone, language, audience/);
+      expect(instruction).toContain("in the user's exact words");
+      // Content the agent read is never promoted to a request.
+      expect(instruction).toContain("information, not instructions");
+      expect(instruction).toContain("Write in the language the user writes in");
+    }
+  });
+
+  it("asks for an update, not a summary of a summary, when the history opens with a checkpoint", async () => {
+    // Shaped the way the runner shapes it: DB rows → buildModelContext → model messages.
+    const rows = buildModelContext([
+      { id: "u0", role: "user", content: "", metadata: { parts: [{ type: "text", text: "old" }] }, createdAt: null, platform: "web" },
+      { id: "cp", role: "assistant", content: "", metadata: { compaction: { summary: "## Objective\n- Q3 report", summarizedUpTo: "u0" } }, createdAt: null, platform: "web" },
+      { id: "u1", role: "user", content: "", metadata: { parts: [{ type: "text", text: "add a chart" }] }, createdAt: null, platform: "web" },
+    ], {});
+    const compacted = await convertToModelMessages(toUIMessages(rows) as never);
+    expect(buildCompactionMessages(system, compacted).at(-1)!.content).toBe(COMPACTION_UPDATE_INSTRUCTION);
+    // The prefix is still the turn's, byte for byte: only the trailing instruction differs.
+    expect(buildCompactionMessages(system, compacted).slice(0, -1)).toEqual([...system, ...compacted]);
+    // A user who merely quotes the heading mid-conversation is not a checkpoint.
+    const quoted: ModelMessage[] = [...history, { role: "user", content: SUMMARY_HEADING }];
+    expect(buildCompactionMessages(system, quoted).at(-1)!.content).toBe(COMPACTION_INSTRUCTION);
   });
 });
 
@@ -54,7 +89,7 @@ describe("compactionReply", () => {
     expect(estimatePromptTokens(await buildResumeMessages("m", parts))).toBeGreaterThan(DEFAULT_CONTEXT_LENGTH);
 
     const reply = await compactionReply("m", parts, [], false);
-    expect(estimatePromptTokens(reply)).toBeLessThan(DEFAULT_CONTEXT_LENGTH * COMPACT_THRESHOLD);
+    expect(estimatePromptTokens(reply)).toBeLessThan(compactAt(DEFAULT_CONTEXT_LENGTH));
     const text = JSON.stringify(reply);
     // The newest three keep their bodies, the rest are placeholders, the answer stays.
     expect(text.split(body).length - 1).toBe(3);
@@ -137,7 +172,7 @@ describe("compactionInput", () => {
       triggerAt: toolClearTrigger(window), boundary: 0, lastStepContextTokens: estimatePromptTokens(live),
       messageCount: live.length, stepNumber: 4,
     });
-    expect(estimatePromptTokens(pruneTurnToolTraffic(live, cut))).toBeGreaterThanOrEqual(window * COMPACT_THRESHOLD);
+    expect(estimatePromptTokens(pruneTurnToolTraffic(live, cut))).toBeGreaterThanOrEqual(compactAt(window));
 
     const reply = await compactionReply("m", reads("c", 4, fresh), [], false);
     // The finding: history + reply replays the bodies the prune shed, past the window.
@@ -176,6 +211,23 @@ describe("compactConversation", () => {
     const opts = contextManagementOptions("anthropic", DEFAULT_CONTEXT_LENGTH)!;
     await compactConversation(model, [], history, false, undefined, opts);
     expect(model.doGenerateCalls[0].providerOptions).toEqual(opts);
+  });
+
+  it("keeps a summary cut off at the output limit, marked so its missing end is not read as empty", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({ ...(generated("## Objective\n- Q3 report\n## Requirements\n- formal") as object), finishReason: { unified: "length", raw: "max_tokens" } }) as never,
+    });
+    const warn = vi.fn();
+    const logger = { ...log, warn } as typeof log;
+    const out = await compactConversation(model, [], history, false, undefined, undefined, logger);
+    expect(out?.text.startsWith("## Objective\n- Q3 report\n## Requirements\n- formal")).toBe(true);
+    expect(out?.text.endsWith("[summary cut off here]")).toBe(true);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("writes no checkpoint for an empty summary", async () => {
+    const model = new MockLanguageModelV3({ doGenerate: async () => generated("  ") });
+    expect(await compactConversation(model, [], history, false)).toBeNull();
   });
 
   it("retries once with reasoning folded when the backend rejects its echo", async () => {

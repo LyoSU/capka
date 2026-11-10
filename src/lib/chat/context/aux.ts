@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import { isReasoningUnsupportedError } from "@/lib/errors/friendly";
 import { getModelCannotReason, rememberModelCannotReason } from "@/lib/models/catalog";
+import { claudeThinksUnasked } from "@/lib/models/thinking";
 import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
@@ -12,9 +13,14 @@ import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
  * the least/no reasoning. Mirror image of the runner's reasoningOptions();
  * unknown providers keep their default.
  */
-function auxReasoningOptions(provider: string): Record<string, Record<string, unknown>> | undefined {
+function auxReasoningOptions(provider: string, modelId: string): Record<string, Record<string, unknown>> | undefined {
   switch (provider) {
-    case "anthropic": return { anthropic: { thinking: { type: "disabled" } } };
+    // A Claude that thinks unasked 400s on `disabled` (Opus 5.5, Sonnet 5.5, Fable,
+    // Mythos) — and that rejection read as "cannot reason" and switched thinking off
+    // for its real turns too. The lowest effort is the least thinking it takes.
+    case "anthropic": return claudeThinksUnasked(modelId)
+      ? { anthropic: { effort: "low" } }
+      : { anthropic: { thinking: { type: "disabled" } } };
     case "openrouter": return { openrouter: { reasoning: { enabled: false } } };
     case "openai": return { openai: { reasoningEffort: "low" } };
     case "google": return { google: { thinkingConfig: { thinkingBudget: 0 } } };
@@ -56,7 +62,7 @@ export async function auxGenerate(model: LanguageModel, provider: string, args: 
   // cost one wasted request, not a missing chat title — the same reason the write
   // below is fire-and-forget.
   const cannotReason = await getModelCannotReason(modelId).catch(() => false);
-  const providerOptions = cannotReason ? undefined : auxReasoningOptions(provider);
+  const providerOptions = cannotReason ? undefined : auxReasoningOptions(provider, modelId);
   const telemetry = telemetryFor(`capka.aux.${label}`);
   // ROOT_CONTEXT, not the caller's context: aux work is fire-and-forget and
   // OUTLIVES the turn that spawned it (that is what trackAux/auxInFlight exist

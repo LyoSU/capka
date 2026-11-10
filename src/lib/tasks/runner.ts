@@ -26,7 +26,7 @@ import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/con
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, thinkingIsDeep, markStepTail,
   mergeUserRuns, clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
+import { wrapUpReason, appendWrapUp, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
 import { compactConversation, compactionInput, compactionReply } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
@@ -35,6 +35,7 @@ import { auxGenerate } from "@/lib/chat/context/aux";
 import { reconcileUsage } from "@/lib/usage";
 import { releaseHold, reserveBudget } from "@/lib/billing/limits";
 import { take } from "@/lib/rate-limit";
+import { claimFinishedJobs, jobNoticeText } from "./background-jobs";
 import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { extractFacts } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
@@ -47,7 +48,7 @@ import { StallWatchdog } from "./stall-watchdog";
 import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
-import type { StoredPart, MessageMeta, AuxRecord, Steer, ConsumedSteer } from "@/lib/chat/contracts";
+import type { StoredPart, MessageMeta, AuxRecord, Steer, ConsumedSteer, WrapUpReason } from "@/lib/chat/contracts";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
@@ -56,7 +57,7 @@ import { foldAssembledRows, untrustedOutputOf } from "./turn-taint";
 import { prepareRun, replyParentOf } from "./run-context";
 import { PLAN_TOOL, planSchema, type PlanStep } from "@/lib/chat/plan";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
-import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
+import { outputChars } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
 import { pseudoToolCallNames } from "@/lib/chat/pseudo-tool-call";
 
@@ -95,6 +96,10 @@ export interface TaskPayload {
    *  "when_needed" arms the quiet path: the `nothing_to_report` tool, its prompt
    *  paragraph, and a finish that notifies nobody. */
   notifyMode?: string;
+  /** Set on a follow-up turn queued because background jobs ended: how many such
+   *  turns led here. Absent (0) on a turn a person sent. Bounded by
+   *  JOB_FOLLOWUP_CHAIN_MAX — see src/lib/tasks/background-jobs.ts. */
+  jobChain?: number;
 }
 
 export interface ClaimedTask {
@@ -128,8 +133,10 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * TASK_TIMEOUT_MINUTES rather than letting such turns fail as timeouts.
  *
  * 20 minutes, not the 10 this started at, because 10 was smaller than the OTHER
- * ceiling on the same turn: MAX_STEPS tool calls at the controller's per-exec
- * timeout is 12.5 minutes of sandbox time alone, before a token of model latency.
+ * ceiling on the same turn: MAX_STEPS tool calls (25 then) at the controller's
+ * per-exec timeout is 12.5 minutes of sandbox time alone, before a token of model
+ * latency. Since the cap went to 100 the clock is deliberately the tighter of the two
+ * — it is the guard, braked by WRAP_UP_AFTER_FRACTION; the step cap is the backstop.
  * A turn doing legitimate heavy work therefore hit the clock with step budget still
  * unspent — the clock was capping work, not catching runaways. It is also no longer
  * the hang detector it once was: STREAM_IDLE_MS catches a silent provider inside a
@@ -322,7 +329,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     ac.abort();
   }, MAX_TASK_MS);
   // When the abort above will fire. Read per step so the turn can brake into a text
-  // answer before the deadline cuts it mid-tool (see stepSettings / WRAP_UP_AFTER_FRACTION).
+  // answer before the deadline cuts it mid-tool (see wrapUpReason / WRAP_UP_AFTER_FRACTION).
   const deadlineAt = Date.now() + MAX_TASK_MS;
   // A native-approval continuation reuses the SUSPENDED assistant message (append
   // the execute-result + follow-up text to it); a normal turn mints a fresh reply.
@@ -420,7 +427,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let runModelId: string | undefined;
   let runConfigId: string | undefined;
   let runShared = false;
-  const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+  // `cacheWrite1h` is the part of `cacheWrite` written with a 1-hour TTL: priced
+  // higher (computeCost), never stored as a token bucket of its own.
+  const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0 };
   // That accumulator as the message stores it; undefined while nothing was billed.
   const liveUsageMeta = (): MessageMeta["usage"] => liveUsage.input || liveUsage.output || liveUsage.cached || liveUsage.cacheWrite
     ? {
@@ -448,7 +457,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // of the two questions asked of a slow turn (the other is retries/stalls), and
   // neither was answerable from the trace before.
   let stepCount = 0;
-  const discarded = { input: 0, output: 0, cached: 0, cacheWrite: 0, cost: 0 };
+  const discarded = { input: 0, output: 0, cached: 0, cacheWrite: 0, cacheWrite1h: 0, cost: 0 };
   const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
   let discardedOrServed = false;
   // Set once the success path has settled the hold. reconcileUsage is not idempotent
@@ -503,6 +512,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // making a hundred calls had no ceiling at all. Enforced by stopping (see the
   // toolChoice override in prepareStep), never by rewriting a result.
   let turnOutputChars = 0;
+  // Why the step most recently prepared had its tools taken away (see wrapUpReason),
+  // or undefined for an ordinary step. Re-decided on every step, so at finalize it
+  // describes the step the turn ENDED on — the one fact the `wrapUp` record needs.
+  let wrapUpStep: WrapUpReason | undefined;
   // What the mid-stream snapshots of this turn wrote (see saveSnapshot), for the
   // "task finished" line: the figure that says whether row rewrites need a cheaper
   // shape, measured on real traffic rather than modelled.
@@ -696,13 +709,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     //     turnContextMessage), so its churn never invalidates the cached history.
     // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
     const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+    // Every breakpoint but the moving step tail lives an HOUR. Users pause longer
+    // than five minutes between messages, and after such a pause a 5-minute entry
+    // is gone and the whole history is written again; a 1h write costs 2x base
+    // input against 1.25x, and one avoided rewrite (reads are 0.1x or less) pays
+    // for it. Anthropic requires 1h breakpoints to precede 5m ones — the system
+    // prompt and both user tails all sit before the step tail, so that holds.
+    // Claude only: OpenRouter reads this namespace for every model it routes, and
+    // documents the 1h TTL for Claude alone.
+    const ephemeralHour = provider === "anthropic" || modelId.includes("claude")
+      ? { anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } } } as const
+      : ephemeral;
     // Every tier is conditional, INCLUDING stable: a project in raw-prompt mode with
     // no instructions of its own legitimately produces nothing here, and shipping
     // `content: ""` would have Anthropic reject the whole request for an empty text
     // block. No stable tier simply means no breakpoint — there is nothing to cache.
     const systemMessages: ModelMessage[] = [];
     if (prompt.stable) {
-      systemMessages.push({ role: "system", content: prompt.stable, providerOptions: ephemeral });
+      systemMessages.push({ role: "system", content: prompt.stable, providerOptions: ephemeralHour });
     }
     if (prompt.session) {
       systemMessages.push({ role: "system", content: prompt.session });
@@ -902,7 +926,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // it. The call it answers is the last message the provider sees.
       const last = msgs.findLast((m) => m.role !== "tool"
         || !m.content.every((p) => p.type === "tool-approval-response" && !p.providerExecuted));
-      if (last) last.providerOptions = { ...last.providerOptions, ...ephemeral };
+      if (last) last.providerOptions = { ...last.providerOptions, ...ephemeralHour };
       // The previous turn's tail too: the user message just before the last reply,
       // which that turn marked in this same position. It is the newest entry this
       // turn can read back — the previous turn's step-tail entries carry its turn
@@ -913,7 +937,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // steered reply this lands on the steer row, one block past the entry.)
       const reply = msgs.findLastIndex((m) => m.role === "assistant");
       const prev = reply > 0 ? msgs[reply - 1] : undefined;
-      if (prev?.role === "user") prev.providerOptions = { ...prev.providerOptions, ...ephemeral };
+      if (prev?.role === "user") prev.providerOptions = { ...prev.providerOptions, ...ephemeralHour };
     };
     markCacheTail(modelMessages);
 
@@ -1025,7 +1049,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // (retryOnCapabilityError), but one that rejects reasoning outright told us so
     // once and `modelCannotReason` remembers it — otherwise every turn paid that
     // rejection plus a full stream restart, forever.
-    let reasoning = modelCannotReason ? undefined : reasoningParams(provider, thinkAmount, modelEfforts);
+    let reasoning = modelCannotReason ? undefined : reasoningParams(provider, thinkAmount, modelEfforts, modelId);
     let useReasoning = reasoning !== undefined;
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
@@ -1116,7 +1140,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // this stream is about to throw away. Dropping the indices (not the steers)
       // makes the next step re-place them at the new tail, so the instruction stays
       // in the prompt across a capability retry, an overflow trim or a stall resume.
-      steerAnchors = steerAnchors.map(({ id, text }) => ({ id, text }));
+      steerAnchors = steerAnchors.map(({ id, text, raw }) => ({ id, text, raw }));
+      // The SDK numbers steps from 0 on every new stream; the step-count brake is
+      // about the TURN. Offsetting by the steps already finished is what keeps a
+      // re-stream from handing back a fresh budget, and keeps a stream started after
+      // the brake fired (a stall resume, the continue-once below) on the wrap-up step.
+      const stepsBefore = stepCount;
+      // Same offset for the output budget: `turnOutputChars` is added up by the stream
+      // consumer, which awaits per event and so can still be behind when the SDK asks
+      // for the next step — read alone, the brake fired a step late or not at all.
+      const outputBefore = turnOutputChars;
       // reasoning + context-management + caching may all target the same provider
       // namespace (e.g. anthropic) — merge so none clobbers the others.
       const providerOptions = mergeProviderOptions(
@@ -1126,10 +1159,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       approvedAhead = true;
       return streamText({
         model,
-        // prepareStep forces a text answer after FORCE_TEXT_AFTER_STEPS so a long
-        // tool loop wraps up instead of hitting the hard step cap mid-tool. It
-        // only tweaks toolChoice — never rewrites messages — so it can't break the
-        // prompt cache mid-turn (see stepSettings). EXCEPTION: once a backend has
+        // prepareStep forces a text answer once a turn runs out of steps, time or
+        // tool-output budget, so a long tool loop wraps up instead of hitting a hard
+        // ceiling mid-tool — and tells the model so, by APPENDING one instruction to
+        // that step only, which leaves every cached prefix intact (see appendWrapUp).
+        // Earlier messages are never rewritten for it. EXCEPTION: once a backend has
         // rejected echoed reasoning_content, we DO rewrite messages per-step to
         // fold reasoning into content — the offending echo is an intermediate
         // tool-loop message invisible to modelMessages, so this is the only place
@@ -1147,7 +1181,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // request: several tool calls emitted as one set of arguments. Anything else
               // (and any unknown tool) is left to fail, so the model sees its own mistake.
               experimental_repairToolCall: repairToolCall as never,
-              prepareStep: async ({ stepNumber, messages }) => {
+              prepareStep: async ({ stepNumber, messages, steps }) => {
                 // Step 0 starts only once the approved calls run ahead of it are
                 // done, and one the SDK never ran (no local execute) streams nothing
                 // that would end its pause: release them all here, or a model that
@@ -1185,6 +1219,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                   }
                 }
                 if (fresh.length) steerAnchors = [...steerAnchors, ...fresh.map((f) => ({ id: f.id, text: f.text }))];
+                // BACKGROUND JOBS that ended while this turn runs: claimed here (once —
+                // the claim is a conditional UPDATE) and placed exactly like a steer,
+                // but unframed: it is Capka's notice, not the user's words, and is not
+                // recorded on the transcript rail. Never fails the step.
+                const ended = await claimFinishedJobs(chatId).catch((e) => {
+                  tlog.warn("could not read ended background jobs", { err: errMsg(e) });
+                  return [];
+                });
+                if (ended.length) {
+                  steerAnchors = [...steerAnchors, { id: `job:${ended[0].jobId}`, text: jobNoticeText(ended), raw: true }];
+                  tlog.info("background job notice folded into the running turn", { stepNumber, jobs: ended.length });
+                }
                 const steered = injectSteers(base, steerAnchors);
                 steerAnchors = steered.steers;
                 let msgs = steered.messages;
@@ -1260,16 +1306,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // does expose explicit `prompt_cache_breakpoint` and
                 // `prompt_cache_options.ttl`, 1024-token minimum, if that stops holding.)
                 msgs = markStepTail(msgs, stepNumber, ephemeral);
-                // A steer or the view-file bridge right after another user message
-                // (the turn context at step 0, a steer before the bridge) is a run.
+                // WRAP-UP: out of steps, time or tool-output budget — this step answers
+                // in text, and is told why. After the cache marker, which stays on the
+                // history: the instruction belongs to this one request, and nothing
+                // will ever read it back from a cache.
+                wrapUpStep = wrapUpReason({
+                  step: stepsBefore + stepNumber,
+                  elapsedFraction: 1 - (deadlineAt - Date.now()) / MAX_TASK_MS,
+                  outputChars: Math.max(turnOutputChars, outputBefore
+                    + steps.reduce((n, s) => n + s.toolResults.reduce((m, r) => m + outputChars(r.output), 0), 0)),
+                });
+                if (wrapUpStep) {
+                  tlog.info("wrapping up: tools withdrawn for this step", { stepNumber, turnStep: stepsBefore + stepNumber, reason: wrapUpStep });
+                  msgs = appendWrapUp(msgs);
+                }
+                // A steer, the view-file bridge or the wrap-up right after another user
+                // message (the turn context at step 0, a steer, a resume request) is a run.
                 msgs = mergeUserRuns(msgs, provider);
                 return {
-                  ...stepSettings(stepNumber, 1 - (deadlineAt - Date.now()) / MAX_TASK_MS),
-                  // The output-side twin of that wrap-up: a turn whose results have
-                  // already added up past the ceiling answers with what it has
-                  // instead of gathering more. Same lever, so a turn that hits both
-                  // is not told two different things.
-                  ...(turnOutputChars >= MAX_TURN_TOOL_OUTPUT_CHARS ? { toolChoice: "none" as const } : {}),
+                  ...(wrapUpStep ? { toolChoice: "none" as const } : {}),
                   ...(msgs !== messages ? { messages: msgs } : {}),
                   ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
                 };
@@ -1378,6 +1433,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Banked like the rest: the tokens a discarded attempt wrote to the cache were
       // billed, so dropping them here would under-charge the reconciliation below.
       discarded.cacheWrite += liveUsage.cacheWrite;
+      discarded.cacheWrite1h += liveUsage.cacheWrite1h;
       // Capture the discarded attempt's real provider cost BEFORE the reset below
       // zeroes it — otherwise this spend is recomputed from the catalog and the
       // provider's authoritative figure is lost. Only meaningful when OpenRouter
@@ -1390,6 +1446,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       liveUsage.output = 0;
       liveUsage.cached = 0;
       liveUsage.cacheWrite = 0;
+      liveUsage.cacheWrite1h = 0;
       liveUsage.reasoning = 0;
       // The discarded attempt's ending says nothing about the one replacing it. Left
       // standing, a discarded "length" would report the NEXT attempt as cut off even
@@ -1902,6 +1959,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // cache WRITE is distinct from read, reasoning is a slice of output.
             liveUsage.cacheWrite += event.usage.inputTokenDetails?.cacheWriteTokens ?? 0;
             liveUsage.reasoning += event.usage.outputTokenDetails?.reasoningTokens ?? 0;
+            // Which of those writes were 1-hour ones (the TTL markCacheTail puts on
+            // most breakpoints): only Anthropic's raw usage says, and the SDK passes
+            // it through untyped. Elsewhere 0 — every write is priced at 5 minutes.
+            const anthropicUsage = (event.providerMetadata?.anthropic as
+              | { usage?: { cache_creation?: { ephemeral_1h_input_tokens?: number } } }
+              | undefined)?.usage;
+            liveUsage.cacheWrite1h += anthropicUsage?.cache_creation?.ephemeral_1h_input_tokens ?? 0;
             // OpenRouter reports the REAL charge + the upstream that served this
             // step. `cost` is what OpenRouter billed; when it's 0 the request was
             // BYOK (you pay upstream directly), so fall to the upstream inference
@@ -2016,7 +2080,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // nearest level it DOES have keeps the thinking the user asked for instead
         // of dropping it. The UI narrows to these same stops from the next turn.
         const snapped = clampAmount(thinkAmount, availableAmounts(provider, allowed));
-        const retryParams = reasoningParams(provider, snapped, allowed);
+        const retryParams = reasoningParams(provider, snapped, allowed, modelId);
         tlog.info("reasoning effort rejected — retrying with the model's own enum", { allowed, thinkAmount, snapped });
         void rememberModelEfforts(modelId, provider, allowed).catch((e) =>
           tlog.warn("could not persist learned reasoning efforts", { error: errMsg(e) }),
@@ -2036,10 +2100,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Remember it, so this costs ONE request per model rather than one per
         // turn — the same bargain the effort-enum branch above makes. Fire and
         // forget: the retry below must not wait on a write, and a failed write
-        // only means the next turn re-learns it.
-        void rememberModelCannotReason(modelId, provider).catch((e) =>
-          tlog.warn("could not persist that the model cannot reason", { error: errMsg(e) }),
-        );
+        // only means the next turn re-learns it. Not on `off`: what it sent there is
+        // only a low effort (reasoningParams), and a rejection of that says nothing
+        // about whether the model can think when asked — remembering it would
+        // switch thinking off for everyone who does ask.
+        if (thinkAmount !== "off") {
+          void rememberModelCannotReason(modelId, provider).catch((e) =>
+            tlog.warn("could not persist that the model cannot reason", { error: errMsg(e) }),
+          );
+        }
         useReasoning = false;
         streamError = undefined;
         await discardPartial();
@@ -2265,8 +2334,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // there is still nothing, fail with a message that says so. Any text at all counts
     // as a reply, so an answer followed by a trailing memory write is not flagged. Read
     // off `firstTextAt` (this run's, reset with a discarded attempt), not `parts`: a
-    // continuation's text merges into the loaded half's last text part. A step-cap stop
-    // ("tool-calls") is not continued: that would grant a second full budget of steps.
+    // continuation's text merges into the loaded half's last text part. A wrap-up step
+    // that came back empty IS continued, and still as a wrap-up: the brakes read the
+    // turn's step count, clock and output, none of which a resume resets, so the new
+    // stream's first step is forced again and carries the instruction again. A step-cap
+    // stop ("tool-calls") is not continued: reaching the cap means the provider already
+    // ignored several forced steps, and a new stream's stopWhen would let it ignore a
+    // whole cap's worth more. That case, like an empty continue, fails as no_reply —
+    // explained, with Continue offered when work was done.
     let noReply = false;
     if (!ac.signal.aborted && !streamError && !stalledOut && !truncated && !awaitingApproval && !awaitingAnswer && firstTextAt == null) {
       tlog.warn("model ended the turn without a reply", { model: modelId, provider, finishReason: lastFinishReason, steps: stepCount });
@@ -2332,6 +2407,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // Billed above base input, and NOT part of `usageMeta.input` (the SDK's
           // noCacheTokens excludes them) — so this is the charge, not a duplicate.
           cacheWriteTokens: usageMeta.cacheWrite,
+          cacheWrite1hTokens: liveUsage.cacheWrite1h,
         });
         if (costMeta != null) costSource = "catalog";
       } catch (e) {
@@ -2440,6 +2516,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(touchedFiles ? { touchedFiles } : {}),
         ...(citedLean.length ? { citedSources: citedLean } : {}),
         ...(quietReason ? { quiet: { reason: quietReason } } : {}),
+        // The reply was written with its tools withdrawn, so the work behind it may
+        // be unfinished — the transcript offers Continue. Completed turns only: a
+        // failed one already carries its own notice (with Continue where work stands),
+        // and a suspended one ended on a question, not a wrap-up.
+        ...(wrapUpStep && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer ? { wrapUp: wrapUpStep } : {}),
         // On EVERY outcome, not just the successful ones: a failed turn's message
         // still sits on the path the next turn reads, and this is how that turn
         // learns clearing is already on (see shouldClearToolResults). The mid-turn
@@ -2509,6 +2590,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // `folded` is undefined — re-derived the cost from a bucket short of
           // every write token, undoing the pricing fix for direct providers.
           cacheWriteTokens: (usageMeta.cacheWrite ?? 0) + discarded.cacheWrite,
+          cacheWrite1hTokens: liveUsage.cacheWrite1h + discarded.cacheWrite1h,
         },
         costUsd: folded,
       });
@@ -2655,6 +2737,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       messages: modelMessages.length,
       ...(recoveries ? { recoveries } : {}),
       ...(turnOutputChars ? { toolOutputChars: turnOutputChars } : {}),
+      ...(wrapUpStep ? { wrapUp: wrapUpStep } : {}),
       ...(snapshotWrites ? { snapshotWrites, snapshotBytes } : {}),
     });
     // Same facts onto the turn span (the worker owns its lifecycle; we only report).
@@ -3068,7 +3151,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const usage = liveUsageMeta();
       const served = orLive.generationId != null || orLive.upstreamProvider != null;
       const cost = served ? orLive.cost : usage && runModelId
-        ? (await costUsd(runModelId, { inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cached, cacheWriteTokens: usage.cacheWrite }).catch(() => null)) ?? undefined
+        ? (await costUsd(runModelId, { inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cached, cacheWriteTokens: usage.cacheWrite, cacheWrite1hTokens: liveUsage.cacheWrite1h }).catch(() => null)) ?? undefined
         : undefined;
       const turn = foldTurnHalves({
         usage, costUsd: cost, costSource: cost == null ? undefined : served ? "provider" : "catalog",
@@ -3209,6 +3292,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         usage: {
           inputTokens: spentInput, outputTokens: spentOutput, cachedInputTokens: spentCached,
           cacheWriteTokens: spentCacheWrite,
+          cacheWrite1hTokens: liveUsage.cacheWrite1h + discarded.cacheWrite1h,
         },
         costUsd: realCost,
       }).catch(() => {});

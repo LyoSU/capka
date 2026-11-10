@@ -216,7 +216,8 @@ run("runAgentTask: the volatile tier rides after the history", () => {
     // that entry back exactly instead of relying on Anthropic's short lookback past
     // the whole reply. The session tier gives up its breakpoint for it: three here,
     // and the step tail makes four from step 1 on — Anthropic's ceiling.
-    const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } };
+    // All three live an hour: users pause past the 5-minute default between turns.
+    const ephemeral = { anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } } };
     expect(parts(first[u1])[0].providerOptions).toMatchObject(ephemeral);
     expect(second[u1].providerOptions).toMatchObject(ephemeral);
     const systems = second.filter((m) => m.role === "system");

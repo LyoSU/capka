@@ -262,12 +262,16 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
   });
 
   it("reads FORCE_TEXT_AFTER_STEPS against the ceiling MAX_AGENT_STEPS sets", () => {
-    // Its default is derived (`MAX_STEPS - 5`) and it is clamped to [1, MAX_STEPS], so
-    // its valid range moves when the other knob does. 30 is out of range by default
+    // Its default is derived (`MAX_STEPS - 5`) and it is clamped to [1, MAX_STEPS - 1],
+    // so its valid range moves when the other knob does. 150 is out of range by default
     // and fine once the ceiling is raised.
-    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30" })).toContain("FORCE_TEXT_AFTER_STEPS");
-    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30", MAX_AGENT_STEPS: "200" })).not.toContain("FORCE_TEXT_AFTER_STEPS");
-    expect(checkConfig({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30" })[0]?.message).toContain("1–25");
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "150" })).toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "150", MAX_AGENT_STEPS: "200" })).not.toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(checkConfig({ ...VALID, FORCE_TEXT_AFTER_STEPS: "150" })[0]?.message).toContain("1–99");
+    // AT the ceiling is out of range too: step numbers stop at cap - 1, so a wrap-up
+    // there never fires and the turn ends mid-tool at the cap.
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "100" })).toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(checkConfig({ ...VALID, FORCE_TEXT_AFTER_STEPS: "100" })[0]?.message).toContain("99 will be used");
   });
 
   it("agrees with db/retention.ts on every value, not just its defaults", () => {

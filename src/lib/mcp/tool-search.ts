@@ -31,7 +31,7 @@ import { finiteNonNeg } from "@/lib/config/env";
  * append-only does NOT preserve the conversation prefix. Its real value is
  * DETERMINISM: once the model has expanded what it needs, every later step of the
  * turn sees an identical tool set, so the rebuild happens exactly once (like the
- * one-off cost `stepSettings` already accepts for a late `toolChoice`), not once
+ * one-off cost the wrap-up step already accepts for a late `toolChoice`), not once
  * per step.
  *
  * Gating: deferral kicks in when the connector tools' estimated cost exceeds

@@ -14,6 +14,8 @@ const admissionPaths: Record<string, string | null> = {
   // Daily cap + overlap guard instead of a flood bucket: nobody is typing.
   "lib/automations/runs.ts": null,
   "lib/manage/authed.ts": "chat",
+  // A finished background job's follow-up turn; chain-bounded on top of the bucket.
+  "lib/tasks/background-jobs.ts": "chat",
   "lib/tasks/runner.ts": "chat",
   "lib/telegram/bot.ts": "chat",
 };

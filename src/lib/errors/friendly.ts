@@ -161,9 +161,19 @@ export function isVisionUnsupportedError(raw: unknown): boolean {
  * capable models) and retries once WITHOUT it on a hit. Tied to thinking/
  * reasoning phrasing so an unrelated capability error doesn't silently strip
  * reasoning — it requires both a reasoning keyword and an "unsupported" verb.
+ *
+ * NOT a complaint about the thinking blocks already in the HISTORY. Claude rejects a
+ * replayed block whose signature no longer verifies ("Invalid `signature` in
+ * `thinking` block"), one that was altered ("thinking blocks … cannot be modified"),
+ * or an assistant turn that should open with one and does not — all of which carry
+ * "thinking" and a rejection verb, and all of which come from a model that DOES
+ * reason. Read as "cannot reason", the runner's retry persists that verdict for the
+ * model and switches thinking off for everyone, so a mention of a thinking BLOCK or
+ * a `signature` rules the error out.
  */
 export function isReasoningUnsupportedError(raw: unknown): boolean {
   const detail = errorText(raw);
+  if (/thinking`?\s+blocks?\b|\bsignature\b/i.test(detail)) return false;
   return (
     /\b(thinking|reasoning|reasoning_effort|reasoningeffort|budget_?tokens|reasoning_?summary|reasoning_?config)\b/i.test(
       detail,

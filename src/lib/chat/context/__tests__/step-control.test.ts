@@ -1,37 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens, injectSteers,
+import { wrapUpReason, appendWrapUp, WRAP_UP_INSTRUCTION, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens, injectSteers,
   FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION, BYTES_PER_TOKEN } from "@/lib/chat/context/step-control";
+import { mergeUserRuns } from "@/lib/chat/context/provider-edits";
+import { MAX_TURN_TOOL_OUTPUT_CHARS } from "@/lib/tool-output";
 import { CLEARED_TOOL_INPUT, CLEARED_TOOL_OUTPUT } from "@/lib/chat/context/tool-clearing";
 import type { ModelMessage } from "ai";
 import { readFileSync } from "node:fs";
 
-describe("stepSettings", () => {
-  it("does not override anything for normal early steps", () => {
-    expect(stepSettings(0)).toEqual({});
-    expect(stepSettings(FORCE_TEXT_AFTER_STEPS - 1)).toEqual({});
+describe("wrapUpReason", () => {
+  it("leaves an ordinary step alone", () => {
+    expect(wrapUpReason({ step: 0 })).toBeUndefined();
+    expect(wrapUpReason({ step: FORCE_TEXT_AFTER_STEPS - 1, elapsedFraction: WRAP_UP_AFTER_FRACTION / 2, outputChars: 1000 })).toBeUndefined();
   });
 
   it("forces a text answer once a tool loop runs long, so it can't spin to the hard step cap", () => {
-    expect(stepSettings(FORCE_TEXT_AFTER_STEPS)).toEqual({ toolChoice: "none" });
-    expect(stepSettings(FORCE_TEXT_AFTER_STEPS + 3)).toEqual({ toolChoice: "none" });
+    expect(wrapUpReason({ step: FORCE_TEXT_AFTER_STEPS })).toBe("steps");
+    expect(wrapUpReason({ step: FORCE_TEXT_AFTER_STEPS + 3 })).toBe("steps");
   });
 
   // The step budget and the wall-clock budget are separate ceilings, and a turn
   // doing heavy sandbox work hits the clock first — with tool time alone able to
   // exceed the deadline before the step cap is anywhere near. Without a clock-side
   // wrap-up the deadline lands mid-tool and the reply is a hard cut.
-  it("leaves an early step alone however little of the clock has run", () => {
-    expect(stepSettings(0, 0)).toEqual({});
-    expect(stepSettings(0, WRAP_UP_AFTER_FRACTION / 2)).toEqual({});
-  });
-
   it("forces a text answer once the turn has spent most of its wall-clock budget", () => {
-    expect(stepSettings(0, WRAP_UP_AFTER_FRACTION)).toEqual({ toolChoice: "none" });
-    expect(stepSettings(0, 1.5)).toEqual({ toolChoice: "none" });
+    expect(wrapUpReason({ step: 0, elapsedFraction: WRAP_UP_AFTER_FRACTION })).toBe("time");
+    expect(wrapUpReason({ step: 0, elapsedFraction: 1.5 })).toBe("time");
   });
 
-  it("defaults to no clock pressure, so a caller that passes only the step is unchanged", () => {
-    expect(stepSettings(0)).toEqual({});
+  it("forces a text answer once the turn's tool output has added up past its budget", () => {
+    expect(wrapUpReason({ step: 0, outputChars: MAX_TURN_TOOL_OUTPUT_CHARS - 1 })).toBeUndefined();
+    expect(wrapUpReason({ step: 0, outputChars: MAX_TURN_TOOL_OUTPUT_CHARS })).toBe("output");
+  });
+
+  it("names one reason when several budgets ran out together", () => {
+    expect(wrapUpReason({ step: FORCE_TEXT_AFTER_STEPS, elapsedFraction: 1, outputChars: MAX_TURN_TOOL_OUTPUT_CHARS })).toBe("steps");
+    expect(wrapUpReason({ step: 0, elapsedFraction: 1, outputChars: MAX_TURN_TOOL_OUTPUT_CHARS })).toBe("time");
   });
 
   it("leaves room to answer after the wrap-up fires", () => {
@@ -41,11 +44,55 @@ describe("stepSettings", () => {
     expect(WRAP_UP_AFTER_FRACTION).toBeLessThan(1);
   });
 
-  it("keeps the wrap-up step inside the hard cap, so it always gets a chance to fire", () => {
-    // A too-high FORCE_TEXT_AFTER_STEPS would defer wrap-up past the ceiling and
-    // hand back the very failure it exists to prevent.
+  it("defaults to a cap of 100 with the wrap-up five steps below it", () => {
+    // The real guards are the clock and the tool-output budget; 25 stopped real
+    // multi-file office tasks half-way. Read from the env-free defaults.
+    expect(MAX_STEPS).toBe(100);
+    expect(FORCE_TEXT_AFTER_STEPS).toBe(95);
+  });
+
+  it("keeps the wrap-up step strictly inside the hard cap, so it always gets a chance to fire", () => {
+    // Step numbers run 0..cap-1: a threshold AT the cap is never reached, and the turn
+    // ends mid-tool at the ceiling — the very failure the wrap-up exists to prevent.
     expect(FORCE_TEXT_AFTER_STEPS).toBeGreaterThanOrEqual(1);
-    expect(FORCE_TEXT_AFTER_STEPS).toBeLessThanOrEqual(MAX_STEPS);
+    expect(FORCE_TEXT_AFTER_STEPS).toBeLessThan(MAX_STEPS);
+  });
+});
+
+describe("appendWrapUp", () => {
+  const afterTools: ModelMessage[] = [
+    { role: "user", content: "analyse these files" },
+    { role: "assistant", content: [{ type: "tool-call", toolCallId: "a", toolName: "run", input: {} }] },
+    { role: "tool", content: [{ type: "tool-result", toolCallId: "a", toolName: "run", output: { type: "text", value: "ok" } }] },
+  ];
+
+  it("appends the instruction once, last, without touching anything before it", () => {
+    const out = appendWrapUp(afterTools);
+    expect(out).toHaveLength(afterTools.length + 1);
+    // Same objects, same order: on Claude a change before a returned thinking block is a 400.
+    out.slice(0, -1).forEach((m, i) => expect(m).toBe(afterTools[i]));
+    expect(out.at(-1)).toEqual({ role: "user", content: WRAP_UP_INSTRUCTION });
+    expect(afterTools).toHaveLength(3); // pure
+  });
+
+  it("folds into a trailing user message rather than forming a run", () => {
+    // After a stall resume the list ends on a user "continue" request; strict chat
+    // templates reject two user messages in a row.
+    const resumed: ModelMessage[] = [...afterTools, { role: "user", content: "continue" }];
+    const out = mergeUserRuns(appendWrapUp(resumed), "openai-compatible");
+    expect(out).toHaveLength(resumed.length);
+    expect(out.at(-1)?.content).toContain("continue");
+    expect(out.at(-1)?.content).toContain(WRAP_UP_INSTRUCTION);
+  });
+
+  it("is told what to say, in the product's voice, without the machinery", () => {
+    // The reply is read by someone non-technical: outcome first, files by path,
+    // what is left, and that they can ask to continue.
+    expect(WRAP_UP_INSTRUCTION).toMatch(/what is finished/);
+    expect(WRAP_UP_INSTRUCTION).toMatch(/\/workspace\//);
+    expect(WRAP_UP_INSTRUCTION).toMatch(/not finished/);
+    expect(WRAP_UP_INSTRUCTION).toMatch(/continue/);
+    expect(WRAP_UP_INSTRUCTION).toMatch(/not from the user/);
   });
 });
 
