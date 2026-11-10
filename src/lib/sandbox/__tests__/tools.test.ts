@@ -333,6 +333,15 @@ describe("sandbox tools — delete_path", () => {
     expect(res).toEqual({ success: true, path: "venv" });
   });
 
+  it("delete_path takes the /workspace/… form the model uses everywhere else, and never the root", async () => {
+    deleteFile.mockResolvedValue({ ok: true });
+    const { tools } = await load();
+    await tools.delete_path.execute!({ path: "/workspace/_tmp/a.json" }, opts);
+    expect(deleteFile).toHaveBeenLastCalledWith("sess1", "_tmp/a.json", "user1");
+    await tools.delete_path.execute!({ path: "/workspace/" }, opts);
+    expect(deleteFile).toHaveBeenLastCalledWith("sess1", "/workspace/", "user1");
+  });
+
   it("delete_path reports a friendly failure instead of throwing", async () => {
     deleteFile.mockRejectedValue(new Error("nope"));
     const { tools } = await load();

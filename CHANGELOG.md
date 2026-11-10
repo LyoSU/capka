@@ -23,6 +23,7 @@ All notable changes to Capka are documented here. Format follows
 - A turn that runs out of steps, run time (`WRAP_UP_AFTER_FRACTION`) or tool output (`MAX_TURN_TOOL_OUTPUT_CHARS`) is now told to say what is done and what is left, and the reply offers Continue; admins see which limit fired under its technical details.
 
 ### Fixed
+- `delete_path` accepts the `/workspace/…` form (it failed as "Path traversal blocked", leaving the agent's temporary files behind), and the `execute_python`/`execute_node` descriptions state that each call is a fresh process.
 - A command printing more than `MAX_EXEC_OUTPUT_BYTES` no longer reports its output as discarded when the full log was saved in the workspace.
 - The `MAX_TURN_TOOL_OUTPUT_CHARS` brake no longer fires a step late.
 - Tool arguments of the wrong type (a number or boolean sent as a string, stringified JSON, a bare value where a list is expected) are coerced to the tool's schema instead of failing the call.

@@ -389,7 +389,9 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
       description:
         "Run Python code in the sandbox — data processing, file creation, analysis, automation. " +
         "Common scientific, document, image, PDF, and web libraries are preinstalled; install " +
-        "anything else with pip if needed.",
+        "anything else with pip if needed. Every call is a fresh process: imports, variables and " +
+        "loaded data do not carry over, so each call re-imports what it uses and re-reads its " +
+        "inputs (save an intermediate result to a file if a later call needs it).",
       inputSchema: z.object({
         code: z.string().describe("Python code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
@@ -408,7 +410,8 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
     execute_node: tool({
       description:
         "Run Node.js / JavaScript code in the sandbox — document generation, image processing, " +
-        "and other JS tasks. Common libraries are preinstalled; install anything else with npm if needed.",
+        "and other JS tasks. Common libraries are preinstalled; install anything else with npm if needed. " +
+        "Every call is a fresh process: nothing defined in one call exists in the next.",
       inputSchema: z.object({
         code: z.string().describe("JavaScript code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
@@ -730,7 +733,7 @@ print('OK', len(matches) if replace_all else 1, tier)`;
         "especially to FREE SPACE when storage is full — it is the only way to delete then, because " +
         "`rm` via execute_bash is paused while storage is over the limit. Deletion is permanent.",
       inputSchema: z.object({
-        path: z.string().describe("A file or folder: relative to /workspace, or an absolute /shared/… path"),
+        path: z.string().describe("A file or folder in /workspace (relative or /workspace/…), or an absolute /shared/… path"),
       }),
       execute: async ({ path }) => {
         // A `/shared/…` path goes to the per-user shared store, which is a different
@@ -743,7 +746,9 @@ print('OK', len(matches) if replace_all else 1, tier)`;
           if (shared) {
             await deleteSharedFile(userId, path.replace(/^\/?shared\/?/, "") || ".");
           } else {
-            await deleteFile(sessionKey, path, userId);
+            // The model writes /workspace/… everywhere else, and the controller takes a
+            // workspace-relative path: left absolute it read as a traversal and failed.
+            await deleteFile(sessionKey, path.replace(/^\/workspace\/(?=.)/, ""), userId);
           }
           return { success: true, path };
         } catch (e) {
