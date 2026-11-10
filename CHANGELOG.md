@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-10
+
 ### Added
 - The agent is notified when an `execute_bash` background job ends (folded into the running reply, or as one follow-up turn under the usual budget gates, at most `JOB_FOLLOWUP_CHAIN_MAX`, default 3, in a row); jobs are watched for `JOB_WATCH_MAX_HOURS` (default 6). A migration adds `background_jobs` and applies at boot.
 
