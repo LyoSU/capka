@@ -121,11 +121,12 @@ im.save('e.png')" && tesseract e.png - -l ukr`,
     name: "parquet round-trip",
     // pandas, polars and the duckdb module each read it: the image once had pandas
     // with no parquet engine at all, so a .parquet file was simply unreadable.
+    // fetchall, not fetchone: duckdb 2.0 removed fetchone() from relations.
     cmd: `python3 -c "
 import pandas as pd, polars as pl, duckdb
 pd.DataFrame({'a': [1, 2]}).to_parquet('h.parquet')
 print('rows', len(pd.read_parquet('h.parquet')), pl.read_parquet('h.parquet').height,
-      duckdb.sql(\\"select count(*) from 'h.parquet'\\").fetchone()[0])"`,
+      duckdb.sql(\\"select count(*) from 'h.parquet'\\").fetchall()[0][0])"`,
     want: /rows 2 2 2/,
   },
   {
