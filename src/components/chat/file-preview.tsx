@@ -1703,6 +1703,7 @@ export function FileThumb({ file, className }: { file: PreviewFile; className?: 
 
 // At most two page renders in flight from this page: each can hold a connection
 // for seconds while LibreOffice works, and HTTP/1.1 gives a page six in total.
+const THUMB_RETRY_MS = [5_000, 15_000, 30_000];
 let thumbSlots = 2;
 const thumbWaiters: (() => void)[] = [];
 function takeThumbSlot(): Promise<void> {
@@ -1730,7 +1731,11 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
   const holding = useRef(false);
   const [src, setSrc] = useState<string | null>(null);
   const [shown, setShown] = useState<"loading" | "ok" | "failed">("loading");
-  const url = `/api/sandbox/files/thumbnail?${fileQuery(file)}&path=${encodeURIComponent(file.path)}`;
+  // A first message in a new chat asks before the sandbox exists (the route answers
+  // 204). The tile shows its typed icon meanwhile and asks again a few times, later
+  // each time, so the page lands once the turn has started the sandbox.
+  const [attempt, setAttempt] = useState(0);
+  const url = `/api/sandbox/files/thumbnail?${fileQuery(file)}&path=${encodeURIComponent(file.path)}${attempt ? `&r=${attempt}` : ""}`;
   const ext = extOf(file.name);
   const slide = ["pptx", "ppt", "odp"].includes(ext);
   const sheet = ["xlsx", "xls", "ods"].includes(ext);
@@ -1741,6 +1746,17 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
     holding.current = false;
     giveThumbSlot();
   }, []);
+
+  useEffect(() => {
+    const delay = THUMB_RETRY_MS[attempt];
+    if (shown !== "failed" || delay === undefined) return;
+    const timer = setTimeout(() => {
+      setSrc(null);
+      setShown("loading");
+      setAttempt(attempt + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [shown, attempt]);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -1768,6 +1784,8 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
 
   return (
     <div ref={boxRef} className={cn("relative overflow-hidden", className)}>
+      {/* No picture (yet): the same typed tile the other kinds get, not a blank sheet. */}
+      {shown === "failed" ? <BinaryFileThumb name={file.name} className="absolute inset-0" /> : (
       <div
         className={cn(
           "absolute overflow-hidden bg-card ring-1 ring-black/10 shadow-[0_1px_3px_oklch(0_0_0/0.08)] dark:ring-white/10",
@@ -1779,7 +1797,7 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
         )}
       >
         <Icon aria-hidden className={cn("absolute left-1/2 size-6 -translate-x-1/2 opacity-60", slide ? "top-1/2 -translate-y-1/2" : "top-4", tintOf(file.name))} />
-        {src && shown !== "failed" && (
+        {src && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={src}
@@ -1794,8 +1812,9 @@ function DocThumb({ file, className }: { file: PreviewFile; className?: string }
           />
         )}
       </div>
+      )}
       {/* The floor of the well: the page slides under it rather than ending. */}
-      {!slide && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-muted to-transparent" />}
+      {!slide && shown !== "failed" && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-muted to-transparent" />}
     </div>
   );
 }

@@ -23,6 +23,7 @@ vi.mock("@/lib/sandbox/client", () => ({
 }));
 
 import { GET } from "@/app/api/sandbox/files/download/route";
+import { downloadFile } from "@/lib/sandbox/client";
 
 describe("sandbox download route — header proxying", () => {
   it("never emits an empty Content-Length when the controller streams without one", async () => {
@@ -35,5 +36,12 @@ describe("sandbox download route — header proxying", () => {
     // An empty Content-Length is invalid HTTP — the upstream proxy rejects the
     // origin response and returns 502 Bad gateway.
     expect(res.headers.get("Content-Length")).not.toBe("");
+  });
+});
+
+describe("sandbox download route — the path form the agent's tool calls carry", () => {
+  it("asks the controller for the workspace-relative file when given /workspace/…", async () => {
+    await GET(new Request("http://x/api/sandbox/files/download?chatId=c1&path=%2Fworkspace%2F_tmp%2Fdeck.pdf&inline=1"));
+    expect(vi.mocked(downloadFile).mock.lastCall?.[1]).toBe("_tmp/deck.pdf");
   });
 });

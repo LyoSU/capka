@@ -50,17 +50,6 @@ export function ChatMenuButton({
   // with its surface open rather than silently doing nothing.
   const want = useRef<"menu" | "share" | null>(null);
 
-  useEffect(
-    () =>
-      subscribeEvents({
-        onMessage: (event) => {
-          const d = event as { type?: string; chatId?: string; title?: string };
-          if (d.type === "chat:title" && d.chatId === chatId && d.title) setTitle(d.title);
-        },
-      }),
-    [chatId],
-  );
-
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/chats/${chatId}`);
@@ -76,6 +65,22 @@ export function ChatMenuButton({
       // so a toast here would be noise about an action the user can just repeat.
     }
   }, [chatId]);
+
+  // A new chat opens with no name; the row gets its placeholder when the first
+  // turn is queued, and the sidebar re-reads on `task:start` to show it. Do the
+  // same here, so the header changes at the same moment instead of waiting for the
+  // generated title after the turn.
+  useEffect(
+    () =>
+      subscribeEvents({
+        onMessage: (event) => {
+          const d = event as { type?: string; chatId?: string; title?: string };
+          if (d.type === "chat:title" && d.chatId === chatId && d.title) setTitle(d.title);
+          else if (d.type === "task:start" && d.chatId === chatId) void load();
+        },
+      }),
+    [chatId, load],
+  );
 
   const show = (what: "menu" | "share") => {
     if (!chat) {

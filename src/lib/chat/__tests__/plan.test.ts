@@ -43,3 +43,12 @@ describe("plan in the Telegram draft", () => {
     expect(composeDraft("Here it is", "", { kind: "tool", label: "x", plan: [...a] }, t)).toEqual({ markdown: "Here it is" });
   });
 });
+
+describe("update_plan result", () => {
+  it("reminds the model to come back while a step is still open, and stays quiet once all are done", async () => {
+    const { makePlanTool } = await import("@/lib/chat/plan-tool");
+    const run = (steps: unknown) => (makePlanTool()[PLAN_TOOL].execute as (i: unknown, o: unknown) => Promise<string>)({ steps }, {});
+    expect(await run(a)).toMatch(/Call update_plan again/);
+    expect(await run(a.map((s) => ({ ...s, status: "done" })))).toBe("Shown to the user.");
+  });
+});

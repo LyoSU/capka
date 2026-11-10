@@ -244,7 +244,13 @@ export function makeViewFileTool(opts: {
       const dir = `${VIEW_DIR}/${callId}`;
       const wanted = normalizePages(pages);
       const res = await execCommand(sessionKey, renderScript(kind, path, dir, wanted), 300_000);
-      if (res.stdout.includes("__NOFILE__")) return { error: `File not found: ${path}` };
+      // The usual cause is not a wrong path: the model converts a document and
+      // views the result in ONE step, the two calls run together, and the file is
+      // not there yet. Left unexplained it blamed the viewer and spent six steps
+      // working around a fault that did not exist.
+      if (res.stdout.includes("__NOFILE__")) {
+        return { error: `File not found: ${path}. If a command in this same step was creating it, the two ran at the same time — call view_file again now that the command has finished.` };
+      }
       const produced = [...res.stdout.matchAll(/__PNG__(.+)/g)].map((m) => m[1].trim()).filter(Boolean);
       if (produced.length === 0) {
         const why = (res.stderr || res.stdout || "").replace(/__\w+__.*/g, "").trim().slice(0, 300);

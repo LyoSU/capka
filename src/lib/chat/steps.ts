@@ -52,6 +52,12 @@ const basename = (p: unknown): string => {
   return trimmed.split("/").pop() || trimmed || "";
 };
 
+/** The path a step's file chip opens. The model writes `/workspace/report.pdf` as
+ *  readily as `report.pdf`; the file routes take the workspace-relative form, and
+ *  the absolute one came back 404 — a link to a file that was sitting right there. */
+const workspaceFile = (p: unknown): string | undefined =>
+  (typeof p === "string" && p.trim().replace(/^\/workspace\/(?=.)/, "")) || undefined;
+
 const clip = (s: unknown, n = 48): string => {
   const str = typeof s === "string" ? s.trim().replace(/\s+/g, " ") : "";
   return str.length > n ? str.slice(0, n) + "…" : str;
@@ -224,7 +230,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("createdFileGeneric"),
         activeLabel: t("creatingFileGeneric"),
         detail: basename(args.path) || undefined,
-        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
+        file: workspaceFile(args.path),
         category: "file",
       };
     case "str_replace":
@@ -233,7 +239,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("editedFileGeneric"),
         activeLabel: t("editingFileGeneric"),
         detail: basename(args.path) || undefined,
-        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
+        file: workspaceFile(args.path),
         category: "file",
       };
     case "read_file":
@@ -242,7 +248,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("readFileGeneric"),
         activeLabel: t("readingFileGeneric"),
         detail: basename(args.path) || undefined,
-        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
+        file: workspaceFile(args.path),
         category: "file",
       };
     case "list_files":
@@ -263,7 +269,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("viewedFileGeneric"),
         activeLabel: t("viewingFileGeneric"),
         detail: basename(args.path) || undefined,
-        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
+        file: workspaceFile(args.path),
         category: "file",
       };
     case "delete_path":
@@ -279,14 +285,20 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
       return { iconKey: "sparkles", label: t("nothingToReport"), activeLabel: t("working"), category: "other" };
     case "check_job":
       return { iconKey: "terminal", label: t("checkedJob"), activeLabel: t("checkingJob"), category: "exec" };
+    // A code-running call carries the model's own few-word `summary` of what it
+    // is for. It replaces the generic label AND the raw command: twenty identical
+    // "Ran Python code" rows tell a reader nothing, and a shell line is jargon.
     case "execute_bash":
+    case "execute_python":
+    case "execute_node": {
+      const summary = clip(args.summary, 80);
+      if (summary && !args.background) return { iconKey: name === "execute_bash" ? "terminal" : "code", label: summary, activeLabel: `${summary}…`, category: "exec" };
+      if (name === "execute_python") return { iconKey: "code", label: t("ranPython"), activeLabel: t("runningPython"), category: "exec" };
+      if (name === "execute_node") return { iconKey: "code", label: t("ranJavaScript"), activeLabel: t("runningJavaScript"), category: "exec" };
       return args.background
         ? { iconKey: "terminal", label: t("startedJob"), activeLabel: t("startingJob"), detail: clip(args.command), category: "exec" }
         : { iconKey: "terminal", label: t("ranCommand"), activeLabel: t("runningCommand"), detail: clip(args.command), category: "exec" };
-    case "execute_python":
-      return { iconKey: "code", label: t("ranPython"), activeLabel: t("runningPython"), category: "exec" };
-    case "execute_node":
-      return { iconKey: "code", label: t("ranJavaScript"), activeLabel: t("runningJavaScript"), category: "exec" };
+    }
   }
 
   // Before the heuristics below, because `memory_search` contains "search" and was

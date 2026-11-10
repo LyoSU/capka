@@ -339,7 +339,7 @@ describe("describeStep — the file behind the step", () => {
   // The chip shows the basename (readable); Quick Look needs the whole path.
   it("carries the full path alongside the basename chip", () => {
     const d = describeStep(t, "write_file", { path: "/workspace/deep/logo.svg" });
-    expect(d.file).toBe("/workspace/deep/logo.svg");
+    expect(d.file).toBe("deep/logo.svg"); // workspace-relative: the form the file routes take
     expect(d.detail).toBe("logo.svg");
   });
 
@@ -482,5 +482,32 @@ describe("describeStep — delete_path and nothing_to_report", () => {
     const d = describeStep(t, "nothing_to_report", { reason: "no changes" });
     expect(d.label).toBe("nothingToReport");
     expect(d.adminDetail).toBeUndefined();
+  });
+});
+
+describe("describeStep — a code step is named by the model's own summary", () => {
+  it("shows the summary in place of the generic label and the raw command", () => {
+    const py = describeStep(t, "execute_python", { summary: "Sum revenue by region", code: "print(1)" });
+    expect(py).toMatchObject({ label: "Sum revenue by region", activeLabel: "Sum revenue by region…", iconKey: "code", category: "exec" });
+    const sh = describeStep(t, "execute_bash", { summary: "Convert the deck to PDF", command: "soffice --convert-to pdf a.pptx" });
+    expect(sh.label).toBe("Convert the deck to PDF");
+    expect(sh.detail).toBeUndefined();
+  });
+
+  it("keeps the generic label without one, and for a background job, which must still read as one", () => {
+    expect(describeStep(t, "execute_node", { code: "1" }).label).toBe("ranJavaScript");
+    expect(describeStep(t, "execute_python", { summary: "  ", code: "1" }).label).toBe("ranPython");
+    const job = describeStep(t, "execute_bash", { summary: "Convert everything", command: "x", background: true });
+    expect(job.label).toBe("startedJob");
+    expect(job.detail).toBe("x");
+  });
+});
+
+describe("describeStep — the file a step links to", () => {
+  it("is workspace-relative whichever form the model wrote, and absent for a bare root", () => {
+    expect(describeStep(t, "view_file", { path: "/workspace/_tmp/deck.pdf" }).file).toBe("_tmp/deck.pdf");
+    expect(describeStep(t, "read_file", { path: "notes.txt" }).file).toBe("notes.txt");
+    expect(describeStep(t, "write_file", { path: "/shared/a.txt" }).file).toBe("/shared/a.txt");
+    expect(describeStep(t, "view_file", { path: "  " }).file).toBeUndefined();
   });
 });

@@ -13,7 +13,13 @@ export function makePlanTool() {
     [PLAN_TOOL]: tool({
       description: DESCRIPTION,
       inputSchema: planSchema,
-      execute: async () => "Shown to the user.",
+      // The result is the one place a reminder is read at the moment it matters: a
+      // plan made once and never touched again leaves the user looking at "step 1
+      // of 6" beside a finished answer.
+      execute: async ({ steps }) =>
+        steps.some((s) => s.status !== "done")
+          ? "Shown to the user. Call update_plan again when the current step is finished — in the same step as the tool calls that start the next one, so it costs no extra round."
+          : "Shown to the user.",
     }),
   };
 }

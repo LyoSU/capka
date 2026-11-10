@@ -268,6 +268,17 @@ export async function loadSandboxTools(
     }
   };
 
+  // Asked of every code-running call so the timeline can say what a step is FOR
+  // ("Summed revenue by region") instead of repeating "Ran Python code" twenty
+  // times; describeStep shows it in place of the generic label.
+  const summary = z
+    .string()
+    .optional()
+    .describe(
+      "What this call does, in a few plain words in the user's language (like \"Sum revenue by region\") — " +
+        "shown to the user in place of the code. No file paths, commands or library names.",
+    );
+
   const tools = {
     execute_bash: tool({
       description:
@@ -284,6 +295,7 @@ export async function loadSandboxTools(
         "keeps running after your reply, and you are normally notified automatically when it ends " +
         "(the result says so). Never poll check_job in a loop or sleep waiting for it.",
       inputSchema: z.object({
+        summary,
         command: z.string().describe("Bash command to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
         background: z
@@ -393,6 +405,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         "loaded data do not carry over, so each call re-imports what it uses and re-reads its " +
         "inputs (save an intermediate result to a file if a later call needs it).",
       inputSchema: z.object({
+        summary,
         code: z.string().describe("Python code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
       }),
@@ -413,6 +426,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         "and other JS tasks. Common libraries are preinstalled; install anything else with npm if needed. " +
         "Every call is a fresh process: nothing defined in one call exists in the next.",
       inputSchema: z.object({
+        summary,
         code: z.string().describe("JavaScript code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 120s, max 300s)"),
       }),

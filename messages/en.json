@@ -618,6 +618,8 @@
     "tool": {
       "done": "Done",
       "failed": "failed",
+      "ranFailed": "Step ended with an error",
+      "ranFailedNamed": "Didn't work: {step}",
       "stepFailed": "This step couldn't be completed.",
       "connectorSignIn": "{name} needs you to sign in again: its access to the service has expired. Open Settings → Connectors, sign in to {name} again, then retry.",
       "technicalDetails": "Technical details",
@@ -716,6 +718,7 @@
         "pending": "Next: {title}"
       },
       "workedFor": "Worked for {duration}",
+      "workingFor": "Working for {duration}",
       "activity": "Activity",
       "stepCount": "{count, plural, one {# action} other {# actions}}",
       "memoryCount": "{count, plural, one {# item in memory} other {# items in memory}}",

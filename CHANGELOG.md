@@ -13,6 +13,8 @@ All notable changes to Capka are documented here. Format follows
 - The turn context now carries the current date and time, so a chat left open overnight no longer answers with the day it started.
 
 ### Changed
+- `execute_bash`/`execute_python`/`execute_node` take an optional `summary` the model writes in the user's language; the step list shows it in place of "Ran Python code" and of the raw command.
+- Admin-only reasoning in a finished reply's step list is clamped to two lines (press to expand).
 - Claude 4.6 and later (including the Claude 5 family) are sent adaptive thinking with an effort level instead of a token budget, which those models reject. A migration clears the stale "cannot reason" flag on such models and applies at boot.
 - Prompt-cache breakpoints on Claude use a 1-hour TTL (the moving step tail stays at 5 minutes); 1-hour cache writes are priced at 2x input in cost accounting.
 - Auto-compaction triggers at the context window minus a 15% reserve (at least 16k tokens) instead of at 75%, and its summary follows a fixed structure.
@@ -23,6 +25,8 @@ All notable changes to Capka are documented here. Format follows
 - A turn that runs out of steps, run time (`WRAP_UP_AFTER_FRACTION`) or tool output (`MAX_TURN_TOOL_OUTPUT_CHARS`) is now told to say what is done and what is left, and the reply offers Continue; admins see which limit fired under its technical details.
 
 ### Fixed
+- File links in a reply's step list open again for files in a subfolder (the download route answered 404 for the `/workspace/…` form), and a file the agent has since deleted is no longer shown as a link or as a card under the reply.
+- The chat shows "Working for …" while a turn runs (was the past tense), the header picks up the chat title when the sidebar does, a step whose command exited non-zero is marked as failed, and attachment tiles fall back to a file-type icon instead of a blank thumbnail before the sandbox exists.
 - `delete_path` accepts the `/workspace/…` form (it failed as "Path traversal blocked", leaving the agent's temporary files behind), and the `execute_python`/`execute_node` descriptions state that each call is a fresh process.
 - A command printing more than `MAX_EXEC_OUTPUT_BYTES` no longer reports its output as discarded when the full log was saved in the workspace.
 - The `MAX_TURN_TOOL_OUTPUT_CHARS` brake no longer fires a step late.

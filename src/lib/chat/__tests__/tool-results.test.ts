@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { INTERRUPTED_TOOL_RESULT, UNANSWERED_ASK_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls } from "../tool-results";
+import { INTERRUPTED_TOOL_RESULT, UNANSWERED_ASK_RESULT, UNDECIDED_APPROVAL_REASON, sealOrphanToolCalls, failedExitCode } from "../tool-results";
 
 type Part = Record<string, unknown>;
 type Msg = { role: string; parts?: Part[] };
@@ -104,5 +104,17 @@ describe("sealOrphanToolCalls", () => {
     const before = JSON.stringify(msgs);
     sealOrphanToolCalls(msgs);
     expect(JSON.stringify(msgs)).toBe(before);
+  });
+});
+
+describe("failedExitCode", () => {
+  it("reads a non-zero exit from a sandbox command result", () => {
+    expect(failedExitCode({ output: "NameError: x", exitCode: 1 })).toBe(1);
+  });
+  it("is null for success, other shapes and non-objects", () => {
+    expect(failedExitCode({ output: "ok", exitCode: 0 })).toBeNull();
+    expect(failedExitCode({ exitCode: 2 })).toBeNull();
+    expect(failedExitCode("boom")).toBeNull();
+    expect(failedExitCode(null)).toBeNull();
   });
 });

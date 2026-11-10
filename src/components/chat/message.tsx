@@ -26,9 +26,9 @@ import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
 import { stripPseudoToolCalls, isKnownToolName } from "@/lib/chat/pseudo-tool-call";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
-import { CONNECTOR_SIGNIN_RE } from "@/lib/chat/tool-results";
+import { CONNECTOR_SIGNIN_RE, failedExitCode } from "@/lib/chat/tool-results";
 import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
-import { SandboxFileTile, FileThumb, usePreview, type PreviewFile } from "./file-preview";
+import { SandboxFileTile, FileThumb, usePreview, useFileStatus, probeFile, type PreviewFile } from "./file-preview";
 import { MessageEditor } from "./message-editor";
 import type { FileRef } from "@/lib/constants";
 import { describeStep, describeInvocation, type StepDescriptor, type StepInvocation, type StepCategory } from "./steps";
@@ -309,12 +309,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   // shape, trusted the same way asMediaRef is. Without this, a command that
   // FAILED renders indistinguishably from one that succeeded, because the tool
   // call itself completed fine and errorText stays empty.
-  const exitCode = (() => {
-    const o = output as Record<string, unknown> | null;
-    return !isError && o && typeof o === "object" && typeof o.output === "string" && typeof o.exitCode === "number" && o.exitCode !== 0
-      ? o.exitCode
-      : null;
-  })();
+  const exitCode = isError ? null : failedExitCode(output);
 
   const extras = (images || resources) && (
     <>
@@ -824,10 +819,15 @@ function TechDetails({ json }: { json: string }) {
  *  FileTile's `overlay` slot. The trigger covers the row from underneath instead
  *  (see StepRow), so both controls get their own tab stop and the whole row still
  *  expands. */
-function StepFileChip({ path, name, chatId }: { path: string; name: string; chatId: string }) {
+function StepFileChip({ path, name, chatId, settled }: { path: string; name: string; chatId: string; settled: boolean }) {
   const t = useTranslations("chat.tool");
   const { open } = usePreview();
   const file: PreviewFile = useMemo(() => ({ path, name, chatId }), [path, name, chatId]);
+  // The shared existence probe (one request per file, cached) — only once the step
+  // is over, since a step that writes the file has not made it yet. An agent often
+  // deletes its scratch files afterwards; a link to one only opens "no such file".
+  const status = useFileStatus(file, settled);
+  if (status === "gone") return <span className="relative z-10 min-w-0 truncate font-mono text-sm">{name}</span>;
   return (
     <button
       type="button"
@@ -956,7 +956,7 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
   // Re-scanning the message text on every render is wasteful; the artifact
   // paths only change when the text does. Shared with the Telegram channel so
   // both surface the same referenced files.
-  const { paths, folded } = useMemo(() => {
+  const { paths: listed, folded } = useMemo(() => {
     const named = extractWorkspacePaths(text);
     // A file the reply mentions by bare name is just as named as one written as a
     // full /workspace/ path — see splitTouchedByMention for why that matters more
@@ -969,6 +969,20 @@ function WorkspaceLinks({ text, chatId, live, touched, stats }: { text: string; 
     if (tierOne.length === 0) return { paths: rest, folded: [] as string[] };
     return { paths: tierOne, folded: rest };
   }, [text, touched]);
+  // A path the reply merely mentions ("I'll write it to last.txt") may never exist.
+  // The inline chip strikes it through; here it gets no card and no count. Asked
+  // through the shared probe the tiles use (one cached request per file), and only
+  // once the reply has stopped streaming, like the tiles' own check.
+  const [gone, setGone] = useState<string[]>([]);
+  useEffect(() => {
+    if (live) return;
+    let alive = true;
+    void Promise.all(listed.map((p) => probeFile({ path: p, name: p.split("/").pop() || p, chatId }).then((r) => (r === "gone" ? p : null)))).then(
+      (r) => { if (alive) setGone(r.filter((p): p is string => p !== null)); },
+    );
+    return () => { alive = false; };
+  }, [listed, live, chatId]);
+  const paths = useMemo(() => listed.filter((p) => !gone.includes(p)), [listed, gone]);
   // Artifacts that open in Quick Look, in listed order, for ←/→ navigation.
   const viewable: PreviewFile[] = useMemo(
     () =>
@@ -1070,6 +1084,16 @@ function ReasoningRow({ text, isStreaming, live, stagger }: { text: string; isSt
   const [overflow, setOverflow] = useState(false);
   const [full, setFull] = useState(0);
   const body = useRef<HTMLDivElement>(null);
+  // The live window shows only the paragraph being written: a bottom-anchored cut
+  // through several leaves the tail of the previous one stranded under the fade, a
+  // lone "the director for it." that reads as a rendering fault. (Not when the text
+  // holds a code fence: splitting at its blank lines would cut the block in two.)
+  const current = useMemo(
+    () => (live && !clean.includes("```") ? clean.trimEnd().split(/\n\s*\n/).pop()! : clean),
+    [clean, live],
+  );
+  const cut = !!live && !open && current !== clean;
+  const shown = live && !open ? current : clean;
   // The window follows the newest words without scrolling anything: it is a
   // bottom-anchored flex column, so text past three lines overflows UPWARD and is
   // clipped. No scroll position to keep, nothing to animate under reduced motion,
@@ -1078,12 +1102,15 @@ function ReasoningRow({ text, isStreaming, live, stagger }: { text: string; isSt
   // tall the full text is for the reveal.
   useIsomorphicLayoutEffect(() => {
     const el = body.current;
-    if (!el || !live) return;
+    if (!el) return;
     const h = el.offsetHeight;
     setFull(h);
     setOverflow(h > (el.parentElement?.clientHeight ?? h) + 1);
-  }, [clean, live, open]);
+  }, [shown, live, open]);
   const ticker = !!live;
+  // Once the turn is over the expanded timeline is read for its steps: a thought
+  // shrinks to two quiet lines (its beginning, fading out) that a press opens.
+  const clamp = !live;
   return (
     <div className={i < 0 ? "py-1.5" : "animate-fade-up py-1.5"} style={{ "--i": i } as React.CSSProperties}>
       <div className="relative">
@@ -1091,7 +1118,7 @@ function ReasoningRow({ text, isStreaming, live, stagger }: { text: string; isSt
             markdown and may hold its own buttons (a code block's copy), which
             cannot sit inside a <button>. While shut the text above is inert, so a
             press anywhere on the window lands here. */}
-        {ticker && overflow && (
+        {(ticker ? overflow || cut : overflow) && (
           <button
             type="button"
             aria-expanded={open}
@@ -1113,14 +1140,17 @@ function ReasoningRow({ text, isStreaming, live, stagger }: { text: string; isSt
           aria-live={ticker ? "off" : undefined}
           className={[
             "reasoning-prose min-w-0 text-sm text-muted-foreground",
+            clamp && "relative z-10 overflow-hidden text-xs text-muted-foreground/80",
+            clamp && !open && "pointer-events-none max-h-[2lh]",
+            clamp && !open && overflow && "[mask-image:linear-gradient(to_bottom,black_55%,transparent)]",
             ticker && "relative z-10 flex flex-col justify-end overflow-hidden",
             ticker && !open && "pointer-events-none max-h-[3lh]",
             ticker && !open && overflow && "[mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)]",
           ].filter(Boolean).join(" ")}
-          style={ticker ? { maxHeight: open && full ? full : undefined, transition: "max-height var(--collapse-dur) var(--ease-strong)" } : undefined}
+          style={ticker || clamp ? { maxHeight: open && full ? full : undefined, transition: "max-height var(--collapse-dur) var(--ease-strong)" } : undefined}
         >
           <div ref={body} className="min-w-0 shrink-0">
-            <Markdown isStreaming={isStreaming}>{clean}</Markdown>
+            <Markdown isStreaming={isStreaming}>{shown}</Markdown>
           </div>
         </div>
       </div>
@@ -1181,12 +1211,20 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
     part.state === "output-error" ? "error" : part.state.startsWith("output-") ? "done" : "running";
   const isRunning = state === "running";
   const isError = state === "error";
+  // A command that ran and exited non-zero: the call completed, so `state` is "done",
+  // but "Ran Python" would be false. Routine for an agent that then recovers — the
+  // label and ink change, quietly, with none of the alarm of a call that errored.
+  const ranFailed = state === "done" && failedExitCode(part.output) !== null;
   // A demoted `manage` result (an applied change / diagnostic that isn't a card)
   // carries a ready, localized one-liner — show it as the label and drop the raw
   // JSON expander, so the timeline reads cleanly instead of "Manage" + a blob.
   const manageLabel = !isRunning && !isError && rawName === "manage" ? manageStepLabel(part.output, tSteps) : null;
   const doneLabel = manageLabel ?? d.label;
-  const label = isRunning ? d.activeLabel : doneLabel;
+  // A step the model named itself keeps its name when it fails — "which one" is the
+  // useful half — and says so in words, not by ink alone.
+  const summary = (part.input as { summary?: unknown } | undefined)?.summary;
+  const named = typeof summary === "string" && summary.trim() && !d.detail;
+  const label = isRunning ? d.activeLabel : ranFailed ? (named ? t("ranFailedNamed", { step: d.label }) : t("ranFailed")) : doneLabel;
 
   // The two halves of the panel, each computed once. `inv` is suppressed while the
   // call is still in an input-* state: arguments stream in character by character,
@@ -1217,12 +1255,12 @@ function StepRow({ part, chatId, isAdmin, connect, stagger }: { part: ToolPart; 
   }, [isAdmin, isError]);
 
   const fileChip =
-    d.file && d.detail && chatId ? <StepFileChip path={d.file} name={d.detail} chatId={chatId} /> : null;
+    d.file && d.detail && chatId ? <StepFileChip path={d.file} name={d.detail} chatId={chatId} settled={!isRunning} /> : null;
 
   const row = (
     <div
       className={`${i < 0 ? "" : "animate-fade-up "}group/step relative flex min-h-8 w-fit max-w-full items-center gap-2.5 py-1 transition-micro ${
-        isError ? "text-destructive" : "text-muted-foreground has-[button:hover]:text-foreground"
+        isError ? "text-destructive" : ranFailed ? "text-destructive/70" : "text-muted-foreground has-[button:hover]:text-foreground"
       }`}
       style={{ "--i": i } as React.CSSProperties}
     >
@@ -1517,7 +1555,7 @@ function ActivityGroup({ items, writes, isStreaming, timing, chatId, isAdmin, sa
     ms != null
       // One verb whatever the run held: switching "Reasoned" / "Worked" on whether a
       // thought was streamed told the reader about the model, not about their task.
-      ? t("workedFor", { duration: formatShortDuration(ms, tDuration) })
+      ? t(streaming ? "workingFor" : "workedFor", { duration: formatShortDuration(ms, tDuration) })
       : streaming && hasReasoning
         ? t("thinking")
         : t(hasReasoning ? "reasoning" : "activity");

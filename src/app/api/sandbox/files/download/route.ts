@@ -38,7 +38,10 @@ export const GET = apiHandler(async (req: Request) => {
   if (!filePath) return Response.json({ error: "Missing path" }, { status: 400 });
 
   const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
-  const controllerRes = await downloadFile(sessionKey, filePath, userId);
+  // `/workspace/x` is the same file as `x` — the form the agent's own tool calls
+  // carry — and the controller, which resolves against the workspace root, answers
+  // 404 for it.
+  const controllerRes = await downloadFile(sessionKey, filePath.replace(/^\/workspace\/(?=.)/, ""), userId);
 
   // Proxy the binary stream from controller to client. The name comes from the
   // sandbox, where the agent can legally create `Q4:plan.txt` or a name ending in a

@@ -40,6 +40,6 @@ describe("streamed text", () => {
     const row = message.slice(message.indexOf("function ReasoningRow"));
     const body = row.slice(0, row.indexOf("\n}"));
     expect(body).not.toMatch(/\.slice\(/);
-    expect(body).toContain(">{clean}</Markdown>");
+    expect(body).toContain(">{shown}</Markdown>");
   });
 });

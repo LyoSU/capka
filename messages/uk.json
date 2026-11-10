@@ -618,6 +618,8 @@
     "tool": {
       "done": "Готово",
       "failed": "помилка",
+      "ranFailed": "Крок завершився з помилкою",
+      "ranFailedNamed": "Не вдалося: {step}",
       "stepFailed": "Не вдалося виконати цей крок.",
       "connectorSignIn": "Конектору «{name}» потрібен повторний вхід: доступ до сервісу закінчився. Відкрийте Налаштування → Конектори, увійдіть у «{name}» ще раз і повторіть запит.",
       "technicalDetails": "Технічні деталі",
@@ -716,6 +718,7 @@
         "pending": "Далі: {title}"
       },
       "workedFor": "Працював {duration}",
+      "workingFor": "Працює {duration}",
       "activity": "Дії",
       "stepCount": "{count, plural, one {# дія} few {# дії} many {# дій} other {# дії}}",
       "memoryCount": "{count, plural, one {# запис у пам'яті} few {# записи у пам'яті} many {# записів у пам'яті} other {# записи у пам'яті}}",

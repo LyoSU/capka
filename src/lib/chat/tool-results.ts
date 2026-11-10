@@ -91,3 +91,13 @@ export function sealOrphanToolCalls<T extends { role: string; parts?: unknown[] 
   }
   return messages;
 }
+
+/** The exit code of a sandbox command that ran and failed. Capka's own exec tools
+ *  return `{ output, exitCode }` — a first-party shape — and the tool call itself
+ *  completes fine, so the part is not `output-error`; only the code says it failed. */
+export function failedExitCode(output: unknown): number | null {
+  const o = output as Record<string, unknown> | null;
+  return o && typeof o === "object" && typeof o.output === "string" && typeof o.exitCode === "number" && o.exitCode !== 0
+    ? o.exitCode
+    : null;
+}
