@@ -256,22 +256,42 @@ export class DockerBackend {
     const container = this.docker.getContainer(handle);
 
     // Run the command in its own session so a timeout kills the whole process
-    // group (forked children included). base64 keeps the command verbatim.
+    // group (forked children included). GNU `timeout` IS that group's leader and,
+    // without --foreground, signals the whole group on expiry — itself included, so
+    // the wrapper sees 137 exactly as from the old `( sleep; kill -KILL -pgid ) &`
+    // killer. That killer was the problem: killing it on a normal exit left its
+    // `sleep` orphaned, holding the exec's stdout open, and Docker then waited out
+    // a ~2s grace before ending the stream — on every call — while the orphan sat
+    // on a pids slot until its timeout. With no separate killer, nothing outlives
+    // the command but what the command itself chose to leave behind.
     const secs = Math.max(1, Math.ceil(timeoutMs / 1000));
-    const b64 = Buffer.from(command).toString("base64");
+    // The command travels over the exec's stdin, never argv: Linux caps ONE argv
+    // string at 128 KiB, and the tools inline whole files as base64, so anything
+    // past ~96 KB died with "argument list too long" before running. The trailing
+    // "." keeps `$(...)` from eating the command's own trailing newlines, and the
+    // byte count lets the wrapper read exactly this much without waiting for an
+    // EOF that a proxy in front of Docker may never pass on — and refuse a command
+    // that arrived short, which could otherwise run as a harmful prefix of itself.
+    const script = Buffer.from(`${command}.`);
     // Where the wrapper publishes its process-group id, so a cancel can reach the
     // same group the timeout killer would. Random per exec: unique across
     // concurrent execs, and not derived from anything the caller controls.
     const pidFile = `${PID_DIR}/${randomUUID()}`;
+    // The script is read on fd 3 and the command's own stdin is /dev/null, so a
+    // command that reads stdin can't swallow its source. Pipes and /dev/null only:
+    // nothing on the small /tmp, nothing gVisor lacks. `eval` inside `bash -c`
+    // keeps `$0` and the "bash: line N:" error format the model has always seen.
     const wrapper =
-      `__cmd=$(echo ${b64} | base64 -d); ` +
-      `setsid bash -c "$__cmd" & __pid=$!; ` +
+      `exec 3<&0 </dev/null; ` +
+      `setsid timeout -s KILL ${secs} bash -c '__cmd=$(head -c ${script.length} <&3); exec 3<&-; ` +
+      `(LC_ALL=C; [ "\${#__cmd}" -eq ${script.length} ]) || { echo "command arrived incomplete" >&2; exit 126; }; ` +
+      `eval "\${__cmd%.}"' & __pid=$!; exec 3<&-; ` +
       // Best-effort, like everything touching the small shared /tmp: if this fails
       // (full tmpfs) the command still runs — it just can't be cancelled early.
       `mkdir -p ${PID_DIR} 2>/dev/null; echo "$__pid" > ${pidFile} 2>/dev/null; ` +
-      `( sleep ${secs}; kill -KILL -"$__pid" 2>/dev/null ) & __killer=$!; ` +
-      `wait "$__pid"; __rc=$?; ` +
-      `kill "$__killer" 2>/dev/null; wait "$__killer" 2>/dev/null; ` +
+      // The shell's own job notice for a killed group would quote this whole wrapper
+      // back to the model; say just what it used to see.
+      `wait "$__pid" 2>/dev/null; __rc=$?; [ "$__rc" -eq 137 ] && echo Killed >&2; ` +
       `rm -f ${pidFile} 2>/dev/null; ` +
       `exit $__rc`;
 
@@ -281,6 +301,7 @@ export class DockerBackend {
     try {
       execObj = await container.exec({
         Cmd: ["bash", "-c", wrapper],
+        AttachStdin: true,
         AttachStdout: true,
         AttachStderr: true,
         User: this.sandboxUser,
@@ -288,7 +309,7 @@ export class DockerBackend {
         // Only when there is something to add: an empty `Env: []` is not the same
         // request Docker has been receiving, and this path has no reason to change
         // for the (overwhelmingly common) chat that stores no secrets. The wrapper's
-        // `setsid bash -c "$__cmd"` is a CHILD of this exec, so it and anything it
+        // `setsid bash -c …` is a CHILD of this exec, so it and anything it
         // forks — a background job included — inherit these variables.
         ...(envPairs.length > 0 ? { Env: envPairs } : {}),
       });
@@ -329,6 +350,9 @@ export class DockerBackend {
       }
       execObj.start({ hijack: true }, (err, stream) => {
         if (err) { cleanup(); return reject(err); }
+        // Not ended: the wrapper reads an exact byte count, so it needs no EOF, and a
+        // half-close is the one thing a proxy may turn into closing our output too.
+        stream.write(script);
         // Buffer frames across 'data' events — they are NOT chunk-aligned.
         const demux = createFrameDemux();
         stream.on("data", (chunk) => demux.push(chunk));

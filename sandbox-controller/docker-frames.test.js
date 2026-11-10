@@ -49,6 +49,17 @@ describe("createFrameDemux", () => {
     expect(stdout).toBe("");
   });
 
+  it("keeps the end of stderr past the ceiling, so the capture trailer survives", () => {
+    const demux = createFrameDemux(50);
+    demux.push(encodeFrame(1, "x".repeat(60))); // overflow
+    demux.push(encodeFrame(2, "e".repeat(5000))); // dropped stderr, only its tail kept
+    demux.push(encodeFrame(2, "\n\x1e123\x1e/workspace/.capka/output/a.log\n"));
+    const { stderr, truncated } = demux.result();
+    expect(truncated).toBe(true);
+    expect(stderr.length).toBe(4096);
+    expect(stderr.endsWith("\x1e123\x1e/workspace/.capka/output/a.log\n")).toBe(true);
+  });
+
   it("does not truncate large multi-frame output spanning many chunks", () => {
     const big = "x".repeat(50_000);
     const bytes = Buffer.concat([encodeFrame(1, big), encodeFrame(1, big)]);

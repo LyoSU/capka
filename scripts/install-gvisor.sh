@@ -15,15 +15,22 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH (gVisor ships x86_64 and aarch64)"; exit 1 ;;
 esac
 
+# Since release-20261102.0 a release ships as ONE tarball (the per-file runsc /
+# containerd-shim-runsc-v1 URLs are gone): runsc, the shim, and a gvisor-bin/
+# directory holding the sentry and its helpers. runsc looks for gvisor-bin/ BESIDE
+# itself and refuses to start a sandbox without it ("sidecar gvisor_sentry not
+# usable"), so all three land together in /usr/local/bin. bz2, not zstd: tar -j is
+# available everywhere, zstd often isn't.
+command -v bzip2 >/dev/null 2>&1 || { echo "bzip2 is required to unpack the gVisor release (apt-get install bzip2)"; exit 1; }
 URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}"
 TMP="$(mktemp -d)"
-echo "[gvisor] downloading runsc + shim for ${ARCH}..."
-for f in runsc containerd-shim-runsc-v1; do
-  wget -q "${URL}/${f}" "${URL}/${f}.sha512" -P "$TMP"
-done
-( cd "$TMP" && sha512sum -c runsc.sha512 containerd-shim-runsc-v1.sha512 )
-chmod a+rx "$TMP/runsc" "$TMP/containerd-shim-runsc-v1"
-mv "$TMP/runsc" "$TMP/containerd-shim-runsc-v1" /usr/local/bin/
+echo "[gvisor] downloading the gVisor release for ${ARCH}..."
+wget -q "${URL}/gvisor.tar.bz2" "${URL}/gvisor.tar.bz2.sha512" -P "$TMP"
+( cd "$TMP" && sha512sum -c gvisor.tar.bz2.sha512 )
+tar -xjf "$TMP/gvisor.tar.bz2" -C "$TMP" runsc containerd-shim-runsc-v1 gvisor-bin
+chmod -R a+rX "$TMP/runsc" "$TMP/containerd-shim-runsc-v1" "$TMP/gvisor-bin"
+rm -rf /usr/local/bin/gvisor-bin
+mv "$TMP/runsc" "$TMP/containerd-shim-runsc-v1" "$TMP/gvisor-bin" /usr/local/bin/
 rm -rf "$TMP"
 
 echo "[gvisor] registering the runsc runtime with Docker..."

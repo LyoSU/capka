@@ -137,6 +137,7 @@ describe("DockerBackend (mocked dockerode)", () => {
       cmds.push(opts.Cmd[2]);
       const stream = new EventEmitter();
       stream.resume = () => {};
+      stream.write = vi.fn();
       streams.push(stream);
       return { start: (_o, cb) => cb(null, stream), inspect: async () => ({ ExitCode: 137 }) };
     });
@@ -153,6 +154,22 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cmds[0]).toMatch(/echo "\$__pid" > \/tmp\/\.capka-exec\/[0-9a-f-]{36}/);
     // ...and removes it on the way out, so /tmp doesn't fill with dead pids.
     expect(cmds[0]).toMatch(/rm -f \/tmp\/\.capka-exec\//);
+  });
+
+  // The old killer was `( sleep N; kill … ) &`, and killing it on a normal exit
+  // orphaned its `sleep` — which held the exec's stdout, so Docker waited out a ~2s
+  // grace on EVERY call, and sat on a pids slot until N ran out. The timeout must be
+  // the command's own group leader, with nothing else forked beside it.
+  it("exec() times out through the command's own group leader, with no killer process beside it", async () => {
+    const { container, cmds } = inFlightContainer();
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1" });
+    b.exec("c1", "true", 42000).catch(() => {});
+    await vi.waitFor(() => expect(cmds.length).toBe(1));
+    expect(cmds[0]).toContain("setsid timeout -s KILL 42 bash -c ");
+    expect(cmds[0]).not.toMatch(/\bsleep\b/);
+    expect(cmds[0]).not.toContain("__killer");
+    // Exactly one background job in the wrapper: the command.
+    expect(cmds[0].match(/ & /g)).toHaveLength(1);
   });
 
   it("exec() aborted mid-run kills the whole group from a second exec", async () => {
@@ -199,6 +216,25 @@ describe("DockerBackend (mocked dockerode)", () => {
     b.exec("c1", "echo hi", 30000).catch(() => {});
     await vi.waitFor(() => expect(exec.mock.calls.length).toBe(2));
     expect(exec.mock.calls[1][0]).not.toHaveProperty("Env");
+  });
+
+  // Linux caps a single argv string at 128 KiB, and the tools inline whole files
+  // as base64 — so a command carried in Cmd failed with "argument list too long"
+  // past ~96 KB. It has to arrive over stdin, byte for byte, with the wrapper told
+  // exactly how many bytes to expect (no EOF needed through a proxy).
+  it("exec() sends the command over stdin, never in argv, however large", async () => {
+    const { container, cmds, streams, exec } = inFlightContainer();
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1" });
+    const big = `printf %s '${"é".repeat(1_000_000)}'\n`;
+    b.exec("c1", big, 30000).catch(() => {});
+    await vi.waitFor(() => expect(streams[0]?.write).toHaveBeenCalledTimes(1));
+    expect(exec.mock.calls[0][0].AttachStdin).toBe(true);
+    expect(cmds[0].length).toBeLessThan(2000);
+    expect(cmds[0]).not.toContain("é");
+    const sent = streams[0].write.mock.calls[0][0];
+    expect(sent.toString()).toBe(`${big}.`);
+    // Byte count, not character count: "é" is two bytes.
+    expect(cmds[0]).toContain(`head -c ${Buffer.byteLength(big) + 1} <&3`);
   });
 
   it("exec() that finishes on its own never issues a kill", async () => {
@@ -287,6 +323,7 @@ describe("DockerBackend — an exec whose sandbox died under it", () => {
   function deadMidExec({ execExitCode = 128, running = false } = {}) {
     const stream = new EventEmitter();
     stream.resume = () => {};
+    stream.write = () => true;
     const container = {
       exec: vi.fn(async () => ({
         start: (_o, cb) => {

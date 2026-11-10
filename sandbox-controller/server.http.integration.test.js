@@ -91,6 +91,19 @@ d("controller HTTP API (lifecycle)", () => {
     expect((await r.json()).stdout).toBe("ran:echo hi");
   });
 
+  // A write_file of a few MB is base64 inside the JSON body; at the old shared 1 MB
+  // cap it never reached the sandbox. The other control endpoints keep that cap.
+  it("accepts a multi-MB exec body, and keeps the 1 MB cap on other control bodies", async () => {
+    const command = `echo '${"A".repeat(4 * 1024 * 1024)}' | base64 -d > f`;
+    const r = await fetch(`${base}/sessions/s1/exec`, { method: "POST", headers: auth, body: JSON.stringify({ command }) });
+    expect(r.status).toBe(200);
+    expect((await r.json()).stdout).toBe(`ran:${command}`);
+    const big = await fetch(`${base}/sessions`, {
+      method: "POST", headers: auth, body: JSON.stringify({ sessionId: "sbig", userId: "ubig", pad: "x".repeat(2 * 1024 * 1024) }),
+    }).then((x) => x.status, () => "reset");
+    expect([413, "reset"]).toContain(big);
+  });
+
   it("a caller that hangs up mid-exec cancels the command it was waiting on", async () => {
     expect((await post("sabort", "uabort")).status).toBe(201);
     const orig = backend.exec;

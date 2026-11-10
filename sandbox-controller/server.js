@@ -24,6 +24,7 @@ import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
 import { streamArchive } from "./archive-stream.js";
 import { log } from "./log.js";
+import { parseBody, MAX_EXEC_BODY } from "./http-body.js";
 import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
 
 // --- Talk to the Docker API via DOCKER_HOST (socket-proxy) when set. ---
@@ -313,26 +314,6 @@ async function listWorkspacesOnDisk() {
 }
 
 // --- HTTP helpers ---
-// JSON control bodies are tiny; cap them so a hostile/runaway request can't buffer
-// unbounded memory. Uploads use the separate streaming MAX_UPLOAD gate, not this.
-const MAX_BODY = 1024 * 1024; // 1 MB
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    req.on("data", (c) => {
-      size += c.length;
-      if (size > MAX_BODY) {
-        reject(Object.assign(new Error("Request body too large"), { statusCode: 413 }));
-        req.destroy();
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); } catch { resolve({}); } });
-    req.on("error", reject);
-  });
-}
 function jsonRes(res, status, data) {
   // A caller can vanish mid-request (a cancelled turn aborts its fetch), and the
   // work it was waiting on still finishes and tries to answer. Writing to a dead
@@ -530,7 +511,7 @@ const server = createServer(async (req, res) => {
           code: "SHARED_FULL",
         });
       }
-      const { command, timeout, env } = await parseBody(req);
+      const { command, timeout, env } = await parseBody(req, MAX_EXEC_BODY);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
       // Per-command environment (the chat's stored secrets). Validated HERE rather
       // than trusted from the platform: this ends up in a container's process

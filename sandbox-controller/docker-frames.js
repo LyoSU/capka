@@ -23,12 +23,15 @@
  *  state, separate from the cosmetic per-result clamp it applies on top. */
 const MAX_EXEC_OUTPUT_BYTES = Number(process.env.MAX_EXEC_OUTPUT_BYTES) || 1_000_000;
 
+const ERR_TAIL_BYTES = 4096;
+
 export function createFrameDemux(maxBytes = MAX_EXEC_OUTPUT_BYTES) {
   let buf = Buffer.alloc(0);
   const out = [];
   const err = [];
   let bytes = 0;
   let truncated = false;
+  let errTail = Buffer.alloc(0);
 
   return {
     /** Feed one chunk from the stream's 'data' event. */
@@ -43,7 +46,14 @@ export function createFrameDemux(maxBytes = MAX_EXEC_OUTPUT_BYTES) {
         // Count the frame BEFORE keeping it: a single oversized frame could
         // otherwise sail past the ceiling unflagged (bytes was only checked
         // against the total so far). Drop any frame that would cross the line.
-        if (truncated || bytes + payload.length > maxBytes) { truncated = true; continue; } // drain & drop the overflow
+        if (truncated || bytes + payload.length > maxBytes) {
+          truncated = true; // drain & drop the overflow
+          // …except the END of stderr: the platform's capture wrapper prints its
+          // log-path trailer there last, and losing it makes a log that IS on disk
+          // look discarded. Bounded at ERR_TAIL_BYTES on top of the ceiling.
+          if (type === 2) errTail = Buffer.concat([errTail, payload]).subarray(-ERR_TAIL_BYTES);
+          continue;
+        }
         bytes += payload.length;
         if (type === 1) out.push(payload);
         else if (type === 2) err.push(payload);
@@ -53,7 +63,7 @@ export function createFrameDemux(maxBytes = MAX_EXEC_OUTPUT_BYTES) {
     result() {
       return {
         stdout: Buffer.concat(out).toString("utf8"),
-        stderr: Buffer.concat(err).toString("utf8"),
+        stderr: Buffer.concat([...err, errTail]).toString("utf8"),
         truncated,
       };
     },
