@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.47.1] - 2026-11-10
+
 ### Fixed
 - Images for 0.47.0 were never published (its sandbox-image smoke test called a duckdb API that duckdb 2.0 removed); this release is 0.47.0 plus the corrected test. In the sandbox, `duckdb.sql(...).fetchone()` no longer exists under duckdb 2.0; use `.fetchall()`.
 
