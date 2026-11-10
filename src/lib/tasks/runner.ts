@@ -26,7 +26,7 @@ import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/con
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, thinkingIsDeep, markStepTail,
   mergeUserRuns, clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { wrapUpReason, appendWrapUp, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
+import { wrapUpReason, appendWrapUp, planReminder, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   injectSteers, MAX_STEPS, type PlacedSteer } from "@/lib/chat/context/step-control";
 import { compactConversation, compactionInput, compactionReply } from "@/lib/chat/context/compactor";
 import { recordAuxSpend } from "@/lib/tasks/aux-spend";
@@ -1319,6 +1319,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 if (wrapUpStep) {
                   tlog.info("wrapping up: tools withdrawn for this step", { stepNumber, turnStep: stepsBefore + stepNumber, reason: wrapUpStep });
                   msgs = appendWrapUp(msgs);
+                } else {
+                  const reminder = planReminder(steps);
+                  if (reminder) msgs = [...msgs, { role: "user", content: reminder }];
                 }
                 // A steer, the view-file bridge or the wrap-up right after another user
                 // message (the turn context at step 0, a steer, a resume request) is a run.

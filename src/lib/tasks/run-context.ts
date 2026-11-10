@@ -6,7 +6,7 @@ import { ProjectDeletedError } from "@/lib/errors/friendly";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
 import { modelTakesImages, supportsImageToolResults } from "@/lib/providers/registry";
-import { loadSandboxTools } from "@/lib/sandbox/tools";
+import { loadSandboxTools, type makeOrderGate } from "@/lib/sandbox/tools";
 import { createSession } from "@/lib/sandbox/client";
 import { makeViewFileTool } from "@/lib/sandbox/view-file";
 import { loadMcpTools } from "@/lib/mcp/load";
@@ -397,7 +397,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       // The live checklist. Sandbox-gated with the prompt rule that describes it:
       // multi-step work is sandbox work.
       ...(caps.sandbox ? makePlanTool() : {}),
-      ...(caps.sandbox && visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
+      ...(caps.sandbox && visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult, inOrder: (sandbox as { gate?: ReturnType<typeof makeOrderGate> }).gate?.read }) : {}),
       ...mcp.tools,
       // Skills without the sandbox still deliver their instructions: `ensureSession`
       // is documented as optional precisely for that body-only path, so withholding

@@ -503,3 +503,33 @@ export function estimatePromptTokens(messages: ModelMessage[]): number {
   }
   return Math.ceil(bytes / BYTES_PER_TOKEN);
 }
+
+/** How many steps a plan may sit untouched before the model is reminded of it. */
+const PLAN_STALE_STEPS = 4;
+
+/**
+ * A one-step reminder that the checklist on the user's screen has gone stale.
+ *
+ * The model makes a plan, then works for twenty steps without touching it, and the
+ * user watches "step 1 of 6" beside work that is plainly on step 5. The tool's
+ * description and its result both ask for updates and are read once, at the start;
+ * this is read at the moment it applies. Every PLAN_STALE_STEPS steps since the
+ * last `update_plan` that left something open, and never once all of it is done.
+ *
+ * Appended like the wrap-up (see appendWrapUp), for the same reasons: it is this
+ * step's instruction, not history, and an append leaves every cached prefix whole.
+ */
+export function planReminder(
+  steps: ReadonlyArray<{ toolCalls: ReadonlyArray<{ toolName: string; input: unknown }> }>,
+): string | undefined {
+  const at = steps.findLastIndex((s) => s.toolCalls.some((c) => c.toolName === "update_plan"));
+  if (at < 0) return undefined;
+  const stale = steps.length - 1 - at;
+  if (stale === 0 || stale % PLAN_STALE_STEPS !== 0) return undefined;
+  const plan = steps[at].toolCalls.findLast((c) => c.toolName === "update_plan")?.input as
+    { steps?: Array<{ title?: string; status?: string }> } | undefined;
+  const current = plan?.steps?.find((s) => s.status !== "done");
+  if (!current?.title) return undefined;
+  return `[System note — not from the user] The checklist on the user's screen still shows "${current.title}" as the step in progress. `
+    + "If the work has moved past it, call update_plan with the current state in the same step as your next tool calls; if not, carry on. Don't mention this note.";
+}

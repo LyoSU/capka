@@ -152,6 +152,38 @@ function friendlyFsError(stderr: string, path: string): string {
  * `ensureSession` is the run's shared, memoized session creator: the container is
  * spun up on the FIRST tool call (lazy) and shared with the MCP/skill paths.
  */
+/** Tools that change the workspace. Everything else only reads it. */
+const WRITERS = new Set(["execute_bash", "execute_python", "execute_node", "write_file", "str_replace", "delete_path"]);
+
+/**
+ * Runs one turn's sandbox calls in the order the model wrote them.
+ *
+ * The SDK starts every tool call of a step at once. For reads that is the point;
+ * for a command and the call that depends on it, it is a race the model cannot see
+ * — "convert the deck, then view the PDF" written in one step looked for a file
+ * that did not exist yet, the model blamed the viewer, and six steps went into
+ * working around a fault that was not there. So: a writer waits for everything
+ * issued before it and runs alone; a reader waits only for the writers issued
+ * before it, and reads run together. A failed call never blocks the ones behind it.
+ */
+export function makeOrderGate() {
+  let all: Promise<unknown> = Promise.resolve();
+  let writes: Promise<unknown> = Promise.resolve();
+  const settled = (p: Promise<unknown>) => p.then(() => {}, () => {});
+  return {
+    write<T>(fn: () => Promise<T>): Promise<T> {
+      const p = all.then(fn);
+      all = writes = settled(p);
+      return p;
+    },
+    read<T>(fn: () => Promise<T>): Promise<T> {
+      const p = writes.then(fn);
+      all = Promise.all([all, settled(p)]);
+      return p;
+    },
+  };
+}
+
 export async function loadSandboxTools(
   sessionKey: string,
   userId: string,
@@ -801,5 +833,13 @@ print('OK', len(matches) if replace_all else 1, tier)`;
     }),
   };
 
-  return { tools, close: async () => {} };
+  const gate = makeOrderGate();
+  for (const [name, t] of Object.entries(tools) as [string, { execute?: (...args: never[]) => unknown }][]) {
+    const execute = t.execute;
+    if (!execute) continue;
+    t.execute = (...args: never[]) =>
+      (WRITERS.has(name) ? gate.write : gate.read)(async () => execute(...args));
+  }
+
+  return { tools, gate, close: async () => {} };
 }

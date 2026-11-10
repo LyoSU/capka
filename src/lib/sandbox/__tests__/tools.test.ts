@@ -486,3 +486,35 @@ describe("sandbox tools — str_replace uniqueness, search_files flags, default 
     expect(timeoutOf()).toBe(30000);
   });
 });
+
+describe("makeOrderGate", () => {
+  it("runs writers alone in written order, lets reads share, and makes a read wait for the writes before it", async () => {
+    const { makeOrderGate } = await import("@/lib/sandbox/tools");
+    const gate = makeOrderGate();
+    const log: string[] = [];
+    const job = (name: string, ms: number) => async () => {
+      log.push(`${name}+`);
+      await new Promise((r) => setTimeout(r, ms));
+      log.push(`${name}-`);
+      return name;
+    };
+    const all = await Promise.all([
+      gate.read(job("r1", 15)), gate.read(job("r2", 5)),   // together
+      gate.write(job("w1", 15)),                            // after both reads
+      gate.write(job("w2", 1)),                             // after w1 although faster
+      gate.read(job("r3", 1)),                              // sees w2's result
+    ]);
+    expect(all).toEqual(["r1", "r2", "w1", "w2", "r3"]);
+    expect(log).toEqual(["r1+", "r2+", "r2-", "r1-", "w1+", "w1-", "w2+", "w2-", "r3+", "r3-"]);
+  });
+
+  it("a failed call does not hold up the ones behind it", async () => {
+    const { makeOrderGate } = await import("@/lib/sandbox/tools");
+    const gate = makeOrderGate();
+    const bad = gate.write(async () => { throw new Error("boom"); });
+    const next = gate.write(async () => "ran");
+    await expect(bad).rejects.toThrow("boom");
+    await expect(next).resolves.toBe("ran");
+    await expect(gate.read(async () => "read")).resolves.toBe("read");
+  });
+});

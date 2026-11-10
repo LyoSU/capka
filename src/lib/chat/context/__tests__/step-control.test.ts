@@ -569,3 +569,26 @@ describe("a steered turn that also has to prune", () => {
     expect(at(out, "keep it short")).toBeLessThan(firstSurviving);
   });
 });
+
+describe("planReminder", () => {
+  const plan = (statuses: string[]) => ({ toolCalls: [{ toolName: "update_plan", input: { steps: statuses.map((status, i) => ({ title: `Step ${i + 1}`, status })) } }] });
+  const work = { toolCalls: [{ toolName: "execute_python", input: {} }] };
+
+  it("speaks up every fourth step a plan with open work sits untouched, naming the stale step", async () => {
+    const { planReminder } = await import("../step-control");
+    const open = plan(["current", "pending"]);
+    expect(planReminder([open])).toBeUndefined();
+    expect(planReminder([open, work, work, work])).toBeUndefined();
+    expect(planReminder([open, work, work, work, work])).toContain('"Step 1"');
+    expect(planReminder([open, work, work, work, work, work])).toBeUndefined();
+    expect(planReminder([open, ...Array(8).fill(work)])).toContain('"Step 1"');
+  });
+
+  it("is silent without a plan, once all of it is done, and counts from the LATEST update", async () => {
+    const { planReminder } = await import("../step-control");
+    expect(planReminder([work, work, work, work, work])).toBeUndefined();
+    expect(planReminder([plan(["done", "done"]), work, work, work, work])).toBeUndefined();
+    expect(planReminder([plan(["current", "pending"]), work, work, plan(["done", "current"]), work, work])).toBeUndefined();
+    expect(planReminder([plan(["current", "pending"]), plan(["done", "current"]), work, work, work, work])).toContain('"Step 2"');
+  });
+});

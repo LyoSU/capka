@@ -222,8 +222,12 @@ export function makeViewFileTool(opts: {
   userId: string;
   ensureSession: () => Promise<unknown>;
   emitImageToolResult: boolean;
+  /** The turn's order gate (see makeOrderGate): a view waits for the commands
+   *  written before it in the same step, so it sees the file they produce. */
+  inOrder?: <T>(fn: () => Promise<T>) => Promise<T>;
 }) {
   const { sessionKey, userId, ensureSession, emitImageToolResult } = opts;
+  const inOrder = opts.inOrder ?? (<T,>(fn: () => Promise<T>) => fn());
 
   const view_file = tool({
     description: DESCRIPTION,
@@ -231,7 +235,7 @@ export function makeViewFileTool(opts: {
       path: z.string().describe("File path relative to /workspace"),
       pages: z.array(z.number()).optional().describe(`Which pages to render (1-based). Default: first ${MAX_PAGES}.`),
     }),
-    execute: async ({ path, pages }): Promise<MediaRef | { error: string }> => {
+    execute: ({ path, pages }): Promise<MediaRef | { error: string }> => inOrder(async () => {
       await ensureSession();
       const ext = (path.toLowerCase().split(".").pop() ?? "").trim();
       const kind = classify(ext);
@@ -244,13 +248,7 @@ export function makeViewFileTool(opts: {
       const dir = `${VIEW_DIR}/${callId}`;
       const wanted = normalizePages(pages);
       const res = await execCommand(sessionKey, renderScript(kind, path, dir, wanted), 300_000);
-      // The usual cause is not a wrong path: the model converts a document and
-      // views the result in ONE step, the two calls run together, and the file is
-      // not there yet. Left unexplained it blamed the viewer and spent six steps
-      // working around a fault that did not exist.
-      if (res.stdout.includes("__NOFILE__")) {
-        return { error: `File not found: ${path}. If a command in this same step was creating it, the two ran at the same time — call view_file again now that the command has finished.` };
-      }
+      if (res.stdout.includes("__NOFILE__")) return { error: `File not found: ${path}` };
       const produced = [...res.stdout.matchAll(/__PNG__(.+)/g)].map((m) => m[1].trim()).filter(Boolean);
       if (produced.length === 0) {
         const why = (res.stderr || res.stdout || "").replace(/__\w+__.*/g, "").trim().slice(0, 300);
@@ -268,7 +266,7 @@ export function makeViewFileTool(opts: {
         pages: produced.map((p) => ({ page: pageNum(p), path: p.replace(/^\/workspace\//, "") })),
         note: "The rendered page(s) were shown to you as image(s). To look again later, call view_file again.",
       };
-    },
+       }),
     // On the BRIDGE transport, hand the model the raw ref (== the SDK's default
     // json wrapping) — the pages arrive via prepareStep as a user message, and
     // buildViewFileInjection reads the ref back from this json output. On a CAPABLE
