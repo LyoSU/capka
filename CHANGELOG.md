@@ -16,6 +16,7 @@ All notable changes to Capka are documented here. Format follows
 - `execute_bash`/`execute_python`/`execute_node` take an optional `summary` the model writes in the user's language; the step list shows it in place of "Ran Python code" and of the raw command.
 - Sandbox tool calls the model sends in one step run in the order written (commands and file edits one at a time, reads after the writes before them), so converting a document and viewing the result can share a step.
 - The agent is reminded to update its checklist when a step has stayed "in progress" for four tool steps, and the system prompt asks for a `summary` on every code call.
+- A new chat's placeholder title is the first line of the opening message (was its first 100 characters, line breaks included) until the generated title lands.
 - Admin-only reasoning in a finished reply's step list is clamped to two lines (press to expand).
 - Claude 4.6 and later (including the Claude 5 family) are sent adaptive thinking with an effort level instead of a token budget, which those models reject. A migration clears the stale "cannot reason" flag on such models and applies at boot.
 - Prompt-cache breakpoints on Claude use a 1-hour TTL (the moving step tail stays at 5 minutes); 1-hour cache writes are priced at 2x input in cost accounting.

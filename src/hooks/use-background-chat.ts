@@ -846,7 +846,7 @@ export function useBackgroundChat({
       if (isFirstMessage && typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("chat:created", {
-            detail: { id: chatId, title: displayText.slice(0, 100), projectId: projectId ?? null },
+            detail: { id: chatId, title: displayText.trim().split("\n", 1)[0].slice(0, 100), projectId: projectId ?? null },
           }),
         );
       }

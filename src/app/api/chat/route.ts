@@ -272,7 +272,7 @@ export const POST = apiHandler(async (req: Request) => {
         if (!own) return false;
       }
       await exec.update(chats).set({
-        ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+        ...(isNewChat ? { title: text.trim().split("\n", 1)[0].slice(0, 100) } : {}),
         ...turnSettings,
         // Point the chat at the new message so a reload mid-flight shows this
         // branch; the worker then advances it to the assistant reply.
